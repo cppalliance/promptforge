@@ -80,10 +80,10 @@ pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 /// ```
 /// use std::sync::Arc;
 ///
-/// use promptforge_engine::test_support::{Performers, drive_tokio};
-/// use promptforge_engine::{Prompt, Run, RunContext, RunResult};
-/// use promptforge_types::cancel::CancelHandle;
-/// use promptforge_types::timestamp::Timestamp;
+/// use promptforge::cancel::CancelHandle;
+/// use promptforge::test_support::{Performers, drive_tokio};
+/// use promptforge::timestamp::Timestamp;
+/// use promptforge::{Prompt, Run, RunContext, RunResult};
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
 /// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");

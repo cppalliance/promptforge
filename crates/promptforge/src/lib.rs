@@ -127,6 +127,19 @@ pub mod prompt {
 }
 
 /// The virtual filesystem a run's store lives in, and the host extension point behind it.
+///
+/// # Examples
+/// A [`VfsRef`](crate::vfs::VfsRef) over a
+/// [`MemoryBackend`](crate::vfs::MemoryBackend) keeps its files in memory:
+/// ```
+/// use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
+///
+/// let vfs = VfsRef::new(MemoryBackend::new());
+/// let access = vfs.acquire(Origin::new("memory backend example"))?;
+/// access.write("/notes.md", b"todo")?;
+/// assert_eq!(access.read("/notes.md")?, b"todo");
+/// # Ok::<(), promptforge::vfs::VfsError>(())
+/// ```
 pub mod vfs {
     pub use promptforge_engine::perform_store_op;
     pub use promptforge_lua::StoreOp;

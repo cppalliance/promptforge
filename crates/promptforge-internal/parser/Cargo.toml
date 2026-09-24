@@ -23,6 +23,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 mlua.workspace = true
+# Surface items' doc examples name `promptforge::` paths, the only paths
+# hosts see; only this crate's doctest run executes them.
+promptforge.workspace = true
 
 [features]
 test-support = []

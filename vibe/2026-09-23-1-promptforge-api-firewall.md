@@ -736,7 +736,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-10>
 
-### Step 10: Make surface docs name only facade paths
+### Step 10: Make surface docs name only facade paths [completed]
 
 - Component: surface-closure
 - Piece: doc closure. It is joint with Steps 8 and 9, because it edits only doc comments and needs nothing from them. It is placed after them so that one `cargo xtask api` run confirms the link and doc-text findings are gone.

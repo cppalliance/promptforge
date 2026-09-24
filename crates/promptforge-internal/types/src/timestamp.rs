@@ -23,7 +23,7 @@ mod tests;
 ///
 /// # Examples
 /// ```
-/// use promptforge_types::timestamp::Timestamp;
+/// use promptforge::timestamp::Timestamp;
 ///
 /// let stamp = Timestamp::from_unix_millis(951_782_400_000);
 /// assert_eq!(stamp.to_rfc3339(), "2000-02-29T00:00:00Z");

@@ -157,7 +157,7 @@ events! {
     ///
     /// Variants fall into four groups. Lifecycle variants (the first group,
     /// through [`Lua`](Self::Lua)) mark operational boundaries; the
-    /// payload-free ones have constructors in [`lifecycle`]. Task
+    /// payload-free ones carry nothing beyond the coordinates. Task
     /// variants report a task chain's start and end. Content variants
     /// hold what a model, tool, or user produced. Debug variants hold the
     /// raw model-turn bodies. Every variant has `execution`, `section`,

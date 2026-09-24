@@ -196,13 +196,13 @@ impl<'de> Deserialize<'de> for TaskId {
 ///
 /// # Examples
 /// ```
-/// use promptforge_types::ids::{Provenance, TaskId};
+/// use promptforge::ids::{Provenance, TaskId};
 ///
 /// let task: TaskId = "0.2".parse()?;
 /// let first = Provenance { task: task.clone(), seq: 0 };
 /// let second = Provenance { task, seq: 1 };
 /// assert!(first < second);
-/// # Ok::<(), promptforge_types::ids::ParseIdError>(())
+/// # Ok::<(), promptforge::ids::ParseIdError>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Provenance {

@@ -43,7 +43,7 @@ impl ToolDescriptor {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolDescriptor, ToolId};
+    /// use promptforge::tools::{ToolDescriptor, ToolId};
     ///
     /// let echo = ToolDescriptor::new(
     ///     ToolId::parse("example/echo/echo")?,
@@ -53,7 +53,7 @@ impl ToolDescriptor {
     /// );
     /// assert_eq!(echo.wire_name, "echo");
     /// assert!(!echo.structured_output);
-    /// # Ok::<(), promptforge_types::tools::ToolIdError>(())
+    /// # Ok::<(), promptforge::tools::ToolIdError>(())
     /// ```
     #[must_use]
     pub fn new(

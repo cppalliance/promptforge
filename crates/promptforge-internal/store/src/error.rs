@@ -186,15 +186,16 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::{StoreErrorKind, StoreExt};
+    /// use promptforge::RunContext;
+    /// use promptforge::timestamp::Timestamp;
+    /// use promptforge::vfs::{Origin, StoreErrorKind, StoreOp, perform_store_op};
     ///
-    /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs
-    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
-    ///     .expect("the stock backend acquires");
-    /// let store = vfs.store(&access);
-    /// let err = store.read("missing.txt").unwrap_err();
+    /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
+    /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
+    /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
+    /// let err = perform_store_op(&access, read).unwrap_err();
     /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
+    /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
     pub fn kind(&self) -> StoreErrorKind {
@@ -216,15 +217,16 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge::RunContext;
+    /// use promptforge::timestamp::Timestamp;
+    /// use promptforge::vfs::{Origin, StoreOp, perform_store_op};
     ///
-    /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs
-    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
-    ///     .expect("the stock backend acquires");
-    /// let store = vfs.store(&access);
-    /// let err = store.read("missing.txt").unwrap_err();
+    /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
+    /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
+    /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
+    /// let err = perform_store_op(&access, read).unwrap_err();
     /// assert!(err.is_not_found());
+    /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
     pub fn is_not_found(&self) -> bool {
@@ -235,15 +237,16 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge::RunContext;
+    /// use promptforge::timestamp::Timestamp;
+    /// use promptforge::vfs::{Origin, StoreOp, perform_store_op};
     ///
-    /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs
-    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
-    ///     .expect("the stock backend acquires");
-    /// let store = vfs.store(&access);
-    /// let err = store.read("missing.txt").unwrap_err();
+    /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
+    /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
+    /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
+    /// let err = perform_store_op(&access, read).unwrap_err();
     /// assert_eq!(err.path(), Some("missing.txt"));
+    /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
     pub fn path(&self) -> Option<&str> {
@@ -279,7 +282,7 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::{StoreError, StoreErrorKind};
+    /// use promptforge::vfs::{StoreError, StoreErrorKind};
     ///
     /// let io = std::io::Error::other("disk gone");
     /// let err = StoreError::backend(io);

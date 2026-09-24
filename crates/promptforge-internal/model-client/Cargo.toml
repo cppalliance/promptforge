@@ -22,5 +22,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 workspace-hack.workspace = true
 
+[dev-dependencies]
+# Surface items' doc examples name `promptforge::` paths, the only paths
+# hosts see; only this crate's doctest run executes them.
+promptforge.workspace = true
+
 [lints]
 workspace = true

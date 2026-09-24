@@ -141,17 +141,6 @@ impl Tree {
 /// listing and glob results are ordered without a sort step. Clones
 /// share the same storage. The zero value (`Default`) is a meaningful
 /// empty backend.
-///
-/// # Examples
-/// ```
-/// use promptforge_vfs::{MemoryBackend, Origin, VfsRef};
-///
-/// let vfs = VfsRef::new(MemoryBackend::new());
-/// let access = vfs.acquire(Origin::new("memory backend example"))?;
-/// access.write("/notes.md", b"todo")?;
-/// assert_eq!(access.read("/notes.md")?, b"todo");
-/// # Ok::<(), promptforge_vfs::VfsError>(())
-/// ```
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct MemoryBackend {

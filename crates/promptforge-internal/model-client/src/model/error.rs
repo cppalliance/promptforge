@@ -9,7 +9,7 @@ use crate::Error;
 /// # Examples
 ///
 /// ```
-/// use promptforge_model_client::model::CompletionErrorKind;
+/// use promptforge::model::CompletionErrorKind;
 ///
 /// let kind = CompletionErrorKind::Backend;
 /// let retry_hint = match kind {
@@ -47,7 +47,7 @@ pub enum CompletionErrorKind {
 /// # Examples
 ///
 /// ```
-/// use promptforge_model_client::model::{CompletionError, CompletionErrorKind};
+/// use promptforge::model::{CompletionError, CompletionErrorKind};
 ///
 /// fn report(error: &CompletionError) -> &'static str {
 ///     if error.kind() == CompletionErrorKind::Backend {

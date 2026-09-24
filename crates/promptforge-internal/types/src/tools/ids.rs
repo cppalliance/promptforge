@@ -30,8 +30,8 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
-    /// use promptforge_types::tools::ToolId;
+    /// use promptforge::capabilities::CapabilityId;
+    /// use promptforge::tools::ToolId;
     ///
     /// let id = ToolId::parse("promptforge/web/fetch")?;
     /// assert_eq!(id.name(), "fetch");
@@ -68,11 +68,11 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::tools::ToolId;
+    /// use promptforge::tools::ToolId;
     ///
     /// let id = ToolId::parse("promptforge/web/fetch")?;
     /// assert_eq!(id.name(), "fetch");
-    /// # Ok::<(), promptforge_types::tools::ToolIdError>(())
+    /// # Ok::<(), promptforge::tools::ToolIdError>(())
     /// ```
     #[must_use]
     pub fn name(&self) -> &str {
@@ -89,8 +89,8 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
-    /// use promptforge_types::tools::ToolId;
+    /// use promptforge::capabilities::CapabilityId;
+    /// use promptforge::tools::ToolId;
     ///
     /// let id = ToolId::parse("promptforge/web/fetch")?;
     /// assert_eq!(id.capability(), CapabilityId::parse("promptforge/web")?);

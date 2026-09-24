@@ -21,8 +21,8 @@ impl Prompt {
     /// They are values for the caller to log; nothing is read back.
     ///
     /// ```
-    /// use promptforge_types::event::Event;
-    /// use promptforge_parser::{Prompt, ParseErrorKind};
+    /// use promptforge::event::Event;
+    /// use promptforge::{ParseErrorKind, Prompt};
     ///
     /// let source = "---\nname: greeter\ndescription: says hi\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
     /// let (prompt, events) = Prompt::parse(source, "docs");
@@ -38,7 +38,7 @@ impl Prompt {
     /// let (err, events) = Prompt::parse("no frontmatter here", "docs");
     /// assert_eq!(err.unwrap_err().kind(), ParseErrorKind::Frontmatter);
     /// assert!(matches!(events.last(), Some(Event::ParseFailed { .. })));
-    /// # Ok::<(), promptforge_parser::ParseError>(())
+    /// # Ok::<(), promptforge::ParseError>(())
     /// ```
     ///
     /// # Errors

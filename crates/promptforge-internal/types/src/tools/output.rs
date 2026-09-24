@@ -32,7 +32,7 @@ impl ToolOutput {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{OutputTrust, ToolOutput};
+    /// use promptforge::tools::{OutputTrust, ToolOutput};
     ///
     /// let out = ToolOutput::trusted("done");
     /// assert_eq!(out.trust(), OutputTrust::Trusted);
@@ -50,7 +50,7 @@ impl ToolOutput {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{OutputTrust, ToolOutput};
+    /// use promptforge::tools::{OutputTrust, ToolOutput};
     ///
     /// let out = ToolOutput::untrusted("<html>...");
     /// assert_eq!(out.trust(), OutputTrust::Untrusted);
@@ -67,7 +67,7 @@ impl ToolOutput {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::ToolOutput;
+    /// use promptforge::tools::ToolOutput;
     ///
     /// assert_eq!(ToolOutput::trusted("hi").text(), "hi");
     /// ```
@@ -80,7 +80,7 @@ impl ToolOutput {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{OutputTrust, ToolOutput};
+    /// use promptforge::tools::{OutputTrust, ToolOutput};
     ///
     /// assert_eq!(ToolOutput::untrusted("x").trust(), OutputTrust::Untrusted);
     /// ```
@@ -124,7 +124,7 @@ impl ToolError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolError, ToolErrorKind};
+    /// use promptforge::tools::{ToolError, ToolErrorKind};
     ///
     /// let err = ToolError::message("could not read the page");
     /// assert_eq!(err.kind(), ToolErrorKind::Other);
@@ -145,7 +145,7 @@ impl ToolError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolError, ToolErrorKind};
+    /// use promptforge::tools::{ToolError, ToolErrorKind};
     ///
     /// let io = std::io::Error::other("boom");
     /// let err = ToolError::with_source("backend failed", io);
@@ -168,7 +168,7 @@ impl ToolError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolError, ToolErrorKind};
+    /// use promptforge::tools::{ToolError, ToolErrorKind};
     ///
     /// let err = ToolError::message("bad args").with_kind(ToolErrorKind::InvalidArguments);
     /// assert_eq!(err.kind(), ToolErrorKind::InvalidArguments);
@@ -189,7 +189,7 @@ impl ToolError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolError, ToolErrorKind};
+    /// use promptforge::tools::{ToolError, ToolErrorKind};
     ///
     /// let err = ToolError::message("stopped").with_kind(ToolErrorKind::Cancelled);
     /// assert!(err.is_cancelled());
@@ -203,7 +203,7 @@ impl ToolError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_types::tools::{ToolError, ToolErrorKind};
+    /// use promptforge::tools::{ToolError, ToolErrorKind};
     ///
     /// let err = ToolError::message("timeout").with_kind(ToolErrorKind::Transport);
     /// assert!(err.is_retryable());

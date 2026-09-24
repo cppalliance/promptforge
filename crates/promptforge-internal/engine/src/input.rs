@@ -61,7 +61,7 @@ impl InputError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_engine::input::InputError;
+    /// use promptforge::input::InputError;
     ///
     /// let error = InputError::message("the input device is gone");
     /// assert_eq!(error.to_string(), "the input device is gone");
@@ -78,7 +78,7 @@ impl InputError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_engine::input::InputError;
+    /// use promptforge::input::InputError;
     ///
     /// let cause = std::io::Error::other("socket reset");
     /// let error = InputError::with_source("the input device is gone", cause);

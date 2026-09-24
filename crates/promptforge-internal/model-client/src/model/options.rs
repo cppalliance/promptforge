@@ -209,7 +209,7 @@ impl CompletionOptions {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_model_client::model::CompletionOptions;
+    /// use promptforge::model::CompletionOptions;
     ///
     /// let options = CompletionOptions::new("analyst")
     ///     .with_temperature(0.2)?

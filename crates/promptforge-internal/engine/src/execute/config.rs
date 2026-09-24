@@ -38,8 +38,8 @@ use super::bindings::{ModelBindings, ToolBindings};
 ///
 /// # Examples
 /// ```
-/// use promptforge_engine::{RunContext, RunLimits};
-/// use promptforge_types::timestamp::Timestamp;
+/// use promptforge::timestamp::Timestamp;
+/// use promptforge::{RunContext, RunLimits};
 ///
 /// let ctx = RunContext::new("example-run", 7, Timestamp::from_unix_millis(951_782_400_000))
 ///     .limits(RunLimits::new());
@@ -120,7 +120,7 @@ impl RunContext {
     /// Builds a context for the run `name` under the host's `seed` and
     /// `started_at`, with a fresh cancel flag, no `ui` snapshot, no debug
     /// reporting, default [`RunLimits`], empty [`Flags`], and the stock
-    /// store handle (`promptforge_vfs::empty()`).
+    /// store handle, a fresh memory backend at the store mount.
     ///
     /// `seed` is the source of the untrusted-envelope nonce, so a live host
     /// draws it from a CSPRNG (a predictable seed is a guessable nonce);
@@ -159,8 +159,7 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's cancellation flag: the synchronous
-    /// [`CancelHandle`](promptforge_types::cancel::CancelHandle)
+    /// Sets the run's cancellation flag: the synchronous [`CancelHandle`]
     /// the engine polls between chain steps and from the Lua instruction
     /// hook. A host that cancels through an awaitable token bridges it to
     /// this flag (set the flag when the token fires), and hands the same
@@ -228,8 +227,7 @@ impl RunContext {
 
     /// Sets the run's VFS handle, which holds the store mount every
     /// section's `store` table operates on. The default is the stock
-    /// handle (`promptforge_vfs::empty()`), a fresh memory backend at the
-    /// store mount.
+    /// handle, a fresh memory backend at the store mount.
     ///
     /// A handle set here is the host's: [`Environment::prepare`]
     /// keeps it rather than building the per-run router, so a host that

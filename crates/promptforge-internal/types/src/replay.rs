@@ -35,7 +35,7 @@ mod tests;
 ///
 /// # Examples
 /// ```
-/// use promptforge_types::replay::Flags;
+/// use promptforge::replay::Flags;
 ///
 /// let recorded = Flags::from_bits(0b101);
 /// assert!(recorded.contains(Flags::from_bits(0b100)));

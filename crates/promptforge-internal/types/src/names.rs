@@ -38,13 +38,13 @@ impl GlobalName {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::names::GlobalName;
+    /// use promptforge::capabilities::GlobalName;
     ///
     /// let name = GlobalName::parse("promptforge/web/fetch")?;
     /// assert_eq!(name.namespace(), "promptforge");
     /// assert_eq!(name.pack(), "web");
     /// assert_eq!(name.to_string(), "promptforge/web/fetch");
-    /// # Ok::<(), promptforge_types::names::GlobalNameError>(())
+    /// # Ok::<(), promptforge::capabilities::GlobalNameError>(())
     /// ```
     pub fn parse(s: &str) -> Result<GlobalName, GlobalNameError> {
         let segments: Vec<&str> = s.split('/').collect();

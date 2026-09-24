@@ -48,11 +48,11 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::tools::ToolCatalog;
+    /// use promptforge::tools::ToolCatalog;
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge_types::tools::ToolCatalogError>(())
+    /// # Ok::<(), promptforge::tools::ToolCatalogError>(())
     /// ```
     pub fn new(tools: &[ToolDescriptor]) -> Result<Self, ToolCatalogError> {
         let mut seen = std::collections::BTreeSet::new();
@@ -87,7 +87,7 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::tools::{ToolCatalog, ToolId};
+    /// use promptforge::tools::{ToolCatalog, ToolId};
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// let missing = ToolId::parse("promptforge/tools/missing")?;
@@ -104,11 +104,11 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::tools::ToolCatalog;
+    /// use promptforge::tools::ToolCatalog;
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge_types::tools::ToolCatalogError>(())
+    /// # Ok::<(), promptforge::tools::ToolCatalogError>(())
     /// ```
     #[must_use]
     pub fn tools(&self) -> &[ToolDescriptor] {

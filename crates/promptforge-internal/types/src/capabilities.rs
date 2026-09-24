@@ -45,12 +45,12 @@ impl CapabilityId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
+    /// use promptforge::capabilities::CapabilityId;
     ///
     /// let id = CapabilityId::parse("promptforge/web")?;
     /// assert_eq!(id.namespace(), "promptforge");
     /// assert_eq!(id.pack(), "web");
-    /// # Ok::<(), promptforge_types::capabilities::CapabilityIdError>(())
+    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
     /// ```
     pub fn parse(id: &str) -> Result<CapabilityId, CapabilityIdError> {
         let name = GlobalName::parse(id)
@@ -95,11 +95,11 @@ impl CapabilityId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
+    /// use promptforge::capabilities::CapabilityId;
     ///
     /// let id = CapabilityId::parse("org.rustalliance/core")?;
     /// assert_eq!(id.namespace(), "org.rustalliance");
-    /// # Ok::<(), promptforge_types::capabilities::CapabilityIdError>(())
+    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
     /// ```
     #[must_use]
     pub fn namespace(&self) -> &str {
@@ -111,11 +111,11 @@ impl CapabilityId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
+    /// use promptforge::capabilities::CapabilityId;
     ///
     /// let id = CapabilityId::parse("promptforge/web")?;
     /// assert_eq!(id.pack(), "web");
-    /// # Ok::<(), promptforge_types::capabilities::CapabilityIdError>(())
+    /// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
     /// ```
     #[must_use]
     pub fn pack(&self) -> &str {
@@ -133,8 +133,8 @@ impl CapabilityId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::capabilities::CapabilityId;
-    /// use promptforge_types::tools::ToolId;
+    /// use promptforge::capabilities::CapabilityId;
+    /// use promptforge::tools::ToolId;
     ///
     /// let web = CapabilityId::parse("promptforge/web")?;
     /// let fetch = ToolId::parse("promptforge/web/fetch")?;

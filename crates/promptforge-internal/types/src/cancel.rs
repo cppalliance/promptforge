@@ -52,7 +52,7 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use promptforge_types::cancel::CancelHandle;
+/// use promptforge::cancel::CancelHandle;
 ///
 /// let run = CancelHandle::new();
 /// let task = run.child();
@@ -199,7 +199,7 @@ impl CancelHandle {
     /// use std::pin::pin;
     /// use std::task::{Context, Poll, Waker};
     ///
-    /// use promptforge_types::cancel::CancelHandle;
+    /// use promptforge::cancel::CancelHandle;
     ///
     /// let run = CancelHandle::new();
     /// let mut waiting = pin!(run.child().cancelled());

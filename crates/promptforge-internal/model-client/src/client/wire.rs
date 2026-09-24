@@ -44,7 +44,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_model_client::client::Message;
+    /// use promptforge::model::Message;
     ///
     /// let message = Message::user("hello");
     /// assert_eq!(message.role(), "user");
@@ -249,8 +249,8 @@ impl ToolArguments<'_> {
 /// I/O, so the example is `no_run`:
 ///
 /// ```no_run
-/// # async fn example(completion: promptforge_model_client::client::Completion) {
-/// use promptforge_model_client::client::CompletionResult;
+/// # async fn example(completion: promptforge::model::Completion) {
+/// use promptforge::model::CompletionResult;
 ///
 /// match completion.result() {
 ///     CompletionResult::Text(reply) => println!("text: {reply}"),

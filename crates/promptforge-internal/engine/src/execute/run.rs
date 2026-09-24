@@ -89,9 +89,8 @@ pub enum Step {
 /// ```
 /// use std::sync::Arc;
 ///
-/// use promptforge_engine::{Run, RunContext, RunResult, Step};
-/// use promptforge_engine::parser::Prompt;
-/// use promptforge_types::timestamp::Timestamp;
+/// use promptforge::timestamp::Timestamp;
+/// use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 ///
 /// let source = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
 /// let (prompt, _parse_events) = Prompt::parse(source, "doc-example");

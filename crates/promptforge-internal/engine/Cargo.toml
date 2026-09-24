@@ -47,6 +47,10 @@ axum.workspace = true
 # client's chunk type for the shared read loop.
 bytes.workspace = true
 criterion.workspace = true
+# Surface items' doc examples name `promptforge::` paths, the only paths
+# hosts see; only this crate's doctest run executes them. `test-support`
+# for the `test_support::drive_tokio` example.
+promptforge = { workspace = true, features = ["test-support"] }
 promptforge-lua = { workspace = true, features = ["test-support"] }
 promptforge-parser = { workspace = true, features = ["test-support"] }
 # The suites' mock-gateway chat client: the one HTTP the engine's own

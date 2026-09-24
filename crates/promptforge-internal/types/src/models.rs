@@ -37,12 +37,12 @@ impl ModelId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_types::models::ModelId;
+    /// use promptforge::model::ModelId;
     ///
     /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
     /// assert_eq!(id.server(), "gateway");
     /// assert_eq!(id.name(), "claude-sonnet-4-6");
-    /// # Ok::<(), promptforge_types::models::ModelIdError>(())
+    /// # Ok::<(), promptforge::model::ModelIdError>(())
     /// ```
     pub fn new(
         server: impl Into<String>,
@@ -140,7 +140,7 @@ pub enum ModelCatalogError {
 /// # Examples
 ///
 /// ```
-/// use promptforge_types::models::ThinkingMode;
+/// use promptforge::model::ThinkingMode;
 ///
 /// // Deserialized from the lowercase gateway wire form.
 /// let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
@@ -182,7 +182,7 @@ impl ModelDescriptor {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
     ///
     /// let context = NonZeroU32::new(131_072).ok_or("context is non-zero")?;
     /// let model = ModelDescriptor::new(
@@ -257,7 +257,7 @@ impl ModelCatalog {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     ///
     /// let ctx = NonZeroU32::new(8_192).ok_or("context is non-zero")?;
     /// let id = ModelId::gateway("small")?;

@@ -4816,6 +4816,7 @@ dependencies = [
  "bytes",
  "criterion",
  "mlua",
+ "promptforge",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
@@ -4850,6 +4851,7 @@ dependencies = [
 name = "promptforge-model-client"
 version = "0.3.0"
 dependencies = [
+ "promptforge",
  "promptforge-types",
  "serde",
  "serde_json",
@@ -4862,6 +4864,7 @@ name = "promptforge-parser"
 version = "0.3.0"
 dependencies = [
  "mlua",
+ "promptforge",
  "promptforge-lua",
  "promptforge-types",
  "pulldown-cmark",
@@ -4875,6 +4878,7 @@ dependencies = [
 name = "promptforge-store"
 version = "0.3.0"
 dependencies = [
+ "promptforge",
  "promptforge-vfs",
  "thiserror 2.0.19",
  "workspace-hack",
@@ -4884,6 +4888,7 @@ dependencies = [
 name = "promptforge-types"
 version = "0.3.0"
 dependencies = [
+ "promptforge",
  "rand 0.9.5",
  "serde",
  "serde_json",
