@@ -22,7 +22,7 @@ let (prompt, events) = Prompt::parse(source, "doc-example");
 let prompt = prompt?;
 assert!(!events.is_empty());
 assert_eq!(prompt.title(), "Greeter");
-assert_eq!(prompt.sections()[0].name(), "Say hi");
+assert_eq!(prompt.frontmatter().name(), "greeter");
 # Ok::<(), promptforge_engine::ParseError>(())
 ```
 

@@ -9,7 +9,7 @@ use crate::parser::Prompt;
 use crate::test_support::recording::{Observation, Observer};
 use crate::test_support::{RunHost, TestTool, run_host};
 use crate::{Environment, RunContext, RunError, RunResult};
-use promptforge_store::{StoreError, StoreExt};
+use promptforge_store::{Store, StoreError};
 use promptforge_types::timestamp::Timestamp;
 use promptforge_vfs::{Origin, VfsRef};
 
@@ -181,7 +181,7 @@ impl FixtureStore {
             .0
             .acquire(Origin::new("FixtureStore::read"))
             .map_err(StoreError::backend)?;
-        self.0.store(&access).read(path)
+        Store::new(&access).read(path)
     }
 }
 

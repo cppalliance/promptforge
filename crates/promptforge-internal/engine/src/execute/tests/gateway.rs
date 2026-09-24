@@ -341,9 +341,14 @@ impl Drop for ScriptedGateway {
     }
 }
 
+/// The model every scripted reply names, as a real backend's body does; a
+/// body naming none reports a `model_metadata_degraded` event.
+pub(super) const MOCK_MODEL: &str = "mock-model";
+
 /// A response asking the model to call one tool (OpenAI `tool_calls` shape).
 pub(super) fn resp_tool_call(id: &str, name: &str, arguments: &str) -> GatewayReply {
     GatewayReply::Json(json!({
+        "model": MOCK_MODEL,
         "choices": [{
             "message": {
                 "role": "assistant",
@@ -365,6 +370,7 @@ pub(super) fn resp_two_tool_calls(
     second: (&str, &str),
 ) -> GatewayReply {
     GatewayReply::Json(json!({
+        "model": MOCK_MODEL,
         "choices": [{
             "message": {
                 "role": "assistant",
@@ -389,6 +395,7 @@ pub(super) fn resp_two_tool_calls(
 /// A final assistant text reply.
 pub(super) fn resp_text(content: &str) -> GatewayReply {
     GatewayReply::Json(json!({
+        "model": MOCK_MODEL,
         "choices": [{
             "message": { "role": "assistant", "content": content }
         }]
@@ -400,6 +407,7 @@ pub(super) fn resp_delayed_text(content: &str, delay: std::time::Duration) -> Ga
     GatewayReply::DelayedJson(
         delay,
         json!({
+            "model": MOCK_MODEL,
             "choices": [{
                 "message": { "role": "assistant", "content": content }
             }]
@@ -410,6 +418,7 @@ pub(super) fn resp_delayed_text(content: &str, delay: std::time::Duration) -> Ga
 /// A final assistant text reply with an explicit `finish_reason`.
 pub(super) fn resp_text_finish(content: &str, finish_reason: &str) -> GatewayReply {
     GatewayReply::Json(json!({
+        "model": MOCK_MODEL,
         "choices": [{
             "finish_reason": finish_reason,
             "message": { "role": "assistant", "content": content }

@@ -304,7 +304,8 @@ pub struct Completion {
     /// mean inter-token latency, and end-to-end wall time for the stream.
     pub(crate) client_timing: Option<ClientTiming>,
     /// One line per response metadata section that was present but
-    /// malformed and degraded to `None`; empty for a well-formed body.
+    /// malformed and degraded to `None`; empty for a well-formed body. The
+    /// engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
     /// The JSON body sent to the gateway.
     pub(crate) request_body: Value,

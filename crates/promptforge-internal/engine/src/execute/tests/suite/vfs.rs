@@ -6,7 +6,7 @@
 //! explicit contract error.
 
 use crate::parser::Prompt;
-use promptforge_store::{Store, StoreError, StoreExt};
+use promptforge_store::{Store, StoreError};
 use promptforge_vfs::{HostBackend, Origin, VfsRef};
 
 use super::support::Recorder;
@@ -83,7 +83,7 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
     let access = vfs
         .acquire(Origin::new("seed_declared_input"))
         .expect("the stock backend acquires");
-    vfs.store(&access)
+    Store::new(&access)
         .write(input.path(), contents)
         .expect("the declared input seeds");
 }
@@ -149,7 +149,7 @@ return store.read('handoff.txt')\n\
         .acquire(Origin::new("prepared handle extraction"))
         .expect("the prepared backend acquires");
     assert_eq!(
-        vfs.store(&access)
+        Store::new(&access)
             .read("handoff.txt")
             .expect("the run's write persists on the handle"),
         "across the reset"
@@ -172,7 +172,7 @@ async fn a_host_seeds_and_extracts_through_the_prepared_handle_with_no_real_file
     let access = vfs
         .acquire(Origin::new("round-trip extraction"))
         .expect("the prepared backend acquires");
-    let report = extract_declared_output(&vfs.store(&access), &prompt)
+    let report = extract_declared_output(&Store::new(&access), &prompt)
         .expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
 }
@@ -195,7 +195,7 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     let access = vfs
         .acquire(Origin::new("missing-output extraction"))
         .expect("the prepared backend acquires");
-    let error = extract_declared_output(&vfs.store(&access), &prompt)
+    let error = extract_declared_output(&Store::new(&access), &prompt)
         .expect_err("the missing output is a contract error");
     assert!(
         error.contains("report.md"),

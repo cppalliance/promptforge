@@ -448,6 +448,7 @@ async fn run_infer_round(reply: GatewayReply) -> (String, Vec<String>) {
 /// A text reply carrying a `reasoning_content` side channel.
 fn resp_text_with_reasoning(content: &str, reasoning: &str) -> GatewayReply {
     GatewayReply::Json(json!({
+        "model": MOCK_MODEL,
         "choices": [{
             "message": {
                 "role": "assistant",

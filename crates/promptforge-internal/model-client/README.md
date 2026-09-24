@@ -24,5 +24,6 @@ reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
 transport measured on its own clock. The metrics vocabulary (`Usage`,
 `LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) is canonical
 in `promptforge-api-types` and re-exported at this crate's root. A
-malformed metadata section degrades to `None` with a `tracing` warning; it
-never fails the call.
+malformed metadata section degrades to `None` with a diagnostic line that
+the engine reports as a `model_metadata_degraded` event; it never fails
+the call.

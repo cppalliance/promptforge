@@ -131,7 +131,7 @@ store.write('epilog-ran.txt', 'yes')\n\
 return 'epilog result'\n\
 ```\n";
     let prompt = bound_for_model(md);
-    let entry = prompt.prompt().entry().expect("fixture has sections");
+    let entry = promptforge_parser::detail::entry(prompt.prompt()).expect("fixture has sections");
     assert!(entry.prologue().is_none());
     assert!(entry.epilog().is_some());
 

@@ -1,5 +1,6 @@
 //! The parsed prompt tree: [`Prompt`], its [`Section`]s, and their
-//! [`Block`]s, with the read-only accessors hosts navigate it through.
+//! [`Block`]s. Hosts read a prompt's title and frontmatter; the tree below
+//! them is the engine's, reached through [`crate::detail`].
 //!
 //! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.
@@ -147,35 +148,39 @@ impl Prompt {
         &self.title
     }
 
-    /// Returns the compiled `lua shared` library, when the prompt declares one.
+    /// Returns the compiled `lua shared` library, when the prompt declares one;
+    /// the engine reaches it through [`crate::detail::replay`].
     #[must_use]
-    pub fn replay(&self) -> Option<&LuaProgram> {
+    pub(crate) fn replay(&self) -> Option<&LuaProgram> {
         self.replay.as_ref()
     }
 
-    /// Returns the ordered live Lua and prose blocks from the H1.
+    /// Returns the ordered live Lua and prose blocks from the H1; the engine
+    /// reaches them through [`crate::detail::h1_blocks`].
     #[must_use]
-    pub fn h1_blocks(&self) -> &[Block] {
+    pub(crate) fn h1_blocks(&self) -> &[Block] {
         &self.h1_blocks
     }
 
-    /// Returns the top-level H2 sections in file order.
+    /// Returns the top-level H2 sections in file order; the engine reaches
+    /// them through [`crate::detail::sections`].
     #[must_use]
-    pub fn sections(&self) -> &[Section] {
+    pub(crate) fn sections(&self) -> &[Section] {
         &self.sections
     }
 
-    /// The entry-point section: the first top-level section in file order.
+    /// The entry-point section: the first top-level section in file order;
+    /// the engine reaches it through [`crate::detail::entry`].
     #[must_use]
-    pub fn entry(&self) -> Option<&Section> {
+    pub(crate) fn entry(&self) -> Option<&Section> {
         self.sections.first()
     }
 
     /// Removes the human-readable prose from the H1, keeping only its live Lua
     /// blocks.
     ///
-    /// This is the invariant-preserving replacement for mutating `h1_blocks`
-    /// directly: it drops every [`Block::Prose`] from the H1 and clears the
+    /// This is the invariant-preserving replacement for mutating the H1 blocks
+    /// directly: it drops every prose block from the H1 and clears the
     /// derived description text, leaving the compiled H1 Lua blocks and the rest
     /// of the prompt tree untouched. Callers use it to run a prompt's live H1
     /// resolution without sending any H1 prose to a model.

@@ -51,18 +51,6 @@ impl ToolId {
         Ok(ToolId(name))
     }
 
-    /// Builds an identity from a string already known to be valid.
-    ///
-    /// Crate-internal: backs [`crate::detail::tool_id_from_validated`].
-    pub(crate) fn from_validated(id: &str) -> ToolId {
-        let name = GlobalName::from_validated(id);
-        debug_assert!(
-            name.segments().len() == 3,
-            "a static tool id must have exactly 3 segments (namespace/pack/name): {id}"
-        );
-        ToolId(name)
-    }
-
     /// Returns the tool's name segment (the last of the three).
     ///
     /// # Examples

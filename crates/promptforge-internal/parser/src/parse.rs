@@ -29,8 +29,6 @@ impl Prompt {
     /// let prompt = prompt?;
     /// assert_eq!(prompt.frontmatter().name(), "greeter");
     /// assert_eq!(prompt.title(), "Greeter");
-    /// assert_eq!(prompt.sections().len(), 1);
-    /// assert_eq!(prompt.sections()[0].name(), "Say hi");
     /// assert!(matches!(events.first(), Some(Event::ParseStarted { .. })));
     /// assert!(matches!(events.last(), Some(Event::ParseSucceeded { .. })));
     ///
@@ -65,7 +63,7 @@ impl Prompt {
                 lifecycle::PARSE_FAILED
             },
         );
-        (result.map_err(ParseError::from), sink.take())
+        (result.map_err(ParseError::from_inner), sink.take())
     }
 
     fn parse_inner(input: &str, emitter: &Emitter) -> Result<Prompt> {

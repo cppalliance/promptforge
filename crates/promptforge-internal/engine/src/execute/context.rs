@@ -299,15 +299,13 @@ impl RunState {
     /// The resolved per-section tool-loop cap: the frontmatter's
     /// `max_tool_iterations` over the limits default.
     pub(crate) fn max_tool_iterations(&self) -> usize {
-        self.prompt
-            .frontmatter()
-            .max_tool_iterations()
+        promptforge_parser::detail::max_tool_iterations(self.prompt.frontmatter())
             .resolve(self.limits.tool_iterations().get() as usize)
     }
 
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) fn section_count(&self) -> usize {
-        self.prompt.sections().len()
+        promptforge_parser::detail::sections(&self.prompt).len()
     }
 
     /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,

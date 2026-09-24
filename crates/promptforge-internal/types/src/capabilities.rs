@@ -64,18 +64,6 @@ impl CapabilityId {
         Ok(CapabilityId(name))
     }
 
-    /// Builds an identity from a string already known to be valid.
-    ///
-    /// Crate-internal: backs [`crate::detail::capability_id_from_validated`].
-    pub(crate) fn from_validated(id: &str) -> CapabilityId {
-        let name = GlobalName::from_validated(id);
-        debug_assert!(
-            name.segments().len() == 2,
-            "a static capability id must have exactly 2 segments (namespace/pack): {id}"
-        );
-        CapabilityId(name)
-    }
-
     /// Builds an identity from a 2-segment prefix split off a validated
     /// tool id.
     ///

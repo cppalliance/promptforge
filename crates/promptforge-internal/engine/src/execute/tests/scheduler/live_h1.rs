@@ -247,8 +247,7 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
         var.ok = true\n\
         ```\n";
     let prompt = parse(md);
-    let shared = prompt
-        .replay()
+    let shared = promptforge_parser::detail::replay(&prompt)
         .cloned()
         .expect("the prompt's shared chunk compiles at parse");
     let ctx = RunState::new(

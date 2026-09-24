@@ -264,7 +264,7 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
     // Section startup replays the shared library unconditionally; a prompt
     // without one replays an empty compiled chunk instead, so the startup
     // sequence always has a program to replay.
-    let shared = match prompt.replay() {
+    let shared = match promptforge_parser::detail::replay(&prompt) {
         Some(program) => program.clone(),
         None => crate::lua::LuaProgram::empty()?,
     };

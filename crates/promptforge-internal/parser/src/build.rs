@@ -197,10 +197,11 @@ impl Frontmatter {
         self.promptforge
     }
 
-    /// Returns the per-section tool-loop cap declared in frontmatter.
+    /// Returns the per-section tool-loop cap declared in frontmatter, or
+    /// `None` when the prompt leaves the runtime's default in force.
     #[must_use]
-    pub fn max_tool_iterations(&self) -> MaxToolIterations {
-        self.max_tool_iterations
+    pub fn max_tool_iterations(&self) -> Option<std::num::NonZeroU32> {
+        self.max_tool_iterations.limit()
     }
 
     /// Returns the declared input file, when present.

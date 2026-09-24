@@ -101,8 +101,8 @@ impl Scheduler {
     /// neither ends at once with the generic completion.
     fn start(&mut self) -> Result<()> {
         let prompt = self.prompt();
-        if prompt.h1_blocks().is_empty() {
-            if prompt.sections().is_empty() {
+        if promptforge_parser::detail::h1_blocks(&prompt).is_empty() {
+            if promptforge_parser::detail::sections(&prompt).is_empty() {
                 self.end(Ok(GENERIC_COMPLETION.to_owned()));
                 return Ok(());
             }

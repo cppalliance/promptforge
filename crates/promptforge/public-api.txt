@@ -1,0 +1,1488 @@
+auto promptforge::CapabilityConflict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::Environment: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::Prompt: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::RequirementCheck: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::Requirements: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::Run: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::RunContext: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::RunError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::RunErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::RunLimits: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::RunResult: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::SourceLocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::Step: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::UnmetRequirement: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::cancel::CancelHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::cancel::Cancelled: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::CapabilityId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::CapabilityIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::CapabilityIdErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::GlobalName: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::GlobalNameError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::GlobalNameErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::AnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::ChatAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::Effect: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::effect::EffectAnswer: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::InputAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::StoreAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::event::DebugMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::event::Event: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::event::ReplyOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::AbandonReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::ChainId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::ParseIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::Provenance: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::TaskId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::ids::TaskOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::input::InputError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::input::InputOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::CallMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::ClientTiming: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::LlamaTimings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::ToolCallEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::Usage: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::metrics::VllmMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::Completion: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::CompletionError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::model::CompletionErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::CompletionOptions: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::CompletionResult: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::Message: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelBinding: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelBindings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelCatalog: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelCatalogError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelDescriptor: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ModelInvocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::StreamDelta: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::Temperature: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::TemperatureError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ThinkingMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ToolArguments: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ToolCall: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::ToolSchema: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ArgDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ArgType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ArgsDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::CapabilityDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::FileDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::Frontmatter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ModelKeyword: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ModelRole: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ModelRoles: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ToolSlot: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ToolSlots: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::replay::Flags: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::timestamp::Timestamp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::OutputTrust: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolBindings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolCatalog: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolCatalogError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolCatalogErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolDescriptor: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::tools::ToolErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolIdErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::tools::ToolOutput: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::transport::ClientError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::transport::ClientTimeout: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::Access: !Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Entry: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::ExecId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::FileType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::GrepMatch: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::GrepQuery: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::GrepResults: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::HostBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::MemoryBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Mode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::ModeHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::ModePolicy: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Op: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::OpEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Origin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::PathReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Stat: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::StoreError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::StoreErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::StoreOp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::StoreOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Verdict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsPath: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsPathBuf: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::VfsRefBuilder: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+derives promptforge::CapabilityConflict: Clone, Debug, Eq, PartialEq
+derives promptforge::Environment: Clone, Debug, Default
+derives promptforge::ParseError: Debug
+derives promptforge::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::Prompt: Clone, Debug, Eq, PartialEq
+derives promptforge::RequirementCheck: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::Requirements: Clone, Debug, Default, Eq, PartialEq
+derives promptforge::Run: Debug
+derives promptforge::RunContext: Debug
+derives promptforge::RunError: Debug
+derives promptforge::RunErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::RunLimits: Clone, Copy, Debug, Default
+derives promptforge::RunResult: Debug
+derives promptforge::SourceLocation: Clone, Debug, Eq, PartialEq
+derives promptforge::Step: Debug
+derives promptforge::UnmetRequirement: Clone, Debug, Eq, PartialEq
+derives promptforge::cancel::CancelHandle: Clone, Debug, Default
+derives promptforge::cancel::Cancelled: Debug
+derives promptforge::capabilities::CapabilityId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::capabilities::CapabilityIdError: Clone, Debug, Eq, PartialEq
+derives promptforge::capabilities::CapabilityIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::capabilities::GlobalName: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives promptforge::capabilities::GlobalNameError: Clone, Debug, Eq, PartialEq
+derives promptforge::capabilities::GlobalNameErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::effect::AnswerRecord: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::effect::ChatAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::effect::Effect: Debug
+derives promptforge::effect::EffectAnswer: Debug
+derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::effect::InputAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::effect::StoreAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::event::DebugMode: Clone, Copy, Debug, Default, Eq, PartialEq
+derives promptforge::event::Event: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::event::ReplyOrigin: Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::ids::AbandonReason: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives promptforge::ids::ChainId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::ids::ParseIdError: Clone, Debug, Eq, PartialEq
+derives promptforge::ids::Provenance: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::ids::TaskId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::ids::TaskOrigin: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives promptforge::input::InputError: Debug
+derives promptforge::input::InputOutcome: Clone, Debug, Eq, PartialEq
+derives promptforge::metrics::CallMetrics: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::metrics::ClientTiming: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::metrics::LlamaTimings: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::metrics::ToolCallEvent: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::metrics::Usage: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::metrics::VllmMetrics: Clone, Debug, Deserialize, PartialEq, Serialize
+derives promptforge::model::Completion: Debug
+derives promptforge::model::CompletionError: Debug
+derives promptforge::model::CompletionErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::model::CompletionOptions: Clone, Debug, PartialEq
+derives promptforge::model::CompletionResult: Clone, Debug, Eq, PartialEq
+derives promptforge::model::Message: Clone, Debug, Eq, PartialEq, Serialize
+derives promptforge::model::ModelBinding: Clone, Debug, PartialEq
+derives promptforge::model::ModelBindings: Clone, Debug, Default, Eq, PartialEq
+derives promptforge::model::ModelCatalog: Clone, Debug, Default, PartialEq
+derives promptforge::model::ModelCatalogError: Clone, Debug, Eq, PartialEq
+derives promptforge::model::ModelDescriptor: Clone, Debug, Eq, PartialEq
+derives promptforge::model::ModelId: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives promptforge::model::ModelIdError: Clone, Debug, Eq, PartialEq
+derives promptforge::model::ModelInvocation: Clone, Debug, PartialEq
+derives promptforge::model::StreamDelta: Clone, Debug, Eq, PartialEq
+derives promptforge::model::Temperature: Clone, Copy, Debug, PartialEq
+derives promptforge::model::TemperatureError: Clone, Debug, PartialEq
+derives promptforge::model::ThinkingMode: Clone, Copy, Debug, Deserialize, Eq, PartialEq
+derives promptforge::model::ToolArguments: Clone, Copy, Debug
+derives promptforge::model::ToolCall: Clone, Debug, Eq, PartialEq
+derives promptforge::model::ToolSchema: Clone, Debug, Eq, PartialEq, Serialize
+derives promptforge::prompt::ArgDecl: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ArgType: Clone, Copy, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ArgsDecl: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives promptforge::prompt::CapabilityDecl: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::FileDecl: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::Frontmatter: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ModelKeyword: Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd
+derives promptforge::prompt::ModelRole: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ModelRoles: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ToolSlot: Clone, Debug, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ToolSlots: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives promptforge::replay::Flags: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize
+derives promptforge::timestamp::Timestamp: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::tools::OutputTrust: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::tools::ToolBindings: Clone, Debug, Default, Eq, PartialEq
+derives promptforge::tools::ToolCatalog: Clone, Debug, Default
+derives promptforge::tools::ToolCatalogError: Clone, Debug, Eq, PartialEq
+derives promptforge::tools::ToolCatalogErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::tools::ToolDescriptor: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::tools::ToolError: Debug
+derives promptforge::tools::ToolErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::tools::ToolId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives promptforge::tools::ToolIdError: Clone, Debug, Eq, PartialEq
+derives promptforge::tools::ToolIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::tools::ToolOutput: Clone, Debug, Eq, PartialEq
+derives promptforge::transport::ClientError: Debug
+derives promptforge::transport::ClientTimeout: Debug
+derives promptforge::vfs::Access: Debug
+derives promptforge::vfs::AllowAll: Debug, Default
+derives promptforge::vfs::Entry: Clone, Debug
+derives promptforge::vfs::ExecId: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::FileType: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::GrepMatch: Clone, Debug, Eq, PartialEq
+derives promptforge::vfs::GrepQuery: Clone, Debug
+derives promptforge::vfs::GrepResults: Clone, Debug, Default, Eq, PartialEq
+derives promptforge::vfs::HostBackend: Clone, Debug
+derives promptforge::vfs::MemoryBackend: Clone, Debug, Default
+derives promptforge::vfs::Mode: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::vfs::ModeHandle: Clone, Debug
+derives promptforge::vfs::ModePolicy: Debug
+derives promptforge::vfs::Op: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::OpEvent: Debug
+derives promptforge::vfs::Origin: Clone, Debug
+derives promptforge::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::vfs::Stat: Clone, Debug
+derives promptforge::vfs::StoreError: Debug
+derives promptforge::vfs::StoreErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::vfs::StoreOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::vfs::StoreOutcome: Debug
+derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
+derives promptforge::vfs::VfsError: Clone, Debug, Eq, PartialEq
+derives promptforge::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::VfsPathBuf: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives promptforge::vfs::VfsRef: Clone, Debug
+derives promptforge::vfs::VfsRefBuilder: Debug
+impl core::convert::From<&promptforge::model::Completion> for promptforge::effect::ChatAnswerRecord
+impl core::convert::From<promptforge::ids::ChainId> for promptforge::ids::TaskId
+impl core::convert::From<promptforge::model::CompletionError> for promptforge::transport::ClientError
+impl core::convert::From<promptforge::transport::ClientError> for promptforge::model::CompletionError
+impl core::convert::From<promptforge::vfs::VfsPath> for promptforge::vfs::VfsPathBuf
+impl core::convert::TryFrom<f64> for promptforge::model::Temperature
+impl core::convert::TryFrom<f64> for promptforge::model::Temperature { type Error = promptforge::model::TemperatureError }
+impl core::error::Error for promptforge::ParseError
+impl core::error::Error for promptforge::RunError
+impl core::error::Error for promptforge::capabilities::CapabilityIdError
+impl core::error::Error for promptforge::capabilities::GlobalNameError
+impl core::error::Error for promptforge::ids::ParseIdError
+impl core::error::Error for promptforge::input::InputError
+impl core::error::Error for promptforge::model::CompletionError
+impl core::error::Error for promptforge::model::ModelCatalogError
+impl core::error::Error for promptforge::model::ModelIdError
+impl core::error::Error for promptforge::model::TemperatureError
+impl core::error::Error for promptforge::tools::ToolCatalogError
+impl core::error::Error for promptforge::tools::ToolError
+impl core::error::Error for promptforge::tools::ToolIdError
+impl core::error::Error for promptforge::transport::ClientError
+impl core::error::Error for promptforge::transport::ClientTimeout
+impl core::error::Error for promptforge::vfs::StoreError
+impl core::error::Error for promptforge::vfs::VfsError
+impl core::fmt::Display for promptforge::ParseError
+impl core::fmt::Display for promptforge::RunError
+impl core::fmt::Display for promptforge::capabilities::CapabilityId
+impl core::fmt::Display for promptforge::capabilities::CapabilityIdError
+impl core::fmt::Display for promptforge::capabilities::GlobalName
+impl core::fmt::Display for promptforge::capabilities::GlobalNameError
+impl core::fmt::Display for promptforge::effect::EffectId
+impl core::fmt::Display for promptforge::ids::ChainId
+impl core::fmt::Display for promptforge::ids::ParseIdError
+impl core::fmt::Display for promptforge::ids::TaskId
+impl core::fmt::Display for promptforge::input::InputError
+impl core::fmt::Display for promptforge::model::CompletionError
+impl core::fmt::Display for promptforge::model::ModelCatalogError
+impl core::fmt::Display for promptforge::model::ModelIdError
+impl core::fmt::Display for promptforge::model::TemperatureError
+impl core::fmt::Display for promptforge::prompt::ArgType
+impl core::fmt::Display for promptforge::timestamp::Timestamp
+impl core::fmt::Display for promptforge::tools::ToolCatalogError
+impl core::fmt::Display for promptforge::tools::ToolError
+impl core::fmt::Display for promptforge::tools::ToolId
+impl core::fmt::Display for promptforge::tools::ToolIdError
+impl core::fmt::Display for promptforge::transport::ClientError
+impl core::fmt::Display for promptforge::transport::ClientTimeout
+impl core::fmt::Display for promptforge::vfs::PathReason
+impl core::fmt::Display for promptforge::vfs::StoreError
+impl core::fmt::Display for promptforge::vfs::VfsError
+impl core::fmt::Display for promptforge::vfs::VfsPath
+impl core::fmt::Display for promptforge::vfs::VfsPathBuf
+impl core::future::future::Future for promptforge::cancel::Cancelled
+impl core::future::future::Future for promptforge::cancel::Cancelled { type Output = () }
+impl core::ops::bit::BitOr for promptforge::replay::Flags
+impl core::ops::bit::BitOr for promptforge::replay::Flags { type Output = promptforge::replay::Flags }
+impl core::ops::bit::BitOrAssign for promptforge::replay::Flags
+impl core::ops::drop::Drop for promptforge::vfs::Access
+impl core::str::traits::FromStr for promptforge::ids::ChainId
+impl core::str::traits::FromStr for promptforge::ids::ChainId { type Err = promptforge::ids::ParseIdError }
+impl core::str::traits::FromStr for promptforge::ids::TaskId
+impl core::str::traits::FromStr for promptforge::ids::TaskId { type Err = promptforge::ids::ParseIdError }
+impl promptforge::vfs::Policy for promptforge::vfs::AllowAll
+impl promptforge::vfs::Policy for promptforge::vfs::ModePolicy
+impl promptforge::vfs::Vfs for promptforge::vfs::HostBackend
+impl promptforge::vfs::Vfs for promptforge::vfs::MemoryBackend
+impl promptforge::vfs::Vfs for promptforge::vfs::VfsRef
+impl<'a> promptforge::vfs::OpEvent<'a>
+pub async fn promptforge::transport::read_body_capped<S: promptforge::transport::ChunkSource>(source: &mut S, content_length: core::option::Option<u64>, cap: u64) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::model::CompletionError>
+pub async fn promptforge::transport::read_completion_stream<S: promptforge::transport::ChunkSource>(source: &mut S, request_body: serde_json::value::Value, max_bytes: u64, on_delta: impl core::ops::function::Fn(promptforge::model::StreamDelta), started: std::time::Instant, now: impl core::ops::function::Fn() -> std::time::Instant) -> core::result::Result<promptforge::model::Completion, promptforge::model::CompletionError>
+pub const fn promptforge::effect::EffectId::get(self) -> u64
+pub const fn promptforge::replay::Flags::bits(self) -> u32
+pub const fn promptforge::replay::Flags::contains(self, other: promptforge::replay::Flags) -> bool
+pub const fn promptforge::replay::Flags::from_bits(bits: u32) -> Self
+pub const fn promptforge::replay::Flags::is_empty(self) -> bool
+pub const fn promptforge::timestamp::Timestamp::from_unix_millis(millis: i64) -> Self
+pub const fn promptforge::timestamp::Timestamp::unix_millis(self) -> i64
+pub const promptforge::model::ModelId::GATEWAY: &'static str
+pub const promptforge::replay::Flags::EMPTY: promptforge::replay::Flags
+pub const promptforge::timestamp::Timestamp::UNIX_EPOCH: promptforge::timestamp::Timestamp
+pub enum promptforge::ParseErrorKind
+pub enum promptforge::RequirementCheck
+pub enum promptforge::RunErrorKind
+pub enum promptforge::RunResult
+pub enum promptforge::Step
+pub enum promptforge::capabilities::CapabilityIdErrorKind
+pub enum promptforge::capabilities::GlobalNameErrorKind
+pub enum promptforge::effect::AnswerRecord
+pub enum promptforge::effect::Effect
+pub enum promptforge::effect::EffectAnswer
+pub enum promptforge::effect::EffectRecord
+pub enum promptforge::effect::InputAnswerRecord
+pub enum promptforge::effect::StoreAnswerRecord
+pub enum promptforge::event::DebugMode
+pub enum promptforge::event::Event
+pub enum promptforge::event::ReplyOrigin
+pub enum promptforge::ids::AbandonReason
+pub enum promptforge::ids::TaskOrigin
+pub enum promptforge::input::InputOutcome
+pub enum promptforge::model::CompletionErrorKind
+pub enum promptforge::model::CompletionResult
+pub enum promptforge::model::ModelCatalogError
+pub enum promptforge::model::StreamDelta
+pub enum promptforge::model::TemperatureError
+pub enum promptforge::model::ThinkingMode
+pub enum promptforge::prompt::ArgType
+pub enum promptforge::prompt::ModelKeyword
+pub enum promptforge::prompt::ToolSlot
+pub enum promptforge::tools::OutputTrust
+pub enum promptforge::tools::ToolCatalogError
+pub enum promptforge::tools::ToolCatalogErrorKind
+pub enum promptforge::tools::ToolErrorKind
+pub enum promptforge::tools::ToolIdErrorKind
+pub enum promptforge::transport::ClientError
+pub enum promptforge::vfs::FileType
+pub enum promptforge::vfs::Mode
+pub enum promptforge::vfs::Op
+pub enum promptforge::vfs::PathReason
+pub enum promptforge::vfs::StoreError
+pub enum promptforge::vfs::StoreErrorKind
+pub enum promptforge::vfs::StoreOp
+pub enum promptforge::vfs::StoreOutcome
+pub enum promptforge::vfs::Verdict
+pub enum promptforge::vfs::VfsError
+pub fn promptforge::CapabilityConflict::new(first: promptforge::capabilities::CapabilityId, second: promptforge::capabilities::CapabilityId) -> promptforge::CapabilityConflict
+pub fn promptforge::Environment::base_vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::Environment
+pub fn promptforge::Environment::max_depth(self, max_depth: u32) -> promptforge::Environment
+pub fn promptforge::Environment::new() -> promptforge::Environment
+pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
+pub fn promptforge::Environment::run_vfs(&self) -> promptforge::vfs::VfsRef
+pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment
+pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
+pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
+pub fn promptforge::ParseError::line(&self) -> core::option::Option<u32>
+pub fn promptforge::ParseError::name(&self) -> core::option::Option<&str>
+pub fn promptforge::ParseError::span(&self) -> core::option::Option<(usize, usize)>
+pub fn promptforge::Prompt::frontmatter(&self) -> &promptforge::prompt::Frontmatter
+pub fn promptforge::Prompt::parse(input: &str, execution: &str) -> (core::result::Result<promptforge::Prompt, promptforge::ParseError>, alloc::vec::Vec<promptforge::event::Event>)
+pub fn promptforge::Prompt::strip_h1_prose(&mut self)
+pub fn promptforge::Prompt::title(&self) -> &str
+pub fn promptforge::Requirements::is_satisfied(&self) -> bool
+pub fn promptforge::Requirements::merge(&mut self, other: promptforge::Requirements)
+pub fn promptforge::Requirements::notice(&self) -> alloc::string::String
+pub fn promptforge::Requirements::refusal(&self) -> core::option::Option<promptforge::RunError>
+pub fn promptforge::Run::cancel(&mut self)
+pub fn promptforge::Run::cancel_handle(&self) -> promptforge::cancel::CancelHandle
+pub fn promptforge::Run::decided(&self) -> bool
+pub fn promptforge::Run::new(prompt: alloc::sync::Arc<promptforge::Prompt>, args: &str, ctx: promptforge::RunContext) -> promptforge::Run
+pub fn promptforge::Run::resume(&mut self, id: promptforge::effect::EffectId, answer: promptforge::effect::EffectAnswer)
+pub fn promptforge::Run::step(&mut self) -> promptforge::Step
+pub fn promptforge::RunContext::cancel(self, handle: promptforge::cancel::CancelHandle) -> promptforge::RunContext
+pub fn promptforge::RunContext::cancel_handle(&self) -> promptforge::cancel::CancelHandle
+pub fn promptforge::RunContext::current_model(&self) -> core::option::Option<&promptforge::model::ModelDescriptor>
+pub fn promptforge::RunContext::depth(&self) -> u32
+pub fn promptforge::RunContext::flags(self, flags: promptforge::replay::Flags) -> promptforge::RunContext
+pub fn promptforge::RunContext::limits(self, limits: promptforge::RunLimits) -> promptforge::RunContext
+pub fn promptforge::RunContext::model(self, model: promptforge::model::ModelDescriptor) -> promptforge::RunContext
+pub fn promptforge::RunContext::model_bindings(&self) -> &promptforge::model::ModelBindings
+pub fn promptforge::RunContext::name(&self) -> &str
+pub fn promptforge::RunContext::new(name: impl core::convert::Into<alloc::string::String>, seed: u64, started_at: promptforge::timestamp::Timestamp) -> promptforge::RunContext
+pub fn promptforge::RunContext::provenance_start(self, start: u32) -> promptforge::RunContext
+pub fn promptforge::RunContext::report_debug(self, mode: promptforge::event::DebugMode) -> promptforge::RunContext
+pub fn promptforge::RunContext::run_flags(&self) -> promptforge::replay::Flags
+pub fn promptforge::RunContext::seed(&self) -> u64
+pub fn promptforge::RunContext::started_at(&self) -> promptforge::timestamp::Timestamp
+pub fn promptforge::RunContext::tool_bindings(&self) -> &promptforge::tools::ToolBindings
+pub fn promptforge::RunContext::tools(&self) -> &promptforge::tools::ToolCatalog
+pub fn promptforge::RunContext::ui(self, snapshot: serde_json::value::Value) -> promptforge::RunContext
+pub fn promptforge::RunContext::vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::RunContext
+pub fn promptforge::RunContext::vfs_handle(&self) -> &promptforge::vfs::VfsRef
+pub fn promptforge::RunError::is_cancelled(&self) -> bool
+pub fn promptforge::RunError::is_retryable(&self) -> bool
+pub fn promptforge::RunError::kind(&self) -> promptforge::RunErrorKind
+pub fn promptforge::RunError::location(&self) -> core::option::Option<promptforge::SourceLocation>
+pub fn promptforge::RunLimits::fanout_concurrency(&self) -> core::num::nonzero::NonZeroUsize
+pub fn promptforge::RunLimits::lua_log_events(self, value: core::num::nonzero::NonZeroU32) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::lua_logs(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::RunLimits::lua_memory(&self) -> core::num::nonzero::NonZeroUsize
+pub fn promptforge::RunLimits::lua_memory_bytes(self, value: core::num::nonzero::NonZeroUsize) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::max_fanout_concurrency(self, value: core::num::nonzero::NonZeroUsize) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::max_response_bytes(self, value: core::num::nonzero::NonZeroU64) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::max_tool_iterations(self, value: core::num::nonzero::NonZeroU32) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::new() -> promptforge::RunLimits
+pub fn promptforge::RunLimits::request_timeout(self, value: core::time::Duration) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::response_bytes(&self) -> core::num::nonzero::NonZeroU64
+pub fn promptforge::RunLimits::timeout(&self) -> core::time::Duration
+pub fn promptforge::RunLimits::tool_iterations(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::cancel::CancelHandle::cancel(&self)
+pub fn promptforge::cancel::CancelHandle::cancelled(&self) -> promptforge::cancel::Cancelled
+pub fn promptforge::cancel::CancelHandle::child(&self) -> promptforge::cancel::CancelHandle
+pub fn promptforge::cancel::CancelHandle::is_cancelled(&self) -> bool
+pub fn promptforge::cancel::CancelHandle::new() -> Self
+pub fn promptforge::capabilities::CapabilityId::contains(&self, tool: &promptforge::tools::ToolId) -> bool
+pub fn promptforge::capabilities::CapabilityId::namespace(&self) -> &str
+pub fn promptforge::capabilities::CapabilityId::pack(&self) -> &str
+pub fn promptforge::capabilities::CapabilityId::parse(id: &str) -> core::result::Result<promptforge::capabilities::CapabilityId, promptforge::capabilities::CapabilityIdError>
+pub fn promptforge::capabilities::CapabilityIdError::kind(&self) -> promptforge::capabilities::CapabilityIdErrorKind
+pub fn promptforge::capabilities::GlobalName::namespace(&self) -> &str
+pub fn promptforge::capabilities::GlobalName::pack(&self) -> &str
+pub fn promptforge::capabilities::GlobalName::parse(s: &str) -> core::result::Result<promptforge::capabilities::GlobalName, promptforge::capabilities::GlobalNameError>
+pub fn promptforge::capabilities::GlobalNameError::kind(&self) -> promptforge::capabilities::GlobalNameErrorKind
+pub fn promptforge::effect::Effect::record(&self) -> promptforge::effect::EffectRecord
+pub fn promptforge::effect::EffectAnswer::record(&self) -> promptforge::effect::AnswerRecord
+pub fn promptforge::event::Event::execution(&self) -> &str
+pub fn promptforge::event::Event::provenance(&self) -> &promptforge::ids::Provenance
+pub fn promptforge::event::Event::section(&self) -> &str
+pub fn promptforge::ids::AbandonReason::why(self) -> &'static str
+pub fn promptforge::ids::ChainId::child(&self, index: u32) -> Self
+pub fn promptforge::ids::ChainId::entry(&self, index: u32) -> alloc::string::String
+pub fn promptforge::ids::ChainId::root() -> Self
+pub fn promptforge::ids::ParseIdError::input(&self) -> &str
+pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option<Self>
+pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
+pub fn promptforge::input::InputError::message(text: impl core::convert::Into<alloc::string::String>) -> promptforge::input::InputError
+pub fn promptforge::input::InputError::with_source(text: impl core::convert::Into<alloc::string::String>, source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> promptforge::input::InputError
+pub fn promptforge::model::Completion::client_timing(&self) -> core::option::Option<&promptforge::metrics::ClientTiming>
+pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
+pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::llama_timings(&self) -> core::option::Option<&promptforge::metrics::LlamaTimings>
+pub fn promptforge::model::Completion::model(&self) -> &str
+pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
+pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::CompletionResult
+pub fn promptforge::model::Completion::usage(&self) -> core::option::Option<&promptforge::metrics::Usage>
+pub fn promptforge::model::CompletionError::backend_body(&self) -> core::option::Option<&str>
+pub fn promptforge::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
+pub fn promptforge::model::CompletionError::is_retryable(&self) -> bool
+pub fn promptforge::model::CompletionError::is_timeout(&self) -> bool
+pub fn promptforge::model::CompletionError::kind(&self) -> promptforge::model::CompletionErrorKind
+pub fn promptforge::model::CompletionError::status(&self) -> core::option::Option<u16>
+pub fn promptforge::model::CompletionOptions::new(model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::CompletionOptions::with_max_tokens(self, max_tokens: core::num::nonzero::NonZeroU32) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::CompletionOptions::with_temperature(self, temperature: f64) -> core::result::Result<promptforge::model::CompletionOptions, promptforge::model::TemperatureError>
+pub fn promptforge::model::CompletionOptions::with_thinking(self, thinking: bool) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::Message::assistant(content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Message
+pub fn promptforge::model::Message::content(&self) -> &str
+pub fn promptforge::model::Message::role(&self) -> &str
+pub fn promptforge::model::Message::tool(tool_call_id: impl core::convert::Into<alloc::string::String>, content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Message
+pub fn promptforge::model::Message::user(content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Message
+pub fn promptforge::model::ModelBinding::alias(&self) -> &str
+pub fn promptforge::model::ModelBinding::capabilities(&self) -> &[alloc::string::String]
+pub fn promptforge::model::ModelBinding::completion_options(&self) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::ModelBinding::context(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::model::ModelBinding::description(&self) -> &str
+pub fn promptforge::model::ModelBinding::id(&self) -> &promptforge::model::ModelId
+pub fn promptforge::model::ModelBinding::invocation(&self) -> &promptforge::model::ModelInvocation
+pub fn promptforge::model::ModelBinding::new(alias: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, id: promptforge::model::ModelId, invocation: promptforge::model::ModelInvocation, context: core::num::nonzero::NonZeroU32) -> Self
+pub fn promptforge::model::ModelBinding::with_capabilities(self, capabilities: alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn promptforge::model::ModelBindings::is_empty(&self) -> bool
+pub fn promptforge::model::ModelBindings::len(&self) -> usize
+pub fn promptforge::model::ModelBindings::model(&self, id: &promptforge::model::ModelId) -> core::option::Option<&promptforge::model::ModelDescriptor>
+pub fn promptforge::model::ModelBindings::resolve(&self, label: &str) -> core::option::Option<&promptforge::model::ModelDescriptor>
+pub fn promptforge::model::ModelBindings::role_id(&self, label: &str) -> core::option::Option<&promptforge::model::ModelId>
+pub fn promptforge::model::ModelCatalog::contains(&self, id: &promptforge::model::ModelId) -> bool
+pub fn promptforge::model::ModelCatalog::empty() -> Self
+pub fn promptforge::model::ModelCatalog::get(&self, id: &promptforge::model::ModelId) -> core::option::Option<&promptforge::model::ModelDescriptor>
+pub fn promptforge::model::ModelCatalog::is_empty(&self) -> bool
+pub fn promptforge::model::ModelCatalog::models(&self) -> &[promptforge::model::ModelDescriptor]
+pub fn promptforge::model::ModelCatalog::new(models: impl core::iter::traits::collect::IntoIterator<Item = promptforge::model::ModelDescriptor>) -> core::result::Result<promptforge::model::ModelCatalog, promptforge::model::ModelCatalogError>
+pub fn promptforge::model::ModelDescriptor::context(&self) -> core::num::nonzero::NonZeroU32
+pub fn promptforge::model::ModelDescriptor::description(&self) -> &str
+pub fn promptforge::model::ModelDescriptor::id(&self) -> &promptforge::model::ModelId
+pub fn promptforge::model::ModelDescriptor::new(id: promptforge::model::ModelId, description: impl core::convert::Into<alloc::string::String>, context: core::num::nonzero::NonZeroU32, thinking: promptforge::model::ThinkingMode) -> Self
+pub fn promptforge::model::ModelDescriptor::thinking(&self) -> promptforge::model::ThinkingMode
+pub fn promptforge::model::ModelId::gateway(name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::ModelId, promptforge::model::ModelIdError>
+pub fn promptforge::model::ModelId::name(&self) -> &str
+pub fn promptforge::model::ModelId::new(server: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::ModelId, promptforge::model::ModelIdError>
+pub fn promptforge::model::ModelId::server(&self) -> &str
+pub fn promptforge::model::Temperature::get(self) -> f64
+pub fn promptforge::model::Temperature::new(value: f64) -> core::result::Result<promptforge::model::Temperature, promptforge::model::TemperatureError>
+pub fn promptforge::model::ToolArguments::contains(&self, key: &str) -> bool
+pub fn promptforge::model::ToolArguments::is_empty(&self) -> bool
+pub fn promptforge::model::ToolArguments::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn promptforge::model::ToolArguments::to_json_string(&self) -> alloc::string::String
+pub fn promptforge::model::ToolCall::arguments(&self) -> promptforge::model::ToolArguments<'_>
+pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> promptforge::model::ToolCall
+pub fn promptforge::model::ToolCall::id(&self) -> &str
+pub fn promptforge::model::ToolCall::name(&self) -> &str
+pub fn promptforge::prompt::ArgDecl::default(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
+pub fn promptforge::prompt::ArgDecl::description(&self) -> core::option::Option<&str>
+pub fn promptforge::prompt::ArgDecl::is_optional(&self) -> bool
+pub fn promptforge::prompt::ArgDecl::kind(&self) -> promptforge::prompt::ArgType
+pub fn promptforge::prompt::ArgsDecl::get(&self, name: &str) -> core::option::Option<&promptforge::prompt::ArgDecl>
+pub fn promptforge::prompt::ArgsDecl::is_default(&self) -> bool
+pub fn promptforge::prompt::ArgsDecl::is_empty(&self) -> bool
+pub fn promptforge::prompt::ArgsDecl::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ArgDecl)>
+pub fn promptforge::prompt::ArgsDecl::len(&self) -> usize
+pub fn promptforge::prompt::CapabilityDecl::config(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
+pub fn promptforge::prompt::CapabilityDecl::id(&self) -> &promptforge::capabilities::GlobalName
+pub fn promptforge::prompt::CapabilityDecl::is_optional(&self) -> bool
+pub fn promptforge::prompt::FileDecl::description(&self) -> &str
+pub fn promptforge::prompt::FileDecl::path(&self) -> &str
+pub fn promptforge::prompt::Frontmatter::args(&self) -> &promptforge::prompt::ArgsDecl
+pub fn promptforge::prompt::Frontmatter::capabilities(&self) -> &[promptforge::prompt::CapabilityDecl]
+pub fn promptforge::prompt::Frontmatter::description(&self) -> &str
+pub fn promptforge::prompt::Frontmatter::input(&self) -> core::option::Option<&promptforge::prompt::FileDecl>
+pub fn promptforge::prompt::Frontmatter::max_tool_iterations(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn promptforge::prompt::Frontmatter::models(&self) -> &promptforge::prompt::ModelRoles
+pub fn promptforge::prompt::Frontmatter::name(&self) -> &str
+pub fn promptforge::prompt::Frontmatter::output(&self) -> core::option::Option<&promptforge::prompt::FileDecl>
+pub fn promptforge::prompt::Frontmatter::promptforge(&self) -> core::option::Option<u32>
+pub fn promptforge::prompt::Frontmatter::tools(&self) -> &promptforge::prompt::ToolSlots
+pub fn promptforge::prompt::ModelRole::description(&self) -> core::option::Option<&str>
+pub fn promptforge::prompt::ModelRole::keywords(&self) -> &[promptforge::prompt::ModelKeyword]
+pub fn promptforge::prompt::ModelRole::min_context(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn promptforge::prompt::ModelRoles::get(&self, label: &str) -> core::option::Option<&promptforge::prompt::ModelRole>
+pub fn promptforge::prompt::ModelRoles::is_empty(&self) -> bool
+pub fn promptforge::prompt::ModelRoles::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ModelRole)>
+pub fn promptforge::prompt::ModelRoles::len(&self) -> usize
+pub fn promptforge::prompt::ToolSlots::get(&self, alias: &str) -> core::option::Option<&promptforge::prompt::ToolSlot>
+pub fn promptforge::prompt::ToolSlots::is_empty(&self) -> bool
+pub fn promptforge::prompt::ToolSlots::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ToolSlot)>
+pub fn promptforge::prompt::ToolSlots::len(&self) -> usize
+pub fn promptforge::timestamp::Timestamp::to_rfc3339(self) -> alloc::string::String
+pub fn promptforge::tools::ToolBindings::alias_id(&self, alias: &str) -> core::option::Option<&promptforge::tools::ToolId>
+pub fn promptforge::tools::ToolBindings::is_empty(&self) -> bool
+pub fn promptforge::tools::ToolBindings::len(&self) -> usize
+pub fn promptforge::tools::ToolBindings::resolve(&self, alias: &str) -> core::option::Option<&promptforge::tools::ToolDescriptor>
+pub fn promptforge::tools::ToolBindings::tool(&self, id: &promptforge::tools::ToolId) -> core::option::Option<&promptforge::tools::ToolDescriptor>
+pub fn promptforge::tools::ToolCatalog::get(&self, id: &promptforge::tools::ToolId) -> core::option::Option<&promptforge::tools::ToolDescriptor>
+pub fn promptforge::tools::ToolCatalog::new(tools: &[promptforge::tools::ToolDescriptor]) -> core::result::Result<Self, promptforge::tools::ToolCatalogError>
+pub fn promptforge::tools::ToolCatalog::tools(&self) -> &[promptforge::tools::ToolDescriptor]
+pub fn promptforge::tools::ToolCatalogError::duplicate_id(&self) -> core::option::Option<&promptforge::tools::ToolId>
+pub fn promptforge::tools::ToolCatalogError::kind(&self) -> promptforge::tools::ToolCatalogErrorKind
+pub fn promptforge::tools::ToolDescriptor::new(id: promptforge::tools::ToolId, wire_name: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> promptforge::tools::ToolDescriptor
+pub fn promptforge::tools::ToolDescriptor::structured(self, structured: bool) -> promptforge::tools::ToolDescriptor
+pub fn promptforge::tools::ToolDescriptor::with_conflicts(self, conflicts: alloc::vec::Vec<promptforge::capabilities::CapabilityId>) -> promptforge::tools::ToolDescriptor
+pub fn promptforge::tools::ToolError::is_cancelled(&self) -> bool
+pub fn promptforge::tools::ToolError::is_retryable(&self) -> bool
+pub fn promptforge::tools::ToolError::kind(&self) -> promptforge::tools::ToolErrorKind
+pub fn promptforge::tools::ToolError::message(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolError
+pub fn promptforge::tools::ToolError::with_kind(self, kind: promptforge::tools::ToolErrorKind) -> promptforge::tools::ToolError
+pub fn promptforge::tools::ToolError::with_source(text: impl core::convert::Into<alloc::string::String>, src: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> promptforge::tools::ToolError
+pub fn promptforge::tools::ToolId::capability(&self) -> promptforge::capabilities::CapabilityId
+pub fn promptforge::tools::ToolId::name(&self) -> &str
+pub fn promptforge::tools::ToolId::parse(id: &str) -> core::result::Result<promptforge::tools::ToolId, promptforge::tools::ToolIdError>
+pub fn promptforge::tools::ToolIdError::field(&self) -> &str
+pub fn promptforge::tools::ToolIdError::kind(&self) -> promptforge::tools::ToolIdErrorKind
+pub fn promptforge::tools::ToolOutput::text(&self) -> &str
+pub fn promptforge::tools::ToolOutput::trust(&self) -> promptforge::tools::OutputTrust
+pub fn promptforge::tools::ToolOutput::trusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
+pub fn promptforge::tools::ToolOutput::untrusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
+pub fn promptforge::transport::ChunkSource::next_chunk(&mut self) -> impl core::future::future::Future<Output = core::result::Result<core::option::Option<<Self as promptforge::transport::ChunkSource>::Chunk>, promptforge::model::CompletionError>> + core::marker::Send
+pub fn promptforge::transport::build_request_body(messages: &[promptforge::model::Message], tools: core::option::Option<&[promptforge::model::ToolSchema]>, options: &promptforge::model::CompletionOptions) -> serde_json::value::Value
+pub fn promptforge::transport::escape_controls(body: &str, max: usize) -> alloc::string::String
+pub fn promptforge::vfs::Access::append(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::exists(&self, path: &str) -> core::result::Result<bool, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::grep(&self, query: &promptforge::vfs::GrepQuery) -> core::result::Result<promptforge::vfs::GrepResults, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::list(&self, path: &str) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::mkdir(&self, path: &str, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::read_range(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::read_range_numbered(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::read_string(&self, path: &str) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::remove(&self, path: &str, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::rename(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::stat(&self, path: &str) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::str_replace(&self, path: &str, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::write(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::HostBackend::identity() -> promptforge::vfs::HostBackend
+pub fn promptforge::vfs::HostBackend::rooted(dir: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<promptforge::vfs::HostBackend, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::HostBackend::with_read_only(self, read_only: bool) -> promptforge::vfs::HostBackend
+pub fn promptforge::vfs::MemoryBackend::new() -> promptforge::vfs::MemoryBackend
+pub fn promptforge::vfs::ModeHandle::mode(&self) -> promptforge::vfs::Mode
+pub fn promptforge::vfs::ModeHandle::set(&self, mode: promptforge::vfs::Mode)
+pub fn promptforge::vfs::ModePolicy::handle(&self) -> promptforge::vfs::ModeHandle
+pub fn promptforge::vfs::ModePolicy::new(mode: promptforge::vfs::Mode) -> promptforge::vfs::ModePolicy
+pub fn promptforge::vfs::OpEvent::op(&self) -> promptforge::vfs::Op
+pub fn promptforge::vfs::OpEvent::origin(&self) -> &'a promptforge::vfs::Origin
+pub fn promptforge::vfs::OpEvent::path(&self) -> &'a promptforge::vfs::VfsPath
+pub fn promptforge::vfs::Origin::at(label: impl core::convert::Into<alloc::string::String>, file: impl core::convert::Into<alloc::string::String>, line: u32) -> promptforge::vfs::Origin
+pub fn promptforge::vfs::Origin::new(label: impl core::convert::Into<alloc::string::String>) -> promptforge::vfs::Origin
+pub fn promptforge::vfs::Policy::check(&self, op: promptforge::vfs::Op, path: &promptforge::vfs::VfsPath) -> promptforge::vfs::Verdict
+pub fn promptforge::vfs::StoreError::backend(source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::StoreError
+pub fn promptforge::vfs::StoreError::conflict_detail(&self) -> core::option::Option<&str>
+pub fn promptforge::vfs::StoreError::is_not_found(&self) -> bool
+pub fn promptforge::vfs::StoreError::kind(&self) -> promptforge::vfs::StoreErrorKind
+pub fn promptforge::vfs::StoreError::path(&self) -> core::option::Option<&str>
+pub fn promptforge::vfs::Vfs::acquire(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<alloc::boxed::Box<dyn promptforge::vfs::VfsAccess>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Vfs::read_only(&self) -> bool { .. }
+pub fn promptforge::vfs::Vfs::release(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::append(&mut self, path: &promptforge::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::chmod(&mut self, path: &promptforge::vfs::VfsPath, mode: u32) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::copy(&mut self, from: &promptforge::vfs::VfsPath, to: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::exists(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<bool, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::grep(&self, query: &promptforge::vfs::GrepQuery) -> core::result::Result<promptforge::vfs::GrepResults, promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::list(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::mkdir(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::read(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::read_link(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<promptforge::vfs::VfsPathBuf, promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::read_range(&self, path: &promptforge::vfs::VfsPath, offset: u64, len: u64) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::remove(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::rename(&mut self, from: &promptforge::vfs::VfsPath, to: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::stat(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::str_replace(&mut self, path: &promptforge::vfs::VfsPath, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::symlink(&mut self, target: &promptforge::vfs::VfsPath, link: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::write(&mut self, path: &promptforge::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsPath::as_str(&self) -> &str
+pub fn promptforge::vfs::VfsPath::to_buf(&self) -> promptforge::vfs::VfsPathBuf
+pub fn promptforge::vfs::VfsPathBuf::as_str(&self) -> &str
+pub fn promptforge::vfs::VfsRef::acquire(&self, origin: promptforge::vfs::Origin) -> core::result::Result<promptforge::vfs::Access, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsRef::builder() -> promptforge::vfs::VfsRefBuilder
+pub fn promptforge::vfs::VfsRef::new(backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRef
+pub fn promptforge::vfs::VfsRef::overlay(&self, prefix: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRef
+pub fn promptforge::vfs::VfsRef::with_policy(backend: impl promptforge::vfs::Vfs + 'static, policy: impl promptforge::vfs::Policy + core::marker::Sync + 'static) -> promptforge::vfs::VfsRef
+pub fn promptforge::vfs::VfsRefBuilder::build(self) -> promptforge::vfs::VfsRef
+pub fn promptforge::vfs::VfsRefBuilder::mount(self, prefix: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRefBuilder
+pub fn promptforge::vfs::VfsRefBuilder::on_op(self, sink: impl core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
+pub fn promptforge::vfs::VfsRefBuilder::policy(self, policy: impl promptforge::vfs::Policy + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
+pub fn promptforge::vfs::perform_store_op(access: &promptforge::vfs::Access, op: promptforge::vfs::StoreOp) -> core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::StoreError>
+pub mod promptforge::cancel
+pub mod promptforge::capabilities
+pub mod promptforge::effect
+pub mod promptforge::event
+pub mod promptforge::ids
+pub mod promptforge::input
+pub mod promptforge::metrics
+pub mod promptforge::model
+pub mod promptforge::prompt
+pub mod promptforge::replay
+pub mod promptforge::timestamp
+pub mod promptforge::tools
+pub mod promptforge::transport
+pub mod promptforge::vfs
+pub promptforge::CapabilityConflict::first: promptforge::capabilities::CapabilityId
+pub promptforge::CapabilityConflict::second: promptforge::capabilities::CapabilityId
+pub promptforge::ParseErrorKind::Fence
+pub promptforge::ParseErrorKind::Frontmatter
+pub promptforge::ParseErrorKind::List
+pub promptforge::ParseErrorKind::Lua
+pub promptforge::ParseErrorKind::Structure
+pub promptforge::RequirementCheck::ContextMinimum
+pub promptforge::RequirementCheck::HardKeyword
+pub promptforge::Requirements::conflicts: alloc::vec::Vec<promptforge::CapabilityConflict>
+pub promptforge::Requirements::missing_required: alloc::vec::Vec<promptforge::capabilities::CapabilityId>
+pub promptforge::Requirements::unmet_requirements: alloc::vec::Vec<promptforge::UnmetRequirement>
+pub promptforge::RunErrorKind::Binding
+pub promptforge::RunErrorKind::Cancelled
+pub promptforge::RunErrorKind::Completion
+pub promptforge::RunErrorKind::ContextExhausted
+pub promptforge::RunErrorKind::Determinism
+pub promptforge::RunErrorKind::Input
+pub promptforge::RunErrorKind::Internal
+pub promptforge::RunErrorKind::Lua
+pub promptforge::RunErrorKind::Parse
+pub promptforge::RunErrorKind::Quota
+pub promptforge::RunErrorKind::RequirementsUnmet
+pub promptforge::RunErrorKind::Store
+pub promptforge::RunErrorKind::Substitution
+pub promptforge::RunErrorKind::Tool
+pub promptforge::RunErrorKind::Version
+pub promptforge::RunResult::Cancelled
+pub promptforge::RunResult::Failure
+pub promptforge::RunResult::Failure::0: promptforge::RunError
+pub promptforge::RunResult::Ok
+pub promptforge::RunResult::Ok::0: alloc::string::String
+pub promptforge::SourceLocation::column: core::option::Option<u32>
+pub promptforge::SourceLocation::line: core::option::Option<u32>
+pub promptforge::SourceLocation::path: alloc::string::String
+pub promptforge::SourceLocation::span: core::option::Option<core::ops::range::Range<usize>>
+pub promptforge::Step::Done
+pub promptforge::Step::Done::events: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::Step::Done::result: promptforge::RunResult
+pub promptforge::Step::Pending
+pub promptforge::Step::Pending::effects: alloc::vec::Vec<(promptforge::effect::EffectId, promptforge::ids::Provenance, promptforge::effect::Effect)>
+pub promptforge::Step::Pending::events: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::UnmetRequirement::actual: alloc::string::String
+pub promptforge::UnmetRequirement::check: promptforge::RequirementCheck
+pub promptforge::UnmetRequirement::required: alloc::string::String
+pub promptforge::UnmetRequirement::role: alloc::string::String
+pub promptforge::capabilities::CapabilityIdErrorKind::Control
+pub promptforge::capabilities::CapabilityIdErrorKind::Empty
+pub promptforge::capabilities::CapabilityIdErrorKind::SegmentCount
+pub promptforge::capabilities::GlobalNameErrorKind::Control
+pub promptforge::capabilities::GlobalNameErrorKind::Empty
+pub promptforge::capabilities::GlobalNameErrorKind::SegmentCount
+pub promptforge::effect::AnswerRecord::Chat
+pub promptforge::effect::AnswerRecord::Chat::0: core::result::Result<promptforge::effect::ChatAnswerRecord, alloc::string::String>
+pub promptforge::effect::AnswerRecord::Dropped
+pub promptforge::effect::AnswerRecord::Store
+pub promptforge::effect::AnswerRecord::Store::0: core::result::Result<promptforge::effect::StoreAnswerRecord, alloc::string::String>
+pub promptforge::effect::AnswerRecord::TaskEvents
+pub promptforge::effect::AnswerRecord::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::effect::AnswerRecord::Timer
+pub promptforge::effect::AnswerRecord::ToolCall
+pub promptforge::effect::AnswerRecord::ToolCall::0: core::result::Result<promptforge::effect::ToolAnswerRecord, alloc::string::String>
+pub promptforge::effect::AnswerRecord::UserInput
+pub promptforge::effect::AnswerRecord::UserInput::0: core::result::Result<promptforge::effect::InputAnswerRecord, alloc::string::String>
+pub promptforge::effect::ChatAnswerRecord::finish_reason: core::option::Option<alloc::string::String>
+pub promptforge::effect::ChatAnswerRecord::model: alloc::string::String
+pub promptforge::effect::ChatAnswerRecord::reply: core::option::Option<alloc::string::String>
+pub promptforge::effect::ChatAnswerRecord::tool_calls: alloc::vec::Vec<alloc::string::String>
+pub promptforge::effect::Effect::Chat
+pub promptforge::effect::Effect::Chat::binding: promptforge::model::ModelBinding
+pub promptforge::effect::Effect::Chat::messages: alloc::vec::Vec<promptforge::model::Message>
+pub promptforge::effect::Effect::Chat::options: promptforge::model::CompletionOptions
+pub promptforge::effect::Effect::Chat::stream: bool
+pub promptforge::effect::Effect::Chat::tools: alloc::vec::Vec<promptforge::model::ToolSchema>
+pub promptforge::effect::Effect::Store
+pub promptforge::effect::Effect::Store::access: alloc::sync::Arc<promptforge::vfs::Access>
+pub promptforge::effect::Effect::Store::op: promptforge::vfs::StoreOp
+pub promptforge::effect::Effect::TaskEvents
+pub promptforge::effect::Effect::TaskEvents::last: core::option::Option<u32>
+pub promptforge::effect::Effect::TaskEvents::task: promptforge::ids::TaskId
+pub promptforge::effect::Effect::Timer
+pub promptforge::effect::Effect::Timer::seconds: f64
+pub promptforge::effect::Effect::ToolCall
+pub promptforge::effect::Effect::ToolCall::alias: alloc::string::String
+pub promptforge::effect::Effect::ToolCall::args: serde_json::value::Value
+pub promptforge::effect::Effect::ToolCall::tool: promptforge::tools::ToolId
+pub promptforge::effect::Effect::UserInput
+pub promptforge::effect::Effect::UserInput::execution: alloc::string::String
+pub promptforge::effect::Effect::UserInput::section: alloc::string::String
+pub promptforge::effect::EffectAnswer::Chat
+pub promptforge::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxed::Box<promptforge::model::Completion>, promptforge::model::CompletionError>
+pub promptforge::effect::EffectAnswer::Dropped
+pub promptforge::effect::EffectAnswer::Store
+pub promptforge::effect::EffectAnswer::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::StoreError>
+pub promptforge::effect::EffectAnswer::TaskEvents
+pub promptforge::effect::EffectAnswer::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
+pub promptforge::effect::EffectAnswer::Timer
+pub promptforge::effect::EffectAnswer::ToolCall
+pub promptforge::effect::EffectAnswer::ToolCall::0: core::result::Result<promptforge::tools::ToolOutput, promptforge::tools::ToolError>
+pub promptforge::effect::EffectAnswer::UserInput
+pub promptforge::effect::EffectAnswer::UserInput::0: core::result::Result<promptforge::input::InputOutcome, promptforge::input::InputError>
+pub promptforge::effect::EffectRecord::Chat
+pub promptforge::effect::EffectRecord::Chat::alias: alloc::string::String
+pub promptforge::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
+pub promptforge::effect::EffectRecord::Chat::messages: alloc::vec::Vec<serde_json::value::Value>
+pub promptforge::effect::EffectRecord::Chat::model: alloc::string::String
+pub promptforge::effect::EffectRecord::Chat::temperature: core::option::Option<f64>
+pub promptforge::effect::EffectRecord::Chat::thinking: core::option::Option<bool>
+pub promptforge::effect::EffectRecord::Chat::tools: alloc::vec::Vec<alloc::string::String>
+pub promptforge::effect::EffectRecord::Store
+pub promptforge::effect::EffectRecord::Store::op: promptforge::vfs::StoreOp
+pub promptforge::effect::EffectRecord::TaskEvents
+pub promptforge::effect::EffectRecord::TaskEvents::last: core::option::Option<u32>
+pub promptforge::effect::EffectRecord::TaskEvents::task: promptforge::ids::TaskId
+pub promptforge::effect::EffectRecord::Timer
+pub promptforge::effect::EffectRecord::Timer::seconds: f64
+pub promptforge::effect::EffectRecord::ToolCall
+pub promptforge::effect::EffectRecord::ToolCall::alias: alloc::string::String
+pub promptforge::effect::EffectRecord::ToolCall::args: serde_json::value::Value
+pub promptforge::effect::EffectRecord::ToolCall::tool: promptforge::tools::ToolId
+pub promptforge::effect::EffectRecord::UserInput
+pub promptforge::effect::EffectRecord::UserInput::execution: alloc::string::String
+pub promptforge::effect::EffectRecord::UserInput::section: alloc::string::String
+pub promptforge::effect::InputAnswerRecord::Text
+pub promptforge::effect::InputAnswerRecord::Text::0: alloc::string::String
+pub promptforge::effect::InputAnswerRecord::Unavailable
+pub promptforge::effect::StoreAnswerRecord::Bool
+pub promptforge::effect::StoreAnswerRecord::Bool::0: bool
+pub promptforge::effect::StoreAnswerRecord::Paths
+pub promptforge::effect::StoreAnswerRecord::Paths::0: alloc::vec::Vec<alloc::string::String>
+pub promptforge::effect::StoreAnswerRecord::Text
+pub promptforge::effect::StoreAnswerRecord::Text::0: alloc::string::String
+pub promptforge::effect::StoreAnswerRecord::Unit
+pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
+pub promptforge::effect::ToolAnswerRecord::trusted: bool
+pub promptforge::event::DebugMode::Off
+pub promptforge::event::DebugMode::On
+pub promptforge::event::Event::AssistantReply
+pub promptforge::event::Event::AssistantReply::execution: alloc::string::String
+pub promptforge::event::Event::AssistantReply::finish_reason: core::option::Option<alloc::string::String>
+pub promptforge::event::Event::AssistantReply::metrics: core::option::Option<promptforge::metrics::CallMetrics>
+pub promptforge::event::Event::AssistantReply::model: alloc::string::String
+pub promptforge::event::Event::AssistantReply::origin: promptforge::event::ReplyOrigin
+pub promptforge::event::Event::AssistantReply::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::AssistantReply::section: alloc::string::String
+pub promptforge::event::Event::AssistantReply::text: alloc::string::String
+pub promptforge::event::Event::AssistantReply::turn: u32
+pub promptforge::event::Event::AssistantToolCalls
+pub promptforge::event::Event::AssistantToolCalls::calls: alloc::vec::Vec<promptforge::metrics::ToolCallEvent>
+pub promptforge::event::Event::AssistantToolCalls::execution: alloc::string::String
+pub promptforge::event::Event::AssistantToolCalls::model: alloc::string::String
+pub promptforge::event::Event::AssistantToolCalls::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::AssistantToolCalls::section: alloc::string::String
+pub promptforge::event::Event::AssistantToolCalls::turn: u32
+pub promptforge::event::Event::Lua
+pub promptforge::event::Event::Lua::execution: alloc::string::String
+pub promptforge::event::Event::Lua::message: alloc::string::String
+pub promptforge::event::Event::Lua::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::Lua::section: alloc::string::String
+pub promptforge::event::Event::LuaChunkFailed
+pub promptforge::event::Event::LuaChunkFailed::execution: alloc::string::String
+pub promptforge::event::Event::LuaChunkFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaChunkFailed::section: alloc::string::String
+pub promptforge::event::Event::LuaChunkStarted
+pub promptforge::event::Event::LuaChunkStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaChunkStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaChunkStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaChunkSucceeded
+pub promptforge::event::Event::LuaChunkSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaChunkSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaChunkSucceeded::section: alloc::string::String
+pub promptforge::event::Event::LuaCompilationFailed
+pub promptforge::event::Event::LuaCompilationFailed::execution: alloc::string::String
+pub promptforge::event::Event::LuaCompilationFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaCompilationFailed::section: alloc::string::String
+pub promptforge::event::Event::LuaCompilationStarted
+pub promptforge::event::Event::LuaCompilationStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaCompilationStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaCompilationStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaCompilationSucceeded
+pub promptforge::event::Event::LuaCompilationSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaCompilationSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaCompilationSucceeded::section: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingFailed
+pub promptforge::event::Event::LuaReplyBindingFailed::execution: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaReplyBindingFailed::section: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingStarted
+pub promptforge::event::Event::LuaReplyBindingStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaReplyBindingStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingSucceeded
+pub promptforge::event::Event::LuaReplyBindingSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaReplyBindingSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaReplyBindingSucceeded::section: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadFailed
+pub promptforge::event::Event::LuaSharedLoadFailed::execution: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaSharedLoadFailed::section: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadStarted
+pub promptforge::event::Event::LuaSharedLoadStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaSharedLoadStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadSucceeded
+pub promptforge::event::Event::LuaSharedLoadSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaSharedLoadSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaSharedLoadSucceeded::section: alloc::string::String
+pub promptforge::event::Event::LuaTeardownStarted
+pub promptforge::event::Event::LuaTeardownStarted::execution: alloc::string::String
+pub promptforge::event::Event::LuaTeardownStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaTeardownStarted::section: alloc::string::String
+pub promptforge::event::Event::LuaTeardownSucceeded
+pub promptforge::event::Event::LuaTeardownSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::LuaTeardownSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::LuaTeardownSucceeded::section: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationFailed
+pub promptforge::event::Event::ModelCatalogValidationFailed::execution: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelCatalogValidationFailed::section: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationStarted
+pub promptforge::event::Event::ModelCatalogValidationStarted::execution: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelCatalogValidationStarted::section: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationSucceeded
+pub promptforge::event::Event::ModelCatalogValidationSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::ModelCatalogValidationSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelCatalogValidationSucceeded::section: alloc::string::String
+pub promptforge::event::Event::ModelMetadataDegraded
+pub promptforge::event::Event::ModelMetadataDegraded::execution: alloc::string::String
+pub promptforge::event::Event::ModelMetadataDegraded::message: alloc::string::String
+pub promptforge::event::Event::ModelMetadataDegraded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelMetadataDegraded::section: alloc::string::String
+pub promptforge::event::Event::ModelMetadataDegraded::turn: u32
+pub promptforge::event::Event::ModelTurnCompleted
+pub promptforge::event::Event::ModelTurnCompleted::execution: alloc::string::String
+pub promptforge::event::Event::ModelTurnCompleted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelTurnCompleted::section: alloc::string::String
+pub promptforge::event::Event::ModelTurnFailed
+pub promptforge::event::Event::ModelTurnFailed::execution: alloc::string::String
+pub promptforge::event::Event::ModelTurnFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelTurnFailed::section: alloc::string::String
+pub promptforge::event::Event::ModelTurnTruncated
+pub promptforge::event::Event::ModelTurnTruncated::execution: alloc::string::String
+pub promptforge::event::Event::ModelTurnTruncated::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ModelTurnTruncated::section: alloc::string::String
+pub promptforge::event::Event::ParseFailed
+pub promptforge::event::Event::ParseFailed::execution: alloc::string::String
+pub promptforge::event::Event::ParseFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ParseFailed::section: alloc::string::String
+pub promptforge::event::Event::ParseStarted
+pub promptforge::event::Event::ParseStarted::execution: alloc::string::String
+pub promptforge::event::Event::ParseStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ParseStarted::section: alloc::string::String
+pub promptforge::event::Event::ParseSucceeded
+pub promptforge::event::Event::ParseSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::ParseSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ParseSucceeded::section: alloc::string::String
+pub promptforge::event::Event::Request
+pub promptforge::event::Event::Request::body: serde_json::value::Value
+pub promptforge::event::Event::Request::execution: alloc::string::String
+pub promptforge::event::Event::Request::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::Request::section: alloc::string::String
+pub promptforge::event::Event::Request::turn: u32
+pub promptforge::event::Event::Response
+pub promptforge::event::Event::Response::body: serde_json::value::Value
+pub promptforge::event::Event::Response::execution: alloc::string::String
+pub promptforge::event::Event::Response::finish_reason: core::option::Option<alloc::string::String>
+pub promptforge::event::Event::Response::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::Response::reasoning_content: core::option::Option<alloc::string::String>
+pub promptforge::event::Event::Response::section: alloc::string::String
+pub promptforge::event::Event::Response::turn: u32
+pub promptforge::event::Event::RunFailed
+pub promptforge::event::Event::RunFailed::execution: alloc::string::String
+pub promptforge::event::Event::RunFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::RunFailed::section: alloc::string::String
+pub promptforge::event::Event::RunStarted
+pub promptforge::event::Event::RunStarted::execution: alloc::string::String
+pub promptforge::event::Event::RunStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::RunStarted::section: alloc::string::String
+pub promptforge::event::Event::RunSucceeded
+pub promptforge::event::Event::RunSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::RunSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::RunSucceeded::section: alloc::string::String
+pub promptforge::event::Event::SectionFinished
+pub promptforge::event::Event::SectionFinished::execution: alloc::string::String
+pub promptforge::event::Event::SectionFinished::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::SectionFinished::section: alloc::string::String
+pub promptforge::event::Event::SectionStarted
+pub promptforge::event::Event::SectionStarted::execution: alloc::string::String
+pub promptforge::event::Event::SectionStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::SectionStarted::section: alloc::string::String
+pub promptforge::event::Event::StoreAppendFailed
+pub promptforge::event::Event::StoreAppendFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreAppendFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreAppendFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreAppendSucceeded
+pub promptforge::event::Event::StoreAppendSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreAppendSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreAppendSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreDeleteFailed
+pub promptforge::event::Event::StoreDeleteFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreDeleteFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreDeleteFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreDeleteSucceeded
+pub promptforge::event::Event::StoreDeleteSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreDeleteSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreDeleteSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreGlobFailed
+pub promptforge::event::Event::StoreGlobFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreGlobFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreGlobFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreGlobSucceeded
+pub promptforge::event::Event::StoreGlobSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreGlobSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreGlobSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreReadFailed
+pub promptforge::event::Event::StoreReadFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreReadFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReadFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreReadNumberedFailed
+pub promptforge::event::Event::StoreReadNumberedFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreReadNumberedFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReadNumberedFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreReadNumberedSucceeded
+pub promptforge::event::Event::StoreReadNumberedSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreReadNumberedSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReadNumberedSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreReadSucceeded
+pub promptforge::event::Event::StoreReadSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreReadSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReadSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreReplaceFailed
+pub promptforge::event::Event::StoreReplaceFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreReplaceFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReplaceFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreReplaceSucceeded
+pub promptforge::event::Event::StoreReplaceSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreReplaceSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreReplaceSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreWriteFailed
+pub promptforge::event::Event::StoreWriteFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreWriteFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreWriteFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreWriteSucceeded
+pub promptforge::event::Event::StoreWriteSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreWriteSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreWriteSucceeded::section: alloc::string::String
+pub promptforge::event::Event::TaskAbandoned
+pub promptforge::event::Event::TaskAbandoned::execution: alloc::string::String
+pub promptforge::event::Event::TaskAbandoned::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskAbandoned::reason: promptforge::ids::AbandonReason
+pub promptforge::event::Event::TaskAbandoned::section: alloc::string::String
+pub promptforge::event::Event::TaskAbandoned::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskCancelled
+pub promptforge::event::Event::TaskCancelled::execution: alloc::string::String
+pub promptforge::event::Event::TaskCancelled::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskCancelled::section: alloc::string::String
+pub promptforge::event::Event::TaskCancelled::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskFailed
+pub promptforge::event::Event::TaskFailed::execution: alloc::string::String
+pub promptforge::event::Event::TaskFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskFailed::section: alloc::string::String
+pub promptforge::event::Event::TaskFailed::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskNote
+pub promptforge::event::Event::TaskNote::execution: alloc::string::String
+pub promptforge::event::Event::TaskNote::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskNote::section: alloc::string::String
+pub promptforge::event::Event::TaskNote::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskNote::text: alloc::string::String
+pub promptforge::event::Event::TaskNotice
+pub promptforge::event::Event::TaskNotice::execution: alloc::string::String
+pub promptforge::event::Event::TaskNotice::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskNotice::section: alloc::string::String
+pub promptforge::event::Event::TaskNotice::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskNotice::text: alloc::string::String
+pub promptforge::event::Event::TaskNotice::turn: u32
+pub promptforge::event::Event::TaskResumed
+pub promptforge::event::Event::TaskResumed::execution: alloc::string::String
+pub promptforge::event::Event::TaskResumed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskResumed::section: alloc::string::String
+pub promptforge::event::Event::TaskResumed::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskStarted
+pub promptforge::event::Event::TaskStarted::execution: alloc::string::String
+pub promptforge::event::Event::TaskStarted::index: core::option::Option<u64>
+pub promptforge::event::Event::TaskStarted::input: core::option::Option<alloc::string::String>
+pub promptforge::event::Event::TaskStarted::item: core::option::Option<serde_json::value::Value>
+pub promptforge::event::Event::TaskStarted::origin: promptforge::ids::TaskOrigin
+pub promptforge::event::Event::TaskStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskStarted::section: alloc::string::String
+pub promptforge::event::Event::TaskStarted::target: alloc::string::String
+pub promptforge::event::Event::TaskStarted::task: promptforge::ids::TaskId
+pub promptforge::event::Event::TaskStarted::var: serde_json::value::Value
+pub promptforge::event::Event::TaskSucceeded
+pub promptforge::event::Event::TaskSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::TaskSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::TaskSucceeded::section: alloc::string::String
+pub promptforge::event::Event::TaskSucceeded::task: promptforge::ids::TaskId
+pub promptforge::event::Event::Thinking
+pub promptforge::event::Event::Thinking::execution: alloc::string::String
+pub promptforge::event::Event::Thinking::model: alloc::string::String
+pub promptforge::event::Event::Thinking::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::Thinking::section: alloc::string::String
+pub promptforge::event::Event::Thinking::text: alloc::string::String
+pub promptforge::event::Event::Thinking::turn: u32
+pub promptforge::event::Event::ToolCallFailed
+pub promptforge::event::Event::ToolCallFailed::execution: alloc::string::String
+pub promptforge::event::Event::ToolCallFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolCallFailed::section: alloc::string::String
+pub promptforge::event::Event::ToolCallSucceeded
+pub promptforge::event::Event::ToolCallSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::ToolCallSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolCallSucceeded::section: alloc::string::String
+pub promptforge::event::Event::ToolResult
+pub promptforge::event::Event::ToolResult::alias: alloc::string::String
+pub promptforge::event::Event::ToolResult::content: alloc::string::String
+pub promptforge::event::Event::ToolResult::execution: alloc::string::String
+pub promptforge::event::Event::ToolResult::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolResult::section: alloc::string::String
+pub promptforge::event::Event::ToolResult::tool_call_id: alloc::string::String
+pub promptforge::event::Event::ToolResult::trusted: bool
+pub promptforge::event::Event::ToolResult::turn: u32
+pub promptforge::event::Event::ToolScopeValidationFailed
+pub promptforge::event::Event::ToolScopeValidationFailed::execution: alloc::string::String
+pub promptforge::event::Event::ToolScopeValidationFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolScopeValidationFailed::section: alloc::string::String
+pub promptforge::event::Event::ToolScopeValidationStarted
+pub promptforge::event::Event::ToolScopeValidationStarted::execution: alloc::string::String
+pub promptforge::event::Event::ToolScopeValidationStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolScopeValidationStarted::section: alloc::string::String
+pub promptforge::event::Event::ToolScopeValidationSucceeded
+pub promptforge::event::Event::ToolScopeValidationSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::ToolScopeValidationSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::ToolScopeValidationSucceeded::section: alloc::string::String
+pub promptforge::event::Event::UserInput
+pub promptforge::event::Event::UserInput::execution: alloc::string::String
+pub promptforge::event::Event::UserInput::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::UserInput::section: alloc::string::String
+pub promptforge::event::Event::UserInput::text: alloc::string::String
+pub promptforge::event::Event::UserInputWaitStarted
+pub promptforge::event::Event::UserInputWaitStarted::execution: alloc::string::String
+pub promptforge::event::Event::UserInputWaitStarted::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::UserInputWaitStarted::section: alloc::string::String
+pub promptforge::event::ReplyOrigin::Chat
+pub promptforge::event::ReplyOrigin::Infer
+pub promptforge::ids::AbandonReason::OwnerAborted
+pub promptforge::ids::AbandonReason::OwnerFailed
+pub promptforge::ids::AbandonReason::OwnerReturned
+pub promptforge::ids::AbandonReason::RunTerminated
+pub promptforge::ids::AbandonReason::ToolLoopExhausted
+pub promptforge::ids::Provenance::seq: u32
+pub promptforge::ids::Provenance::task: promptforge::ids::TaskId
+pub promptforge::ids::TaskOrigin::Author
+pub promptforge::ids::TaskOrigin::Model
+pub promptforge::input::InputOutcome::Text
+pub promptforge::input::InputOutcome::Text::0: alloc::string::String
+pub promptforge::input::InputOutcome::Unavailable
+pub promptforge::metrics::CallMetrics::client: core::option::Option<promptforge::metrics::ClientTiming>
+pub promptforge::metrics::CallMetrics::llama: core::option::Option<promptforge::metrics::LlamaTimings>
+pub promptforge::metrics::CallMetrics::usage: core::option::Option<promptforge::metrics::Usage>
+pub promptforge::metrics::CallMetrics::vllm: core::option::Option<promptforge::metrics::VllmMetrics>
+pub promptforge::metrics::ClientTiming::e2e_ms: f64
+pub promptforge::metrics::ClientTiming::mean_itl_ms: core::option::Option<f64>
+pub promptforge::metrics::ClientTiming::ttft_ms: core::option::Option<f64>
+pub promptforge::metrics::LlamaTimings::draft_n: u32
+pub promptforge::metrics::LlamaTimings::draft_n_accepted: u32
+pub promptforge::metrics::LlamaTimings::predicted_ms: f64
+pub promptforge::metrics::LlamaTimings::predicted_n: u32
+pub promptforge::metrics::LlamaTimings::predicted_per_second: f64
+pub promptforge::metrics::LlamaTimings::prompt_ms: f64
+pub promptforge::metrics::LlamaTimings::prompt_n: u32
+pub promptforge::metrics::LlamaTimings::prompt_per_second: f64
+pub promptforge::metrics::ToolCallEvent::arguments: serde_json::value::Value
+pub promptforge::metrics::ToolCallEvent::id: alloc::string::String
+pub promptforge::metrics::ToolCallEvent::name: alloc::string::String
+pub promptforge::metrics::Usage::cached_tokens: core::option::Option<u32>
+pub promptforge::metrics::Usage::completion_tokens: u32
+pub promptforge::metrics::Usage::prompt_tokens: u32
+pub promptforge::metrics::Usage::reasoning_tokens: core::option::Option<u32>
+pub promptforge::metrics::Usage::total_tokens: u32
+pub promptforge::metrics::VllmMetrics::generation_time_ms: core::option::Option<f64>
+pub promptforge::metrics::VllmMetrics::mean_itl_ms: core::option::Option<f64>
+pub promptforge::metrics::VllmMetrics::queue_time_ms: core::option::Option<f64>
+pub promptforge::metrics::VllmMetrics::time_to_first_token_ms: core::option::Option<f64>
+pub promptforge::metrics::VllmMetrics::tokens_per_second: core::option::Option<f64>
+pub promptforge::model::CompletionErrorKind::Backend
+pub promptforge::model::CompletionErrorKind::Config
+pub promptforge::model::CompletionErrorKind::Disabled
+pub promptforge::model::CompletionErrorKind::EmptyReply
+pub promptforge::model::CompletionErrorKind::MalformedResponse
+pub promptforge::model::CompletionErrorKind::Transport
+pub promptforge::model::CompletionResult::Text
+pub promptforge::model::CompletionResult::Text::0: alloc::string::String
+pub promptforge::model::CompletionResult::ToolCalls
+pub promptforge::model::CompletionResult::ToolCalls::0: alloc::vec::Vec<promptforge::model::ToolCall>
+pub promptforge::model::ModelCatalogError::DuplicateId
+pub promptforge::model::ModelCatalogError::DuplicateId::name: alloc::string::String
+pub promptforge::model::ModelCatalogError::DuplicateId::server: alloc::string::String
+pub promptforge::model::ModelInvocation::max_tokens: core::option::Option<core::num::nonzero::NonZeroU32>
+pub promptforge::model::ModelInvocation::temperature: core::option::Option<promptforge::model::Temperature>
+pub promptforge::model::ModelInvocation::thinking: core::option::Option<bool>
+pub promptforge::model::StreamDelta::Reasoning
+pub promptforge::model::StreamDelta::Reasoning::0: alloc::string::String
+pub promptforge::model::StreamDelta::Text
+pub promptforge::model::StreamDelta::Text::0: alloc::string::String
+pub promptforge::model::TemperatureError::NotFinite
+pub promptforge::model::TemperatureError::OutOfRange
+pub promptforge::model::TemperatureError::OutOfRange::value: f64
+pub promptforge::model::ThinkingMode::Always
+pub promptforge::model::ThinkingMode::Never
+pub promptforge::model::ThinkingMode::Switchable
+pub promptforge::prompt::ArgType::Boolean
+pub promptforge::prompt::ArgType::Integer
+pub promptforge::prompt::ArgType::Number
+pub promptforge::prompt::ArgType::String
+pub promptforge::prompt::ModelKeyword::Chat
+pub promptforge::prompt::ModelKeyword::Creative
+pub promptforge::prompt::ModelKeyword::Fast
+pub promptforge::prompt::ModelKeyword::Frontier
+pub promptforge::prompt::ModelKeyword::NoThinking
+pub promptforge::prompt::ModelKeyword::Small
+pub promptforge::prompt::ModelKeyword::Thinking
+pub promptforge::prompt::ToolSlot::Exact
+pub promptforge::prompt::ToolSlot::Exact::0: promptforge::tools::ToolId
+pub promptforge::tools::OutputTrust::Trusted
+pub promptforge::tools::OutputTrust::Untrusted
+pub promptforge::tools::ToolCatalogError::DuplicateId
+pub promptforge::tools::ToolCatalogError::DuplicateId::id: promptforge::tools::ToolId
+pub promptforge::tools::ToolCatalogError::InvalidWireName
+pub promptforge::tools::ToolCatalogError::InvalidWireName::reason: &'static str
+pub promptforge::tools::ToolCatalogError::InvalidWireName::wire_name: alloc::string::String
+pub promptforge::tools::ToolCatalogErrorKind::DuplicateId
+pub promptforge::tools::ToolCatalogErrorKind::InvalidWireName
+pub promptforge::tools::ToolDescriptor::conflicts: alloc::vec::Vec<promptforge::capabilities::CapabilityId>
+pub promptforge::tools::ToolDescriptor::description: alloc::string::String
+pub promptforge::tools::ToolDescriptor::id: promptforge::tools::ToolId
+pub promptforge::tools::ToolDescriptor::parameters_schema: serde_json::value::Value
+pub promptforge::tools::ToolDescriptor::structured_output: bool
+pub promptforge::tools::ToolDescriptor::wire_name: alloc::string::String
+pub promptforge::tools::ToolErrorKind::Backend
+pub promptforge::tools::ToolErrorKind::Cancelled
+pub promptforge::tools::ToolErrorKind::InvalidArguments
+pub promptforge::tools::ToolErrorKind::Other
+pub promptforge::tools::ToolErrorKind::Transport
+pub promptforge::tools::ToolIdErrorKind::Control
+pub promptforge::tools::ToolIdErrorKind::Empty
+pub promptforge::tools::ToolIdErrorKind::SegmentCount
+pub promptforge::tools::ToolIdErrorKind::Separator
+pub promptforge::transport::ClientError::Backend
+pub promptforge::transport::ClientError::Backend::body: alloc::string::String
+pub promptforge::transport::ClientError::Backend::status: u16
+pub promptforge::transport::ClientError::BackendBodyRead
+pub promptforge::transport::ClientError::BackendBodyRead::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::transport::ClientError::BackendBodyRead::status: u16
+pub promptforge::transport::ClientError::Config
+pub promptforge::transport::ClientError::Config::message: alloc::string::String
+pub promptforge::transport::ClientError::Config::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::transport::ClientError::EmptyModelReply
+pub promptforge::transport::ClientError::EmptyModelReply::detail: &'static str
+pub promptforge::transport::ClientError::EmptyModelReply::finish_reason: core::option::Option<alloc::string::String>
+pub promptforge::transport::ClientError::GatewayDisabled
+pub promptforge::transport::ClientError::Http
+pub promptforge::transport::ClientError::Http::0: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::transport::ClientError::InvalidConfig
+pub promptforge::transport::ClientError::InvalidConfig::0: alloc::string::String
+pub promptforge::transport::ClientError::InvalidEnv
+pub promptforge::transport::ClientError::InvalidEnv::0: alloc::string::String
+pub promptforge::transport::ClientError::MalformedResponse
+pub promptforge::transport::ClientError::MalformedResponse::0: alloc::string::String
+pub promptforge::transport::ClientError::MalformedResponseSource
+pub promptforge::transport::ClientError::MalformedResponseSource::message: alloc::string::String
+pub promptforge::transport::ClientError::MalformedResponseSource::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::transport::ClientError::MissingEnv
+pub promptforge::transport::ClientError::MissingEnv::0: alloc::string::String
+pub promptforge::transport::ClientError::ModelSetLock
+pub promptforge::transport::ClientError::ModelSetLock::0: alloc::string::String
+pub promptforge::transport::ClientTimeout::0: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::vfs::Entry::description: core::option::Option<alloc::string::String>
+pub promptforge::vfs::Entry::name: alloc::string::String
+pub promptforge::vfs::Entry::stat: promptforge::vfs::Stat
+pub promptforge::vfs::FileType::BlockDevice
+pub promptforge::vfs::FileType::CharDevice
+pub promptforge::vfs::FileType::Directory
+pub promptforge::vfs::FileType::Fifo
+pub promptforge::vfs::FileType::File
+pub promptforge::vfs::FileType::Socket
+pub promptforge::vfs::FileType::Symlink
+pub promptforge::vfs::GrepMatch::line: alloc::string::String
+pub promptforge::vfs::GrepMatch::line_number: usize
+pub promptforge::vfs::GrepMatch::path: alloc::string::String
+pub promptforge::vfs::GrepQuery::case_insensitive: bool
+pub promptforge::vfs::GrepQuery::glob_filter: core::option::Option<alloc::string::String>
+pub promptforge::vfs::GrepQuery::is_regex: bool
+pub promptforge::vfs::GrepQuery::max_results: core::option::Option<usize>
+pub promptforge::vfs::GrepQuery::pattern: alloc::string::String
+pub promptforge::vfs::GrepQuery::root: promptforge::vfs::VfsPathBuf
+pub promptforge::vfs::GrepResults::matches: alloc::vec::Vec<promptforge::vfs::GrepMatch>
+pub promptforge::vfs::GrepResults::truncated: bool
+pub promptforge::vfs::Mode::Agent
+pub promptforge::vfs::Mode::Ask
+pub promptforge::vfs::Mode::Plan
+pub promptforge::vfs::Op::Append
+pub promptforge::vfs::Op::Chmod
+pub promptforge::vfs::Op::Copy
+pub promptforge::vfs::Op::Delete
+pub promptforge::vfs::Op::Exists
+pub promptforge::vfs::Op::Glob
+pub promptforge::vfs::Op::Grep
+pub promptforge::vfs::Op::List
+pub promptforge::vfs::Op::Mkdir
+pub promptforge::vfs::Op::Read
+pub promptforge::vfs::Op::ReadLink
+pub promptforge::vfs::Op::Rename
+pub promptforge::vfs::Op::Stat
+pub promptforge::vfs::Op::Symlink
+pub promptforge::vfs::Op::Write
+pub promptforge::vfs::Origin::file: alloc::string::String
+pub promptforge::vfs::Origin::label: alloc::string::String
+pub promptforge::vfs::Origin::line: u32
+pub promptforge::vfs::PathReason::Absolute
+pub promptforge::vfs::PathReason::Backslash
+pub promptforge::vfs::PathReason::Control
+pub promptforge::vfs::PathReason::Empty
+pub promptforge::vfs::PathReason::EmptySegment
+pub promptforge::vfs::PathReason::ReservedName
+pub promptforge::vfs::PathReason::TooLong
+pub promptforge::vfs::PathReason::Traversal
+pub promptforge::vfs::PathReason::UnsafeSuffix
+pub promptforge::vfs::Stat::created: core::option::Option<std::time::SystemTime>
+pub promptforge::vfs::Stat::file_type: promptforge::vfs::FileType
+pub promptforge::vfs::Stat::mode: core::option::Option<u32>
+pub promptforge::vfs::Stat::modified: core::option::Option<std::time::SystemTime>
+pub promptforge::vfs::Stat::size: u64
+pub promptforge::vfs::StoreError::AnchorAmbiguous
+pub promptforge::vfs::StoreError::AnchorAmbiguous::anchor: alloc::string::String
+pub promptforge::vfs::StoreError::AnchorAmbiguous::count: usize
+pub promptforge::vfs::StoreError::AnchorAmbiguous::path: alloc::string::String
+pub promptforge::vfs::StoreError::AnchorNotFound
+pub promptforge::vfs::StoreError::AnchorNotFound::anchor: alloc::string::String
+pub promptforge::vfs::StoreError::AnchorNotFound::path: alloc::string::String
+pub promptforge::vfs::StoreError::Backend
+pub promptforge::vfs::StoreError::Backend::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
+pub promptforge::vfs::StoreError::InvalidAnchor
+pub promptforge::vfs::StoreError::InvalidAnchor::path: alloc::string::String
+pub promptforge::vfs::StoreError::InvalidAnchor::reason: &'static str
+pub promptforge::vfs::StoreError::InvalidPath
+pub promptforge::vfs::StoreError::InvalidPath::path: alloc::string::String
+pub promptforge::vfs::StoreError::InvalidPath::reason: promptforge::vfs::PathReason
+pub promptforge::vfs::StoreError::InvalidPattern
+pub promptforge::vfs::StoreError::InvalidPattern::pattern: alloc::string::String
+pub promptforge::vfs::StoreError::InvalidPattern::reason: alloc::string::String
+pub promptforge::vfs::StoreError::InvalidRange
+pub promptforge::vfs::StoreError::InvalidRange::path: alloc::string::String
+pub promptforge::vfs::StoreError::InvalidRange::reason: &'static str
+pub promptforge::vfs::StoreError::NotFound
+pub promptforge::vfs::StoreError::NotFound::path: alloc::string::String
+pub promptforge::vfs::StoreError::WriteRace
+pub promptforge::vfs::StoreError::WriteRace::detail: alloc::string::String
+pub promptforge::vfs::StoreError::WriteRace::path: alloc::string::String
+pub promptforge::vfs::StoreErrorKind::Anchor
+pub promptforge::vfs::StoreErrorKind::Backend
+pub promptforge::vfs::StoreErrorKind::InvalidAnchor
+pub promptforge::vfs::StoreErrorKind::InvalidPath
+pub promptforge::vfs::StoreErrorKind::InvalidPattern
+pub promptforge::vfs::StoreErrorKind::InvalidRange
+pub promptforge::vfs::StoreErrorKind::NotFound
+pub promptforge::vfs::StoreErrorKind::WriteRace
+pub promptforge::vfs::StoreOp::Append
+pub promptforge::vfs::StoreOp::Append::contents: alloc::string::String
+pub promptforge::vfs::StoreOp::Append::path: alloc::string::String
+pub promptforge::vfs::StoreOp::Delete
+pub promptforge::vfs::StoreOp::Delete::path: alloc::string::String
+pub promptforge::vfs::StoreOp::Exists
+pub promptforge::vfs::StoreOp::Exists::path: alloc::string::String
+pub promptforge::vfs::StoreOp::Glob
+pub promptforge::vfs::StoreOp::Glob::pattern: alloc::string::String
+pub promptforge::vfs::StoreOp::Read
+pub promptforge::vfs::StoreOp::Read::end: core::option::Option<i64>
+pub promptforge::vfs::StoreOp::Read::path: alloc::string::String
+pub promptforge::vfs::StoreOp::Read::start: core::option::Option<i64>
+pub promptforge::vfs::StoreOp::ReadNumbered
+pub promptforge::vfs::StoreOp::ReadNumbered::end: core::option::Option<i64>
+pub promptforge::vfs::StoreOp::ReadNumbered::path: alloc::string::String
+pub promptforge::vfs::StoreOp::ReadNumbered::start: core::option::Option<i64>
+pub promptforge::vfs::StoreOp::StrReplace
+pub promptforge::vfs::StoreOp::StrReplace::new: alloc::string::String
+pub promptforge::vfs::StoreOp::StrReplace::old: alloc::string::String
+pub promptforge::vfs::StoreOp::StrReplace::path: alloc::string::String
+pub promptforge::vfs::StoreOp::Write
+pub promptforge::vfs::StoreOp::Write::contents: alloc::string::String
+pub promptforge::vfs::StoreOp::Write::path: alloc::string::String
+pub promptforge::vfs::StoreOutcome::Bool
+pub promptforge::vfs::StoreOutcome::Bool::0: bool
+pub promptforge::vfs::StoreOutcome::Paths
+pub promptforge::vfs::StoreOutcome::Paths::0: alloc::vec::Vec<alloc::string::String>
+pub promptforge::vfs::StoreOutcome::Text
+pub promptforge::vfs::StoreOutcome::Text::0: alloc::string::String
+pub promptforge::vfs::StoreOutcome::Unit
+pub promptforge::vfs::Verdict::Allow
+pub promptforge::vfs::Verdict::Ask
+pub promptforge::vfs::Verdict::Ask::0: alloc::string::String
+pub promptforge::vfs::Verdict::Deny
+pub promptforge::vfs::Verdict::Deny::0: alloc::string::String
+pub promptforge::vfs::VfsError::AlreadyExists
+pub promptforge::vfs::VfsError::AlreadyExists::0: alloc::string::String
+pub promptforge::vfs::VfsError::Backend
+pub promptforge::vfs::VfsError::Backend::0: alloc::string::String
+pub promptforge::vfs::VfsError::Conflict
+pub promptforge::vfs::VfsError::Conflict::0: alloc::string::String
+pub promptforge::vfs::VfsError::DirectoryNotEmpty
+pub promptforge::vfs::VfsError::DirectoryNotEmpty::0: alloc::string::String
+pub promptforge::vfs::VfsError::InvalidPath
+pub promptforge::vfs::VfsError::InvalidPath::0: alloc::string::String
+pub promptforge::vfs::VfsError::IsADirectory
+pub promptforge::vfs::VfsError::IsADirectory::0: alloc::string::String
+pub promptforge::vfs::VfsError::NotADirectory
+pub promptforge::vfs::VfsError::NotADirectory::0: alloc::string::String
+pub promptforge::vfs::VfsError::NotFound
+pub promptforge::vfs::VfsError::NotFound::0: alloc::string::String
+pub promptforge::vfs::VfsError::PermissionDenied
+pub promptforge::vfs::VfsError::PermissionDenied::0: alloc::string::String
+pub promptforge::vfs::VfsError::Unsupported
+pub promptforge::vfs::VfsError::Unsupported::0: alloc::string::String
+pub struct promptforge::CapabilityConflict
+pub struct promptforge::Environment
+pub struct promptforge::ParseError
+pub struct promptforge::Prompt
+pub struct promptforge::Requirements
+pub struct promptforge::Run
+pub struct promptforge::RunContext
+pub struct promptforge::RunError
+pub struct promptforge::RunLimits
+pub struct promptforge::SourceLocation
+pub struct promptforge::UnmetRequirement
+pub struct promptforge::cancel::CancelHandle
+pub struct promptforge::cancel::Cancelled
+pub struct promptforge::capabilities::CapabilityId
+pub struct promptforge::capabilities::CapabilityIdError
+pub struct promptforge::capabilities::GlobalName
+pub struct promptforge::capabilities::GlobalNameError
+pub struct promptforge::effect::ChatAnswerRecord
+pub struct promptforge::effect::EffectId
+pub struct promptforge::effect::ToolAnswerRecord
+pub struct promptforge::ids::ChainId
+pub struct promptforge::ids::ParseIdError
+pub struct promptforge::ids::Provenance
+pub struct promptforge::ids::TaskId
+pub struct promptforge::input::InputError
+pub struct promptforge::metrics::CallMetrics
+pub struct promptforge::metrics::ClientTiming
+pub struct promptforge::metrics::LlamaTimings
+pub struct promptforge::metrics::ToolCallEvent
+pub struct promptforge::metrics::Usage
+pub struct promptforge::metrics::VllmMetrics
+pub struct promptforge::model::Completion
+pub struct promptforge::model::CompletionError
+pub struct promptforge::model::CompletionOptions
+pub struct promptforge::model::Message
+pub struct promptforge::model::ModelBinding
+pub struct promptforge::model::ModelBindings
+pub struct promptforge::model::ModelCatalog
+pub struct promptforge::model::ModelDescriptor
+pub struct promptforge::model::ModelId
+pub struct promptforge::model::ModelIdError
+pub struct promptforge::model::ModelInvocation
+pub struct promptforge::model::Temperature
+pub struct promptforge::model::ToolArguments<'a>
+pub struct promptforge::model::ToolCall
+pub struct promptforge::model::ToolSchema
+pub struct promptforge::prompt::ArgDecl
+pub struct promptforge::prompt::ArgsDecl
+pub struct promptforge::prompt::CapabilityDecl
+pub struct promptforge::prompt::FileDecl
+pub struct promptforge::prompt::Frontmatter
+pub struct promptforge::prompt::ModelRole
+pub struct promptforge::prompt::ModelRoles
+pub struct promptforge::prompt::ToolSlots
+pub struct promptforge::replay::Flags
+pub struct promptforge::timestamp::Timestamp
+pub struct promptforge::tools::ToolBindings
+pub struct promptforge::tools::ToolCatalog
+pub struct promptforge::tools::ToolDescriptor
+pub struct promptforge::tools::ToolError
+pub struct promptforge::tools::ToolId
+pub struct promptforge::tools::ToolIdError
+pub struct promptforge::tools::ToolOutput
+pub struct promptforge::transport::ClientTimeout
+pub struct promptforge::vfs::Access
+pub struct promptforge::vfs::AllowAll
+pub struct promptforge::vfs::Entry
+pub struct promptforge::vfs::ExecId
+pub struct promptforge::vfs::GrepMatch
+pub struct promptforge::vfs::GrepQuery
+pub struct promptforge::vfs::GrepResults
+pub struct promptforge::vfs::HostBackend
+pub struct promptforge::vfs::MemoryBackend
+pub struct promptforge::vfs::ModeHandle
+pub struct promptforge::vfs::ModePolicy
+pub struct promptforge::vfs::OpEvent<'a>
+pub struct promptforge::vfs::Origin
+pub struct promptforge::vfs::Stat
+pub struct promptforge::vfs::VfsPath
+pub struct promptforge::vfs::VfsPathBuf
+pub struct promptforge::vfs::VfsRef
+pub struct promptforge::vfs::VfsRefBuilder
+pub trait promptforge::transport::ChunkSource
+pub trait promptforge::vfs::Policy: core::marker::Send
+pub trait promptforge::vfs::Vfs: core::marker::Send
+pub trait promptforge::vfs::VfsAccess: core::marker::Send
+pub type promptforge::transport::ChunkSource::Chunk: core::convert::AsRef<[u8]>
+pub type promptforge::vfs::OpSink = alloc::sync::Arc<dyn core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync>

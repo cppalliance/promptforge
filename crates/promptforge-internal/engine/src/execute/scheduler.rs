@@ -123,7 +123,7 @@ impl SlicePath {
     /// always in range; an out-of-range index resolves to the empty slice,
     /// which the walk treats as exhausted rather than panicking.
     fn resolve<'p>(&self, prompt: &'p Prompt) -> &'p [Section] {
-        let mut slice = prompt.sections();
+        let mut slice = promptforge_parser::detail::sections(prompt);
         for &index in &self.0 {
             slice = slice.get(index).map_or(&[], Section::children);
         }
@@ -337,7 +337,7 @@ impl Chain {
     /// the current section's blocks on the walk.
     fn blocks<'p>(&self, prompt: &'p Prompt) -> &'p [Block] {
         if self.h1 {
-            prompt.h1_blocks()
+            promptforge_parser::detail::h1_blocks(prompt)
         } else {
             self.section(prompt).blocks()
         }

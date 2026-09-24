@@ -21,11 +21,12 @@
 //! # Sensitivity
 //! Lifecycle variants have no payload beyond their coordinates, and the
 //! coordinates themselves are author-controlled (`execution` is caller
-//! chosen, `section` is prompt-authored heading text). Content variants
-//! hold model-, tool-, or user-authored text; task variants hold the
-//! author's spawn seeds; debug variants hold the verbatim request and
-//! response bodies. A host that persists or forwards events owns treating
-//! all of it as untrusted.
+//! chosen, `section` is prompt-authored heading text); the exception is
+//! `ModelMetadataDegraded`, whose message may quote values from a
+//! backend's response. Content variants hold model-, tool-, or
+//! user-authored text; task variants hold the author's spawn seeds; debug
+//! variants hold the verbatim request and response bodies. A host that
+//! persists or forwards events owns treating all of it as untrusted.
 //!
 //! # Serialized form
 //! One event serializes to one JSON object tagged by `kind` (the variant
@@ -187,6 +188,17 @@ events! {
         ModelTurnFailed {},
         /// A successful parse ended because the model hit its length limit.
         ModelTurnTruncated {},
+        /// One metadata section of a completed model turn's response was
+        /// present but malformed and degraded to nothing, or the response
+        /// named no model. The turn itself succeeded; each degraded
+        /// section reports once, after the turn's `model_turn_completed`.
+        ModelMetadataDegraded {
+            /// The model-turn counter the response was served under.
+            turn: u32,
+            /// The engine's sentence naming the section and why it did not
+            /// parse; it may quote backend-supplied values.
+            message: String,
+        },
         /// A tool dispatch completed successfully.
         ToolCallSucceeded {},
         /// A tool dispatch returned an error.

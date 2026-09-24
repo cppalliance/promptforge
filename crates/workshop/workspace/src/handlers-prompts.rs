@@ -229,7 +229,6 @@ impl From<&Frontmatter> for ContractResponse {
             promptforge: frontmatter.promptforge(),
             max_tool_iterations: frontmatter
                 .max_tool_iterations()
-                .limit()
                 .map(std::num::NonZeroU32::get),
             input: frontmatter.input().map(FileDto::from),
             output: frontmatter.output().map(FileDto::from),

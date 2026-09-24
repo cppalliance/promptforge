@@ -4,8 +4,9 @@
 //! is reachable from a host. Each function stands in for what would
 //! otherwise be an inherent method or a public field on a host-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
-//! a message holds, reading a tool schema's wire parts, taking the raw
-//! JSON bodies a completion holds, and wrapping a transport failure.
+//! a message holds, reading a tool schema's wire parts, reading the
+//! metadata diagnostics and taking the raw JSON bodies a completion holds,
+//! and wrapping a transport failure.
 
 use promptforge_types::metrics::VllmMetrics;
 use serde_json::Value;
@@ -32,20 +33,6 @@ pub fn message_from_validated_parts(
         content,
         tool_call_id,
         tool_calls,
-    }
-}
-
-/// Constructs the `assistant` turn that requested tool calls.
-///
-/// `raw_tool_calls` is the backend's `tool_calls` array echoed back
-/// verbatim so the conversation history matches what the model emitted.
-#[must_use]
-pub fn message_assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
-    Message {
-        role: "assistant".into(),
-        content: Value::String(String::new()),
-        tool_call_id: None,
-        tool_calls: Some(raw_tool_calls),
     }
 }
 
@@ -143,7 +130,7 @@ pub fn completion_vllm_metrics(completion: &Completion) -> Option<&VllmMetrics> 
 
 /// Returns one line per response metadata section that was present but
 /// malformed and so degraded to `None` (or a body naming no string
-/// `model`).
+/// `model`), for the engine to report as `model_metadata_degraded` events.
 #[must_use]
 pub fn completion_metadata_diagnostics(completion: &Completion) -> &[String] {
     &completion.metadata_diagnostics

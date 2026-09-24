@@ -2,13 +2,12 @@
 //!
 //! A prompt run keeps its bulk state in virtual files addressed by logical
 //! string paths. The run's [`VfsRef`] handle holds the store mount; the
-//! [`Store`] facade (behind the `StoreExt` extension trait's
-//! `vfs.store(&access)` call shape) scopes logical paths onto it, and every
-//! operation is attributed to the [`Access`] capability's identity, so a
-//! conflicting operation by a second live identity surfaces as
-//! [`StoreError::WriteRace`]. [`Store::read`] returns verbatim contents for
-//! trusted handoff, [`Store::read_range`] slices a 1-based inclusive line
-//! range out of the same verbatim contents, and
+//! [`Store`] facade (built by `Store::new(&access)`) scopes logical paths
+//! onto it, and every operation is attributed to the [`Access`]
+//! capability's identity, so a conflicting operation by a second live
+//! identity surfaces as [`StoreError::WriteRace`]. [`Store::read`] returns
+//! verbatim contents for trusted handoff, [`Store::read_range`] slices a
+//! 1-based inclusive line range out of the same verbatim contents, and
 //! [`Store::read_range_numbered`] numbers such a slice absolutely (with no
 //! bounds it numbers the whole file from 1). For model-facing re-injection
 //! the caller wraps a verbatim read in an untrusted guard envelope (the

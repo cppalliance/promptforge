@@ -251,6 +251,16 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
     let task: TaskId = "0.1".parse().expect("a task id parses");
     events.extend([
         (
+            Event::ModelMetadataDegraded {
+                execution: "run".to_owned(),
+                section: "A".to_owned(),
+                provenance: provenance(),
+                turn: 1,
+                message: "malformed `usage` in completion response ignored".to_owned(),
+            },
+            Seam::Observed,
+        ),
+        (
             Event::Lua {
                 execution: "run".to_owned(),
                 section: "A".to_owned(),

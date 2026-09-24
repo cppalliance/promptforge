@@ -77,10 +77,8 @@ impl Scheduler {
         // The walk capability serves every section in turn, so its label
         // is the prompt's own; the line is where the walk starts.
         let prompt = self.ctx.prompt();
-        let blocks: &[Block] = prompt
-            .sections()
-            .first()
-            .map_or(&[], |section| section.blocks());
+        let blocks: &[Block] =
+            promptforge_parser::detail::entry(prompt).map_or(&[], |section| section.blocks());
         let origin = prompt_origin(prompt, prompt.title(), blocks);
         let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         self.chains[root.index()].access = Some(Arc::new(access));
@@ -272,7 +270,7 @@ impl Scheduler {
             // H1 is section 0: its visible set is the whole top-level
             // slice - it excludes nothing and has no children, so every
             // target is a flat index into that slice.
-            let sections = prompt.sections();
+            let sections = promptforge_parser::detail::sections(prompt);
             let target = fanout::resolve_sibling(heading, sections)?;
             let index = section_position(sections, target).ok_or(Error::internal(
                 "a resolved H1 target is absent from the top-level slice",

@@ -58,6 +58,13 @@ fn one_variant_of_each_group_round_trips_through_serde() {
         provenance: provenance("0", 1),
         message: "checkpoint".to_owned(),
     });
+    round_trips(&Event::ModelMetadataDegraded {
+        execution: "run-1".to_owned(),
+        section: "Gather".to_owned(),
+        provenance: provenance("0", 8),
+        turn: 2,
+        message: "malformed `usage` in completion response ignored: invalid type: string \"lots\", expected u64".to_owned(),
+    });
     // Task, with the spawn seeds.
     round_trips(&Event::TaskStarted {
         execution: "run-1".to_owned(),
@@ -198,6 +205,21 @@ fn a_serialized_event_is_tagged_by_kind_with_its_coordinates_beside_the_payload(
     assert_eq!(
         serde_json::to_string(&notice).expect("an event serializes"),
         r#"{"kind":"task_notice","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":10},"turn":3,"task":"0.1","text":"Task id=0.1 (## Worker) completed: done"}"#
+    );
+}
+
+#[test]
+fn a_degraded_metadata_report_serializes_its_turn_and_message_under_its_kind() {
+    let event = Event::ModelMetadataDegraded {
+        execution: "run-1".to_owned(),
+        section: "Gather".to_owned(),
+        provenance: provenance("0", 3),
+        turn: 1,
+        message: "completion response named no string `model`; recorded as empty".to_owned(),
+    };
+    assert_eq!(
+        serde_json::to_string(&event).expect("an event serializes"),
+        r#"{"kind":"model_metadata_degraded","execution":"run-1","section":"Gather","provenance":{"task":"0","seq":3},"turn":1,"message":"completion response named no string `model`; recorded as empty"}"#
     );
 }
 

@@ -74,17 +74,6 @@ impl GlobalName {
         &self.segments[1]
     }
 
-    /// Builds a name from a string already known to satisfy the grammar,
-    /// skipping validation.
-    ///
-    /// Crate-internal: backs [`crate::detail::tool_id_from_validated`] and
-    /// [`crate::detail::capability_id_from_validated`].
-    pub(crate) fn from_validated(s: &str) -> GlobalName {
-        GlobalName {
-            segments: s.split('/').map(str::to_owned).collect(),
-        }
-    }
-
     /// Returns the segments (exactly 2 or 3 by construction).
     ///
     /// Crate-internal: the id newtypes in [`crate::tools`] index segments.

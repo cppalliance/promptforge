@@ -11,7 +11,7 @@ use promptforge_vfs::{
 };
 
 use super::path::MAX_STORE_PATH_BYTES;
-use super::{MAX_GLOB_PATTERN_BYTES, PathReason, Store, StoreError, StoreErrorKind, StoreExt};
+use super::{MAX_GLOB_PATTERN_BYTES, PathReason, Store, StoreError, StoreErrorKind};
 
 /// A stock handle with one acquired identity: the fixture every
 /// single-identity test starts from.
@@ -25,8 +25,8 @@ fn stock() -> (VfsRef, Access) {
 
 #[test]
 fn write_then_read_numbered_numbers_lines() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "first\nsecond\nthird").expect("write");
     assert_eq!(
         store
@@ -38,8 +38,8 @@ fn write_then_read_numbered_numbers_lines() {
 
 #[test]
 fn read_numbered_pads_numbers_to_width() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     numbered_fixture(&store, "a.txt", 10);
     let numbered = store
         .read_range_numbered("a.txt", 1, None)
@@ -50,8 +50,8 @@ fn read_numbered_pads_numbers_to_width() {
 
 #[test]
 fn read_returns_contents_verbatim() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "first\nsecond\n").expect("write");
     assert_eq!(store.read("a.txt").expect("read"), "first\nsecond\n");
     assert_eq!(
@@ -64,8 +64,8 @@ fn read_returns_contents_verbatim() {
 
 #[test]
 fn read_missing_file_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     let err = store.read("absent.txt").expect_err("should fail");
     assert!(matches!(err, StoreError::NotFound { .. }));
 }
@@ -77,7 +77,7 @@ fn a_second_identitys_write_to_a_claimed_path_races() {
     // rewriting its own path stays legal, and releasing the first
     // identity frees the path.
     let (vfs, first) = stock();
-    let store = vfs.store(&first);
+    let store = Store::new(&first);
     store.write("a.txt", "one").expect("first write");
     store
         .write("a.txt", "uno")
@@ -85,7 +85,7 @@ fn a_second_identitys_write_to_a_claimed_path_races() {
     let second = vfs
         .acquire(Origin::new("store parity test"))
         .expect("the stock backend acquires");
-    let contender = vfs.store(&second);
+    let contender = Store::new(&second);
     let err = contender
         .write("a.txt", "two")
         .expect_err("a second live identity must race");
@@ -117,12 +117,12 @@ fn a_glob_over_a_claimed_path_races_like_a_read() {
     // same claimed path must surface the same WriteRace vocabulary, not an
     // opaque Backend.
     let (vfs, first) = stock();
-    let store = vfs.store(&first);
+    let store = Store::new(&first);
     store.write("a.txt", "one").expect("first write");
     let second = vfs
         .acquire(Origin::new("store parity test"))
         .expect("the stock backend acquires");
-    let contender = vfs.store(&second);
+    let contender = Store::new(&second);
     let err = contender
         .glob("*.txt")
         .expect_err("a glob touching a claimed path must race");
@@ -137,8 +137,8 @@ fn two_facades_bound_to_one_identity_never_conflict() {
     // Borrow semantics: blocking call chains share the parent's access,
     // so two facades over one identity touch one path without a false
     // conflict.
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     let also = store.clone();
     store.write("a.txt", "one").expect("write");
     also.append("a.txt", "two").expect("append");
@@ -148,7 +148,7 @@ fn two_facades_bound_to_one_identity_never_conflict() {
 #[test]
 fn identities_share_backing_state_once_claims_are_released() {
     let (vfs, first) = stock();
-    let store = vfs.store(&first);
+    let store = Store::new(&first);
     store
         .write("shared.txt", "written by the first")
         .expect("write");
@@ -156,7 +156,7 @@ fn identities_share_backing_state_once_claims_are_released() {
     let second = vfs
         .acquire(Origin::new("store parity test"))
         .expect("the stock backend acquires");
-    let reader = vfs.store(&second);
+    let reader = Store::new(&second);
     assert_eq!(
         reader.read("shared.txt").expect("read"),
         "written by the first"
@@ -165,8 +165,8 @@ fn identities_share_backing_state_once_claims_are_released() {
 
 #[test]
 fn read_range_with_start_only_reads_to_end() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     assert_eq!(
         store.read_range("a.txt", 2, None).expect("read_range"),
@@ -176,8 +176,8 @@ fn read_range_with_start_only_reads_to_end() {
 
 #[test]
 fn read_range_with_start_and_end_slices_inclusively() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     assert_eq!(
         store.read_range("a.txt", 2, Some(2)).expect("read_range"),
@@ -191,8 +191,8 @@ fn read_range_with_start_and_end_slices_inclusively() {
 
 #[test]
 fn read_range_clamps_end_to_the_last_line() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     assert_eq!(
         store.read_range("a.txt", 2, Some(99)).expect("read_range"),
@@ -202,8 +202,8 @@ fn read_range_clamps_end_to_the_last_line() {
 
 #[test]
 fn read_range_beyond_eof_is_empty() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     assert_eq!(store.read_range("a.txt", 4, None).expect("read_range"), "");
     // The end bound is never evaluated when the range starts beyond EOF.
@@ -215,16 +215,16 @@ fn read_range_beyond_eof_is_empty() {
 
 #[test]
 fn read_range_empty_file_is_empty_string() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("e.txt", "").expect("write");
     assert_eq!(store.read_range("e.txt", 1, None).expect("read_range"), "");
 }
 
 #[test]
 fn read_range_start_below_one_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\n").expect("write");
     for style in [RangeStyle::Plain, RangeStyle::Numbered] {
         let err = style
@@ -238,8 +238,8 @@ fn read_range_start_below_one_errors() {
 
 #[test]
 fn read_range_end_before_start_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     for style in [RangeStyle::Plain, RangeStyle::Numbered] {
         let err = style
@@ -252,8 +252,8 @@ fn read_range_end_before_start_errors() {
 
 #[test]
 fn read_range_missing_file_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     for style in [RangeStyle::Plain, RangeStyle::Numbered] {
         let err = style
             .read(&store, "absent.txt", 1, None)
@@ -295,8 +295,8 @@ fn numbered_fixture(store: &Store, path: &str, line_count: usize) {
 
 #[test]
 fn read_range_numbered_without_bounds_numbers_from_one() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     numbered_fixture(&store, "a.txt", 12);
     assert_eq!(
         store
@@ -308,8 +308,8 @@ fn read_range_numbered_without_bounds_numbers_from_one() {
 
 #[test]
 fn read_range_numbered_empty_file_is_empty_string() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("e.txt", "").expect("write");
     assert_eq!(
         store
@@ -321,8 +321,8 @@ fn read_range_numbered_empty_file_is_empty_string() {
 
 #[test]
 fn read_range_numbered_numbers_a_slice_absolutely() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     numbered_fixture(&store, "a.txt", 85);
     assert_eq!(
         store
@@ -334,8 +334,8 @@ fn read_range_numbered_numbers_a_slice_absolutely() {
 
 #[test]
 fn read_range_numbered_pads_across_the_hundred_boundary() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     numbered_fixture(&store, "a.txt", 100);
     assert_eq!(
         store
@@ -347,8 +347,8 @@ fn read_range_numbered_pads_across_the_hundred_boundary() {
 
 #[test]
 fn read_range_numbered_clamps_end_to_the_last_line() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     numbered_fixture(&store, "a.txt", 100);
     assert_eq!(
         store
@@ -369,8 +369,8 @@ fn read_range_numbered_clamps_end_to_the_last_line() {
 
 #[test]
 fn read_range_numbered_beyond_eof_is_empty() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
     assert_eq!(
         store
@@ -382,8 +382,8 @@ fn read_range_numbered_beyond_eof_is_empty() {
 
 #[test]
 fn write_overwrites() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "old").expect("write");
     store.write("a.txt", "new").expect("overwrite");
     assert_eq!(store.read("a.txt").expect("read"), "new");
@@ -391,8 +391,8 @@ fn write_overwrites() {
 
 #[test]
 fn append_creates_then_extends() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.append("log.txt", "one\n").expect("create via append");
     store.append("log.txt", "two").expect("extend");
     assert_eq!(store.read("log.txt").expect("read"), "one\ntwo");
@@ -400,8 +400,8 @@ fn append_creates_then_extends() {
 
 #[test]
 fn str_replace_replaces_unique() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "the quick brown fox").expect("write");
     store
         .str_replace("a.txt", "quick", "slow")
@@ -411,8 +411,8 @@ fn str_replace_replaces_unique() {
 
 #[test]
 fn str_replace_missing_anchor_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "hello world").expect("write");
     let err = store
         .str_replace("a.txt", "absent", "x")
@@ -422,8 +422,8 @@ fn str_replace_missing_anchor_errors() {
 
 #[test]
 fn str_replace_ambiguous_anchor_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "na na na").expect("write");
     let err = store
         .str_replace("a.txt", "na", "la")
@@ -436,8 +436,8 @@ fn str_replace_ambiguous_anchor_errors() {
 
 #[test]
 fn str_replace_on_missing_file_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     let err = store
         .str_replace("nope.txt", "a", "b")
         .expect_err("should fail");
@@ -446,8 +446,8 @@ fn str_replace_on_missing_file_errors() {
 
 #[test]
 fn delete_then_read_errors() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "gone soon").expect("write");
     store.delete("a.txt").expect("delete");
     let err = store.read("a.txt").expect_err("should fail");
@@ -457,15 +457,15 @@ fn delete_then_read_errors() {
 #[test]
 fn delete_missing_is_silent() {
     // Delete is idempotent: deleting an absent path succeeds.
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.delete("absent.txt").expect("delete is idempotent");
 }
 
 #[test]
 fn glob_matches_sorted() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     for path in ["src/b.rs", "src/a.rs", "src/deep/c.rs", "notes.md"] {
         store.write(path, "").expect("write");
     }
@@ -485,8 +485,8 @@ fn glob_matches_sorted() {
 
 #[test]
 fn glob_star_stops_at_slash() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a/b.txt", "").expect("write");
     assert!(store.glob("*.txt").expect("glob").is_empty());
     assert_eq!(store.glob("a/*.txt").expect("glob"), vec!["a/b.txt"]);
@@ -505,8 +505,8 @@ fn assert_invalid_paths(store: &Store, cases: &[(&str, PathReason)]) {
 
 #[test]
 fn invalid_paths_are_rejected_before_dispatch() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     assert_invalid_paths(
         &store,
         &[
@@ -522,8 +522,8 @@ fn invalid_paths_are_rejected_before_dispatch() {
 
 #[test]
 fn exists_reports_confirmed_absence_and_presence() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     assert!(!store.exists("a.txt").expect("absence is not an error"));
     store.write("a.txt", "hi").expect("write");
     assert!(store.exists("a.txt").expect("presence is not an error"));
@@ -531,8 +531,8 @@ fn exists_reports_confirmed_absence_and_presence() {
 
 #[test]
 fn glob_rejects_empty_and_oversized_and_control_patterns() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     assert_eq!(
         store.glob("").expect_err("empty").kind(),
         StoreErrorKind::InvalidPattern
@@ -550,8 +550,8 @@ fn glob_rejects_empty_and_oversized_and_control_patterns() {
 
 #[test]
 fn empty_anchor_is_refused() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a.txt", "body").expect("write");
     let err = store
         .str_replace("a.txt", "", "x")
@@ -565,8 +565,8 @@ fn empty_anchor_is_refused() {
 #[test]
 fn str_replace_reports_empty_ascii_and_multibyte_contents() {
     // STORE-007 coverage: empty, ASCII, and multibyte file contents.
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
 
     store.write("empty.txt", "").expect("write empty");
     let empty_err = store
@@ -598,8 +598,8 @@ fn str_replace_reports_empty_ascii_and_multibyte_contents() {
 
 #[test]
 fn platform_unsafe_paths_are_rejected_before_dispatch() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     assert_invalid_paths(
         &store,
         &[
@@ -642,8 +642,8 @@ fn platform_unsafe_paths_are_rejected_before_dispatch() {
 
 #[test]
 fn glob_grammar_rejects_unsupported_forms() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     for bad in ["a**b", "***", "a/***/b", "a\\*.txt"] {
         assert_eq!(
             store.glob(bad).expect_err(bad).kind(),
@@ -662,8 +662,8 @@ fn glob_matcher_is_bounded_against_adversarial_patterns() {
     // STORE-005: a pattern packed with single-segment stars against a long
     // non-matching name completes promptly (a recursive/backtracking
     // matcher would blow up here). The iterative matcher is O(tokens*len).
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     let name = "a".repeat(200);
     store.write(&name, "").expect("write");
     // A grammar-valid pattern of many single `*` separated by literals: the
@@ -687,8 +687,8 @@ fn glob_matcher_is_bounded_against_adversarial_patterns() {
 
 #[test]
 fn glob_double_star_slash_matches_zero_segments() {
-    let (vfs, access) = stock();
-    let store = vfs.store(&access);
+    let (_vfs, access) = stock();
+    let store = Store::new(&access);
     store.write("a/b.rs", "").expect("write");
     // `a/**/b.rs` matches `a/b.rs` (zero intermediate segments).
     assert_eq!(store.glob("a/**/b.rs").expect("glob"), vec!["a/b.rs"]);
@@ -788,7 +788,7 @@ fn a_panicking_operation_does_not_wedge_the_store() {
     let access = vfs
         .acquire(Origin::new("store parity test"))
         .expect("the stock backend acquires");
-    let store = vfs.store(&access);
+    let store = Store::new(&access);
     let outcome =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| store.write("a.txt", "x")));
     assert!(outcome.is_err(), "the panic must propagate");

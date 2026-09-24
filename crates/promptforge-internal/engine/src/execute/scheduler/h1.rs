@@ -38,7 +38,7 @@ impl Scheduler {
         let origin = prompt_origin(
             self.ctx.prompt(),
             self.ctx.prompt().title(),
-            self.ctx.prompt().h1_blocks(),
+            promptforge_parser::detail::h1_blocks(self.ctx.prompt()),
         );
         let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         // The pass is the root chain: its one frame takes entry 0, and the
@@ -108,7 +108,7 @@ impl Scheduler {
         // pass's counters: the pass took entry 0, the first walked section
         // takes entry 1, and a child the pass started keeps its index.
         let counters = chain.counters;
-        if self.ctx.prompt().sections().is_empty() {
+        if promptforge_parser::detail::sections(self.ctx.prompt()).is_empty() {
             // No walk follows, so the pass's end is the run's end: a task
             // the pass spawned and left live ends here under the same
             // rules as a finishing chain.
@@ -154,7 +154,7 @@ impl Scheduler {
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         let prompt = self.prompt();
-        let sections = prompt.sections();
+        let sections = promptforge_parser::detail::sections(&prompt);
         let target = fanout::resolve_sibling(heading, sections)?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",

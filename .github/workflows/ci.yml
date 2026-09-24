@@ -363,13 +363,53 @@ jobs:
             exit 1
           fi
 
+  # `cargo xtask api` reads rustdoc JSON, which only a nightly emits, so this
+  # job runs on the nightly pinned in crates/build-xtask/src/api/toolchain.rs.
+  # The date is read from that constant, never repeated here, so the two
+  # cannot drift; exporting it as RUSTUP_TOOLCHAIN puts every cargo below on it.
+  api-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned nightly
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          nightly="$(sed -n 's/^ *nightly: "\(nightly-[0-9-]*\)",.*$/\1/p' crates/build-xtask/src/api/toolchain.rs)"
+          case "$nightly" in
+            nightly-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+            *)
+              echo "expected one pinned nightly in crates/build-xtask/src/api/toolchain.rs, found: '$nightly'"
+              exit 1
+              ;;
+          esac
+          echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
+          echo "RUSTUP_TOOLCHAIN=$nightly" >> "$GITHUB_ENV"
+
+      - name: Install the pinned nightly
+        run: rustup toolchain install "${{ steps.pin.outputs.nightly }}" --profile minimal
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@4dc1969decfa71b34f25aa7f3dd4656654d9ad1e # nextest
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Surface closure and listing
+        run: cargo xtask api --check
+
+      - name: Nightly-only fixtures
+        run: cargo nextest run --locked -p build-xtask --run-ignored only
+
   # Single required status check for branch protection: it fails when any
   # job fails or is cancelled, so a cancelled job cannot read as green.
   # needs: is a static list, so every newly added job must be added to it
   # or that job bypasses this gate.
   ci-green:
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain]
+    needs: [fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface]
     if: always()
     steps:
       - name: Verify every job succeeded

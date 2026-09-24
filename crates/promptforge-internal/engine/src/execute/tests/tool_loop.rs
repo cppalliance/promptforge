@@ -117,8 +117,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
         "---\nname: t\ndescription: d\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(declared, EXECUTION).0.unwrap();
     assert_eq!(
-        p.frontmatter()
-            .max_tool_iterations()
+        promptforge_parser::detail::max_tool_iterations(p.frontmatter())
             .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
         5
     );
@@ -126,8 +125,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     let absent = "---\nname: t\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(absent, EXECUTION).0.unwrap();
     assert_eq!(
-        p.frontmatter()
-            .max_tool_iterations()
+        promptforge_parser::detail::max_tool_iterations(p.frontmatter())
             .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
         DEFAULT_MAX_TOOL_ITERATIONS
     );

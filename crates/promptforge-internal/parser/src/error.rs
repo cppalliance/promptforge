@@ -289,8 +289,9 @@ impl std::error::Error for ParseError {
     }
 }
 
-impl From<Error> for ParseError {
-    fn from(inner: Error) -> Self {
+impl ParseError {
+    /// Classifies the internal error into its public wrapper.
+    pub(crate) fn from_inner(inner: Error) -> ParseError {
         let classified = classify_parse_error(&inner);
         ParseError {
             kind: classified.kind,

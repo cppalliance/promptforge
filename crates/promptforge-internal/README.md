@@ -12,7 +12,7 @@ The prompt document parser: YAML frontmatter, the H1 and nested-section tree, an
 
 ## promptforge-store
 
-Run-scoped virtual files: the Store facade over the shared VFS, exposed as `vfs.store(&access)`. Lua sections and the model share run files through it. Depends on promptforge-vfs and shared-vfs.
+Run-scoped virtual files: the Store facade over the shared VFS, built by `Store::new(&access)`. Lua sections and the model share run files through it. Depends on promptforge-vfs and shared-vfs.
 
 ## promptforge-vfs
 

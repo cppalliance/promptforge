@@ -109,19 +109,17 @@ pub mod capabilities {
     pub use promptforge_types::names::GlobalNameErrorKind;
 }
 
-/// What a parsed prompt declares in its frontmatter, and its sections and blocks.
+/// What a parsed prompt declares in its frontmatter.
 pub mod prompt {
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
     pub use promptforge_parser::ArgsDecl;
-    pub use promptforge_parser::Block;
     pub use promptforge_parser::CapabilityDecl;
     pub use promptforge_parser::FileDecl;
     pub use promptforge_parser::Frontmatter;
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
-    pub use promptforge_parser::Section;
     pub use promptforge_parser::ToolSlot;
     pub use promptforge_parser::ToolSlots;
 }
@@ -157,6 +155,9 @@ pub mod vfs {
     pub use promptforge_vfs::GrepResults;
     pub use promptforge_vfs::HostBackend;
     pub use promptforge_vfs::MemoryBackend;
+    pub use promptforge_vfs::Mode;
+    pub use promptforge_vfs::ModeHandle;
+    pub use promptforge_vfs::ModePolicy;
     pub use promptforge_vfs::Op;
     pub use promptforge_vfs::OpEvent;
     pub use promptforge_vfs::OpSink;

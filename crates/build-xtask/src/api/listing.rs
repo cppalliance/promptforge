@@ -3,14 +3,26 @@
 //! built from the default build only because that is the surface hosts
 //! get. It is committed as `crates/promptforge/public-api.txt`, so every
 //! change to the surface shows up in review as a change to that file.
+//!
+//! Trait impls are listed compactly. Impls of `StructuralPartialEq`,
+//! `TrivialClone`, and `UnsafeUnpin`, markers no host can depend on, are
+//! left out. A type's auto traits share one line, `auto <path>: <traits>`,
+//! with `!` before each one the type lacks, and its derive-style impls
+//! share another, `derives <path>: <traits>`, each list in alphabetical
+//! order. An impl whose header bounds a type parameter keeps its own line,
+//! as does every other impl, so a type losing `Send` or gaining
+//! `Serialize` still changes a line.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use rustdoc_types::ItemEnum;
+
 use super::items::Surface;
 use super::load::FACADE;
 use super::render::Renderer;
-use super::walk::Visit;
+use super::walk::{Role, Visit};
+use compact::{Placement, Shared, placement, trait_name};
 
 /// The committed listing's path under the workspace root.
 pub(crate) fn path(root: &Path) -> PathBuf {
@@ -28,11 +40,29 @@ pub(crate) fn lines(surface: &Surface, visits: &[Visit<'_>]) -> Vec<String> {
         .filter(|(label, _)| label != FACADE)
         .map(|(label, _)| format!("pub mod {label}"))
         .collect();
+    let mut shared = Shared::default();
     for visit in visits {
-        if let Some(line) = Renderer::new(visit.krate, surface).line(visit) {
-            lines.insert(line);
+        let placed = match (visit.role, &visit.item.inner) {
+            (Role::Impl, ItemEnum::Impl(block)) => placement(trait_name(visit.krate, block), block),
+            _ => Placement::Own,
+        };
+        let owner = visit.parent.as_str();
+        match placed {
+            Placement::Omitted => {}
+            Placement::Auto { name, lacks } => {
+                shared.auto.entry(owner).or_default().insert(name, lacks);
+            }
+            Placement::Derives(name) => {
+                shared.derives.entry(owner).or_default().insert(name);
+            }
+            Placement::Own => {
+                if let Some(line) = Renderer::new(visit.krate, surface).line(visit) {
+                    lines.insert(line);
+                }
+            }
         }
     }
+    lines.extend(shared.lines());
     lines.into_iter().collect()
 }
 
@@ -67,6 +97,9 @@ pub(crate) fn difference(committed: Option<&str>, lines: &[String]) -> Vec<Strin
     }
     report
 }
+
+#[path = "listing-compact.rs"]
+mod compact;
 
 #[cfg(test)]
 #[path = "listing-tests.rs"]

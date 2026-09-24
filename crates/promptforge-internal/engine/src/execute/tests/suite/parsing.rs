@@ -4,7 +4,9 @@
 
 use std::num::NonZeroU32;
 
-use crate::parser::{LuaProgram, MaxToolIterations, Prompt};
+use promptforge_parser::detail;
+
+use crate::parser::{LuaProgram, Prompt};
 
 struct ValidFixture {
     name: &'static str,
@@ -47,10 +49,10 @@ fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter().description(), "minimum valid");
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Test");
-    assert!(prompt.replay().is_none());
-    assert!(prompt.h1_blocks().is_empty());
-    assert_eq!(prompt.sections().len(), 1);
-    let entry = prompt.entry().expect("fixture has sections");
+    assert!(detail::replay(prompt).is_none());
+    assert!(detail::h1_blocks(prompt).is_empty());
+    assert_eq!(detail::sections(prompt).len(), 1);
+    let entry = detail::entry(prompt).expect("fixture has sections");
     assert_eq!(entry.name(), "Run");
     assert_eq!(entry.level(), 2);
     assert_eq!(entry.prose(), "Done.");
@@ -67,12 +69,12 @@ fn verify_shared_library(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(prompt.title(), "Shared Library");
     assert_eq!(
-        prompt.replay().map(LuaProgram::source),
+        detail::replay(prompt).map(LuaProgram::source),
         Some("function normalize(value)\n    return string.lower(value)\nend")
     );
-    assert_eq!(prompt.sections().len(), 2);
+    assert_eq!(detail::sections(prompt).len(), 2);
 
-    let prepare = &prompt.sections()[0];
+    let prepare = &detail::sections(prompt)[0];
     assert_eq!(prepare.name(), "Prepare");
     assert_eq!(prepare.level(), 2);
     assert_eq!(prepare.prose(), "Normalize the supplied subject.");
@@ -86,7 +88,7 @@ fn verify_shared_library(prompt: &Prompt) {
         "This nested prose remains attached to Prepare."
     );
 
-    let finish = &prompt.sections()[1];
+    let finish = &detail::sections(prompt)[1];
     assert_eq!(finish.name(), "Finish");
     assert_eq!(finish.prose(), "Return the normalized subject.");
     assert!(finish.children().is_empty());
@@ -101,13 +103,13 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter().promptforge(), Some(0));
     assert_eq!(
         prompt.frontmatter().max_tool_iterations(),
-        MaxToolIterations::Limit(NonZeroU32::new(3).expect("3 is non-zero"))
+        NonZeroU32::new(3)
     );
     assert_eq!(prompt.title(), "Phase Boundaries");
-    assert!(prompt.replay().is_none());
-    assert_eq!(prompt.sections().len(), 2);
+    assert!(detail::replay(prompt).is_none());
+    assert_eq!(detail::sections(prompt).len(), 2);
 
-    let transform = prompt.entry().expect("fixture has sections");
+    let transform = detail::entry(prompt).expect("fixture has sections");
     assert_eq!(transform.name(), "Transform");
     assert_eq!(
         transform.prologue().map(LuaProgram::source),
@@ -120,7 +122,7 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     );
     assert!(transform.children().is_empty());
 
-    let fallback = &prompt.sections()[1];
+    let fallback = &detail::sections(prompt)[1];
     assert_eq!(fallback.name(), "Fallback");
     assert_eq!(fallback.prose(), "This section has prose only.");
     assert!(fallback.prologue().is_none());

@@ -244,16 +244,6 @@ fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
 }
 
 #[test]
-fn from_validated_builds_a_static_id_without_revalidating() {
-    let id = crate::detail::tool_id_from_validated("promptforge/web/search");
-    assert_eq!(id.name(), "search");
-    assert_eq!(
-        id.capability(),
-        CapabilityId::parse("promptforge/web").expect("a valid capability id")
-    );
-}
-
-#[test]
 fn the_migrated_built_in_ids_parse() {
     // The built-ins moved from 2-part server/name onto the global grammar:
     // promptforge/web_fetch -> promptforge/web/fetch and

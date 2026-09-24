@@ -356,13 +356,6 @@ impl Access {
         })
     }
 
-    /// Returns this capability's identity.
-    ///
-    /// Crate-internal: backs [`crate::detail::access_id`].
-    pub(crate) fn id(&self) -> ExecId {
-        self.id
-    }
-
     /// Reads the file at `path` as stored.
     ///
     /// # Errors
@@ -959,7 +952,7 @@ mod tests {
         let vfs = handle(&StubFs::default());
         let first = vfs.acquire(test_origin())?;
         let second = vfs.acquire(test_origin())?;
-        assert_ne!(first.id(), second.id());
+        assert_ne!(first.id, second.id);
         Ok(())
     }
 
@@ -994,11 +987,11 @@ mod tests {
             "names the attempted kind: {message}"
         );
         assert!(
-            message.contains(&format!("{:?}", reader.id())),
+            message.contains(&format!("{:?}", reader.id)),
             "names the claimant: {message}"
         );
         assert!(
-            message.contains(&format!("{:?}", writer.id())),
+            message.contains(&format!("{:?}", writer.id)),
             "names the attempter: {message}"
         );
         Ok(())
@@ -1119,7 +1112,7 @@ mod tests {
         let stub = StubFs::default();
         let vfs = handle(&stub);
         let first = vfs.acquire(test_origin())?;
-        let first_id = first.id();
+        let first_id = first.id;
         first.write("/f.txt", b"1")?;
         drop(first);
         assert!(stub.released().contains(&first_id));
@@ -1135,7 +1128,7 @@ mod tests {
         let parent = vfs.acquire(test_origin())?;
         parent.write("/f.txt", b"1")?;
         let child = parent.spawn(test_origin())?;
-        assert_ne!(parent.id(), child.id());
+        assert_ne!(parent.id, child.id);
         // The parent's pre-spawn write claim is retired: the child can
         // touch the same path without a false conflict.
         child.write("/f.txt", b"2")?;
@@ -1169,7 +1162,7 @@ mod tests {
         let moved = original;
         let other = vfs.acquire(test_origin())?;
         let message = conflict_message(other.write("/f.txt", b"new"));
-        assert!(message.contains(&format!("{:?}", moved.id())));
+        assert!(message.contains(&format!("{:?}", moved.id)));
         assert_eq!(moved.read("/f.txt")?, b"data");
         Ok(())
     }

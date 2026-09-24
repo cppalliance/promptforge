@@ -33,7 +33,7 @@ use crate::{Error, Result};
 use promptforge_lua::ToolOutputKind;
 use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
 use promptforge_model_client::model::ModelCatalog;
-use promptforge_store::StoreExt;
+use promptforge_store::Store;
 
 mod context;
 mod fixtures;

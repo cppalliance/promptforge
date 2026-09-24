@@ -229,7 +229,7 @@ impl TestStore {
         let access = vfs
             .acquire(promptforge_vfs::Origin::new("TestStore::read"))
             .map_err(StoreError::backend)?;
-        vfs.store(&access).read(path)
+        Store::new(&access).read(path)
     }
 
     pub(super) fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
@@ -237,7 +237,7 @@ impl TestStore {
         let access = vfs
             .acquire(promptforge_vfs::Origin::new("TestStore::glob"))
             .map_err(StoreError::backend)?;
-        vfs.store(&access).glob(pattern)
+        Store::new(&access).glob(pattern)
     }
 }
 

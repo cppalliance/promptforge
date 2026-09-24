@@ -165,7 +165,7 @@ impl SectionContext {
         )?;
         // H1's visible set is the whole top-level slice: section 0
         // excludes nothing and has no children.
-        let visible = ctx.prompt().sections().to_vec();
+        let visible = promptforge_parser::detail::sections(ctx.prompt()).to_vec();
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
         // H1's one privilege: `argv` installs writable, so the repair
         // pattern can assign it; the executor reads the value back at the

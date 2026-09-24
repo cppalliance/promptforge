@@ -85,7 +85,8 @@ lifecycle_pairs! {
 /// [`forward_lifecycle`] owns.
 macro_rules! task_lifecycle_variants {
     () => {
-        Event::Lua { .. }
+        Event::ModelMetadataDegraded { .. }
+            | Event::Lua { .. }
             | Event::TaskStarted { .. }
             | Event::TaskSucceeded { .. }
             | Event::TaskFailed { .. }
@@ -170,6 +171,16 @@ pub(crate) fn forward_one(event: Event, observer: &dyn Observer, debug: Option<&
 /// The lifecycle and task variants with payloads, as observations.
 fn forward_lifecycle(event: Event, observer: &dyn Observer) {
     match event {
+        Event::ModelMetadataDegraded {
+            execution,
+            section,
+            message,
+            ..
+        } => observer.observe(
+            &execution,
+            &section,
+            Observation::Other(format!("Model metadata degraded: {message}")),
+        ),
         Event::Lua {
             execution,
             section,

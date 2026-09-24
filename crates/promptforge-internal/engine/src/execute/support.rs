@@ -4,12 +4,12 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use promptforge_model_client::detail::{
-    completion_into_result, completion_take_request_body, completion_take_response_body,
-    completion_vllm_metrics,
+    completion_into_result, completion_metadata_diagnostics, completion_take_request_body,
+    completion_take_response_body, completion_vllm_metrics,
 };
 use promptforge_types::emitter::Emitter;
-use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
+use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::metrics::CallMetrics;
 
 use crate::model::{Completion, CompletionResult};
@@ -94,9 +94,10 @@ pub(crate) struct Served {
 ///
 /// The sequence is fixed and lives here for both the chat and the nested
 /// inference paths: the debug request/response pair, `MODEL_TURN_COMPLETED`,
-/// the thinking side channel, the `length` truncation observation, then
-/// exactly one `assistant_reply` content report carrying `origin` - the
-/// chat arm's [`ReplyOrigin::Chat`] or the nested-inference arm's
+/// one `model_metadata_degraded` per metadata diagnostic the completion
+/// holds, the thinking side channel, the `length` truncation observation,
+/// then exactly one `assistant_reply` content report carrying `origin` -
+/// the chat arm's [`ReplyOrigin::Chat`] or the nested-inference arm's
 /// [`ReplyOrigin::Infer`]. A non-text outcome fires the shared prefix and
 /// no content report.
 pub(crate) fn report_model_turn(
@@ -124,6 +125,17 @@ pub(crate) fn report_model_turn(
         );
     }
     emitter.report(section, lifecycle::MODEL_TURN_COMPLETED);
+    for message in completion_metadata_diagnostics(&completion) {
+        emitter.emit(section, |execution, section, provenance| {
+            Event::ModelMetadataDegraded {
+                execution,
+                section,
+                provenance,
+                turn,
+                message: message.clone(),
+            }
+        });
+    }
     // The content reports every host transcript is built from: the
     // thinking side channel first, then the reply, each with model and
     // metrics.
@@ -154,3 +166,7 @@ pub(crate) fn report_model_turn(
     }
     (outcome, served)
 }
+
+#[cfg(test)]
+#[path = "support-tests.rs"]
+mod tests;

@@ -2,11 +2,10 @@
 //!
 //! A prompt run keeps its bulk state in virtual files addressed by logical
 //! string paths. [`Store`] is a concrete facade over a prefix-scoped
-//! [`Access`] capability from the shared VFS: the [`StoreExt`] extension
-//! trait (re-exported in [`prelude`]) gives every `VfsRef` the
-//! `vfs.store(&access)` call shape, binding the facade to the caller's
-//! identity so its operations participate in the claims model - a second
-//! live identity's conflicting write surfaces as [`StoreError::WriteRace`].
+//! [`Access`] capability from the shared VFS: [`Store::new`] binds the
+//! facade to the caller's identity so its operations participate in the
+//! claims model - a second live identity's conflicting write surfaces as
+//! [`StoreError::WriteRace`].
 //!
 //! The facade keeps the store's caller-facing contract: logical paths
 //! validated before dispatch, verbatim reads, anchor-based edits
@@ -24,7 +23,7 @@ mod path;
 
 use std::fmt::Write as _;
 
-use promptforge_vfs::{FileType, STORE_MOUNT, VfsError, VfsRef};
+use promptforge_vfs::{FileType, STORE_MOUNT, VfsError};
 
 pub use promptforge_vfs::Access;
 
@@ -48,13 +47,13 @@ pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 ///
 /// # Examples
 /// ```
-/// use promptforge_store::StoreExt;
+/// use promptforge_store::Store;
 ///
 /// let vfs = promptforge_vfs::empty();
 /// let access = vfs
 ///     .acquire(promptforge_vfs::Origin::new("store example"))
 ///     .map_err(promptforge_store::StoreError::backend)?;
-/// let store = vfs.store(&access);
+/// let store = Store::new(&access);
 /// store.write("shared.txt", "state")?;
 /// assert_eq!(store.read("shared.txt")?, "state");
 /// # Ok::<(), promptforge_store::StoreError>(())
@@ -68,10 +67,8 @@ impl<'a> Store<'a> {
     /// Returns the facade over one identity's capability, scoped to the
     /// stock store mount.
     ///
-    /// This is the constructor for holders that own the [`Access`] - the
-    /// Lua VM's store closures build a facade per call over their shared
-    /// `Arc<Access>`. Callers holding a `VfsRef` prefer the
-    /// [`StoreExt::store`] shape.
+    /// The Lua VM's store closures build a facade per call over their
+    /// shared `Arc<Access>`.
     #[must_use]
     pub fn new(access: &'a Access) -> Store<'a> {
         Store { access }
@@ -88,13 +85,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
@@ -114,13 +111,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.append("a.txt", "hi")?;
     /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
@@ -142,13 +139,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "hi\n")?;
     /// assert_eq!(store.read("a.txt")?, "hi\n");
     /// # Ok::<(), promptforge_store::StoreError>(())
@@ -175,13 +172,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(store.read_range("a.txt", 2, None)?, "two\nthree");
     /// assert_eq!(store.read_range("a.txt", 2, Some(99))?, "two\nthree");
@@ -216,13 +213,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
     /// assert_eq!(
     ///     store.read_range_numbered("a.txt", 1, None)?,
@@ -272,13 +269,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
     /// assert_eq!(store.read("a.txt")?, "one three");
@@ -324,13 +321,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "hi")?;
     /// store.delete("a.txt")?;
     /// store.delete("a.txt")?; // already gone; still Ok
@@ -362,13 +359,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// store.write("a.txt", "")?;
     /// store.write("b.md", "")?;
     /// assert_eq!(store.glob("*.txt")?, vec!["a.txt"]);
@@ -441,13 +438,13 @@ impl Store<'_> {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_store::StoreExt;
+    /// use promptforge_store::Store;
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
     ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
+    /// let store = Store::new(&access);
     /// assert!(!store.exists("a.txt")?);
     /// store.write("a.txt", "hi")?;
     /// assert!(store.exists("a.txt")?);
@@ -459,42 +456,6 @@ impl Store<'_> {
             .exists(&full(path.as_str()))
             .map_err(|err| map_vfs(err, path.as_str()))
     }
-}
-
-/// The extension trait behind the `vfs.store(&access)` call shape.
-///
-/// The [`Store`] facade type sits in this crate, above `promptforge-vfs`
-/// in the dependency stack, so the method cannot be
-/// inherent on `VfsRef`; a prelude-exported extension trait preserves the
-/// declared call shape without inverting the stack.
-pub trait StoreExt {
-    /// Returns the store facade scoped to the stock store mount, bound to
-    /// `access`'s identity.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_store::StoreExt;
-    ///
-    /// let vfs = promptforge_vfs::empty();
-    /// let access = vfs
-    ///     .acquire(promptforge_vfs::Origin::new("store example"))
-    ///     .map_err(promptforge_store::StoreError::backend)?;
-    /// let store = vfs.store(&access);
-    /// store.write("seeded.txt", "input")?;
-    /// # Ok::<(), promptforge_store::StoreError>(())
-    /// ```
-    fn store<'a>(&self, access: &'a Access) -> Store<'a>;
-}
-
-impl StoreExt for VfsRef {
-    fn store<'a>(&self, access: &'a Access) -> Store<'a> {
-        Store { access }
-    }
-}
-
-/// The integrator prelude: the facade and its extension trait.
-pub mod prelude {
-    pub use crate::{Store, StoreExt};
 }
 
 /// Joins a validated logical path onto the store mount prefix.

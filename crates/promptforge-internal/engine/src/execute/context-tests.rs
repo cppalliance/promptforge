@@ -51,7 +51,10 @@ fn clones_share_the_prompt_allocation() {
 fn derived_values_come_from_the_prompt_and_limits() {
     let prompt = test_prompt();
     let ctx = test_context(&prompt);
-    assert_eq!(ctx.section_count(), prompt.sections().len());
+    assert_eq!(
+        ctx.section_count(),
+        promptforge_parser::detail::sections(&prompt).len()
+    );
     assert_eq!(ctx.max_tool_iterations(), 24);
 }
 

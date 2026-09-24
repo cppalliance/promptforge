@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge run-scoped virtual files: the Store facade over the shared VFS, exposed as vfs.store(&access)"
+description = "PromptForge run-scoped virtual files: the Store facade over the shared VFS, built by Store::new(&access)"
 readme = "README.md"
 keywords = ["prompt", "llm", "virtual-filesystem", "storage"]
 categories = ["data-structures", "rust-patterns"]
