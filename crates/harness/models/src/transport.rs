@@ -4,8 +4,8 @@
 //! The request body, the stream reassembly, and the read loop that applies
 //! the byte cap and measures the timing are the engine's shared protocol
 //! seams (`promptforge::transport`); this file owns only what touches the
-//! wire: sending, the request timeout, the response as a chunk source, and
-//! the clock the read loop is handed.
+//! wire: sending, the per-receive timeout, the response as a chunk source,
+//! and the clock the read loop is handed.
 
 use std::fmt;
 use std::num::NonZeroU64;
@@ -34,13 +34,15 @@ pub struct GatewayClient {
     base_url: String,
     /// The bearer presented on every request, or `None` to present nothing.
     key: Option<SecretString>,
-    /// Wall-clock cap applied to each completion request.
+    /// Longest wait for the response headers, and then for each next body
+    /// chunk; a stream that keeps arriving is never cut off.
     request_timeout: Duration,
     /// Byte ceiling enforced on a response body before it is decoded.
     max_response_bytes: u64,
 }
 
-/// Default per-request timeout, matching the executor's run limits.
+/// Default longest wait for the next receive, matching the executor's run
+/// limits.
 pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Default response-body ceiling, matching the executor's run limits.
 const DEFAULT_MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
@@ -71,16 +73,27 @@ pub(crate) fn transport_source(error: reqwest::Error) -> Box<dyn std::error::Err
     Box::new(error)
 }
 
-/// A [`reqwest::Response`] body as the reassembly's chunk source.
-struct ResponseChunks(reqwest::Response);
+/// Wraps an elapsed receive deadline as a transport failure under the
+/// vocabulary's timeout marker, so it reports exactly as a `reqwest`
+/// timeout does.
+fn elapsed(error: tokio::time::error::Elapsed) -> Error {
+    Error::Http(Box::new(ClientTimeout(Box::new(error))))
+}
+
+/// A [`reqwest::Response`] body as the reassembly's chunk source, with each
+/// receive bounded by the client's timeout.
+struct ResponseChunks {
+    response: reqwest::Response,
+    timeout: Duration,
+}
 
 impl ChunkSource for ResponseChunks {
     type Chunk = bytes::Bytes;
 
     async fn next_chunk(&mut self) -> Result<Option<Self::Chunk>, CompletionError> {
-        self.0
-            .chunk()
+        tokio::time::timeout(self.timeout, self.response.chunk())
             .await
+            .map_err(|error| CompletionError::from(elapsed(error)))?
             .map_err(|error| CompletionError::from(http(error)))
     }
 }
@@ -206,9 +219,12 @@ impl GatewayClient {
 
     /// Applies the run's HTTP limits to this client.
     ///
-    /// Each completion request is bounded by `request_timeout`, and the response
-    /// body is refused once it would exceed `max_response_bytes` before any
-    /// UTF-8 or JSON decoding runs.
+    /// `request_timeout` is the longest a completion request waits for its
+    /// response headers, and then for each next body chunk; every receive
+    /// restarts it, so a long stream that keeps arriving completes while
+    /// one that stalls fails as a timeout. The response body is refused
+    /// once it would exceed `max_response_bytes` before any UTF-8 or JSON
+    /// decoding runs.
     ///
     /// # Examples
     ///
@@ -287,8 +303,9 @@ impl GatewayClient {
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
     /// (F11 - the full reachable set):
     /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
-    /// - `Transport` on a transport-layer failure (connection, timeout) or
-    ///   when the stream contains a mid-flight error envelope;
+    /// - `Transport` on a transport-layer failure (connection, or no headers
+    ///   or next chunk within the timeout) or when the stream contains a
+    ///   mid-flight error envelope;
     /// - `Backend` when the gateway responds with a non-success status;
     /// - `MalformedResponse` when the stream exceeds the size cap, a chunk's
     ///   shape is unusable (the JSON decode failure is retained as a private
@@ -310,21 +327,27 @@ impl GatewayClient {
         let request_body = build_request_body(messages, tools, options);
 
         let started = Instant::now();
+        // No reqwest `.timeout`: it caps the whole request including the
+        // body, which would cut off a long stream that is still arriving.
+        // The timeout bounds the headers here and each receive in
+        // `ResponseChunks`.
         let mut request = http
             .post(format!("{}/chat/completions", self.base_url))
-            // reqwest's whole-request timeout covers the body read, so the
-            // run's wall-clock cap bounds the entire stream, not just the
-            // connection.
-            .timeout(self.request_timeout)
             .json(&request_body);
         if let Some(key) = &self.key {
             request = request.bearer_auth(key.expose());
         }
-        let response = request.send().await.map_err(self::http)?;
+        let response = tokio::time::timeout(self.request_timeout, request.send())
+            .await
+            .map_err(elapsed)?
+            .map_err(self::http)?;
 
         let status = response.status();
         let content_length = response.content_length();
-        let mut chunks = ResponseChunks(response);
+        let mut chunks = ResponseChunks {
+            response,
+            timeout: self.request_timeout,
+        };
         if !status.is_success() {
             let raw_body =
                 read_body_capped(&mut chunks, content_length, self.max_response_bytes).await?;

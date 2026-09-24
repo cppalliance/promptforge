@@ -7,11 +7,12 @@
 use std::num::NonZeroU32;
 
 use crate::parser::Prompt;
-use crate::test_support::{RunHost, run_with_host};
+use crate::test_support::{RunHost, run_host, run_with_host};
 use crate::{Environment, RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
+use super::super::{ScriptedGateway, gateway_client, resp_text};
 use super::support::context;
 
 /// A prompt declaring no capabilities at all.
@@ -145,6 +146,75 @@ async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
         panic!("a satisfiable prompt runs through implicit prepare: {result:?}");
     };
     assert_eq!(text, "done");
+}
+
+/// A prompt declaring one `no-thinking` role whose section asks it one
+/// question.
+const DECLARES_NO_THINKING: &str = concat!(
+    "---\n",
+    "name: declares-no-thinking\n",
+    "description: d\n",
+    "promptforge: 0\n",
+    "models:\n",
+    "  writer:\n",
+    "    keywords: [no-thinking]\n",
+    "---\n\n",
+    "# Title\n\n",
+    "## Only\n\n",
+    "```lua\n",
+    "models.use('writer')\n",
+    "return models.infer('ping')\n",
+    "```\n",
+);
+
+#[tokio::test]
+async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
+    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let (ctx, requirements) = Environment::new().prepare(
+        &prompt,
+        context("switchable").model(current_model(32_000, ThinkingMode::Switchable)),
+    );
+    assert!(
+        requirements.is_satisfied(),
+        "a switchable model can turn thinking off: {requirements:?}"
+    );
+    let host = RunHost::new().client(gateway_client(gateway.addr()));
+    let result = run_host(&prompt, "", ctx, host).await;
+    let RunResult::Ok(text) = result else {
+        panic!("the prepared prompt runs: {result:?}");
+    };
+    assert_eq!(text, "pong");
+    let body = gateway
+        .last_request()
+        .expect("the round reaches the gateway");
+    assert_eq!(body["model"], "current");
+    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+}
+
+#[tokio::test]
+async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
+    let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
+    let result = run_with_host(
+        &Environment::new(),
+        &prompt,
+        "",
+        context("always").model(current_model(32_000, ThinkingMode::Always)),
+        RunHost::new(),
+    )
+    .await;
+    let RunResult::Failure(error) = result else {
+        panic!("a model that always thinks cannot satisfy no-thinking: {result:?}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    assert!(
+        notice.contains(
+            "role 'writer': requires 'no-thinking'; \
+             the current model's thinking capability is Always"
+        ),
+        "the notice gives required versus actual keywords: {notice}"
+    );
 }
 
 /// A prompt declaring one tool slot whose capability is not declared at

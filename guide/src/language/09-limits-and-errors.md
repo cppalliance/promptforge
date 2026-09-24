@@ -21,7 +21,7 @@ A run ships with these default limits:
 - a 16 MiB model response cap
 - 64 MiB of Lua memory per section state
 - 1024 Lua log events per section state
-- a 120 second request timeout
+- a model request limit of 120 seconds without progress: the wait for the response, and then for each next piece of the stream, restarts whenever data arrives, so a long reply that keeps streaming is never cut off
 
 A Lua block that exhausts a host resource quota fails with a typed quota error naming the exhausted resource: log events, log bytes, or instructions.
 

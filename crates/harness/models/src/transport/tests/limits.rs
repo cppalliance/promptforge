@@ -1,10 +1,10 @@
 //! The bounds and refusals: the disabled sentinel, the byte caps on both
-//! paths, the request timeout, and the malformed or cut-off stream.
+//! paths, the per-receive timeout, and the malformed or cut-off stream.
 
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use promptforge::model::Message;
+use promptforge::model::{CompletionResult, Message};
 
 use super::*;
 use crate::CompletionErrorKind;
@@ -105,7 +105,7 @@ async fn a_request_past_the_timeout_is_a_timeout_transport_failure() {
     use axum::Router;
     use axum::routing::post;
 
-    // The run's wall-clock cap bounds the whole request; a gateway that
+    // The timeout bounds the wait for the response headers; a gateway that
     // never answers within it fails as Transport, and the timeout survives
     // the type erasure so `is_timeout` holds.
     async fn stall() -> (axum::http::StatusCode, String) {
@@ -120,6 +120,138 @@ async fn a_request_past_the_timeout_is_a_timeout_transport_failure() {
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("a stalled gateway must time out");
+    assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    assert!(
+        err.is_timeout(),
+        "the timeout must be recognizable: {err:?}"
+    );
+    assert!(err.is_retryable());
+}
+
+/// Reads one request through its body, so answering and closing never
+/// resets a connection that still holds unread bytes.
+async fn read_request(sock: &mut tokio::net::TcpStream) {
+    use tokio::io::AsyncReadExt;
+
+    let mut request = Vec::new();
+    let mut buf = [0u8; 1024];
+    while let Ok(read @ 1..) = sock.read(&mut buf).await {
+        request.extend_from_slice(&buf[..read]);
+        let text = String::from_utf8_lossy(&request);
+        let Some(end) = text.find("\r\n\r\n") else {
+            continue;
+        };
+        let length = text[..end]
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        if request.len() >= end + 4 + length {
+            return;
+        }
+    }
+}
+
+/// Serves one completion as a chunked SSE response written piece by piece,
+/// each after its pause, and returns the `/v1` base. With `stall` the body
+/// is never terminated and the socket stays open.
+async fn spawn_paced_gateway(pieces: Vec<(Duration, String)>, stall: bool) -> String {
+    use tokio::io::AsyncWriteExt;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    spawn_tagged(mock_tag(), async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        // Small paced writes must leave at once, not wait on Nagle.
+        let _ = sock.set_nodelay(true);
+        read_request(&mut sock).await;
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+                    Transfer-Encoding: chunked\r\n\r\n";
+        if sock.write_all(head.as_bytes()).await.is_err() {
+            return;
+        }
+        for (pause, piece) in pieces {
+            tokio::time::sleep(pause).await;
+            let frame = format!("{:x}\r\n{piece}\r\n", piece.len());
+            if sock.write_all(frame.as_bytes()).await.is_err() {
+                return;
+            }
+        }
+        if stall {
+            std::future::pending::<()>().await;
+        }
+        let _ = sock.write_all(b"0\r\n\r\n").await;
+    });
+    format!("http://{addr}/v1")
+}
+
+/// The stream's closing `stop` chunk and `[DONE]` sentinel.
+fn stream_close() -> String {
+    sse_body(&[serde_json::json!({
+        "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+    })])
+}
+
+/// A keyed client for `base` whose timeout is `budget`.
+fn budgeted_client(base: &str, budget: Duration) -> GatewayClient {
+    keyed_client(base).with_request_limits(budget, NonZeroU64::new(1024 * 1024).expect("non-zero"))
+}
+
+#[tokio::test]
+async fn a_steady_stream_longer_than_the_timeout_completes() {
+    let gap = Duration::from_millis(50);
+    let mut pieces: Vec<(Duration, String)> = (0..5)
+        .map(|_| (gap, format!("data: {}\n\n", content_chunk("tick"))))
+        .collect();
+    pieces.push((gap, stream_close()));
+    let base = spawn_paced_gateway(pieces, false).await;
+    let completion = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("a stream that keeps arriving is not timed out");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "tick".repeat(5).as_str()),
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_single_event_trickled_past_the_timeout_completes() {
+    let event = format!("data: {}\n\n", content_chunk("trickled"));
+    let gap = Duration::from_millis(30);
+    let step = event.len().div_ceil(10);
+    let mut pieces: Vec<(Duration, String)> = event
+        .as_bytes()
+        .chunks(step)
+        .map(|piece| (gap, String::from_utf8(piece.to_vec()).expect("ASCII event")))
+        .collect();
+    assert!(pieces.len() >= 9, "the event arrives in about ten pieces");
+    pieces.push((gap, stream_close()));
+    let base = spawn_paced_gateway(pieces, false).await;
+    let completion = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("every received piece restarts the timeout");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "trickled"),
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_stream_that_stalls_after_the_headers_is_a_timeout_transport_failure() {
+    let pieces = vec![(
+        Duration::ZERO,
+        format!("data: {}\n\n", content_chunk("half")),
+    )];
+    let base = spawn_paced_gateway(pieces, true).await;
+    let err = budgeted_client(&base, Duration::from_millis(100))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("a stream that stops arriving must time out");
     assert_eq!(err.kind(), CompletionErrorKind::Transport);
     assert!(
         err.is_timeout(),

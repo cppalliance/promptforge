@@ -28,9 +28,9 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# The delta channel: `sync` for the sender a chat performer streams to.
-# Nothing here spawns; the runner does.
-tokio = { workspace = true, features = ["sync"] }
+# The delta channel: `sync` for the sender a chat performer streams to;
+# `time` for the per-receive timeout. Nothing here spawns; the runner does.
+tokio = { workspace = true, features = ["sync", "time"] }
 url.workspace = true
 workspace-hack.workspace = true
 

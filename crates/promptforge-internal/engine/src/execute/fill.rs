@@ -88,7 +88,7 @@ pub(super) fn fill_model_bindings(
                 ModelKeyword::Thinking if model.thinking() == ThinkingMode::Never => {
                     Some("thinking")
                 }
-                ModelKeyword::NoThinking if model.thinking() != ThinkingMode::Never => {
+                ModelKeyword::NoThinking if model.thinking() == ThinkingMode::Always => {
                     Some("no-thinking")
                 }
                 _ => None,

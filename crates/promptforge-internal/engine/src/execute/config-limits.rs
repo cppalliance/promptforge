@@ -24,7 +24,7 @@ nz!(nz_usize, NonZeroUsize, usize);
 
 /// Resource ceilings a run honors at its bounded sites: per-section tool
 /// iterations, fanout concurrency, model response size, Lua memory, Lua log
-/// volume, and the request timeout.
+/// volume, and the model receive timeout.
 ///
 /// The defaults are safe, non-environment values that a clean build can use
 /// as they are. Frontmatter `max_tool_iterations`, when present, still
@@ -54,7 +54,8 @@ pub struct RunLimits {
 
 impl RunLimits {
     /// Builds the default limits (24 tool iterations, 8-way fanout, 16 MiB
-    /// response cap, 64 MiB Lua memory, 1024 Lua log events, 120 s timeout).
+    /// response cap, 64 MiB Lua memory, 1024 Lua log events, and a 120 s
+    /// longest wait for the next model receive).
     ///
     /// # Examples
     /// ```
@@ -109,7 +110,9 @@ impl RunLimits {
         self
     }
 
-    /// Sets the per-request model HTTP timeout.
+    /// Sets the longest a model request waits for its next receive: the
+    /// response headers, then each body chunk. Every receive restarts the
+    /// wait, so a long stream that keeps arriving is never cut off.
     #[must_use]
     pub fn request_timeout(mut self, value: Duration) -> RunLimits {
         self.request_timeout = value;
@@ -146,7 +149,7 @@ impl RunLimits {
         self.lua_log_events
     }
 
-    /// Returns the per-request model HTTP timeout.
+    /// Returns the longest a model request waits for its next receive.
     #[must_use]
     pub fn timeout(&self) -> Duration {
         self.request_timeout

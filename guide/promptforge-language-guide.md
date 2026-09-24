@@ -375,7 +375,7 @@ models:
 
 Each key is a prompt-local label. A role declares a keyword set, an optional `min_context` token floor, and a description.
 
-The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
+The keyword vocabulary is closed, and split in two. The hard keywords, `thinking` and `no-thinking`, are checked at prepare against the filled model's descriptor, as is the context minimum: a role requiring `min_context: 200000` filled with a 32k model, or requiring `thinking` filled with a model that never thinks, is reported as an unmet requirement naming the role, required versus actual. `no-thinking` is satisfied by a model that never thinks or by one whose thinking is switchable, and only a model that always thinks is refused. On a switchable model every round under the role asks for thinking off. The switch is forwarded as `chat_template_kwargs.enable_thinking`, so an upstream that ignores that field keeps its own default. The soft keywords - `frontier`, `fast`, `small`, `creative`, and `chat` - document author intent for the day a smarter fill can shop for them. An unknown keyword fails the parse; adding a keyword is a language change.
 
 Today's fill is deliberately trivial: every declared role binds to the host's current model (in the Workshop, the dropdown's selection). The declaration is written for the full contract - roles, requirements, checks - so the same prompt runs unchanged when a smarter fill arrives; only the binding decisions change.
 
@@ -676,7 +676,7 @@ A run ships with these default limits:
 - a 16 MiB model response cap
 - 64 MiB of Lua memory per section state
 - 1024 Lua log events per section state
-- a 120 second request timeout
+- a model request limit of 120 seconds without progress: the wait for the response, and then for each next piece of the stream, restarts whenever data arrives, so a long reply that keeps streaming is never cut off
 
 A Lua block that exhausts a host resource quota fails with a typed quota error naming the exhausted resource: log events, log bytes, or instructions.
 

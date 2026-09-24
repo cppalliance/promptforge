@@ -237,10 +237,10 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     assert_eq!(unmet.actual, "Never");
 
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
-    // `no-thinking` against a Switchable model.
+    // `no-thinking` against an Always model.
     let (_ctx, requirements) = env.prepare(
         &prompt,
-        context("fill").model(current_model(32_000, ThinkingMode::Switchable)),
+        context("fill").model(current_model(32_000, ThinkingMode::Always)),
     );
     let [unmet] = requirements.unmet_requirements.as_slice() else {
         panic!(
@@ -251,7 +251,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
     assert_eq!(unmet.role, "triage");
     assert_eq!(unmet.check, RequirementCheck::HardKeyword);
     assert_eq!(unmet.required, "no-thinking");
-    assert_eq!(unmet.actual, "Switchable");
+    assert_eq!(unmet.actual, "Always");
 }
 
 // ToolBindings and slot filling: exact slots fill by identity against
