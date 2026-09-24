@@ -6,16 +6,25 @@ use super::*;
 #[tokio::test]
 async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     // models.use -> completion_options -> GatewayClient::complete must set
-    // the binding's model and the hard-keyword thinking switch on the chat
-    // body. (v1 roles declare no sampling fields; the thinking switch is the
-    // one invocation parameter with a frontmatter source.)
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+    // the binding's model, the hard-keyword thinking switch, and the
+    // section's `models.use` sampling options on the chat body. Roles
+    // declare no sampling fields, so a section on the prompt-wide default
+    // sends none.
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("hello from the mock"),
+        resp_text("hello again"),
+    ])
+    .await;
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst:\n    keywords: [no-thinking]\n---\n\n\
 # T\n\n\
+```lua\nmodels.default('analyst')\n```\n\n\
 ## Only\n\n\
-```lua\nmodels.use('analyst')\n```\n\n\
+```lua\nmodels.use('analyst', { temperature = 0, max_tokens = 256 })\n```\n\n\
 Ask the model.\n\n\
+```lua\nmodels.infer(prose)\n```\n\n\
+## Next\n\n\
+Ask again.\n\n\
 ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = Prompt::parse(md, EXECUTION).0.expect("fixture must parse");
     let mut ctx = test_context(EXECUTION);
@@ -33,13 +42,22 @@ Ask the model.\n\n\
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
     };
-    assert_eq!(out, "hello from the mock");
+    assert_eq!(out, "hello again");
 
-    let body = gateway
-        .last_request()
-        .expect("complete must reach the gateway");
-    assert_eq!(body["model"], "analyst");
-    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    let requests = gateway.requests();
+    assert_eq!(requests.len(), 2, "one round per section: {requests:?}");
+    let selected = &requests[0];
+    assert_eq!(selected["model"], "analyst");
+    assert_eq!(selected["chat_template_kwargs"]["enable_thinking"], false);
+    assert_eq!(selected["temperature"], 0.0);
+    assert_eq!(selected["max_tokens"], 256);
+    let defaulted = &requests[1];
+    assert_eq!(defaulted["model"], "analyst");
+    assert_eq!(defaulted["chat_template_kwargs"]["enable_thinking"], false);
+    assert!(
+        defaulted.get("temperature").is_none() && defaulted.get("max_tokens").is_none(),
+        "a section on the prompt-wide default sends neither option: {defaulted}"
+    );
 }
 
 #[tokio::test]

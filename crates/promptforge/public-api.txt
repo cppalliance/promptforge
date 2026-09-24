@@ -558,6 +558,7 @@ pub fn promptforge::model::ModelBinding::id(&self) -> &promptforge::model::Model
 pub fn promptforge::model::ModelBinding::invocation(&self) -> &promptforge::model::ModelInvocation
 pub fn promptforge::model::ModelBinding::new(alias: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, id: promptforge::model::ModelId, invocation: promptforge::model::ModelInvocation, context: core::num::nonzero::NonZeroU32) -> Self
 pub fn promptforge::model::ModelBinding::with_capabilities(self, capabilities: alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn promptforge::model::ModelBinding::with_invocation(self, invocation: promptforge::model::ModelInvocation) -> Self
 pub fn promptforge::model::ModelBindings::is_empty(&self) -> bool
 pub fn promptforge::model::ModelBindings::len(&self) -> usize
 pub fn promptforge::model::ModelBindings::model(&self, id: &promptforge::model::ModelId) -> core::option::Option<&promptforge::model::ModelDescriptor>

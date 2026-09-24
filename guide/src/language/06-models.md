@@ -34,9 +34,19 @@ The label names a role declared in the frontmatter `models` key, and an unknown 
 
 Inside a section, `models.use('analyst')` selects a bound role by its label for that section. The selection is read when a model round starts, so a later `models.use` call in the same section replaces it and steers the next round. A section that runs a model round needs a model from `models.use` or from the prompt-wide default; with neither, the call fails with a model-required error.
 
+An optional second argument sets sampling options for the selection:
+
+````lua
+models.use('analyst', { temperature = 0, max_tokens = 1024 })
+````
+
+The table accepts two fields. `temperature` is a number from 0 to 2, written as an integer or a decimal. `max_tokens` is a positive integer that caps how many tokens the model generates. An unknown key, a value that breaks those rules, a second argument that is not a table, or a third argument fails the call with an error naming the option, required versus actual.
+
+The options apply to the rounds that run on this selection - `models.infer(prose)`, `models.loop(msgs)`, and any round on the handle this `models.use` call returns. Rounds on the prompt-wide default or on a `models.get` handle do not see them. A later `models.use` replaces the options along with the selection, so a plain `models.use('analyst')` clears them. Leaving a field out keeps the model's default. The value passes through to the provider as given, so a provider that refuses a temperature fails the round with its own error.
+
 ## Inspecting a binding
 
-Every bound role is also a bare global holding an inspectable handle, and `models.get(label)` returns the same handle, with `name`, `label`, `capabilities`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
+Every bound role is also a bare global holding an inspectable handle, and `models.get(label)` returns the same handle, with `name`, `label`, `capabilities`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens` fields. On the handle `models.use` returns, `temperature` and `max_tokens` show the section's options; on every other handle, and for a field the options leave out, they read nil. Reading a handle does not change the section's selection. Handles are plain values: they have no methods, and every operation that accepts one takes it as a leading argument.
 
 ## Direct inference
 
@@ -101,4 +111,4 @@ models:
 models.default('analyst')
 ````
 
-The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements move into `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only.
+The `models.bind` call is removed. What was its prose description now documents the role, the hard requirements move into `keywords` and `min_context`, and `models.default` and `models.use` name declared labels only. The old `models.bind` options `temperature` and `max_tokens` now go in the `models.use` options table, as in `models.use('analyst', { temperature = 0.2 })`.

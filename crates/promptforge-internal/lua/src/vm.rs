@@ -1341,8 +1341,8 @@ pub fn current_tool_bindings(
 }
 
 /// Reads the section's effective model binding through the run's model view
-/// without mutating the model runtime: the H2 `models.use` selection, else
-/// the prompt-wide `models.default` baseline.
+/// without mutating the model runtime: the H2 `models.use` selection with
+/// its options applied, else the prompt-wide `models.default` baseline.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the model runtime's mutex is poisoned or the
@@ -1351,21 +1351,25 @@ pub fn resolve_model_binding(
     bindings: &dyn ModelView,
     runtime: &Mutex<ModelRuntime>,
 ) -> Result<Option<ModelBinding>> {
-    let used = {
+    let selection = {
         let runtime = runtime
             .lock()
             .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-        runtime.used().map(String::from)
+        runtime
+            .selection()
+            .map(|(alias, options)| (alias.to_owned(), options))
     };
-    let alias = match used {
-        Some(alias) => Some(alias),
-        None => bindings.default()?,
+    let frozen = |alias: &str| -> Result<ModelBinding> {
+        bindings
+            .binding(alias)?
+            .ok_or_else(|| Error::Lua(format!("model alias {alias:?} has no frozen binding")))
     };
-    match alias {
-        Some(alias) => Ok(Some(bindings.binding(&alias)?.ok_or_else(|| {
-            Error::Lua(format!("model alias {alias:?} has no frozen binding"))
-        })?)),
-        None => Ok(None),
+    match selection {
+        Some((alias, options)) => Ok(Some(options.apply(frozen(&alias)?))),
+        None => match bindings.default()? {
+            Some(alias) => Ok(Some(frozen(&alias)?)),
+            None => Ok(None),
+        },
     }
 }
 

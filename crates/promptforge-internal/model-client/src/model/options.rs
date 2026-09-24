@@ -132,6 +132,13 @@ impl ModelBinding {
         self
     }
 
+    /// Replaces the frozen per-request fields.
+    #[must_use]
+    pub fn with_invocation(mut self, invocation: ModelInvocation) -> Self {
+        self.invocation = invocation;
+        self
+    }
+
     /// Returns the bound role's keyword set.
     #[must_use]
     pub fn capabilities(&self) -> &[String] {
