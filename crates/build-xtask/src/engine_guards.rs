@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 const ENGINE_ROOT_CRATES: [&str; 1] = ["promptforge"];
 
 /// The private container whose every member is an engine crate.
-const ENGINE_CONTAINER: &str = "promptforge-internal";
+pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 
 /// The identifiers the sans-I/O engine plan retired. Live engine source
 /// (outside `#[cfg(test)]`, `tests/`, and test-support modules) may not

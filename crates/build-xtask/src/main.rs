@@ -5,8 +5,12 @@
 //! - Tier: tooling; depends on no workspace crates. The tidy-style
 //!   architecture checks run as tests (`cargo test -p build-xtask`);
 //!   `cargo xtask tidy` prints the same report on demand.
+//! - `cargo xtask api` reads rustdoc JSON, so it runs only on the nightly
+//!   pinned in `api/toolchain.rs`; its fixtures that build rustdoc JSON are
+//!   `#[ignore]`d on stable.
 //! - Every file in this crate stays under 500 lines; split first, then edit.
 
+mod api;
 mod engine_deps;
 mod engine_guards;
 mod facade_shape;
@@ -41,6 +45,7 @@ fn main() -> ExitCode {
             },
             None => usage(),
         },
+        Some("api") => api::run(root, &args[2..]),
         Some("tidy") => {
             let violations = tidy::all_violations(root);
             if violations.is_empty() {
@@ -58,6 +63,9 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: cargo xtask new-crate <workshop-name> | cargo xtask tidy");
+    eprintln!(
+        "usage: cargo xtask new-crate <workshop-name> | cargo xtask tidy | \
+         cargo +<pinned nightly> xtask api [--check | --bless]"
+    );
     ExitCode::from(2)
 }

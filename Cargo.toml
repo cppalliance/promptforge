@@ -122,6 +122,10 @@ syn = { version = "3", features = ["full"] }
 # `span-locations` makes a span parsed outside a proc macro report its line,
 # which the shape check prints with every violation.
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# The rustdoc JSON model `cargo xtask api` reads. Exact pin: each release
+# matches one `format_version`, so it moves only together with the pinned
+# nightly in build-xtask's `api/toolchain.rs`.
+rustdoc-types = "=0.61.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tower = { version = "0.5", features = ["util"] }

@@ -24,7 +24,7 @@ use syn::{Attribute, Expr, ExprLit, Item, ItemMod, ItemUse, Lit, Meta, MetaNameV
 use syn::{UseTree, Visibility};
 
 /// The facade's crate directory, relative to the workspace root.
-const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
+pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
 
 const REEXPORT: &str = "a single-item re-export `pub use internal_crate::path::Item;`";
 const FACADE_ITEMS: &str = "only grouping `pub mod` blocks and single-item `pub use` re-exports";
