@@ -9,6 +9,25 @@
 //! doc text may name an internal crate. The listing is compared with
 //! `crates/promptforge/public-api.txt`.
 //!
+//! A listing line is the item's facade path with its signature, in this
+//! notation:
+//!
+//! - `#[non_exhaustive] ` prefixes a struct, union, enum, or variant line
+//!   when the item carries the attribute.
+//! - A kind suffix follows any generics and where clause: a unit struct
+//!   ends in `;`, a unit variant has no suffix, a tuple kind ends in
+//!   `(..)`, and a braced kind ends in ` { .. }`. A variant's
+//!   ` = <discriminant>` stays as it is.
+//! - On a struct, union, or variant line, `..` means every field has its
+//!   own listed line, and `/* private fields */` replaces `..` when any
+//!   field is hidden.
+//! - A provided trait method line ends in ` { .. }`, standing in for its
+//!   body.
+//!
+//! So `#[non_exhaustive] pub enum promptforge::vfs::VfsError`,
+//! `pub struct promptforge::vfs::AllowAll;`, and
+//! `pub struct promptforge::vfs::ExecId(/* private fields */)`.
+//!
 //! - `cargo +<pinned nightly> xtask api` prints every violation and the
 //!   listing's difference.
 //! - `--check` fails on any violation or any difference.

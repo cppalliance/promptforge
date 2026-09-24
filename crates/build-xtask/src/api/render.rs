@@ -7,7 +7,9 @@
 //! renders as its definition path (`alloc::string::String`), which keeps
 //! the listing independent of how the source happened to spell it.
 
-use rustdoc_types::{Crate, Function, Generics, Impl, ItemEnum};
+use rustdoc_types::{
+    Attribute, Crate, Function, Generics, Impl, Item, ItemEnum, StructKind, VariantKind,
+};
 
 use super::items::Surface;
 use super::walk::{Role, Visit};
@@ -59,21 +61,37 @@ impl<'a> Renderer<'a> {
                     line
                 })
             }
-            (_, ItemEnum::Struct(structure)) => {
-                Some(self.data("struct", label, &structure.generics))
-            }
-            (_, ItemEnum::Union(union)) => Some(self.data("union", label, &union.generics)),
+            (_, ItemEnum::Struct(structure)) => Some(self.data(
+                "struct",
+                visit.item,
+                label,
+                &structure.generics,
+                struct_shape(&structure.kind),
+            )),
+            (_, ItemEnum::Union(union)) => Some(self.data(
+                "union",
+                visit.item,
+                label,
+                &union.generics,
+                braced(union.has_stripped_fields),
+            )),
             (_, ItemEnum::Enum(enumeration)) => {
-                Some(self.data("enum", label, &enumeration.generics))
+                Some(self.data("enum", visit.item, label, &enumeration.generics, ""))
             }
             (_, ItemEnum::StructField(ty)) => {
                 self.context = "field";
                 Some(format!("pub {label}: {}", self.ty(ty)))
             }
-            (_, ItemEnum::Variant(variant)) => Some(match &variant.discriminant {
-                Some(discriminant) => format!("pub {label} = {}", discriminant.expr),
-                None => format!("pub {label}"),
-            }),
+            (_, ItemEnum::Variant(variant)) => {
+                let exhaustiveness = non_exhaustive(visit.item);
+                let shape = variant_shape(&variant.kind);
+                Some(match &variant.discriminant {
+                    Some(discriminant) => {
+                        format!("{exhaustiveness}pub {label} = {}{shape}", discriminant.expr)
+                    }
+                    None => format!("{exhaustiveness}pub {label}{shape}"),
+                })
+            }
             (_, ItemEnum::Trait(definition)) => {
                 let generics = self.generics(&definition.generics);
                 self.context = "supertrait";
@@ -174,10 +192,18 @@ impl<'a> Renderer<'a> {
         format!("{unsafety}impl{generics} {trait_part}{self_type}{where_clause}")
     }
 
-    fn data(&mut self, keyword: &str, label: &str, generics: &Generics) -> String {
+    fn data(
+        &mut self,
+        keyword: &str,
+        item: &Item,
+        label: &str,
+        generics: &Generics,
+        shape: &str,
+    ) -> String {
         let params = self.generics(generics);
         let where_clause = self.where_clause(generics);
-        format!("pub {keyword} {label}{params}{where_clause}")
+        let exhaustiveness = non_exhaustive(item);
+        format!("{exhaustiveness}pub {keyword} {label}{params}{where_clause}{shape}")
     }
 
     fn function(&mut self, label: &str, function: &Function) -> String {
@@ -187,6 +213,65 @@ impl<'a> Renderer<'a> {
         let signature = self.signature(&function.sig, true);
         let header = header(&function.header);
         format!("pub {header}fn {label}{generics}{signature}{where_clause}")
+    }
+}
+
+/// The `#[non_exhaustive] ` prefix, when the item carries the attribute.
+/// A variant's own attributes carry it; an enum's say nothing about its
+/// variants.
+fn non_exhaustive(item: &Item) -> &'static str {
+    if item
+        .attrs
+        .iter()
+        .any(|attr| matches!(attr, Attribute::NonExhaustive))
+    {
+        "#[non_exhaustive] "
+    } else {
+        ""
+    }
+}
+
+/// What a struct line ends with: nothing but `;` for a unit struct, the
+/// tuple or braced form otherwise.
+fn struct_shape(kind: &StructKind) -> &'static str {
+    match kind {
+        StructKind::Unit => ";",
+        StructKind::Tuple(fields) => tuple(fields.iter().any(Option::is_none)),
+        StructKind::Plain {
+            has_stripped_fields,
+            ..
+        } => braced(*has_stripped_fields),
+    }
+}
+
+/// What a variant line ends with; a unit variant ends with nothing, so
+/// its line is the path alone.
+fn variant_shape(kind: &VariantKind) -> &'static str {
+    match kind {
+        VariantKind::Plain => "",
+        VariantKind::Tuple(fields) => tuple(fields.iter().any(Option::is_none)),
+        VariantKind::Struct {
+            has_stripped_fields,
+            ..
+        } => braced(*has_stripped_fields),
+    }
+}
+
+/// A tuple kind's shape, naming hidden fields in place of `..`.
+fn tuple(hidden: bool) -> &'static str {
+    if hidden {
+        "(/* private fields */)"
+    } else {
+        "(..)"
+    }
+}
+
+/// A braced kind's shape, naming hidden fields in place of `..`.
+fn braced(hidden: bool) -> &'static str {
+    if hidden {
+        " { /* private fields */ }"
+    } else {
+        " { .. }"
     }
 }
 

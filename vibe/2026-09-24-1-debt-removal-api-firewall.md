@@ -441,7 +441,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 
 <step-4>
 
-### Step 4: Render exhaustiveness, kind, and private-field markers in the surface listing, re-bless it, and run the exit gates
+### Step 4: Render exhaustiveness, kind, and private-field markers in the surface listing, re-bless it, and run the exit gates [completed]
 
 - Component: listing-fidelity
 - Component placement: last. It depends on no other component, since the listing covers only the default build. It follows `test-support` so its fixtures are written once against the single-build loader, after Step 2's edits to `listing-tests.rs` and `api.rs`. Those two files have shifted by then, so locate their content by name rather than by `9eac5f3b` line number. It changes the committed listing, the last surface artifact, so the plan's exit gates run here on the finished tree.

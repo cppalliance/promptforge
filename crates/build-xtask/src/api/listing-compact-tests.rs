@@ -345,9 +345,9 @@ fn the_listing_drops_markers_and_collapses_auto_and_derive_style_impls() {
         "impl core::fmt::Display for promptforge::Plain",
         "impl<T: core::clone::Clone> core::clone::Clone for promptforge::Wrapper<T>",
         "pub promptforge::Wrapper::0: T",
-        "pub struct promptforge::Local",
-        "pub struct promptforge::Plain",
-        "pub struct promptforge::Wrapper<T>",
+        "pub struct promptforge::Local(/* private fields */)",
+        "pub struct promptforge::Plain;",
+        "pub struct promptforge::Wrapper<T>(..)",
     ]
     .map(str::to_owned)
     .into_iter()

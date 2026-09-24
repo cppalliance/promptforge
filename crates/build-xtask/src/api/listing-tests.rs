@@ -2,6 +2,10 @@
 //! workflow end to end: a difference fails `--check`, `--bless` writes
 //! the listing and refuses while a violation remains, and a violation
 //! alone fails `--check` while a plain run only prints it.
+//!
+//! The notation fixtures pin what a data line says beyond its path: the
+//! `#[non_exhaustive]` prefix, the kind suffix, and the private-fields
+//! marker, each read from the rustdoc JSON the pinned nightly writes.
 
 use super::super::fixture::{leak, workspace, write};
 use super::super::{Mode, execute, report};
@@ -85,7 +89,7 @@ fn a_snapshot_difference_fails_check_until_blessed() {
     assert!(
         first
             .lines
-            .contains(&"+ pub struct promptforge::Visible".to_owned())
+            .contains(&"+ pub struct promptforge::Visible { .. }".to_owned())
     );
     assert!(
         first
@@ -148,4 +152,139 @@ fn a_violation_alone_fails_check_and_a_plain_run_only_prints_it() {
     let plain = execute(root.path(), Mode::Report).expect("the fixture documents");
     assert!(!plain.failed, "{:?}", plain.lines);
     assert_eq!(plain.lines, expected);
+}
+
+const SHAPES: &str = "//! Inner.\n\n\
+    /// A unit struct.\npub struct AllowAll;\n\n\
+    /// A tuple struct whose field is private.\npub struct ExecId(u64);\n\n\
+    /// A braced struct with every field public.\n\
+    pub struct Open {\n    /// A count.\n    pub count: u8,\n}\n\n\
+    /// A braced struct with a private field.\n\
+    pub struct Guarded {\n    /// A count.\n    pub count: u8,\n    seed: u64,\n}\n\n\
+    /// A union with a private field.\n\
+    pub union Word {\n    /// The bits.\n    pub bits: u32,\n    seed: f32,\n}\n";
+
+const SHAPES_FACADE: &str = "//! Facade.\n\
+    pub use promptforge_inner::AllowAll;\npub use promptforge_inner::ExecId;\n\
+    pub use promptforge_inner::Guarded;\npub use promptforge_inner::Open;\n\
+    pub use promptforge_inner::Word;\n";
+
+const VARIANTS: &str = "//! Inner.\n\n\
+    /// An exhaustive enum.\n\
+    pub enum Verdict {\n    /// A unit variant.\n    Allow,\n    /// A tuple variant.\n    Deny(u8),\n    /// A struct variant.\n    Ask {\n        /// A reason.\n        reason: u8,\n    },\n}\n\n\
+    /// A non-exhaustive enum.\n#[non_exhaustive]\n\
+    pub enum VfsError {\n    /// A non-exhaustive struct variant.\n    #[non_exhaustive]\n    Missing {\n        /// A code.\n        code: u8,\n    },\n    /// A unit variant.\n    Denied,\n}\n\n\
+    /// An enum whose variant has a discriminant.\n\
+    pub enum Code {\n    /// The first.\n    First = 1,\n}\n";
+
+const VARIANTS_FACADE: &str = "//! Facade.\n\
+    pub use promptforge_inner::Code;\npub use promptforge_inner::Verdict;\n\
+    pub use promptforge_inner::VfsError;\n";
+
+const UNIT: &str = "//! Inner.\n\n/// A unit struct.\npub struct AllowAll;\n";
+
+const UNIT_FACADE: &str = "//! Facade.\npub use promptforge_inner::AllowAll;\n";
+
+/// The surface listing of the fixture workspace built from `inner` and
+/// `facade`, as a set to test membership against.
+fn listing(inner: &str, facade: &str) -> BTreeSet<String> {
+    let root = workspace(inner, facade);
+    report(root.path())
+        .expect("the fixture documents")
+        .listing
+        .into_iter()
+        .collect()
+}
+
+fn assert_lines(listing: &BTreeSet<String>, shown: &[&str], absent: &[&str]) {
+    for line in shown {
+        assert!(
+            listing.contains(*line),
+            "{line} is missing from {listing:?}"
+        );
+    }
+    for line in absent {
+        assert!(!listing.contains(*line), "{line} is still in {listing:?}");
+    }
+}
+
+#[test]
+#[ignore = "needs the pinned nightly"]
+fn a_struct_or_union_line_ends_with_its_kind_and_names_hidden_fields() {
+    let listing = listing(SHAPES, SHAPES_FACADE);
+    assert_lines(
+        &listing,
+        &[
+            "pub struct promptforge::AllowAll;",
+            "pub struct promptforge::ExecId(/* private fields */)",
+            "pub struct promptforge::Open { .. }",
+            "pub struct promptforge::Guarded { /* private fields */ }",
+            "pub union promptforge::Word { /* private fields */ }",
+            "pub promptforge::Guarded::count: u8",
+        ],
+        &[
+            "pub struct promptforge::AllowAll",
+            "pub struct promptforge::ExecId",
+            "pub struct promptforge::Open",
+            "pub struct promptforge::Guarded",
+            "pub union promptforge::Word",
+        ],
+    );
+}
+
+#[test]
+#[ignore = "needs the pinned nightly"]
+fn an_enum_or_variant_line_carries_non_exhaustive_and_its_variant_kind() {
+    let listing = listing(VARIANTS, VARIANTS_FACADE);
+    assert_lines(
+        &listing,
+        &[
+            "pub enum promptforge::Verdict",
+            "pub promptforge::Verdict::Allow",
+            "pub promptforge::Verdict::Deny(..)",
+            "pub promptforge::Verdict::Ask { .. }",
+            "#[non_exhaustive] pub enum promptforge::VfsError",
+            "#[non_exhaustive] pub promptforge::VfsError::Missing { .. }",
+            "pub promptforge::VfsError::Denied",
+            "pub promptforge::Code::First = 1",
+        ],
+        &[
+            "pub enum promptforge::VfsError",
+            "pub promptforge::VfsError::Missing { .. }",
+            "#[non_exhaustive] pub enum promptforge::Verdict",
+            "#[non_exhaustive] pub promptforge::VfsError::Denied",
+        ],
+    );
+}
+
+#[test]
+#[ignore = "needs the pinned nightly"]
+fn marking_a_blessed_unit_struct_non_exhaustive_fails_check() {
+    let root = workspace(UNIT, UNIT_FACADE);
+    let blessed = execute(root.path(), Mode::Bless).expect("the fixture documents");
+    assert!(!blessed.failed, "{:?}", blessed.lines);
+    write(
+        root.path(),
+        "crates/promptforge-internal/inner/src/lib.rs",
+        &UNIT.replace(
+            "pub struct AllowAll;",
+            "#[non_exhaustive]\npub struct AllowAll;",
+        ),
+    );
+    let changed = execute(root.path(), Mode::Check).expect("the fixture documents");
+    assert!(changed.failed, "{:?}", changed.lines);
+    assert!(
+        changed
+            .lines
+            .contains(&"- pub struct promptforge::AllowAll;".to_owned()),
+        "{:?}",
+        changed.lines
+    );
+    assert!(
+        changed
+            .lines
+            .contains(&"+ #[non_exhaustive] pub struct promptforge::AllowAll;".to_owned()),
+        "{:?}",
+        changed.lines
+    );
 }
