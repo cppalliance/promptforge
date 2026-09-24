@@ -4,8 +4,8 @@
 //! family, and its dependencies of every kind (normal, dev, build, and
 //! target-specific) are checked against the matrix:
 //!
-//! - `promptforge-*` crates must not depend on gateway, workshop, or
-//!   harness crates.
+//! - `promptforge`/`promptforge-*` crates must not depend on gateway,
+//!   workshop, or harness crates.
 //! - `gateway`/`gateway-*` crates must not depend on promptforge,
 //!   workshop, or harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
@@ -18,16 +18,16 @@
 //! - Public API: a crate outside the promptforge family may depend on
 //!   `promptforge-*` only through `promptforge-api-runtime` or
 //!   `promptforge-api-types`.
-//! - Container privacy: the manifestless `crates/promptforge/`,
+//! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness/`
 //!   directories are private to their families; only the crates inside a
 //!   container and the container's named outside exception
-//!   (`promptforge-api-runtime` for `crates/promptforge/`, `harness-api`
-//!   for `crates/harness/`; the gateway and workshop containers name none)
-//!   may depend on the crates it holds. Containers nest:
-//!   `crates/gateway/stt/` is a subsystem private to the gateway family,
-//!   with `gateway-stt` as its public member - the one crate inside the
-//!   family outside the subsystem may name.
+//!   (`promptforge-api-runtime` for `crates/promptforge-internal/`,
+//!   `harness-api` for `crates/harness/`; the gateway and workshop
+//!   containers name none) may depend on the crates it holds. Containers
+//!   nest: `crates/gateway/stt/` is a subsystem private to the gateway
+//!   family, with `gateway-stt` as its public member - the one crate inside
+//!   the family outside the subsystem may name.
 //! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
 //!   and never on `workshop-server`.
 
@@ -52,7 +52,7 @@ enum Family {
 
 /// Classifies a package name into its product family.
 fn family(package: &str) -> Family {
-    if package.starts_with("promptforge-") {
+    if package == "promptforge" || package.starts_with("promptforge-") {
         Family::Promptforge
     } else if package == "gateway" || package.starts_with("gateway-") {
         Family::Gateway
@@ -243,7 +243,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 /// container names one.
 fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
-        "promptforge" => Some("promptforge-api-runtime"),
+        "promptforge-internal" => Some("promptforge-api-runtime"),
         "harness" => Some(PUBLIC_HARNESS),
         _ => None,
     }

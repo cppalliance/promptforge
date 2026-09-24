@@ -11,14 +11,19 @@ fn an_outside_crate_depending_into_the_private_container_is_reported() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge/lua\" }\n",
+        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
     );
-    write_crate(root.path(), "promptforge/lua", "promptforge-lua", "");
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        "",
+    );
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("workshop-sessions depends on promptforge-lua")
-            && violations[0].contains("crates/promptforge is private to its family")
+            && violations[0].contains("crates/promptforge-internal is private to its family")
             && violations[0].contains("promptforge-api-runtime"),
         "the violation includes the container privacy message: {violations:?}"
     );
@@ -29,11 +34,16 @@ fn a_container_crate_depending_on_a_container_sibling_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge/parser",
+        "promptforge-internal/parser",
         "promptforge-parser",
         "[dependencies]\npromptforge-lua = { path = \"../lua\" }\n",
     );
-    write_crate(root.path(), "promptforge/lua", "promptforge-lua", "");
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        "",
+    );
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -48,9 +58,14 @@ fn the_public_runtime_depending_into_the_container_passes() {
         root.path(),
         "promptforge-api-runtime",
         "promptforge-api-runtime",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge/lua\" }\n",
+        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
     );
-    write_crate(root.path(), "promptforge/lua", "promptforge-lua", "");
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        "",
+    );
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),

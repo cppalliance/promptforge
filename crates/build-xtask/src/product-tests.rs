@@ -439,3 +439,9 @@ fn harness_family_classification_follows_the_name_prefix() {
     assert_eq!(family("harness-runner"), Family::Harness);
     assert_eq!(family("harness"), Family::Unaffiliated);
 }
+
+#[test]
+fn the_bare_promptforge_package_belongs_to_the_promptforge_family() {
+    assert_eq!(family("promptforge"), Family::Promptforge);
+    assert_eq!(family("promptforger"), Family::Unaffiliated);
+}

@@ -4,8 +4,8 @@
 //! `cargo xtask tidy`.
 //!
 //! The engine is `promptforge-api-runtime`, `promptforge-api-types`, and
-//! every crate under the `crates/promptforge/` container. The two root
-//! crates are named, so a missing manifest is reported rather than
+//! every crate under the `crates/promptforge-internal/` container. The two
+//! root crates are named, so a missing manifest is reported rather than
 //! skipped; the container's members are discovered, so a new engine crate
 //! is covered the moment it lands.
 
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 const ENGINE_ROOT_CRATES: [&str; 2] = ["promptforge-api-runtime", "promptforge-api-types"];
 
 /// The private container whose every member is an engine crate.
-const ENGINE_CONTAINER: &str = "promptforge";
+const ENGINE_CONTAINER: &str = "promptforge-internal";
 
 /// The identifiers the sans-I/O engine plan retired. Live engine source
 /// (outside `#[cfg(test)]`, `tests/`, and test-support modules) may not

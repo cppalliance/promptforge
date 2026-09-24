@@ -46,7 +46,12 @@ fn engine_root() -> tempfile::TempDir {
         "promptforge-api-types",
         features,
     );
-    write_crate(root.path(), "promptforge/lua", "promptforge-lua", features);
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        features,
+    );
     root
 }
 
@@ -137,7 +142,7 @@ fn a_workspace_dependencies_entry_enabling_an_engine_test_support_feature_is_rep
         root.path().join("Cargo.toml"),
         "[workspace]\nmembers = []\n[workspace.dependencies]\n\
          promptforge-api-runtime = { path = \"crates/promptforge-api-runtime\", features = [\"test-support\"] }\n\
-         promptforge-lua = { path = \"crates/promptforge/lua\" }\n",
+         promptforge-lua = { path = \"crates/promptforge-internal/lua\" }\n",
     )
     .expect("the root manifest writes");
     let violations = test_support_leak_violations(root.path());

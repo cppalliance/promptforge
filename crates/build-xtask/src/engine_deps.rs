@@ -2,9 +2,9 @@
 //! runtime and no HTTP client.
 //!
 //! The engine (`promptforge-api-runtime` and the crates under
-//! `crates/promptforge/`) is a deterministic state machine; every wait
-//! becomes an effect the harness performs. Its manifests therefore may not
-//! name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in
+//! `crates/promptforge-internal/`) is a deterministic state machine; every
+//! wait becomes an effect the harness performs. Its manifests therefore may
+//! not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in
 //! `[dependencies]`, `[build-dependencies]`, or the target-specific forms
 //! of either. `[dev-dependencies]` are outside the guard: the engine's own
 //! suites drive it from a tokio test harness against a mock gateway.

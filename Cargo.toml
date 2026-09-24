@@ -1,15 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge/lua", "crates/promptforge/parser", "crates/promptforge/store", "crates/promptforge/vfs", "crates/promptforge/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness/runner", "crates/harness/models", "crates/harness/capabilities", "crates/harness/log", "crates/harness/sessions", "crates/harness/web", "crates/harness/webfetch", "crates/harness/web-search"]
+members = ["crates/*", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/store", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness/runner", "crates/harness/models", "crates/harness/capabilities", "crates/harness/log", "crates/harness/sessions", "crates/harness/web", "crates/harness/webfetch", "crates/harness/web-search"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
-# crates/promptforge, crates/gateway, crates/workshop, and crates/harness
-# are manifestless containers holding their families' private crates (the
-# gateway's STT subsystem nests one level deeper under crates/gateway/stt).
+# crates/promptforge-internal, crates/gateway, crates/workshop, and
+# crates/harness are manifestless containers holding their families' private
+# crates (the gateway's STT subsystem nests one level deeper under
+# crates/gateway/stt).
 # Cargo prunes excluded subtrees from member globs, so a "crates/gateway/*"
 # glob beside the exclude below would match nothing; the container crates
 # are enumerated explicitly instead.
-exclude = ["crates/shared-ui", "crates/promptforge", "crates/gateway", "crates/gateway/stt", "crates/workshop", "crates/harness"]
+exclude = ["crates/shared-ui", "crates/promptforge-internal", "crates/gateway", "crates/gateway/stt", "crates/workshop", "crates/harness"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
@@ -49,13 +50,13 @@ harness-webfetch = { path = "crates/harness/webfetch", version = "0.3.0" }
 harness-web-search = { path = "crates/harness/web-search", version = "0.3.0" }
 shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
 gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
-promptforge-lua = { path = "crates/promptforge/lua", version = "0.3.0" }
-promptforge-model-client = { path = "crates/promptforge/model-client", version = "0.3.0" }
-promptforge-parser = { path = "crates/promptforge/parser", version = "0.3.0" }
+promptforge-lua = { path = "crates/promptforge-internal/lua", version = "0.3.0" }
+promptforge-model-client = { path = "crates/promptforge-internal/model-client", version = "0.3.0" }
+promptforge-parser = { path = "crates/promptforge-internal/parser", version = "0.3.0" }
 gateway-progress = { path = "crates/gateway/progress", version = "0.3.0" }
 gateway-stt = { path = "crates/gateway/stt/api", version = "0.3.0" }
-promptforge-store = { path = "crates/promptforge/store", version = "0.3.0" }
-promptforge-vfs = { path = "crates/promptforge/vfs", version = "0.3.0" }
+promptforge-store = { path = "crates/promptforge-internal/store", version = "0.3.0" }
+promptforge-vfs = { path = "crates/promptforge-internal/vfs", version = "0.3.0" }
 gateway-stt-engine = { path = "crates/gateway/stt/engine", version = "0.3.0" }
 gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper", version = "0.3.0" }
 gateway-web-search = { path = "crates/gateway/web-search", version = "0.3.0" }

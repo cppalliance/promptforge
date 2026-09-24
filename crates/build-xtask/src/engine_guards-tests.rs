@@ -66,8 +66,18 @@ fn engine_sources_name_no_retired_symbols() {
 #[test]
 fn the_engine_crate_set_is_the_two_root_crates_plus_every_container_member() {
     let root = clean_engine_root();
-    write_crate(root.path(), "promptforge/lua", "", "pub struct Vm;\n");
-    write_crate(root.path(), "promptforge/store", "", "pub struct Store;\n");
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "",
+        "pub struct Vm;\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/store",
+        "",
+        "pub struct Store;\n",
+    );
     write_crate(root.path(), "harness/runner", "", "pub struct Runner;\n");
     write_crate(root.path(), "gateway-api-types", "", "pub struct Api;\n");
     let mut names: Vec<String> = engine_crates(root.path())
@@ -85,8 +95,8 @@ fn the_engine_crate_set_is_the_two_root_crates_plus_every_container_member() {
         [
             "promptforge-api-runtime",
             "promptforge-api-types",
-            "promptforge/lua",
-            "promptforge/store",
+            "promptforge-internal/lua",
+            "promptforge-internal/store",
         ],
         "harness and gateway crates are outside the engine"
     );
@@ -97,7 +107,7 @@ fn a_retired_symbol_reintroduced_in_an_engine_crate_fails_the_guard() {
     let root = clean_engine_root();
     write_crate(
         root.path(),
-        "promptforge/lua",
+        "promptforge-internal/lua",
         "",
         "pub struct Vm;\n\npub fn install_agent_chat_shim() {}\n",
     );
@@ -119,7 +129,7 @@ fn every_seed_is_caught_and_a_seed_confined_to_test_code_passes() {
         .map(|seed| format!("pub struct {seed};\n"))
         .collect::<Vec<_>>()
         .concat();
-    write_crate(root.path(), "promptforge/live", "", &live);
+    write_crate(root.path(), "promptforge-internal/live", "", &live);
     let test_items = RETIRED_SEEDS
         .iter()
         .map(|seed| format!("    struct {seed};\n"))
@@ -129,7 +139,7 @@ fn every_seed_is_caught_and_a_seed_confined_to_test_code_passes() {
         "pub struct Live;\n// {}\n#[cfg(test)]\nmod tests {{\n{test_items}}}\n",
         RETIRED_SEEDS.join(" "),
     );
-    write_crate(root.path(), "promptforge/quiet", "", &test_only);
+    write_crate(root.path(), "promptforge-internal/quiet", "", &test_only);
     let violations = retired_symbol_violations(root.path());
     let mut symbols: Vec<&str> = violations
         .iter()
@@ -156,7 +166,7 @@ fn a_forbidden_dependency_in_a_container_crate_fails_the_guard() {
     let root = clean_engine_root();
     write_crate(
         root.path(),
-        "promptforge/store",
+        "promptforge-internal/store",
         "[dependencies]\ntokio = { version = \"1\", features = [\"rt\"] }\n",
         "pub struct Store;\n",
     );
