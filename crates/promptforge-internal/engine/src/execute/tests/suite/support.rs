@@ -11,7 +11,7 @@ use crate::test_support::{RunHost, TestTool, run_host};
 use crate::{Environment, RunContext, RunError, RunResult};
 use promptforge_store::{StoreError, StoreExt};
 use promptforge_types::timestamp::Timestamp;
-use shared_vfs::{Origin, VfsRef};
+use promptforge_vfs::{Origin, VfsRef};
 
 /// A [`RunContext`] for the run `name` under the fixed host inputs every
 /// fixture shares: the engine takes its seed and clock from the host, and

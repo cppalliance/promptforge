@@ -145,15 +145,15 @@ fn a_shared_crate_depending_on_a_product_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "shared-vfs",
-        "shared-vfs",
+        "shared-loopback",
+        "shared-loopback",
         "[dependencies]\nworkshop-protocol = { path = \"../workshop-protocol\" }\n",
     );
     write_crate(root.path(), "workshop-protocol", "workshop-protocol", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("shared-vfs") && violations[0].contains("workshop-protocol"),
+        violations[0].contains("shared-loopback") && violations[0].contains("workshop-protocol"),
         "the violation names both crates: {violations:?}"
     );
 }
@@ -284,13 +284,13 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
         "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n\
          gateway-api-types = { path = \"../../gateway-api-types\" }\n\
          gateway-api-discovery = { path = \"../../gateway-api-discovery\" }\n\
-         shared-vfs = { path = \"../../shared-vfs\" }\n",
+         shared-loopback = { path = \"../../shared-loopback\" }\n",
     );
     for name in [
         "promptforge",
         "gateway-api-types",
         "gateway-api-discovery",
-        "shared-vfs",
+        "shared-loopback",
     ] {
         write_crate(root.path(), name, name, "");
     }
@@ -401,10 +401,10 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
     write_crate(root.path(), "harness-api", "harness-api", "");
     write_crate(root.path(), "promptforge", "promptforge", dep);
     write_crate(root.path(), "gateway-routing", "gateway-routing", dep);
-    write_crate(root.path(), "shared-vfs", "shared-vfs", dep);
+    write_crate(root.path(), "shared-loopback", "shared-loopback", dep);
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 3, "{violations:?}");
-    for package in ["promptforge", "gateway-routing", "shared-vfs"] {
+    for package in ["promptforge", "gateway-routing", "shared-loopback"] {
         assert!(
             violations
                 .iter()
@@ -421,7 +421,7 @@ fn family_classification_follows_the_naming_rules() {
     assert_eq!(family("gateway-config"), Family::Gateway);
     assert_eq!(family("workshop"), Family::Workshop);
     assert_eq!(family("workshop-server"), Family::Workshop);
-    assert_eq!(family("shared-vfs"), Family::Shared);
+    assert_eq!(family("shared-loopback"), Family::Shared);
     assert_eq!(family("build-xtask"), Family::Build);
     assert_eq!(family("serde"), Family::Unaffiliated);
 }

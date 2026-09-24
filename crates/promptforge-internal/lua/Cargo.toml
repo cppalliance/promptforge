@@ -30,7 +30,6 @@ test-support = []
 [dev-dependencies]
 criterion.workspace = true
 promptforge-vfs.workspace = true
-shared-vfs.workspace = true
 
 [[bench]]
 name = "surface"

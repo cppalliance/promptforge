@@ -20,7 +20,7 @@ platforms = [
     "aarch64-apple-darwin",
 ]
 
-# shared-vfs keeps its zero-dependency rule (its manifest test enforces it);
-# with no third-party dependencies it has nothing for hakari to unify.
+# promptforge-vfs keeps its zero-dependency rule (its manifest test enforces
+# it); with no third-party dependencies it has nothing for hakari to unify.
 [final-excludes]
-workspace-members = ["shared-vfs"]
+workspace-members = ["promptforge-vfs"]

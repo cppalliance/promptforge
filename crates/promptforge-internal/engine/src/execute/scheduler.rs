@@ -81,7 +81,7 @@ use std::sync::Arc;
 
 use mlua::Thread;
 use promptforge_types::ids::{ChainId, Provenance, TaskId};
-use shared_vfs::Origin;
+use promptforge_vfs::Origin;
 
 use crate::parser::{Block, Prompt, Section};
 use crate::store::Access;

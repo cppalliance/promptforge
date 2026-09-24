@@ -23,9 +23,9 @@
 //! replay key stamped on every effect and event; [`timestamp`] is the UTC
 //! instant a run starts from, rendered over std alone; and [`replay`] holds
 //! the behavior [`Flags`](replay::Flags) a run records and the
-//! [`ReplayError`](replay::ReplayError) kinds. This crate's only workspace
-//! dependency is the std-only `shared-vfs`, so every promptforge crate may
-//! depend on it, and it declares no async runtime.
+//! [`ReplayError`](replay::ReplayError) kinds. This crate depends on no
+//! other promptforge crate, so every promptforge crate may depend on it,
+//! and it declares no async runtime.
 
 pub mod cancel;
 pub mod capabilities;

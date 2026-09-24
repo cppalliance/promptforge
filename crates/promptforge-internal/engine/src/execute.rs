@@ -140,7 +140,7 @@ pub use promptforge_store::StoreError;
 /// not-found, anchor, range, write-race, or backend failure), which the
 /// engine raises at the author's call site when the answer is resumed.
 pub fn perform_store_op(
-    access: &shared_vfs::Access,
+    access: &promptforge_vfs::Access,
     op: StoreOp,
 ) -> std::result::Result<StoreOutcome, StoreError> {
     crate::lua::run_store_op(&crate::store::Store::new(access), op)

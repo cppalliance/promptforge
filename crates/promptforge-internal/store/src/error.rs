@@ -190,7 +190,7 @@ impl StoreError {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store error example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
     ///     .expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();
@@ -220,7 +220,7 @@ impl StoreError {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store error example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
     ///     .expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();
@@ -239,7 +239,7 @@ impl StoreError {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store error example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store error example"))
     ///     .expect("the stock backend acquires");
     /// let store = vfs.store(&access);
     /// let err = store.read("missing.txt").unwrap_err();

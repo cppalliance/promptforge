@@ -13,7 +13,7 @@
 //! ([`Store::str_replace`]), 1-based inclusive line ranges with optional
 //! absolute numbering, idempotent deletes, and the `*`/`**` glob grammar.
 //! The `Store` trait, `MemStore`, `FileStore`, and the `WriteScope`
-//! registry are gone: backends sit in `shared-vfs`, the mount layout in
+//! registry are gone: backends and the mount layout sit in
 //! `promptforge-vfs`, and race detection in the claims model.
 //!
 //! This crate defines the facade and its error vocabulary only.
@@ -23,10 +23,9 @@ mod path;
 
 use std::fmt::Write as _;
 
-use promptforge_vfs::STORE_MOUNT;
-use shared_vfs::{FileType, VfsError, VfsRef};
+use promptforge_vfs::{FileType, STORE_MOUNT, VfsError, VfsRef};
 
-pub use shared_vfs::Access;
+pub use promptforge_vfs::Access;
 
 pub use error::{PathReason, StoreError, StoreErrorKind};
 use path::StorePath;
@@ -52,7 +51,7 @@ pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 ///
 /// let vfs = promptforge_vfs::empty();
 /// let access = vfs
-///     .acquire(shared_vfs::Origin::new("store example"))
+///     .acquire(promptforge_vfs::Origin::new("store example"))
 ///     .map_err(promptforge_store::StoreError::backend)?;
 /// let store = vfs.store(&access);
 /// store.write("shared.txt", "state")?;
@@ -92,7 +91,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
@@ -118,7 +117,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.append("a.txt", "hi")?;
@@ -146,7 +145,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi\n")?;
@@ -179,7 +178,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
@@ -220,7 +219,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one\ntwo\nthree\n")?;
@@ -276,7 +275,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "one two")?;
@@ -328,7 +327,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "hi")?;
@@ -366,7 +365,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("a.txt", "")?;
@@ -402,7 +401,7 @@ impl Store<'_> {
                 reason: "pattern does not support backslash escapes".to_owned(),
             });
         }
-        // One glob implementation lives in shared-vfs; the facade scopes
+        // One glob implementation lives in promptforge-vfs; the facade scopes
         // the pattern to the mount and maps a grammar rejection back onto
         // the store vocabulary.
         let scoped = format!("{STORE_MOUNT}/{pattern}");
@@ -445,7 +444,7 @@ impl Store<'_> {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// assert!(!store.exists("a.txt")?);
@@ -464,7 +463,7 @@ impl Store<'_> {
 /// The extension trait behind the `vfs.store(&access)` call shape.
 ///
 /// The [`Store`] facade type sits in this crate, above `promptforge-vfs`
-/// and `shared-vfs` in the dependency stack, so the method cannot be
+/// in the dependency stack, so the method cannot be
 /// inherent on `VfsRef`; a prelude-exported extension trait preserves the
 /// declared call shape without inverting the stack.
 pub trait StoreExt {
@@ -477,7 +476,7 @@ pub trait StoreExt {
     ///
     /// let vfs = promptforge_vfs::empty();
     /// let access = vfs
-    ///     .acquire(shared_vfs::Origin::new("store example"))
+    ///     .acquire(promptforge_vfs::Origin::new("store example"))
     ///     .map_err(promptforge_store::StoreError::backend)?;
     /// let store = vfs.store(&access);
     /// store.write("seeded.txt", "input")?;

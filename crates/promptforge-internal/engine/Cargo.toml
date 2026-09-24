@@ -21,7 +21,6 @@ promptforge-types.workspace = true
 promptforge-vfs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-shared-vfs.workspace = true
 thiserror.workspace = true
 mlua.workspace = true
 # The one runtime the engine names, and only for the tokio test driver

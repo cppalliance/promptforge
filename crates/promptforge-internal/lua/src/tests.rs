@@ -7,8 +7,8 @@ use crate::program::map_chunk_line_to_absolute;
 use crate::vm::{LocalTools, LuaOutcome, run_chunk};
 use promptforge_store::Store;
 use promptforge_types::tools::ToolDescriptor;
+use promptforge_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 use serde_json::json;
-use shared_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 
 #[path = "tests-recording.rs"]
 pub(crate) mod recording;
@@ -91,11 +91,11 @@ impl VfsAccess for FailingAccess {
         )))
     }
 
-    fn list(&self, path: &VfsPath) -> std::result::Result<Vec<shared_vfs::Entry>, VfsError> {
+    fn list(&self, path: &VfsPath) -> std::result::Result<Vec<promptforge_vfs::Entry>, VfsError> {
         Err(FailingBackend::error(path))
     }
 
-    fn stat(&self, path: &VfsPath) -> std::result::Result<shared_vfs::Stat, VfsError> {
+    fn stat(&self, path: &VfsPath) -> std::result::Result<promptforge_vfs::Stat, VfsError> {
         Err(FailingBackend::error(path))
     }
 

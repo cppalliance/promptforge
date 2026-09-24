@@ -116,7 +116,7 @@ fn a_user_input_effect_records_its_execution_and_section() {
 fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
     let access = Arc::new(
         promptforge_vfs::empty()
-            .acquire(shared_vfs::Origin::new("run test fixture"))
+            .acquire(promptforge_vfs::Origin::new("run test fixture"))
             .expect("the stock backend acquires"),
     );
     let effect = Effect::Store {

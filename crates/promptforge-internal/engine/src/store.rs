@@ -15,10 +15,11 @@
 //! `untrusted` Lua global). Edits are anchor-based ([`Store::str_replace`])
 //! rather than offset-based, the shape that works for a model.
 //!
-//! The implementation sits in the `promptforge-store` and `shared-vfs`
+//! The implementation sits in the `promptforge-store` and `promptforge-vfs`
 //! crates. This module is the crate-internal import surface for them; hosts
-//! that seed or extract the store depend on `shared-vfs` directly.
+//! that seed or extract the store reach them through the `promptforge`
+//! facade's `vfs` module.
 
 pub(crate) use promptforge_store::Store;
 pub(crate) use promptforge_store::StoreError;
-pub(crate) use shared_vfs::{Access, VfsRef};
+pub(crate) use promptforge_vfs::{Access, VfsRef};

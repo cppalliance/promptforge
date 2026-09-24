@@ -8,7 +8,7 @@ use super::*;
 pub(super) fn fresh_access() -> Arc<Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire(shared_vfs::Origin::new("execute test fixture"))
+            .acquire(promptforge_vfs::Origin::new("execute test fixture"))
             .expect("the stock backend acquires"),
     )
 }
@@ -227,7 +227,7 @@ impl TestStore {
     pub(super) fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
         let vfs = self.vfs();
         let access = vfs
-            .acquire(shared_vfs::Origin::new("TestStore::read"))
+            .acquire(promptforge_vfs::Origin::new("TestStore::read"))
             .map_err(StoreError::backend)?;
         vfs.store(&access).read(path)
     }
@@ -235,7 +235,7 @@ impl TestStore {
     pub(super) fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
         let vfs = self.vfs();
         let access = vfs
-            .acquire(shared_vfs::Origin::new("TestStore::glob"))
+            .acquire(promptforge_vfs::Origin::new("TestStore::glob"))
             .map_err(StoreError::backend)?;
         vfs.store(&access).glob(pattern)
     }

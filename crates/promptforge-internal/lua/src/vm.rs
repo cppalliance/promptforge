@@ -444,7 +444,7 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))?,
+    ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
@@ -793,7 +793,7 @@ impl SectionVm {
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
     /// let vfs = promptforge_vfs::empty();
     /// let access = std::sync::Arc::new(
-    ///     vfs.acquire(shared_vfs::Origin::new("vm example"))?,
+    ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &access)?;

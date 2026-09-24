@@ -49,7 +49,6 @@ harness-sessions = { path = "crates/harness/sessions", version = "0.3.0" }
 harness-web = { path = "crates/harness/web", version = "0.3.0" }
 harness-webfetch = { path = "crates/harness/webfetch", version = "0.3.0" }
 harness-web-search = { path = "crates/harness/web-search", version = "0.3.0" }
-shared-vfs = { path = "crates/shared-vfs", version = "0.3.0" }
 gateway-routing = { path = "crates/gateway/routing", version = "0.3.0" }
 promptforge-lua = { path = "crates/promptforge-internal/lua", version = "0.3.0" }
 promptforge-model-client = { path = "crates/promptforge-internal/model-client", version = "0.3.0" }

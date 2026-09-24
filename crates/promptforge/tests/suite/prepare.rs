@@ -41,7 +41,7 @@ fn parse(source: &str, execution: &str) -> Prompt {
 }
 
 /// A unique temporary directory that removes itself on drop. The suite has
-/// no tempfile dependency; this mirrors shared-vfs's own test helper.
+/// no tempfile dependency; this mirrors promptforge-vfs's own test helper.
 struct TempDir(std::path::PathBuf);
 
 impl TempDir {

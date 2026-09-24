@@ -444,12 +444,12 @@ pub(crate) enum Error {
     },
 
     /// A run-scoped store operation failed at the virtual filesystem layer,
-    /// retaining the concrete [`shared_vfs::VfsError`] as the `#[source]`
+    /// retaining the concrete [`promptforge_vfs::VfsError`] as the `#[source]`
     /// cause so a backend failure survives the public wrappers instead of
     /// being flattened to a string. The message names only the operation;
     /// a renderer that wants the backend's diagnosis walks `source()`.
     #[error("store operation failed")]
-    Store(#[source] shared_vfs::VfsError),
+    Store(#[source] promptforge_vfs::VfsError),
 
     /// Two live execution identities claimed one store path: the claims
     /// model's conflict, mapped from the store's write-race vocabulary at

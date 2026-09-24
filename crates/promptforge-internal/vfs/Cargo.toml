@@ -6,11 +6,13 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge virtual filesystem policy: the /_promptforge mount layout, the empty() stock handle, and the mode policy"
+description = "PromptForge virtual filesystem: canonical paths, claims, routing, backends, the /_promptforge mount layout, and the mode policy"
 
+# Zero-dependency rule: std only. No dependencies, workspace or external.
+# The manifest test enforces this; never weaken it. workspace-hack is
+# excluded: this crate has no third-party dependencies, so feature
+# unification has nothing to unify here.
 [dependencies]
-shared-vfs.workspace = true
-workspace-hack.workspace = true
 
 [lints]
 workspace = true

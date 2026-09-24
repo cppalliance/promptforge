@@ -623,7 +623,7 @@ mod tests {
         fn new() -> Result<TempDir, VfsError> {
             static COUNTER: AtomicU64 = AtomicU64::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "shared-vfs-host-test-{}-{}",
+                "promptforge-vfs-host-test-{}-{}",
                 std::process::id(),
                 COUNTER.fetch_add(1, Ordering::Relaxed)
             ));

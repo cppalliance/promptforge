@@ -18,7 +18,7 @@ promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
 promptforge-store.workspace = true
 promptforge-types.workspace = true
-shared-vfs.workspace = true
+promptforge-vfs.workspace = true
 workspace-hack.workspace = true
 
 [features]

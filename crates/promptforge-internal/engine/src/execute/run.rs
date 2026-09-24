@@ -276,7 +276,7 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
     if !store_mount_present(&ctx.vfs).map_err(Error::Store)? {
         ctx.vfs = ctx.vfs.overlay(
             promptforge_vfs::STORE_MOUNT,
-            shared_vfs::MemoryBackend::new(),
+            promptforge_vfs::MemoryBackend::new(),
         );
     }
     Ok(RunState::new(prompt, args, &ctx.vfs, shared, &ctx))
@@ -290,13 +290,13 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
 /// is never converted into the run silently reading and writing a
 /// throwaway overlay. The probe's identity and claim release with the
 /// access.
-fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, shared_vfs::VfsError> {
+fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, promptforge_vfs::VfsError> {
     match vfs
-        .acquire(shared_vfs::Origin::new("store mount probe"))?
+        .acquire(promptforge_vfs::Origin::new("store mount probe"))?
         .stat(promptforge_vfs::STORE_MOUNT)
     {
         Ok(_) => Ok(true),
-        Err(shared_vfs::VfsError::NotFound(_)) => Ok(false),
+        Err(promptforge_vfs::VfsError::NotFound(_)) => Ok(false),
         Err(error) => Err(error),
     }
 }

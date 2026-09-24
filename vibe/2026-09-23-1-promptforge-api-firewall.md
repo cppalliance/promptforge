@@ -584,7 +584,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-5>
 
-### Step 5: Fold shared-vfs into promptforge-vfs
+### Step 5: Fold shared-vfs into promptforge-vfs [completed]
 
 - Component: facade-firewall
 - Piece: engine relocation, continued from Step 4.

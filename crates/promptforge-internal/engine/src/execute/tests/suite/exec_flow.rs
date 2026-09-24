@@ -12,8 +12,8 @@ use crate::test_support::{RunHost, TestTool, TestToolTable, run_with_host};
 use crate::{Environment, RunError, RunResult};
 use promptforge_store::StoreError;
 use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
+use promptforge_vfs::VfsRef;
 use serde_json::{Value, json};
-use shared_vfs::VfsRef;
 
 use super::support::{
     FixtureRun, FixtureStore, Recorder, context, parse_execution_fixture, run_fixture,
@@ -2125,7 +2125,7 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
         ## First\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n\n\
         ## Second\n\n```lua\nreturn store.read('overlay.txt')\n```\n"
     );
-    let vfs = VfsRef::new(shared_vfs::MemoryBackend::new());
+    let vfs = VfsRef::new(promptforge_vfs::MemoryBackend::new());
     let probe = vfs.clone();
     let out = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
         .await
@@ -2140,10 +2140,10 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
     assert!(
         matches!(
             probe
-                .acquire(shared_vfs::Origin::new("overlay absence probe"))
+                .acquire(promptforge_vfs::Origin::new("overlay absence probe"))
                 .expect("the stock backend acquires")
                 .stat(promptforge_vfs::STORE_MOUNT),
-            Err(shared_vfs::VfsError::NotFound(_))
+            Err(promptforge_vfs::VfsError::NotFound(_))
         ),
         "the run's writes must land on the overlay, not the caller's backend"
     );

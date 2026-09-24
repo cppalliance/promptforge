@@ -7,7 +7,7 @@
 
 use crate::parser::Prompt;
 use promptforge_store::{Store, StoreError, StoreExt};
-use shared_vfs::{HostBackend, Origin, VfsRef};
+use promptforge_vfs::{HostBackend, Origin, VfsRef};
 
 use super::support::Recorder;
 use super::support::{RunOptions, drive, parse_execution_fixture, prepare_run, run_fixture};
@@ -208,7 +208,7 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
 }
 
 /// A unique temporary directory that removes itself on drop. The suite has
-/// no tempfile dependency; this mirrors shared-vfs's own test helper.
+/// no tempfile dependency; this mirrors promptforge-vfs's own test helper.
 struct TempDir(std::path::PathBuf);
 
 impl TempDir {

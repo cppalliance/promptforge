@@ -4798,8 +4798,8 @@ dependencies = [
  "promptforge-parser",
  "promptforge-store",
  "promptforge-types",
+ "promptforge-vfs",
  "serde_json",
- "shared-vfs",
  "workspace-hack",
 ]
 
@@ -4821,7 +4821,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "shared-vfs",
  "thiserror 2.0.19",
  "tokio",
  "workspace-hack",
@@ -4839,7 +4838,6 @@ dependencies = [
  "promptforge-vfs",
  "serde",
  "serde_json",
- "shared-vfs",
  "thiserror 2.0.19",
  "workspace-hack",
 ]
@@ -4874,7 +4872,6 @@ name = "promptforge-store"
 version = "0.3.0"
 dependencies = [
  "promptforge-vfs",
- "shared-vfs",
  "thiserror 2.0.19",
  "workspace-hack",
 ]
@@ -4886,7 +4883,6 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_json",
- "shared-vfs",
  "thiserror 2.0.19",
  "time",
  "workspace-hack",
@@ -4895,10 +4891,6 @@ dependencies = [
 [[package]]
 name = "promptforge-vfs"
 version = "0.3.0"
-dependencies = [
- "shared-vfs",
- "workspace-hack",
-]
 
 [[package]]
 name = "prost"
@@ -5961,10 +5953,6 @@ dependencies = [
  "tower",
  "workspace-hack",
 ]
-
-[[package]]
-name = "shared-vfs"
-version = "0.3.0"
 
 [[package]]
 name = "shellexpand"

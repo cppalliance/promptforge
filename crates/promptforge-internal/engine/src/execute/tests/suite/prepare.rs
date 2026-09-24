@@ -10,7 +10,7 @@ use crate::parser::Prompt;
 use crate::test_support::{RunHost, run_with_host};
 use crate::{Environment, RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
-use shared_vfs::Origin;
+use promptforge_vfs::Origin;
 
 use super::support::context;
 

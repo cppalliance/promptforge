@@ -188,8 +188,8 @@ impl<'de> Deserialize<'de> for TaskId {
 /// the replay key. The in-flight `EffectId` is a separate, opaque run-wide
 /// handle that need not reproduce.
 ///
-/// The name is chosen over `Origin` because [`shared_vfs::Origin`] already
-/// names the claims origin label one crate below and [`TaskOrigin`] names
+/// The name is chosen over `Origin` because the virtual filesystem's
+/// `Origin` already names the claims origin label and [`TaskOrigin`] names
 /// the spawning principal.
 ///
 /// Orders by task path, then by sequence.

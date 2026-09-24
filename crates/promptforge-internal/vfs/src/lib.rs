@@ -1,13 +1,40 @@
-//! PromptForge policy over the shared virtual filesystem machinery.
+//! The PromptForge virtual filesystem: generic machinery (canonical
+//! interned paths, the claims model, the mount router, the
+//! operation-observation seam, and backends) and the promptforge policy
+//! over it.
 //!
-//! This crate holds promptforge policy: the `/_promptforge` mount layout,
-//! the [`empty`] stock handle, and [`ModePolicy`], the editor mode gate.
-//! Generic machinery (traits, claims, routing, backends) sits in
-//! `shared-vfs` below.
+//! The crate root holds promptforge policy: the `/_promptforge` mount
+//! layout, the [`empty`] stock handle, and [`ModePolicy`], the editor mode
+//! gate. The machinery modules hold no promptforge policy (no
+//! `/_promptforge` paths, no Store, no run concepts).
+//!
+//! This crate is the permanent bottom of the dependency stack: std only,
+//! no workspace or external crates.
+
+mod error;
+mod glob;
+mod grep;
+mod handle;
+mod host;
+mod memory;
+mod observe;
+mod path;
+mod router;
+mod stat;
+mod traits;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use shared_vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath, VfsRef};
+pub use error::VfsError;
+pub use grep::{GrepMatch, GrepQuery, GrepResults};
+pub use handle::{Access, VfsRef};
+pub use host::HostBackend;
+pub use memory::MemoryBackend;
+pub use observe::{OpEvent, OpSink, Origin};
+pub use path::{VfsPath, VfsPathBuf};
+pub use router::VfsRefBuilder;
+pub use stat::{Entry, FileType, Stat};
+pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
 /// The mount prefix of the run-scoped store. Hosts seed before `run()`
 /// and extract after through this mount; callers never hardcode the
@@ -140,9 +167,69 @@ impl Policy for ModePolicy {
 
 #[cfg(test)]
 mod tests {
-    use shared_vfs::{Origin, VfsError, VfsRef};
-
     use super::{Mode, ModePolicy, STORE_MOUNT, empty};
+    use crate::{Origin, VfsError, VfsRef};
+
+    /// A manifest section is a dependency table when it is exactly one of
+    /// the three dependency tables, a sub-table of one
+    /// (`[dependencies.foo]` declares a dependency the same way), or a
+    /// target-qualified dependency table.
+    fn is_dependency_table(section: &str) -> bool {
+        const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+        TABLES.iter().any(|table| {
+            section == *table
+                || section
+                    .strip_prefix(*table)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        }) || (section.starts_with("target.") && section.ends_with(".dependencies"))
+    }
+
+    /// The zero-dependency rule is load-bearing: this crate compiles alone
+    /// and never rebuilds for a dependency rev, so the manifest must never
+    /// declare a dependency. This test reads the crate's own Cargo.toml and
+    /// fails if any dependency table has an entry.
+    #[test]
+    fn the_manifest_declares_no_dependencies() -> Result<(), std::io::Error> {
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+        )?;
+        let mut section = String::new();
+        for raw_line in manifest.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                section = line.trim_matches(['[', ']']).to_owned();
+                continue;
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            assert!(
+                !is_dependency_table(&section),
+                "zero-dependency rule violated: [{section}] declares `{line}`"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dependency_sub_tables_count_as_dependency_tables() {
+        // Regression: `[dependencies.foo]` once slipped past the exact-
+        // match section check while still declaring a dependency.
+        for section in [
+            "dependencies",
+            "dependencies.foo",
+            "dev-dependencies",
+            "dev-dependencies.foo",
+            "build-dependencies",
+            "build-dependencies.foo",
+            "target.'cfg(windows)'.dependencies",
+        ] {
+            assert!(is_dependency_table(section), "[{section}] must be caught");
+        }
+        for section in ["package", "lints", "features", "dependenciesfoo"] {
+            assert!(!is_dependency_table(section), "[{section}] must pass");
+        }
+    }
 
     #[test]
     fn empty_has_the_store_mount() -> Result<(), VfsError> {

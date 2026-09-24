@@ -18,7 +18,7 @@ use serde_json::json;
 fn fresh_access() -> Arc<Access> {
     Arc::new(
         promptforge_vfs::empty()
-            .acquire(shared_vfs::Origin::new("model test fixture"))
+            .acquire(promptforge_vfs::Origin::new("model test fixture"))
             .expect("the stock backend acquires"),
     )
 }

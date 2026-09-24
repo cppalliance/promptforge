@@ -99,7 +99,7 @@ impl Environment {
             .mount("/", self.base_vfs.clone())
             .mount(
                 promptforge_vfs::STORE_MOUNT,
-                shared_vfs::MemoryBackend::new(),
+                promptforge_vfs::MemoryBackend::new(),
             )
             .build()
     }

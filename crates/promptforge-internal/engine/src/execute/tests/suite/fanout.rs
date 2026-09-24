@@ -6,7 +6,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::RunErrorKind;
-use shared_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
+use promptforge_vfs::{
+    Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+};
 
 use super::support::{Record, run_fixture};
 

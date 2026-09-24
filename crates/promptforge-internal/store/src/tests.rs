@@ -6,7 +6,7 @@
 //! wedge the store) rather than a surfaced backend error.
 
 use promptforge_vfs::STORE_MOUNT;
-use shared_vfs::{
+use promptforge_vfs::{
     Access, Entry, ExecId, MemoryBackend, Origin, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
 };
 

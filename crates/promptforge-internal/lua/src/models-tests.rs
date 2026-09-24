@@ -185,7 +185,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
         &serde_json::json!({}),
         &std::sync::Arc::new(
             promptforge_vfs::empty()
-                .acquire(shared_vfs::Origin::new("models test fixture"))
+                .acquire(promptforge_vfs::Origin::new("models test fixture"))
                 .expect("the stock backend acquires"),
         ),
     )

@@ -15,7 +15,6 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-shared-vfs.workspace = true
 thiserror.workspace = true
 workspace-hack.workspace = true
 

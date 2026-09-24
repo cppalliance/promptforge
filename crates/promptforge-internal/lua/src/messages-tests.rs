@@ -12,7 +12,7 @@ use crate::{Error, SectionVm};
 fn fresh_access() -> std::sync::Arc<promptforge_store::Access> {
     std::sync::Arc::new(
         promptforge_vfs::empty()
-            .acquire(shared_vfs::Origin::new("messages test fixture"))
+            .acquire(promptforge_vfs::Origin::new("messages test fixture"))
             .expect("the stock backend acquires"),
     )
 }
