@@ -33,9 +33,14 @@ mod handlers;
 pub mod handles;
 mod workspace;
 mod workspace_file;
+#[cfg(feature = "test-fixtures")]
+#[path = "workspace-stall.rs"]
+mod workspace_stall;
 
 pub use error::WorkspaceError;
 pub use handlers::routes;
+#[cfg(feature = "test-fixtures")]
+pub use handlers::routes_with_deadline;
 pub use handles::{register, register_tasks};
 pub use workspace::{
     EntryKind, FileContents, GrantEntry, TreeEntry, TreeListing, Workspace, WorkspaceSummary,
@@ -43,3 +48,5 @@ pub use workspace::{
 #[cfg(any(test, feature = "test-fixtures"))]
 pub use workspace_file::create_alien_database_for_test;
 pub use workspace_file::{WindowState, WorkspaceFileError};
+#[cfg(feature = "test-fixtures")]
+pub use workspace_stall::WriteStallHandle;

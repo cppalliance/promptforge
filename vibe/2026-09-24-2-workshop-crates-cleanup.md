@@ -765,7 +765,7 @@ Components, in dependency order:
 
 <step-8>
 
-### Step 8: Answer the route deadline with a JSON 408
+### Step 8: Answer the route deadline with a JSON 408 [completed]
 
 - Component: Behavior fixes
 - Piece: save-timeout

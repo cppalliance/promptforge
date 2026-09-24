@@ -26,4 +26,7 @@ pub use config::{
     AgentsConfig, Config, ConfigError, DEFAULT_ADDR, DEFAULT_CONFIG_PATH, GatewayConfig,
     ServerConfig,
 };
-pub use deadline::{DEFAULT_DEADLINE, RELAY_DEADLINE, with_deadline};
+pub use deadline::{
+    DEADLINE_ELAPSED_CODE, DEFAULT_DEADLINE, RELAY_DEADLINE, deadline_elapsed_message,
+    with_deadline,
+};

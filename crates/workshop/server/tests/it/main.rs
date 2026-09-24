@@ -10,6 +10,7 @@ mod chat_gate;
 mod heartbeat;
 mod heartbeat_loop;
 mod realtime_relay;
+mod save_timeout;
 mod session;
 mod user_state;
 mod workspace_shutdown;

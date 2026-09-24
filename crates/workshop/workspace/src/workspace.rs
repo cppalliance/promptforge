@@ -175,6 +175,8 @@ pub struct Workspace {
     /// Where the last-used file is remembered between runs; `None` when
     /// built without a state directory (see [`Workspace::with_state_dir`]).
     pointer: Option<pointer::LastWorkspacePointer>,
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) stall: Arc<crate::workspace_stall::WriteStall>,
 }
 
 impl Default for Workspace {
@@ -187,6 +189,8 @@ impl Default for Workspace {
             switches: Arc::default(),
             closed: Arc::default(),
             pointer: None,
+            #[cfg(feature = "test-fixtures")]
+            stall: Arc::new(crate::workspace_stall::WriteStall::new()),
         }
     }
 }
@@ -390,6 +394,8 @@ impl Workspace {
             Err(source) if source.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(WorkspaceError::InspectPath { source }),
         }
+        #[cfg(feature = "test-fixtures")]
+        let _done = self.stall_wait();
         workshop_support::write_atomic(&canonical, text.as_bytes())
             .map_err(|source| WorkspaceError::WriteFile { source })?;
         let metadata =

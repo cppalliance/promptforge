@@ -30,6 +30,19 @@ mod prompts;
 /// `/workspace/file/state` ui-state bucket from `file_state`. Every
 /// route runs under the default deadline tier.
 pub fn routes(state: Workspace) -> axum::Router {
+    build(state, DEFAULT_DEADLINE)
+}
+
+/// The workspace routes bound on an explicit deadline, exposed only to
+/// tests so the 408 is reachable without waiting out the production
+/// 10-second default.
+#[cfg(feature = "test-fixtures")]
+pub fn routes_with_deadline(state: Workspace, limit: std::time::Duration) -> axum::Router {
+    build(state, limit)
+}
+
+/// Assembles the workspace routes and bounds them on `limit`.
+fn build(state: Workspace, limit: std::time::Duration) -> axum::Router {
     with_deadline(
         axum::Router::new()
             .route("/workspace/tree", get(tree))
@@ -40,7 +53,7 @@ pub fn routes(state: Workspace) -> axum::Router {
             .merge(file_state::routes())
             .merge(prompts::routes())
             .with_state(state),
-        DEFAULT_DEADLINE,
+        limit,
     )
 }
 

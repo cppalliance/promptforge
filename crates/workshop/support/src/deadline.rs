@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use axum::Json;
 use axum::Router;
 use axum::extract::Request;
 use axum::http::StatusCode;
@@ -20,6 +21,21 @@ pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(10);
 /// the relay's 502 with its failure shape rather than a blunt 408 from the
 /// route deadline.
 pub const RELAY_DEADLINE: Duration = Duration::from_secs(35);
+
+/// The machine-readable wire code of a deadline-elapsed failure. Both UIs
+/// key on this string, so it is a wire contract.
+pub const DEADLINE_ELAPSED_CODE: &str = "deadline_elapsed";
+
+/// The user-visible message a deadline-elapsed failure answers with: the
+/// elapsed deadline in seconds, and that the abandoned operation may
+/// still complete - a blocking write cannot be cancelled.
+#[must_use]
+pub fn deadline_elapsed_message(limit: Duration) -> String {
+    format!(
+        "the request did not finish within its {}s deadline; the operation may still complete",
+        limit.as_secs()
+    )
+}
 
 /// Bounds every route already in `router` on `limit`: a response not
 /// produced by the deadline is abandoned and answered with 408 instead.
@@ -38,7 +54,13 @@ where
                 Ok(response) => response,
                 Err(_elapsed) => {
                     tracing::warn!(%uri, ?limit, "request deadline elapsed");
-                    StatusCode::REQUEST_TIMEOUT.into_response()
+                    let body = serde_json::json!({
+                        "error": {
+                            "message": deadline_elapsed_message(limit),
+                            "code": DEADLINE_ELAPSED_CODE,
+                        }
+                    });
+                    (StatusCode::REQUEST_TIMEOUT, Json(body)).into_response()
                 }
             }
         },
@@ -75,7 +97,7 @@ mod tests {
                     "unreachable"
                 }),
             ),
-            Duration::from_millis(50),
+            Duration::from_secs(1),
         );
         let request = Request::builder()
             .uri("/stalled")
@@ -86,6 +108,26 @@ mod tests {
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .map(axum::http::HeaderValue::as_bytes),
+            Some(b"application/json".as_slice()),
+            "the deadline answers JSON"
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&body_bytes(response).await).expect("the body is JSON");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "error": {
+                    "message": deadline_elapsed_message(Duration::from_secs(1)),
+                    "code": DEADLINE_ELAPSED_CODE,
+                }
+            }),
+            "the 408 body is the error envelope"
+        );
     }
 
     #[tokio::test]
