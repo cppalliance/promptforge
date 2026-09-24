@@ -12,7 +12,7 @@
 use std::fmt;
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use promptforge_api_types::event::Event;
+use promptforge::event::Event;
 use tokio::sync::broadcast;
 
 /// Capacity of the broadcast channel behind
@@ -45,8 +45,8 @@ impl WorkshopObserver {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_api_types::event::Event;
-    /// use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    /// use promptforge::event::Event;
+    /// use promptforge::ids::{ChainId, Provenance, TaskId};
     /// use workshop_gateway::WorkshopObserver;
     ///
     /// let log = WorkshopObserver::new();
@@ -109,8 +109,8 @@ impl WorkshopObserver {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_api_types::event::Event;
-    /// use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    /// use promptforge::event::Event;
+    /// use promptforge::ids::{ChainId, Provenance, TaskId};
     /// use workshop_gateway::WorkshopObserver;
     ///
     /// let log = WorkshopObserver::new();

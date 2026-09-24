@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use harness_capabilities::CapabilityRegistry;
-use promptforge_api_runtime::{Environment, RunErrorKind, RunResult};
-use promptforge_api_types::tools::ToolId;
+use promptforge::tools::ToolId;
+use promptforge::{Environment, RunErrorKind, RunResult};
 
 use super::activation::DECLARES_REQUIRED;
 use super::support::{

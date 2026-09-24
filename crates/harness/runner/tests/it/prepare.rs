@@ -17,9 +17,9 @@ use harness_runner::display_chain;
 use harness_runner::effect_loop::{SharedLog, drive_run};
 use harness_runner::performers::{ActivatedTools, ToolPerformer};
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare_run};
-use promptforge_api_runtime::RunErrorKind;
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::RunErrorKind;
+use promptforge::cancel::CancelHandle;
+use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
 use crate::support::Unused;
 
@@ -57,7 +57,7 @@ async fn log() -> SharedLog {
 fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Services {
     Services {
         registry,
-        vfs: shared_vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::builder().build(),
         cancel: CancelHandle::new(),
         log: Arc::clone(log),
         chat: Arc::new(Unused),

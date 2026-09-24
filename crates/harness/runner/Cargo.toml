@@ -15,8 +15,9 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 harness-capabilities.workspace = true
 harness-log.workspace = true
-promptforge-api-runtime.workspace = true
-promptforge-api-types.workspace = true
+# The engine's public API: the Run this crate drives, the effects and
+# answers it correlates, and the run's VFS handle.
+promptforge.workspace = true
 # The run seed is drawn from the OS CSPRNG at preparation: it is the
 # untrusted-envelope nonce's source, so it must be unguessable.
 rand.workspace = true
@@ -24,7 +25,6 @@ serde_json.workspace = true
 # The prompt's content hash for the run row, so a transcript can be
 # matched to the exact text that produced it.
 sha2.workspace = true
-shared-vfs.workspace = true
 thiserror.workspace = true
 # `fs` for the prompt file read at preparation, so launching a run never
 # blocks a worker thread; `sync` and `rt` for the awaitable cancel token

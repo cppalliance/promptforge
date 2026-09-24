@@ -14,7 +14,8 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 harness-capabilities.workspace = true
-promptforge-api-types.workspace = true
+# The engine's public API: tool id, output, and error vocabulary.
+promptforge.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true

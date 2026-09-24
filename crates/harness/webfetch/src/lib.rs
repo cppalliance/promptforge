@@ -18,9 +18,8 @@
 //! ## Invariants
 //!
 //! - Family: harness, private to `crates/harness/`; may depend on:
-//!   `promptforge-api-runtime`, `promptforge-api-types`,
-//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
-//!   container siblings.
+//!   `promptforge`, `gateway-api-types`, `gateway-api-discovery`,
+//!   `shared-*`, and its container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.

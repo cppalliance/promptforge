@@ -27,14 +27,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use harness_capabilities::{CapabilityRegistry, RunServices, activate};
 use harness_log::{LogError, Record, RecordKind, RunId, RunMeta, RunOutcome};
-use promptforge_api_runtime::{Environment, RunContext, RunError};
-use promptforge_api_runtime::{ParseError, Prompt, Run};
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::event::Event;
-use promptforge_api_types::models::ModelDescriptor;
-use promptforge_api_types::timestamp::Timestamp;
+use promptforge::cancel::CancelHandle;
+use promptforge::event::Event;
+use promptforge::model::ModelDescriptor;
+use promptforge::timestamp::Timestamp;
+use promptforge::vfs::VfsRef;
+use promptforge::{Environment, RunContext, RunError};
+use promptforge::{ParseError, Prompt, Run};
 use sha2::{Digest as _, Sha256};
-use shared_vfs::VfsRef;
 
 use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};

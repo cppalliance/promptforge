@@ -1,7 +1,7 @@
 //! The streamed round end to end: what goes on the wire, and how the
 //! stream comes back as one completion.
 
-use promptforge_api_runtime::model::{CompletionResult, Message, StreamDelta};
+use promptforge::model::{CompletionResult, Message, StreamDelta};
 
 use super::*;
 use crate::CompletionErrorKind;

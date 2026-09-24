@@ -17,7 +17,8 @@ futures-util.workspace = true
 # The gateway's public wire vocabulary: the progress snapshot the
 # `GET /admin/progress` stream sends.
 gateway-api-types.workspace = true
-promptforge-api-types.workspace = true
+# The engine's public API: the events the run event log records.
+promptforge.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

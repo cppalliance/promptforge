@@ -11,8 +11,8 @@
 //! permitted caller of the raw tokio method it wraps, and no other
 //! harness code is.
 
-use promptforge_api_runtime::EffectId;
-use promptforge_api_types::ids::Provenance;
+use promptforge::effect::EffectId;
+use promptforge::ids::Provenance;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 

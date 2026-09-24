@@ -31,8 +31,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_log::{LogError, RunId as LogRunId};
 use harness_runner::effect_loop::SharedLog;
-use promptforge_api_types::event::Event;
-use promptforge_api_types::wire::StreamDelta;
+use promptforge::event::Event;
+use promptforge::model::StreamDelta;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::discovery::AgentSource;
@@ -381,7 +381,7 @@ impl SessionCore {
     }
 
     /// Installs and retains the next run's fresh cancel handle.
-    pub(crate) fn arm_cancel(&self, run: RunId) -> promptforge_api_types::cancel::CancelHandle {
+    pub(crate) fn arm_cancel(&self, run: RunId) -> promptforge::cancel::CancelHandle {
         self.lifecycle.arm(run)
     }
 

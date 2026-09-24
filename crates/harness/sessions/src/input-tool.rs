@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use harness_runner::performers::{BoxFuture, InputPerformer};
-use promptforge_api_runtime::input::{InputError, InputOutcome};
+use promptforge::input::{InputError, InputOutcome};
 use tokio::sync::broadcast;
 
 use super::{WaitFrame, WaitRegistry};

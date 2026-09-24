@@ -5,7 +5,7 @@
 use std::num::NonZeroU32;
 
 use harness_runner::performers::ChatPerformer;
-use promptforge_api_runtime::model::{
+use promptforge::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
     StreamDelta,
 };

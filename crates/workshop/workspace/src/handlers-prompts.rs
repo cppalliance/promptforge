@@ -13,10 +13,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
-use promptforge_api_runtime::parser::{
-    ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ParseError,
-    ParseErrorKind, Prompt, ToolSlot,
+use promptforge::prompt::{
+    ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
 };
+use promptforge::{ParseError, ParseErrorKind, Prompt};
 use workshop_protocol::ErrorEnvelope;
 
 use crate::workspace::Workspace;

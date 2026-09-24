@@ -21,8 +21,8 @@ fn agent_fixture() -> serde_json::Value {
 
 /// The root task's zeroth sequence: the provenance every fixture event
 /// holds, since the wire does not expose it.
-fn provenance() -> promptforge_api_types::ids::Provenance {
-    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+fn provenance() -> promptforge::ids::Provenance {
+    use promptforge::ids::{ChainId, Provenance, TaskId};
     Provenance {
         task: TaskId::from(ChainId::root()),
         seq: 0,
@@ -31,8 +31,8 @@ fn provenance() -> promptforge_api_types::ids::Provenance {
 
 /// The fixture's `agent_event_minimal` entry as the engine event it
 /// projects from.
-fn minimal_fixture_event() -> promptforge_api_types::event::Event {
-    promptforge_api_types::event::Event::UserInput {
+fn minimal_fixture_event() -> promptforge::event::Event {
+    promptforge::event::Event::UserInput {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
         provenance: provenance(),
@@ -42,11 +42,9 @@ fn minimal_fixture_event() -> promptforge_api_types::event::Event {
 
 /// The fixture's `agent_event_stamped` entry as the engine event it
 /// projects from, every metrics section populated.
-fn stamped_fixture_event() -> promptforge_api_types::event::Event {
-    use promptforge_api_types::metrics::{
-        CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
-    };
-    promptforge_api_types::event::Event::AssistantReply {
+fn stamped_fixture_event() -> promptforge::event::Event {
+    use promptforge::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
+    promptforge::event::Event::AssistantReply {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
         provenance: provenance(),
@@ -54,7 +52,7 @@ fn stamped_fixture_event() -> promptforge_api_types::event::Event {
         text: "hello".to_owned(),
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
-        origin: promptforge_api_types::event::ReplyOrigin::Chat,
+        origin: promptforge::event::ReplyOrigin::Chat,
         metrics: Some(CallMetrics {
             usage: Some(Usage {
                 prompt_tokens: 7,

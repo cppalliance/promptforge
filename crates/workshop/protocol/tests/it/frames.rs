@@ -161,8 +161,8 @@ fn an_agent_session_frame_serializes_its_id_and_agent() {
 
 #[test]
 fn an_agent_event_frame_has_its_log_index_and_optional_reply_id() {
-    use promptforge_api_types::event::Event;
-    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    use promptforge::event::Event;
+    use promptforge::ids::{ChainId, Provenance, TaskId};
     let event = Event::UserInput {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
@@ -201,9 +201,9 @@ fn an_agent_event_frame_has_its_log_index_and_optional_reply_id() {
 
 #[test]
 fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
-    use promptforge_api_types::event::Event;
-    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
-    use promptforge_api_types::metrics::ToolCallEvent;
+    use promptforge::event::Event;
+    use promptforge::ids::{ChainId, Provenance, TaskId};
+    use promptforge::metrics::ToolCallEvent;
     let provenance = Provenance {
         task: TaskId::from(ChainId::root()),
         seq: 0,
@@ -245,8 +245,8 @@ fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
 
 #[test]
 fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_results() {
-    use promptforge_api_types::event::Event;
-    use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+    use promptforge::event::Event;
+    use promptforge::ids::{ChainId, Provenance, TaskId};
     let provenance = Provenance {
         task: TaskId::from(ChainId::root()),
         seq: 0,

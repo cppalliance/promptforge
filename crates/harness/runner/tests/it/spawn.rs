@@ -2,8 +2,9 @@
 //! effect's tag.
 
 use harness_runner::spawn::{spawn_blocking_launch, spawn_blocking_tagged, spawn_tagged};
-use promptforge_api_runtime::{EffectId, Step};
-use promptforge_api_types::ids::Provenance;
+use promptforge::Step;
+use promptforge::effect::EffectId;
+use promptforge::ids::Provenance;
 
 use crate::support::run;
 

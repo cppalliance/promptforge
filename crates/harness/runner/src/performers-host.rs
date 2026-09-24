@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use harness_log::RunId;
-use promptforge_api_runtime::{StoreError, StoreOp, StoreOutcome, perform_store_op};
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::TaskId;
-use shared_vfs::Access;
+use promptforge::event::Event;
+use promptforge::ids::TaskId;
+use promptforge::vfs::Access;
+use promptforge::vfs::{StoreError, StoreOp, StoreOutcome, perform_store_op};
 
 use super::{BoxFuture, StorePerformer, TaskEventsPerformer, TimerPerformer};
 use crate::effect_loop::SharedLog;

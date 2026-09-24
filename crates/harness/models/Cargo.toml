@@ -17,11 +17,10 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # harness's one instrumented spawn wrapper the mock gateways run under.
 harness-runner.workspace = true
 # The engine's public API: the chat vocabulary (Message, ToolSchema, Completion,
-# CompletionError) this transport exchanges with a Run's Chat effect, and
-# the SSE reassembly the streamed body is folded through.
-promptforge-api-runtime.workspace = true
-# The canonical metrics, model catalog, and delta vocabulary.
-promptforge-api-types.workspace = true
+# CompletionError) this transport exchanges with a Run's Chat effect, the
+# SSE reassembly the streamed body is folded through, and the canonical
+# metrics, model catalog, and delta vocabulary.
+promptforge.workspace = true
 # Names `bytes::Bytes`, the buffer `reqwest` yields per body chunk, as the
 # reassembly's chunk type so no chunk is copied on its way in.
 bytes.workspace = true
@@ -42,7 +41,6 @@ axum.workspace = true
 harness-log.workspace = true
 # The tag fixture the mock gateways are spawned under.
 harness-runner = { workspace = true, features = ["test-support"] }
-shared-vfs.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 

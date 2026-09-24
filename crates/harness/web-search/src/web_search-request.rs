@@ -3,7 +3,7 @@
 //! alone cannot express. Only a value that passed [`SearchRequest::from_args`]
 //! is serialized onto the wire to the gateway.
 
-use promptforge_api_types::tools::{ToolError, ToolErrorKind};
+use promptforge::tools::{ToolError, ToolErrorKind};
 
 use super::{MAX_COUNT, MAX_DOMAINS, MAX_QUERY_LEN, MAX_STRING_LEN};
 

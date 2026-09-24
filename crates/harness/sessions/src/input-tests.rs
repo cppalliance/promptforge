@@ -7,9 +7,10 @@ use std::sync::Arc;
 use harness_runner::performers::InputPerformer;
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
-use promptforge_api_runtime::input::InputOutcome;
-use promptforge_api_runtime::{Effect, EffectAnswer, Prompt, Run, RunContext, RunResult, Step};
-use promptforge_api_types::timestamp::Timestamp;
+use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::input::InputOutcome;
+use promptforge::timestamp::Timestamp;
+use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.

@@ -11,16 +11,16 @@
 //! performer resolves a `ToolCall` effect's id in. The engine sees only the
 //! first.
 //!
-//! [`Environment::prepare`]: promptforge_api_runtime::Environment::prepare
+//! [`Environment::prepare`]: promptforge::Environment::prepare
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_api_runtime::parser::Prompt;
-use promptforge_api_runtime::{CapabilityConflict, Requirements};
-use promptforge_api_types::capabilities::CapabilityId;
-use promptforge_api_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
+use promptforge::Prompt;
+use promptforge::capabilities::CapabilityId;
+use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
+use promptforge::{CapabilityConflict, Requirements};
 
 use crate::capability::{Capability, Contribution, RunServices};
 use crate::registry::CapabilityRegistry;
@@ -75,7 +75,7 @@ impl fmt::Debug for ToolTable {
 pub struct Activation {
     /// The activated capabilities' contributed tools as descriptors, in
     /// declaration order: what the host hands to
-    /// [`Environment::tools`](promptforge_api_runtime::Environment::tools).
+    /// [`Environment::tools`](promptforge::Environment::tools).
     pub catalog: ToolCatalog,
     /// The implementations behind the catalog: what the host's tool
     /// performer resolves against.

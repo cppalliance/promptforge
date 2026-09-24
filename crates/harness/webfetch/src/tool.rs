@@ -11,7 +11,7 @@ use std::sync::Arc;
 use reqwest::header::CONTENT_TYPE;
 
 use harness_capabilities::Tool;
-use promptforge_api_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::config::{ConfigError, FetchConfig};
 use crate::error::{Disposition, FetchError, SafeUrl};

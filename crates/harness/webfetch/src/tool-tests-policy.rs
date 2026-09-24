@@ -6,7 +6,7 @@
 
 use super::*;
 
-use promptforge_api_types::tools::ToolErrorKind;
+use promptforge::tools::ToolErrorKind;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_server_past_total_timeout_yields_timeout() {

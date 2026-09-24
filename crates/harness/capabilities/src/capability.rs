@@ -10,13 +10,13 @@
 //! run's [`RunServices`]; the returned [`Contribution`] is v1 tools-only
 //! and grows without redesign. An activation failure is a
 //! [`CapabilityError`]: a stable kind for code plus a message written to be
-//! read by a model, mirroring [`ToolError`](promptforge_api_types::tools::ToolError).
+//! read by a model, mirroring [`ToolError`](promptforge::tools::ToolError).
 
 use std::sync::Arc;
 
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::capabilities::CapabilityId;
-use shared_vfs::VfsRef;
+use promptforge::cancel::CancelHandle;
+use promptforge::capabilities::CapabilityId;
+use promptforge::vfs::VfsRef;
 
 use crate::tool::Tool;
 
@@ -62,7 +62,7 @@ mod tests;
 ///     id: CapabilityId::parse("promptforge/web")?,
 /// };
 /// assert_eq!(web.id().pack(), "web");
-/// # Ok::<(), promptforge_api_types::capabilities::CapabilityIdError>(())
+/// # Ok::<(), promptforge::capabilities::CapabilityIdError>(())
 /// ```
 ///
 /// # Invariants
@@ -129,9 +129,9 @@ impl RunServices {
     ///
     /// ```
     /// use harness_capabilities::RunServices;
-    /// use promptforge_api_types::cancel::CancelHandle;
+    /// use promptforge::cancel::CancelHandle;
     ///
-    /// let services = RunServices::new(shared_vfs::VfsRef::builder().build(), CancelHandle::new());
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::builder().build(), CancelHandle::new());
     /// assert!(!services.cancel.is_cancelled());
     /// ```
     #[must_use]
@@ -190,7 +190,7 @@ pub enum CapabilityErrorKind {
 /// The `Display` message is caller-facing and safe to hand to a model; any
 /// underlying cause is hidden behind [`std::error::Error::source`]. Match on
 /// [`CapabilityError::kind`] rather than a private representation. This
-/// mirrors [`ToolError`](promptforge_api_types::tools::ToolError): a stable
+/// mirrors [`ToolError`](promptforge::tools::ToolError): a stable
 /// kind for code, a message written to be read by a model.
 #[derive(Debug)]
 #[non_exhaustive]

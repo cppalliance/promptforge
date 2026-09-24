@@ -3,17 +3,19 @@
 //!
 //! The request body, the stream reassembly, and the read loop that applies
 //! the byte cap and measures the timing are the engine's shared protocol
-//! seams (`promptforge_api_runtime::model`); this file owns only what
-//! touches the wire: sending, the request timeout, the response as a chunk
-//! source, and the clock the read loop is handed.
+//! seams (`promptforge::transport`); this file owns only what touches the
+//! wire: sending, the request timeout, the response as a chunk source, and
+//! the clock the read loop is handed.
 
 use std::fmt;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use promptforge_api_runtime::model::{
-    ChunkSource, ClientError as Error, ClientTimeout, Completion, CompletionError,
-    CompletionOptions, Message, StreamDelta, ToolSchema, build_request_body, escape_controls,
+use promptforge::model::{
+    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
+};
+use promptforge::transport::{
+    ChunkSource, ClientError as Error, ClientTimeout, build_request_body, escape_controls,
     read_body_capped, read_completion_stream,
 };
 
@@ -105,7 +107,7 @@ impl GatewayClient {
     /// ```no_run
     /// # async fn run() -> Result<(), harness_models::CompletionError> {
     /// use harness_models::{GatewayClient, GatewayEndpoint, SecretString};
-    /// use promptforge_api_runtime::model::{CompletionOptions, Message};
+    /// use promptforge::model::{CompletionOptions, Message};
     ///
     /// let client = GatewayClient::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
@@ -173,7 +175,7 @@ impl GatewayClient {
     /// ```
     /// # async fn run() {
     /// use harness_models::{CompletionErrorKind, GatewayClient};
-    /// use promptforge_api_runtime::model::{CompletionOptions, Message};
+    /// use promptforge::model::{CompletionOptions, Message};
     ///
     /// let client = GatewayClient::disabled();
     /// let options = CompletionOptions::new("m");
@@ -269,7 +271,7 @@ impl GatewayClient {
     /// [`StreamDelta`] text or reasoning fragment (a caller with no use for
     /// deltas passes a no-op closure). The returned [`Completion`] holds
     /// the reassembled turn, the metadata parsed from the stream's summary
-    /// chunk, and a [`ClientTiming`](promptforge_api_types::metrics::ClientTiming)
+    /// chunk, and a [`ClientTiming`](promptforge::metrics::ClientTiming)
     /// measured on this client's own clock
     /// (TTFT, mean inter-token latency, end-to-end).
     ///

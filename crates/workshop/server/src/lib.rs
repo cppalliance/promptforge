@@ -26,7 +26,7 @@
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-user-state`,
 //!   `workshop-workspace`), the harness's public API `harness-api`, and
-//!   the engine's vocabulary `promptforge-api-types`. Read `AGENTS.md`
+//!   the engine's public API `promptforge`. Read `AGENTS.md`
 //!   before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.

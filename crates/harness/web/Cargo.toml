@@ -16,11 +16,10 @@ documentation = "https://cppalliance.github.io/promptforge/"
 harness-capabilities.workspace = true
 harness-webfetch.workspace = true
 harness-web-search.workspace = true
-promptforge-api-types.workspace = true
+# The engine's public API: the tool error activation reports, and (in
+# tests) the VFS handle the run services are built over.
+promptforge.workspace = true
 workspace-hack.workspace = true
-
-[dev-dependencies]
-shared-vfs.workspace = true
 
 [lints]
 workspace = true

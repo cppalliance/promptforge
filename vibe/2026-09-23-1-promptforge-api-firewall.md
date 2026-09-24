@@ -524,7 +524,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-3>
 
-### Step 3: Migrate every outside crate to the facade
+### Step 3: Migrate every outside crate to the facade [completed]
 
 - Component: facade-firewall
 - Piece: consumer migration. It comes after the facade crate, whose re-exports it imports, and before the relocation. It is one step because the two test partitions are the one test set that covers it.

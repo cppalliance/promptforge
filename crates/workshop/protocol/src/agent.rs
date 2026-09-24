@@ -1,7 +1,7 @@
 //! Agent-session frames: the `/agents/ws` socket's frame family.
 
-use promptforge_api_types::event::Event;
-use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge::event::Event;
+use promptforge::metrics::{CallMetrics, ToolCallEvent};
 use serde::Serialize;
 
 /// The agent list pushed when an `/agents/ws` socket connects:

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::CapabilityId;
+use promptforge::capabilities::CapabilityId;
 
 use super::{CapabilityRegistry, RegistryErrorKind};
 use crate::{Capability, CapabilityError, Contribution, RunServices};

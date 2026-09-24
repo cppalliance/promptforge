@@ -8,7 +8,7 @@
 //! the run log.
 
 use harness_runner::performers::{BoxFuture, ChatPerformer};
-use promptforge_api_runtime::model::{
+use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, StreamDelta, ToolSchema,
 };
 use tokio::sync::mpsc;

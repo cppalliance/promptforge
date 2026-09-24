@@ -3,7 +3,7 @@
 //! and [`Tool`] traits the first-party capability crates implement.
 //!
 //! The engine holds none of this. It binds tool slots against descriptors
-//! ([`promptforge_api_types::tools::ToolCatalog`]) and issues every tool
+//! ([`promptforge::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
 //! are defined here, in the harness. A host builds one
 //! [`CapabilityRegistry`] of installed capabilities, calls [`activate`]
@@ -14,9 +14,8 @@
 //! ## Invariants
 //!
 //! - Family: harness, private to `crates/harness/`; may depend on:
-//!   `promptforge-api-runtime`, `promptforge-api-types`,
-//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
-//!   container siblings.
+//!   `promptforge`, `gateway-api-types`, `gateway-api-discovery`,
+//!   `shared-*`, and its container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.
@@ -40,6 +39,4 @@ pub use tool::Tool;
 
 /// The capability identity vocabulary, re-exported from the engine's types
 /// so a provider names one crate for the whole contract.
-pub use promptforge_api_types::capabilities::{
-    CapabilityId, CapabilityIdError, CapabilityIdErrorKind,
-};
+pub use promptforge::capabilities::{CapabilityId, CapabilityIdError, CapabilityIdErrorKind};

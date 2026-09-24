@@ -17,8 +17,8 @@ use harness_log::{RunId as LogRunId, RunOutcome};
 use harness_models::{GatewayChatPerformer, GatewayClient};
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
-use promptforge_api_runtime::RunLimits;
-use promptforge_api_types::event::Event;
+use promptforge::RunLimits;
+use promptforge::event::Event;
 
 use crate::discovery::AgentSource;
 use crate::environment::{
@@ -87,7 +87,7 @@ pub(crate) async fn run_once(
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
     let services = Services {
         registry,
-        vfs: shared_vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::builder().build(),
         cancel: cancel.clone(),
         log: Arc::clone(&core.log),
         chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),

@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use promptforge_api_runtime::{EffectAnswer, EffectId};
-use promptforge_api_runtime::{StoreError, StoreOp, StoreOutcome};
-use shared_vfs::Access;
+use promptforge::effect::{EffectAnswer, EffectId};
+use promptforge::vfs::Access;
+use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
 use tokio::sync::mpsc;
 
 use crate::performers::StorePerformer;

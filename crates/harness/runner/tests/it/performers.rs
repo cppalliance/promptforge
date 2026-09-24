@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use harness_log::{RecordKind, RunLog, RunMeta, RunOutcome};
 use harness_runner::effect_loop::{SharedLog, drive_run};
 use harness_runner::performers::{BoxFuture, InputPerformer, LogTaskEvents, TokioTimer, VfsStore};
-use promptforge_api_runtime::input::{InputError, InputOutcome};
-use promptforge_api_types::cancel::CancelHandle;
+use promptforge::cancel::CancelHandle;
+use promptforge::input::{InputError, InputOutcome};
 use serde_json::json;
 
 use crate::support::{PendingInput, TIMED_MAIN, run, run_with_child, unused};

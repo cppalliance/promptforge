@@ -30,7 +30,7 @@ use axum::response::Response;
 use harness_api::{
     Delta, DeltaKind, Session, SessionEvent, SessionFailure, WaitError, WaitFrame, display_chain,
 };
-use promptforge_api_types::event::Event;
+use promptforge::event::Event;
 use tokio::sync::broadcast;
 
 use workshop_protocol::{

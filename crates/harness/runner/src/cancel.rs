@@ -5,7 +5,7 @@
 //! [`CancelHandle::cancel`] from a Ctrl-C task instead, or `select!` over
 //! [`CancelHandle::cancelled`] beside the run's effect channel. This is
 //! the tokio-aware token a host waits on; the engine itself observes only
-//! the polled flag in `promptforge_api_types::cancel`, and a host bridges
+//! the polled flag in `promptforge::cancel`, and a host bridges
 //! the one to the other when it launches a run.
 
 use std::future::Future;

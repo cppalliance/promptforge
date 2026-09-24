@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+use promptforge::ids::{ChainId, Provenance, TaskId};
 use workshop_protocol::Severity;
 use workshop_registry::Registry;
 use workshop_status::StatusBus;
@@ -46,7 +46,7 @@ fn reply_event() -> Event {
         finish_reason: None,
         model: "m".to_owned(),
         metrics: None,
-        origin: promptforge_api_types::event::ReplyOrigin::Chat,
+        origin: promptforge::event::ReplyOrigin::Chat,
     }
 }
 

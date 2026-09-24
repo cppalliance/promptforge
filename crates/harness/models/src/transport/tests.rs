@@ -3,7 +3,8 @@
 
 use harness_runner::spawn::spawn_tagged;
 pub(crate) use harness_runner::test_support::mock_tag;
-use promptforge_api_runtime::model::{ClientError as Error, CompletionOptions};
+use promptforge::model::CompletionOptions;
+use promptforge::transport::ClientError as Error;
 use serde_json::Value;
 
 use super::*;

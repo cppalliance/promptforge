@@ -57,7 +57,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_api_types::capabilities::CapabilityId;
+use promptforge::capabilities::CapabilityId;
 
 use crate::capability::Capability;
 

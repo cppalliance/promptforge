@@ -1,9 +1,9 @@
 //! One performer trait per effect kind, and the bundle the effect loop
 //! performs a run's effects through.
 //!
-//! The engine issues an [`Effect`](promptforge_api_runtime::Effect) as a
+//! The engine issues an [`Effect`](promptforge::effect::Effect) as a
 //! value and waits for its
-//! [`EffectAnswer`](promptforge_api_runtime::EffectAnswer); a performer is
+//! [`EffectAnswer`](promptforge::effect::EffectAnswer); a performer is
 //! the host code that turns the one into the other. Each trait takes the
 //! effect's fields and returns the answer's payload for its kind, so a
 //! performer never sees the run, the log, or another kind's effects. The
@@ -26,16 +26,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use promptforge_api_runtime::input::{InputError, InputOutcome};
-use promptforge_api_runtime::model::{
+use promptforge::event::Event;
+use promptforge::ids::TaskId;
+use promptforge::input::{InputError, InputOutcome};
+use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
-use promptforge_api_runtime::{StoreError, StoreOp, StoreOutcome};
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::TaskId;
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
+use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
 use serde_json::Value;
-use shared_vfs::Access;
 
 #[path = "performers-host.rs"]
 mod host;

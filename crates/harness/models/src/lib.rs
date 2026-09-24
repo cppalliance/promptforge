@@ -9,7 +9,7 @@
 //! body, reads the stream under the run's byte cap and timeout, hands each
 //! `data:` payload to the engine's shared SSE reassembly, invokes the
 //! caller's delta callback live, and returns the one
-//! [`Completion`](promptforge_api_runtime::model::Completion) the round
+//! [`Completion`](promptforge::model::Completion) the round
 //! produced. [`fetch_model_catalog`] reads the gateway's typed model list
 //! for host-side concerns (the Workshop dropdown and its selection
 //! resolution). The client holds only the gateway's URL and the shared
@@ -20,16 +20,14 @@
 //!
 //! This is a Gateway model client, not a universal transport: it speaks
 //! the one protocol the gateway serves. Everything it exchanges is the
-//! engine's vocabulary, reached through the `promptforge-api-runtime`
-//! crate; the metrics it reports are the canonical
-//! `promptforge-api-types` ones.
+//! engine's vocabulary, reached through the `promptforge` crate; the
+//! metrics it reports are the canonical `promptforge::metrics` ones.
 //!
 //! ## Invariants
 //!
 //! - Family: harness, private to `crates/harness/`; may depend on:
-//!   `promptforge-api-runtime`, `promptforge-api-types`,
-//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
-//!   container siblings.
+//!   `promptforge`, `gateway-api-types`, `gateway-api-discovery`,
+//!   `shared-*`, and its container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.
@@ -48,5 +46,5 @@ mod transport;
 pub use catalog::fetch_model_catalog;
 pub use config::{GatewayEndpoint, SecretError, SecretString};
 pub use performer::{DeltaSink, GatewayChatPerformer};
-pub use promptforge_api_runtime::model::{CompletionError, CompletionErrorKind};
+pub use promptforge::model::{CompletionError, CompletionErrorKind};
 pub use transport::GatewayClient;

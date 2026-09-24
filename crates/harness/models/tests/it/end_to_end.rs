@@ -23,10 +23,10 @@ use harness_runner::performers::{BoxFuture, InputPerformer};
 use harness_runner::prepare::{Prepared, Services, prepare_run};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
-use promptforge_api_runtime::input::{InputError, InputOutcome};
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::event::Event;
-use promptforge_api_types::models::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::cancel::CancelHandle;
+use promptforge::event::Event;
+use promptforge::input::{InputError, InputOutcome};
+use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -336,7 +336,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
     let services = Services {
         registry: None,
-        vfs: shared_vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::builder().build(),
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(GatewayChatPerformer::new(client, deltas)),

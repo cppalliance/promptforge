@@ -6,9 +6,9 @@
 //! order changes, would make a replayed run differ from the run that ran.
 
 use harness_log::{Record, RecordFilter, RecordKind, RunLog, RunMeta};
-use promptforge_api_types::event::{Event, ReplyOrigin};
-use promptforge_api_types::ids::{ParseIdError, Provenance, TaskId};
-use promptforge_api_types::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
+use promptforge::event::{Event, ReplyOrigin};
+use promptforge::ids::{ParseIdError, Provenance, TaskId};
+use promptforge::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::{Map, Value, json};
 
 /// A double whose shortest decimal text a plain parser reads back as the

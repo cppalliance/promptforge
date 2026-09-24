@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::capabilities::CapabilityId;
+use promptforge::cancel::CancelHandle;
+use promptforge::capabilities::CapabilityId;
 
 use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
 
@@ -73,7 +73,10 @@ fn a_default_contribution_has_no_tools() {
 #[test]
 fn create_receives_the_run_services() {
     let capability = StubCapability::web();
-    let services = RunServices::new(shared_vfs::VfsRef::builder().build(), CancelHandle::new());
+    let services = RunServices::new(
+        promptforge::vfs::VfsRef::builder().build(),
+        CancelHandle::new(),
+    );
     let contribution = capability
         .create(&services)
         .expect("activation succeeds on a live run");
@@ -81,7 +84,7 @@ fn create_receives_the_run_services() {
 
     let cancel = CancelHandle::new();
     cancel.cancel();
-    let services = RunServices::new(shared_vfs::VfsRef::builder().build(), cancel);
+    let services = RunServices::new(promptforge::vfs::VfsRef::builder().build(), cancel);
     let error = capability
         .create(&services)
         .expect_err("a cancelled run fails activation");

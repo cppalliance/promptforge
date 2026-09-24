@@ -2,7 +2,7 @@
 //! [`ToolDescriptor`] the engine binds against.
 //!
 //! The engine's catalog is descriptors
-//! ([`ToolCatalog`](promptforge_api_types::tools::ToolCatalog)), and a
+//! ([`ToolCatalog`](promptforge::tools::ToolCatalog)), and a
 //! `ToolCall` effect names a [`ToolId`]; the harness resolves the id in
 //! its [`ToolTable`](crate::ToolTable) and calls the implementation here.
 //! Some tools run locally in the harness process (fetching and rendering a
@@ -10,7 +10,7 @@
 //! leaves the server; both share this trait so the tool performer dispatches
 //! them uniformly.
 
-use promptforge_api_types::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
+use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
 
 #[cfg(test)]
 #[path = "tool-tests.rs"]
@@ -26,7 +26,7 @@ mod tests;
 ///
 /// ```
 /// use harness_capabilities::Tool;
-/// use promptforge_api_types::tools::{
+/// use promptforge::tools::{
 ///     OutputTrust, ToolError, ToolErrorKind, ToolId, ToolOutput,
 /// };
 ///
@@ -69,7 +69,7 @@ mod tests;
 /// assert_eq!(echo.id().name(), "echo");
 /// assert_eq!(echo.descriptor().wire_name, "echo");
 /// # let _ = OutputTrust::Trusted;
-/// # Ok::<(), promptforge_api_types::tools::ToolIdError>(())
+/// # Ok::<(), promptforge::tools::ToolIdError>(())
 /// ```
 ///
 /// # Compatibility policy
@@ -148,9 +148,9 @@ pub trait Tool: Send + Sync {
     /// Executes the tool with the given JSON arguments and returns its output.
     ///
     /// The returned [`ToolOutput`] includes its own
-    /// [`OutputTrust`](promptforge_api_types::tools::OutputTrust), so trust
+    /// [`OutputTrust`](promptforge::tools::OutputTrust), so trust
     /// is mandatory and cannot be forgotten: an
-    /// [`OutputTrust::Untrusted`](promptforge_api_types::tools::OutputTrust::Untrusted)
+    /// [`OutputTrust::Untrusted`](promptforge::tools::OutputTrust::Untrusted)
     /// result is nonce-wrapped before it can reach model input. A failure
     /// returns a narrow, model-safe [`ToolError`]. Implementations must not
     /// panic and should return promptly when the run is cancelled.

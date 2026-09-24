@@ -2,7 +2,7 @@
 //! endpoint guards.
 
 use harness_runner::spawn::spawn_tagged;
-use promptforge_api_runtime::model::Message;
+use promptforge::model::Message;
 
 use super::*;
 use crate::CompletionErrorKind;

@@ -16,9 +16,8 @@
 //! ## Invariants
 //!
 //! - Family: harness, private to `crates/harness/`; may depend on:
-//!   `promptforge-api-runtime`, `promptforge-api-types`,
-//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
-//!   container siblings.
+//!   `promptforge`, `gateway-api-types`, `gateway-api-discovery`,
+//!   `shared-*`, and its container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.
@@ -36,7 +35,7 @@ use std::sync::Arc;
 use harness_capabilities::{
     Capability, CapabilityError, CapabilityErrorKind, CapabilityId, Contribution, RunServices,
 };
-use promptforge_api_types::tools::ToolError;
+use promptforge::tools::ToolError;
 
 use harness_web_search::WebSearch;
 use harness_webfetch::WebFetch;
@@ -57,7 +56,7 @@ pub use harness_webfetch::{ConfigError, FetchConfig};
 ///
 /// let capability = Web::new("https://gateway.example.com/v1", "bearer-token")?;
 /// assert_eq!(capability.id().to_string(), "promptforge/web");
-/// # Ok::<(), promptforge_api_types::tools::ToolError>(())
+/// # Ok::<(), promptforge::tools::ToolError>(())
 /// ```
 #[derive(Debug, Clone)]
 pub struct Web {
@@ -127,14 +126,17 @@ impl Capability for Web {
 #[cfg(test)]
 mod tests {
     use harness_capabilities::{Capability, CapabilityErrorKind, CapabilityId, RunServices};
-    use promptforge_api_types::cancel::CancelHandle;
-    use promptforge_api_types::tools::ToolId;
+    use promptforge::cancel::CancelHandle;
+    use promptforge::tools::ToolId;
 
     use crate::Web;
 
     /// Fresh run services over an empty VFS and a live cancel handle.
     fn services() -> RunServices {
-        RunServices::new(shared_vfs::VfsRef::builder().build(), CancelHandle::new())
+        RunServices::new(
+            promptforge::vfs::VfsRef::builder().build(),
+            CancelHandle::new(),
+        )
     }
 
     #[test]
@@ -185,7 +187,7 @@ mod tests {
         let capability = Web::new("http://localhost", "tok").expect("valid configuration");
         let cancel = CancelHandle::new();
         cancel.cancel();
-        let services = RunServices::new(shared_vfs::VfsRef::builder().build(), cancel);
+        let services = RunServices::new(promptforge::vfs::VfsRef::builder().build(), cancel);
 
         let err = capability
             .create(&services)

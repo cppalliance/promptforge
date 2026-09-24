@@ -2,8 +2,8 @@
 
 use std::num::NonZeroU32;
 
-use promptforge_api_runtime::model::{ClientError as Error, CompletionError};
-use promptforge_api_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use promptforge::transport::ClientError as Error;
 use serde::Deserialize;
 
 use crate::transport::{http, transport_source};

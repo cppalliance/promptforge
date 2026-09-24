@@ -21,7 +21,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use harness_log::RunOutcome;
-use promptforge_api_types::wire::StreamDelta;
+use promptforge::model::StreamDelta;
 use tokio::sync::{mpsc, watch};
 
 use crate::environment::{Bindings, CatalogBinding, GatewayResources};

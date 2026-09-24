@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::tools::{
+use promptforge::tools::{
     ToolCatalog, ToolCatalogErrorKind, ToolDescriptor, ToolError, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};

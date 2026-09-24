@@ -5,7 +5,7 @@
 //! the step's effects is issued, because a running task may read its own
 //! history back through a `TaskEvents` effect and must see everything
 //! reported before the read. Each effect is appended as its
-//! [`EffectRecord`](promptforge_api_runtime::EffectRecord) and then
+//! [`EffectRecord`](promptforge::effect::EffectRecord) and then
 //! started through the tagged spawn wrapper: a plain task for the
 //! asynchronous kinds, the blocking pool for a store operation (the VFS is
 //! synchronous by design). Each task posts `(EffectId, EffectAnswer)` on
@@ -33,11 +33,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use harness_log::{LogError, Record, RecordKind, RunId, RunLog, RunOutcome};
-use promptforge_api_runtime::RunError;
-use promptforge_api_runtime::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::Provenance;
+use promptforge::cancel::CancelHandle;
+use promptforge::effect::{Effect, EffectAnswer, EffectId};
+use promptforge::event::Event;
+use promptforge::ids::Provenance;
+use promptforge::{Run, RunError, RunResult, Step};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 

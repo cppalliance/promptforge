@@ -11,7 +11,7 @@
 use std::fmt;
 
 use harness_capabilities::ToolTable;
-use promptforge_api_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use serde_json::Value;
 
 use super::{BoxFuture, ToolPerformer};

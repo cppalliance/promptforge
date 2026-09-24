@@ -10,7 +10,7 @@ use std::fmt;
 use std::time::Duration;
 
 use harness_capabilities::Tool;
-use promptforge_api_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 use crate::endpoint::Endpoint;
 use crate::secret::Token;
@@ -109,7 +109,7 @@ impl WebSearch {
     ///
     /// assert!(WebSearch::new("not-a-url", "bearer-token").is_err());
     /// assert!(WebSearch::new("https://gateway.example.com/v1", "").is_err());
-    /// # Ok::<(), promptforge_api_types::tools::ToolError>(())
+    /// # Ok::<(), promptforge::tools::ToolError>(())
     /// ```
     pub fn new(base_url: &str, token: impl Into<String>) -> Result<WebSearch, ToolError> {
         Self::with_timeout(base_url, token, REQUEST_TIMEOUT)

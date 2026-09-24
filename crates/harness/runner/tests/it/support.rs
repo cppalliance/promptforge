@@ -12,18 +12,18 @@ use harness_runner::performers::{
     BoxFuture, ChatPerformer, InputPerformer, Performers, StorePerformer, TaskEventsPerformer,
     TimerPerformer, ToolPerformer,
 };
-use promptforge_api_runtime::input::{InputError, InputOutcome};
-use promptforge_api_runtime::model::{
+use promptforge::event::Event;
+use promptforge::ids::TaskId;
+use promptforge::input::{InputError, InputOutcome};
+use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
-use promptforge_api_runtime::{Prompt, Run, RunContext};
-use promptforge_api_runtime::{StoreError, StoreOp, StoreOutcome};
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::TaskId;
-use promptforge_api_types::timestamp::Timestamp;
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::timestamp::Timestamp;
+use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Access;
+use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
+use promptforge::{Prompt, Run, RunContext};
 use serde_json::Value;
-use shared_vfs::Access;
 
 /// The run's execution identifier.
 pub(crate) const EXECUTION: &str = "runner-test";

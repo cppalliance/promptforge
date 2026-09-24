@@ -3,9 +3,9 @@
 //! activation failure semantics, and the run path's refusals.
 
 use harness_capabilities::{CapabilityId, CapabilityRegistry};
-use promptforge_api_runtime::{Environment, RunErrorKind, RunResult};
-use promptforge_api_types::cancel::CancelHandle;
-use shared_vfs::Origin;
+use promptforge::cancel::CancelHandle;
+use promptforge::vfs::Origin;
+use promptforge::{Environment, RunErrorKind, RunResult};
 
 use super::support::{
     Fixture, STORE_MOUNT, captured_logs, context, parse, prepare_activated, run_activated,

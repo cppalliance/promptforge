@@ -10,15 +10,14 @@
 //! The whole supported surface is [`WebSearch`]; the endpoint validation and
 //! the redacted bearer token are crate-private implementation details. The
 //! tool vocabulary ([`Tool`](harness_capabilities::Tool),
-//! [`ToolError`](promptforge_api_types::tools::ToolError), and their kinds)
-//! comes from `promptforge-api-types`.
+//! [`ToolError`](promptforge::tools::ToolError), and their kinds)
+//! comes from `promptforge`.
 //!
 //! ## Invariants
 //!
 //! - Family: harness, private to `crates/harness/`; may depend on:
-//!   `promptforge-api-runtime`, `promptforge-api-types`,
-//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and its
-//!   container siblings.
+//!   `promptforge`, `gateway-api-types`, `gateway-api-discovery`,
+//!   `shared-*`, and its container siblings.
 //!   Never on a `workshop-*` crate, a private `gateway-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.

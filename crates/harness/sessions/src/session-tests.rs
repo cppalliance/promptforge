@@ -3,8 +3,8 @@
 //! turn or a programmatic inference round - settles and advances the round
 //! the same way.
 
-use promptforge_api_types::event::ReplyOrigin;
-use promptforge_api_types::ids::Provenance;
+use promptforge::event::ReplyOrigin;
+use promptforge::ids::Provenance;
 
 use super::*;
 

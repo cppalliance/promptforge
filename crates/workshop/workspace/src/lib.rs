@@ -10,7 +10,7 @@
 //!
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`, the service crates, and
-//!   `promptforge-api-runtime` (the promptforge product's public API,
+//!   `promptforge` (the promptforge product's public API,
 //!   for the `/prompts/contract` parse route). Read `AGENTS.md` before
 //!   adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then

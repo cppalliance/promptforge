@@ -22,8 +22,8 @@ use harness_models::{
     CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
 };
 use harness_web::Web;
-use promptforge_api_types::models::{ModelDescriptor, ModelId};
-use promptforge_api_types::tools::ToolError;
+use promptforge::model::{ModelDescriptor, ModelId};
+use promptforge::tools::ToolError;
 use tokio::sync::watch;
 
 /// One generation of the gateway a client has bound the harness to.

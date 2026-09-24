@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use promptforge_api_types::ids::{ChainId, Provenance, TaskId};
+use promptforge::ids::{ChainId, Provenance, TaskId};
 
 use super::*;
 

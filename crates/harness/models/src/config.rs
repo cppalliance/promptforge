@@ -3,7 +3,8 @@
 
 use std::fmt;
 
-use promptforge_api_runtime::model::{ClientError as Error, CompletionError};
+use promptforge::model::CompletionError;
+use promptforge::transport::ClientError as Error;
 
 /// A bearer credential whose contents never appear in `Debug`, `Display`, or
 /// logs.

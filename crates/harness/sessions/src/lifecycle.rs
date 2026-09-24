@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use promptforge_api_types::cancel::CancelHandle;
+use promptforge::cancel::CancelHandle;
 use tokio::sync::mpsc;
 
 use crate::transition::{RunId, SupervisorEvent};

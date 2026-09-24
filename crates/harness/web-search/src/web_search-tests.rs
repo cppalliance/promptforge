@@ -4,7 +4,7 @@ use super::{MAX_COUNT, MAX_DOMAINS, MAX_QUERY_LEN, MAX_STRING_LEN, WebSearch};
 use harness_capabilities::Tool;
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
-use promptforge_api_types::tools::{OutputTrust, ToolErrorKind, ToolId};
+use promptforge::tools::{OutputTrust, ToolErrorKind, ToolId};
 
 use std::net::SocketAddr;
 
@@ -161,7 +161,7 @@ fn the_migrated_id_names_its_contributing_capability() {
     assert_eq!(id.name(), "search");
     assert_eq!(
         id.capability(),
-        promptforge_api_types::capabilities::CapabilityId::parse("promptforge/web")
+        promptforge::capabilities::CapabilityId::parse("promptforge/web")
             .expect("a valid capability id")
     );
 }

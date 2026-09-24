@@ -20,7 +20,8 @@ turso.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-promptforge-api-types.workspace = true
+# The fidelity suite round-trips the engine's events through the log.
+promptforge.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

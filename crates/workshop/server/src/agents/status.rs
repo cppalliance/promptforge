@@ -9,7 +9,7 @@
 //! detaches: the channels close, and the loop returns.
 
 use harness_api::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
-use promptforge_api_types::event::Event;
+use promptforge::event::Event;
 use tokio::sync::broadcast;
 use workshop_protocol::Activity;
 use workshop_registry::Push;

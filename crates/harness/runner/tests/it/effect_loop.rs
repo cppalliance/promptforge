@@ -14,8 +14,8 @@ use harness_log::{
     LogError, RecordFilter, RecordKind, RunId, RunLog, RunMeta, RunOutcome, StoredRecord,
 };
 use harness_runner::effect_loop::{DriveError, SharedLog, drive_run};
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::event::Event;
+use promptforge::cancel::CancelHandle;
+use promptforge::event::Event;
 use serde_json::json;
 
 use crate::support::{

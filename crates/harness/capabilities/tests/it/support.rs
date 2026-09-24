@@ -9,14 +9,14 @@ use harness_capabilities::{
     Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
     RunServices, Tool, activate,
 };
-use promptforge_api_runtime::Run;
-use promptforge_api_runtime::parser::Prompt;
-use promptforge_api_runtime::test_support::{Performers, drive_tokio};
-use promptforge_api_runtime::{Environment, Requirements, RunContext, RunResult};
-use promptforge_api_types::cancel::CancelHandle;
-use promptforge_api_types::timestamp::Timestamp;
-use promptforge_api_types::tools::{ToolError, ToolId, ToolOutput};
-use shared_vfs::Origin;
+use promptforge::Prompt;
+use promptforge::Run;
+use promptforge::cancel::CancelHandle;
+use promptforge::test_support::{Performers, drive_tokio};
+use promptforge::timestamp::Timestamp;
+use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::vfs::Origin;
+use promptforge::{Environment, Requirements, RunContext, RunResult};
 
 /// The run's store mount inside its VFS, where `store.read('x')` resolves
 /// `x`. The engine's private `promptforge-vfs` crate names it; the harness

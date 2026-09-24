@@ -22,7 +22,7 @@ use flate2::write::GzEncoder;
 use harness_capabilities::Tool;
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
-use promptforge_api_types::tools::ToolId;
+use promptforge::tools::ToolId;
 
 use super::WebFetch;
 use crate::config::{FetchConfig, FetchConfigBuilder};
@@ -113,7 +113,7 @@ fn the_migrated_id_names_its_contributing_capability() {
     assert_eq!(id.name(), "fetch");
     assert_eq!(
         id.capability(),
-        promptforge_api_types::capabilities::CapabilityId::parse("promptforge/web")
+        promptforge::capabilities::CapabilityId::parse("promptforge/web")
             .expect("a valid capability id")
     );
 }

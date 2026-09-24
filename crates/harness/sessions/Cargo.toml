@@ -29,15 +29,14 @@ harness-runner.workspace = true
 # crate is the one place a provider crate is named, at registration.
 harness-web.workspace = true
 # The engine's public API: the input outcome and error vocabulary a `UserInput`
-# effect is answered with, the run context, and the run limits.
-promptforge-api-runtime.workspace = true
-promptforge-api-types.workspace = true
+# effect is answered with, the run context, the run limits, the events and
+# deltas a session forwards, and the run's VFS handle.
+promptforge.workspace = true
 # Wait tokens and session ids are 128 bits from the OS CSPRNG:
 # unguessable by anything that has not seen the announcing frame.
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-shared-vfs.workspace = true
 thiserror.workspace = true
 # `sync` for the supervisor's typed event queues (`mpsc`), the wait
 # registry's `oneshot` and `broadcast` channels, and the binding
