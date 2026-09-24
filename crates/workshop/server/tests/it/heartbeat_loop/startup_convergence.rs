@@ -145,7 +145,11 @@ async fn a_healthy_gateway_retries_refresh_until_its_catalog_is_ready() {
     );
 
     let requests_after_restore = state.requests.load(Ordering::Relaxed);
-    tokio::time::sleep(TEST_INTERVAL * 4).await;
+    // Advance the paused clock across several ticks instead of sleeping on
+    // the wall clock, so the quiet window costs no real time.
+    tokio::time::pause();
+    tokio::time::advance(TEST_INTERVAL * 4).await;
+    tokio::time::resume();
     assert_eq!(
         state.requests.load(Ordering::Relaxed),
         requests_after_restore,

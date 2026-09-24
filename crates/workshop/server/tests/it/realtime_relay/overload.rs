@@ -16,7 +16,6 @@ async fn stalled_browser_cleanup_is_bounded_after_gateway_disconnect() {
         .await
         .expect("the Gateway fills the relay's browser send");
 
-    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
     let first = tokio::time::timeout(RECV_TIMEOUT, socket.next())
         .await
         .expect("bounded relay cleanup releases the stalled browser");

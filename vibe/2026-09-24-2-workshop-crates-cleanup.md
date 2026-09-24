@@ -701,7 +701,7 @@ Components, in dependency order:
 
 <step-4>
 
-### Step 4: Replace fixed sleeps with event-driven waits
+### Step 4: Replace fixed sleeps with event-driven waits [completed]
 
 - Component: Trustworthy tests
 - Piece: flaky-tests

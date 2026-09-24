@@ -76,7 +76,7 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
         .await;
     assert_eq!(initial["models"], json!([]));
 
-    assert_chat_quiet(&mut socket, Duration::from_millis(150)).await;
+    assert_chat_quiet(&mut socket).await;
     server.state.catalog().publish(vec![
         json!({"id": "whisper-base-en", "kind": "transcription", "object": "model"}),
         json!({"id": "whisper-small-en", "kind": "transcription", "object": "model"}),
@@ -95,7 +95,7 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
         json!([]),
         "the shared catalog feeding both model menus publishes no speech-only choices"
     );
-    assert_chat_quiet(&mut socket, Duration::from_millis(150)).await;
+    assert_chat_quiet(&mut socket).await;
 
     server.state.catalog().publish(vec![
         json!({"id": "whisper-base-en", "kind": "transcription", "object": "model"}),

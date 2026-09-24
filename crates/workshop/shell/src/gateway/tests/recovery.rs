@@ -262,6 +262,7 @@ fn dropping_a_candidate_signals_without_waiting_for_an_unresponsive_child() {
     let gateway = validated_gateway("hanging-key");
     let reference = gateway.validate("hanging-key", 1_778_000_001, "2026-09-08T18:00:01Z");
     let hang = Arc::new(AtomicBool::new(false));
+    let (_hang_tx, hang_rx) = std::sync::mpsc::channel::<()>();
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind the hanging fixture");
     let port = listener.local_addr().expect("the fixture address").port();
     std::thread::spawn({
@@ -271,7 +272,10 @@ fn dropping_a_candidate_signals_without_waiting_for_an_unresponsive_child() {
                 let mut buffer = [0_u8; 1024];
                 if hang.load(Ordering::SeqCst) {
                     let _ = stream.read(&mut buffer);
-                    std::thread::sleep(Duration::from_secs(5));
+                    // Park the shutdown connection until the test drops the
+                    // gate, so the child stays unresponsive for as long as
+                    // the test needs, without a fixed wall-clock delay.
+                    let _ = hang_rx.recv();
                     continue;
                 }
                 while let Ok(read) = stream.read(&mut buffer) {

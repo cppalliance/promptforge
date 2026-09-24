@@ -266,9 +266,12 @@ async fn launch_chat(socket: &mut JsonSocket) -> String {
         .to_owned()
 }
 
-/// Asserts that no input wait or error arrives during `duration`.
-async fn assert_chat_quiet(socket: &mut JsonSocket, duration: Duration) {
-    let frame = tokio::time::timeout(duration, socket.recv_json()).await;
+/// Asserts that no input wait or error is buffered. The models frame the
+/// test has just received is the catalog's end-of-stream signal: with no
+/// chat-capable model selected the agent stays dormant, so a zero-deadline
+/// read reports any premature wait without a wall-clock quiet window.
+async fn assert_chat_quiet(socket: &mut JsonSocket) {
+    let frame = tokio::time::timeout(Duration::ZERO, socket.recv_json()).await;
     assert!(
         frame.is_err(),
         "chat must stay dormant until a chat-capable catalog exists, got {frame:?}"
