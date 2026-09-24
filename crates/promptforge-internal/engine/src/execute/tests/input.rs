@@ -6,10 +6,11 @@
 use super::*;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
 use crate::lua::ToolSet;
-use crate::model::{ModelBinding, ModelId};
+use crate::model::ModelBinding;
 use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
+use promptforge_types::detail::model_id_from_validated;
 
 /// The model set an input test's run uses: `writer` (the prompt-wide
 /// default, model `test-model`), so `models.loop` resolves a binding.
@@ -18,7 +19,7 @@ fn input_models() -> ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",
             "A general model for tests",
-            ModelId::from_validated("gateway", "test-model"),
+            model_id_from_validated("gateway", "test-model"),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,

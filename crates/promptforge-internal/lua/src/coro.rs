@@ -101,21 +101,24 @@ const FAILURE_TRACEBACK_REGISTRY: &str = "promptforge.impl_coro.failure_tracebac
 /// a typed error at each install.
 static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
     LazyLock::new(|| {
-        LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(SharedSource::new)
+        LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
     });
 
 /// The `tasks` namespace program, compiled once and loaded per VM after the
 /// prelude, under the same failure contract.
 static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
     LazyLock::new(|| {
-        LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME).map_err(SharedSource::new)
+        LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
     });
 
 /// The `fanout` program, compiled once and loaded per VM after the prelude,
 /// under the same failure contract.
 static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
     LazyLock::new(|| {
-        LuaProgram::compile_internal(FANOUT_SOURCE, FANOUT_CHUNK_NAME).map_err(SharedSource::new)
+        LuaProgram::compile_internal(FANOUT_SOURCE, FANOUT_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
     });
 
 /// Installs the yield shims on a VM whose host tables already exist.

@@ -340,7 +340,9 @@ impl Access {
     /// Returns an error when the backend refuses to acquire the child's
     /// identity; see [`VfsRef::acquire`]. A failed spawn leaves this
     /// capability's claims untouched.
-    pub fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
+    ///
+    /// Crate-internal: backs [`crate::detail::access_spawn`].
+    pub(crate) fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
         let id = ExecId::vend();
         let inner = self.backend().acquire(id)?;
         self.volume.claims.retire(self.id);
@@ -355,7 +357,9 @@ impl Access {
     }
 
     /// Returns this capability's identity.
-    pub fn id(&self) -> ExecId {
+    ///
+    /// Crate-internal: backs [`crate::detail::access_id`].
+    pub(crate) fn id(&self) -> ExecId {
         self.id
     }
 

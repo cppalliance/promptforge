@@ -78,9 +78,19 @@ impl Web {
     /// # Errors
     /// Returns the search tool's [`ToolError`] when `base_url` is not a valid
     /// gateway API root or `token` is empty.
+    ///
+    /// # Panics
+    /// Panics only if the literal capability id `promptforge/web` fails to
+    /// parse, a defect in this crate rather than a caller error.
     pub fn new(base_url: &str, token: impl Into<String>) -> Result<Web, ToolError> {
+        #[expect(
+            clippy::expect_used,
+            reason = "the id is a literal of the capability id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
+        )]
+        let id =
+            CapabilityId::parse("promptforge/web").expect("the literal web capability id parses");
         Ok(Web {
-            id: CapabilityId::from_validated("promptforge/web"),
+            id,
             fetch: WebFetch::new(),
             search: WebSearch::new(base_url, token)?,
         })

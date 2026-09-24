@@ -53,12 +53,8 @@ impl ToolId {
 
     /// Builds an identity from a string already known to be valid.
     ///
-    /// For internal callers whose inputs are static tool ids, so the
-    /// validation in [`ToolId::parse`] is redundant. Hidden from the public
-    /// API: downstream callers use [`ToolId::parse`].
-    #[doc(hidden)]
-    #[must_use]
-    pub fn from_validated(id: &str) -> ToolId {
+    /// Crate-internal: backs [`crate::detail::tool_id_from_validated`].
+    pub(crate) fn from_validated(id: &str) -> ToolId {
         let name = GlobalName::from_validated(id);
         debug_assert!(
             name.segments().len() == 3,

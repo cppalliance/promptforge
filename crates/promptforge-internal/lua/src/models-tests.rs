@@ -3,7 +3,8 @@
 use super::{ModelRuntime, install_models};
 use mlua::Lua;
 use promptforge_model_client::model::ModelBinding;
-use promptforge_model_client::model::{ModelId, ModelInvocation, ModelSet};
+use promptforge_model_client::model::{ModelInvocation, ModelSet};
+use promptforge_types::detail::model_id_from_validated;
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -33,7 +34,7 @@ fn bound_role(label: &str, capabilities: &[&str]) -> ModelBinding {
     ModelBinding::new(
         label,
         "A general model for tests",
-        ModelId::from_validated("gateway", "m1"),
+        model_id_from_validated("gateway", "m1"),
         ModelInvocation {
             temperature: None,
             max_tokens: None,

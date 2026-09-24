@@ -109,6 +109,10 @@ pub struct Activation {
 /// earlier contribution, or has a transport-illegal wire name is
 /// rejected - logged and never admitted. Every admitted descriptor
 /// includes its capability's declared conflicts for the record.
+///
+/// # Panics
+/// Panics only if `prompt` declares a capability id that is not a valid
+/// 2-segment id, which the parser refuses before a [`Prompt`] exists.
 #[must_use]
 pub fn activate(
     registry: Option<&CapabilityRegistry>,
@@ -120,9 +124,12 @@ pub fn activate(
     // declaration order.
     let mut present: Vec<(CapabilityId, Arc<dyn Capability>, bool)> = Vec::new();
     for declaration in prompt.frontmatter().capabilities() {
-        // The parser validated the id's arity and charset at parse time,
-        // so the checked constructor's validation cannot fail.
-        let id = CapabilityId::from_validated(&declaration.id().to_string());
+        #[expect(
+            clippy::expect_used,
+            reason = "the parser validated the declared id's arity and charset at parse time, so a parse failure here is a defect, not a prompt error"
+        )]
+        let id = CapabilityId::parse(&declaration.id().to_string())
+            .expect("a parsed capability declaration names a valid capability id");
         let capability = registry.and_then(|registry| registry.get(&id));
         let Some(capability) = capability else {
             if declaration.is_optional() {

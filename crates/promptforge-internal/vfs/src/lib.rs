@@ -11,6 +11,7 @@
 //! This crate is the permanent bottom of the dependency stack: std only,
 //! no workspace or external crates.
 
+pub mod detail;
 mod error;
 mod glob;
 mod grep;

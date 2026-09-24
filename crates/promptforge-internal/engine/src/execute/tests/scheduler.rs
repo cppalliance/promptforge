@@ -8,6 +8,7 @@
 use super::*;
 use crate::model::ModelBinding;
 use promptforge_model_client::model::ModelInvocation;
+use promptforge_types::detail::model_id_from_validated;
 
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
@@ -17,7 +18,7 @@ pub(super) fn writer_models() -> ModelSet {
         bindings: vec![ModelBinding::new(
             "writer",
             "A general model for tests",
-            ModelId::from_validated("gateway", "test-model"),
+            model_id_from_validated("gateway", "test-model"),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,

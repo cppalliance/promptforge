@@ -13,11 +13,12 @@ use crate::execute::scope::DispatchTarget;
 use crate::lua::TaskAllowlist;
 use crate::model::ToolSchema;
 use crate::{Error, Result};
+use promptforge_model_client::detail::tool_schema_new;
 
 /// One built-in's fixed schema; the five are the engine's own, so a
 /// refusal by the validated constructor is an internal fault.
 fn builtin_schema(name: &str, description: String, parameters: Value) -> Result<ToolSchema> {
-    ToolSchema::new(name.to_owned(), description, parameters)
+    tool_schema_new(name.to_owned(), description, parameters)
         .map_err(|_| Error::internal("a task built-in's fixed schema validates"))
 }
 

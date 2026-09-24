@@ -68,6 +68,7 @@ pub fn build_request_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detail::tool_schema_new;
     use crate::model::Temperature;
 
     #[test]
@@ -92,7 +93,7 @@ mod tests {
             max_tokens: Some(std::num::NonZeroU32::new(128).expect("128 is non-zero")),
             thinking: Some(false),
         };
-        let schema = ToolSchema::new("echo", "Echo.", serde_json::json!({ "type": "object" }))
+        let schema = tool_schema_new("echo", "Echo.", serde_json::json!({ "type": "object" }))
             .expect("a valid schema");
         let body = build_request_body(&[Message::user("hi")], Some(&[schema]), &options);
         assert_eq!(body["temperature"], 0.0);

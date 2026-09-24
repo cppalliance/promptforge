@@ -22,6 +22,7 @@ use serde_json::Value;
 
 use super::{Error, Lua, NonZeroU32, Result};
 use promptforge_model_client::client::Message;
+use promptforge_model_client::detail::{message_content_value, message_raw_tool_calls};
 
 /// Why a request cannot fit the model's context window.
 ///
@@ -143,7 +144,7 @@ fn estimate_tokens(messages: &[Message]) -> u64 {
 /// One message's estimated character weight: its text (a plain string, or
 /// the text parts of a multimodal array) plus its serialized tool calls.
 fn message_chars(message: &Message) -> u64 {
-    let content = match message.content_value() {
+    let content = match message_content_value(message) {
         Value::String(text) => text.len() as u64,
         Value::Array(parts) => parts
             .iter()
@@ -152,7 +153,7 @@ fn message_chars(message: &Message) -> u64 {
             .sum(),
         _ => 0,
     };
-    let calls: u64 = message.raw_tool_calls().map_or(0, |calls| {
+    let calls: u64 = message_raw_tool_calls(message).map_or(0, |calls| {
         calls.iter().map(|call| call.to_string().len() as u64).sum()
     });
     content + calls

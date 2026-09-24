@@ -29,6 +29,7 @@
 
 pub mod cancel;
 pub mod capabilities;
+pub mod detail;
 pub mod emitter;
 pub mod event;
 pub mod ids;

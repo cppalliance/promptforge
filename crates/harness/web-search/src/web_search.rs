@@ -230,8 +230,12 @@ async fn read_capped(mut response: reqwest::Response, limit: usize) -> Result<St
 
 #[async_trait::async_trait]
 impl Tool for WebSearch {
+    #[expect(
+        clippy::expect_used,
+        reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
+    )]
     fn id(&self) -> ToolId {
-        ToolId::from_validated("promptforge/web/search")
+        ToolId::parse("promptforge/web/search").expect("the literal web_search id parses")
     }
 
     #[expect(

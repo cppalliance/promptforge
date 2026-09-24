@@ -22,19 +22,10 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
 /// cheaply per lookup instead of being flattened to a string (resolve F4).
 /// The compiled-program statics (the coroutine shim and the messages
-/// library) are the callers.
+/// library) are the callers, through [`crate::detail::shared_source_new`].
 #[derive(Debug, Clone)]
 #[doc(hidden)]
-pub struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
-
-impl SharedSource {
-    /// Wraps a concrete error as a shareable cause.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn new(source: impl std::error::Error + Send + Sync + 'static) -> SharedSource {
-        SharedSource(std::sync::Arc::new(source))
-    }
-}
+pub struct SharedSource(pub(crate) std::sync::Arc<dyn std::error::Error + Send + Sync>);
 
 impl std::fmt::Display for SharedSource {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

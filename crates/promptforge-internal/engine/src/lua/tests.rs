@@ -25,11 +25,12 @@ use serde_json::json;
 use crate::execute::protocol::{Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
-use crate::model::{ModelBinding, ModelId, ModelSet};
+use crate::model::{ModelBinding, ModelSet};
 use crate::test_support::recording::null_emitter;
 use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
 use promptforge_model_client::model::ModelInvocation;
+use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::tools::ToolDescriptor;
 
 fn test_models() -> ModelSet {
@@ -37,7 +38,7 @@ fn test_models() -> ModelSet {
         bindings: vec![ModelBinding::new(
             "fast",
             "a fast model",
-            ModelId::from_validated("gateway", "test-model"),
+            model_id_from_validated("gateway", "test-model"),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,

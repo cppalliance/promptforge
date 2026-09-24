@@ -12,9 +12,10 @@
 
 use super::*;
 use crate::lua::ToolSet;
-use crate::model::{ModelBinding, ModelId};
+use crate::model::ModelBinding;
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_model_client::model::ModelInvocation;
+use promptforge_types::detail::model_id_from_validated;
 
 /// The model set a loop test's run uses: `writer` (the prompt-wide
 /// default, model `test-model`) and `other` (model `other-model`), so an
@@ -24,7 +25,7 @@ pub(super) fn loop_models() -> ModelSet {
         ModelBinding::new(
             alias,
             description,
-            ModelId::from_validated("gateway", model),
+            model_id_from_validated("gateway", model),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,

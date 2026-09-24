@@ -677,7 +677,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-8>
 
-### Step 8: Move engine-only operations into detail functions
+### Step 8: Move engine-only operations into detail functions [completed]
 
 - Component: surface-closure
 - Component order: fourth. The list of fixes comes from `cargo xtask api`, and so does the proof that they're done.

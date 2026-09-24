@@ -134,20 +134,6 @@ pub enum Error {
     ModelSetLock(String),
 }
 
-impl Error {
-    /// Wraps a transport-layer error, hiding its concrete type from the API.
-    ///
-    /// A transport that knows the failure was a timeout wraps it in
-    /// [`Timeout`] first, so [`CompletionError::is_timeout`] can say so
-    /// without this crate naming the HTTP client.
-    ///
-    /// [`CompletionError::is_timeout`]: crate::model::CompletionError::is_timeout
-    #[doc(hidden)]
-    pub fn http(source: impl std::error::Error + Send + Sync + 'static) -> Error {
-        Error::Http(Box::new(source))
-    }
-}
-
 /// A transport failure that was a timeout: the marker the transport wraps
 /// its own timeout error in, so the classification survives the type
 /// erasure of [`Error::Http`] and [`Error::BackendBodyRead`] without this

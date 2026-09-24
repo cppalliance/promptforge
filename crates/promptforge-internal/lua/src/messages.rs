@@ -37,7 +37,7 @@ const MESSAGES_SOURCE: &str = include_str!("__impl_messages.lua");
 static MESSAGES_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
     LazyLock::new(|| {
         LuaProgram::compile_internal(MESSAGES_SOURCE, MESSAGES_CHUNK_NAME)
-            .map_err(SharedSource::new)
+            .map_err(crate::detail::shared_source_new)
     });
 
 /// Installs the `messages` global holding the pure-Lua `new` builder.

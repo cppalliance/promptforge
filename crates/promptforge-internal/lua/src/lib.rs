@@ -87,6 +87,7 @@ mod alias;
 mod argv;
 mod collection;
 mod compactors;
+pub mod detail;
 mod error;
 #[path = "error-value.rs"]
 mod error_value;

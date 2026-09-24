@@ -66,12 +66,8 @@ impl CapabilityId {
 
     /// Builds an identity from a string already known to be valid.
     ///
-    /// For internal callers whose inputs are static capability ids, so the
-    /// validation in [`CapabilityId::parse`] is redundant. Hidden from the
-    /// public API: downstream callers use [`CapabilityId::parse`].
-    #[doc(hidden)]
-    #[must_use]
-    pub fn from_validated(id: &str) -> CapabilityId {
+    /// Crate-internal: backs [`crate::detail::capability_id_from_validated`].
+    pub(crate) fn from_validated(id: &str) -> CapabilityId {
         let name = GlobalName::from_validated(id);
         debug_assert!(
             name.segments().len() == 2,

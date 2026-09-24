@@ -24,6 +24,7 @@ use promptforge_model_client::client::{
     ChunkSource, Completion, Message, ToolSchema, build_request_body, escape_controls,
     read_body_capped, read_completion_stream,
 };
+use promptforge_model_client::detail::error_http;
 use promptforge_model_client::model::{CompletionError, CompletionOptions};
 use promptforge_types::wire::StreamDelta;
 
@@ -116,9 +117,9 @@ impl ChunkSource for ResponseChunks {
 /// Wraps a transport failure, marking a timeout so `is_timeout` holds.
 fn http(error: reqwest::Error) -> CompletionError {
     if error.is_timeout() {
-        return CompletionError::from(ClientError::http(promptforge_model_client::Timeout(
-            Box::new(error),
-        )));
+        return CompletionError::from(error_http(promptforge_model_client::Timeout(Box::new(
+            error,
+        ))));
     }
-    CompletionError::from(ClientError::http(error))
+    CompletionError::from(error_http(error))
 }

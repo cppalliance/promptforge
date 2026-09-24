@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use super::*;
+use crate::detail::{message_from_validated_parts, tool_schema_new};
 
 #[test]
 fn from_validated_parts_serializes_role_and_content_verbatim() {
@@ -13,7 +14,7 @@ fn from_validated_parts_serializes_role_and_content_verbatim() {
         { "type": "text", "text": "look at this" },
         { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } },
     ]);
-    let multimodal = Message::from_validated_parts("user", parts.clone(), None, None);
+    let multimodal = message_from_validated_parts("user", parts.clone(), None, None);
     assert_eq!(
         serde_json::to_value(&multimodal).expect("a message must serialize"),
         serde_json::json!({ "role": "user", "content": parts }),
@@ -24,7 +25,7 @@ fn from_validated_parts_serializes_role_and_content_verbatim() {
         "parts content has no text form; the accessor reports empty"
     );
     let system =
-        Message::from_validated_parts("system", Value::String("be terse".to_owned()), None, None);
+        message_from_validated_parts("system", Value::String("be terse".to_owned()), None, None);
     assert_eq!(
         serde_json::to_value(&system).expect("a message must serialize"),
         serde_json::json!({ "role": "system", "content": "be terse" }),
@@ -70,24 +71,24 @@ fn tool_arguments_view_exposes_no_raw_value() {
 fn tool_schema_new_validates_wire_name_and_object_schema() {
     // F7: a valid name and object schema are accepted.
     let schema =
-        ToolSchema::new("web.search-1", "desc", json_object()).expect("a valid schema is accepted");
+        tool_schema_new("web.search-1", "desc", json_object()).expect("a valid schema is accepted");
     assert_eq!(schema.name, "web.search-1");
     // An empty or malformed name is rejected.
     assert!(matches!(
-        ToolSchema::new("", "d", json_object()),
+        tool_schema_new("", "d", json_object()),
         Err(ToolSchemaError::InvalidName { .. })
     ));
     assert!(matches!(
-        ToolSchema::new("bad name", "d", json_object()),
+        tool_schema_new("bad name", "d", json_object()),
         Err(ToolSchemaError::InvalidName { .. })
     ));
     // A non-object JSON Schema is rejected.
     assert!(matches!(
-        ToolSchema::new("ok", "d", serde_json::json!([1, 2, 3])),
+        tool_schema_new("ok", "d", serde_json::json!([1, 2, 3])),
         Err(ToolSchemaError::NonObjectSchema { .. })
     ));
     assert!(matches!(
-        ToolSchema::new("ok", "d", serde_json::json!("scalar")),
+        tool_schema_new("ok", "d", serde_json::json!("scalar")),
         Err(ToolSchemaError::NonObjectSchema { .. })
     ));
 }

@@ -11,6 +11,7 @@ use serde_json::json;
 
 use super::*;
 use crate::client::CompletionResult;
+use crate::detail::error_http;
 use crate::model::CompletionErrorKind;
 use promptforge_types::metrics::ClientTiming;
 
@@ -222,7 +223,7 @@ fn read_completion_stream_refuses_a_stream_without_the_sentinel() {
 
 #[test]
 fn read_completion_stream_returns_the_source_failure_as_is() {
-    let timed_out = CompletionError::from(Error::http(crate::Timeout(Box::new(
+    let timed_out = CompletionError::from(error_http(crate::Timeout(Box::new(
         std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
     ))));
     let mut source = Canned(VecDeque::from([

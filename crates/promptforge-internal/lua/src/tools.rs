@@ -17,7 +17,7 @@
 use std::sync::{Arc, Mutex};
 
 use mlua::{Function, Lua, MultiValue, Table, Value, Variadic};
-use promptforge_model_client::client::ToolSchema;
+use promptforge_model_client::detail::tool_schema_new;
 
 use crate::alias::validate_alias;
 use crate::error::{Error, Result};
@@ -230,7 +230,7 @@ pub(crate) fn install_tools(
                     )));
                 }
                 let parameters = add_local_params_schema(&params)?;
-                let schema = ToolSchema::new(alias.clone(), description, parameters)
+                let schema = tool_schema_new(alias.clone(), description, parameters)
                     .map_err(mlua::Error::external)?;
                 let key = lua.create_registry_value(handler)?;
                 local

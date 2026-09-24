@@ -30,6 +30,7 @@
 //! executor.
 
 pub mod client;
+pub mod detail;
 mod error;
 pub mod model;
 mod normalize;

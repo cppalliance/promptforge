@@ -77,8 +77,8 @@ impl GlobalName {
     /// Builds a name from a string already known to satisfy the grammar,
     /// skipping validation.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::from_validated`] for
-    /// static first-party ids.
+    /// Crate-internal: backs [`crate::detail::tool_id_from_validated`] and
+    /// [`crate::detail::capability_id_from_validated`].
     pub(crate) fn from_validated(s: &str) -> GlobalName {
         GlobalName {
             segments: s.split('/').map(str::to_owned).collect(),

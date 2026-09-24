@@ -24,7 +24,7 @@ pub struct Message {
     /// The message content, serialized into the request verbatim: a JSON
     /// string for a plain text message (every inherent constructor), or an
     /// OpenAI content-parts array for a multimodal message built through
-    /// [`Message::from_validated_parts`].
+    /// [`crate::detail::message_from_validated_parts`].
     pub(crate) content: Value,
     /// For a `tool` message, the id of the tool call this result answers.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,50 +84,6 @@ impl Message {
         }
     }
 
-    /// Constructs a message from parts a caller has already validated.
-    ///
-    /// `role` is one of the wire roles (`system`, `user`, `assistant`,
-    /// `tool`). `content` is the raw wire content value - a string for a
-    /// plain message or an OpenAI content-parts array for a multimodal one -
-    /// and serializes into the request verbatim.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the agent executor, whose
-    /// protocol layer validates author-built message tables once and hands
-    /// the validated parts here; not host API.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn from_validated_parts(
-        role: impl Into<String>,
-        content: Value,
-        tool_call_id: Option<String>,
-        tool_calls: Option<Vec<Value>>,
-    ) -> Message {
-        Message {
-            role: role.into(),
-            content,
-            tool_call_id,
-            tool_calls,
-        }
-    }
-
-    /// Constructs the `assistant` turn that requested tool calls.
-    ///
-    /// `raw_tool_calls` is the backend's `tool_calls` array echoed back
-    /// verbatim so the conversation history matches what the model emitted.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop, not
-    /// host API.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
-        Message {
-            role: "assistant".into(),
-            content: Value::String(String::new()),
-            tool_call_id: None,
-            tool_calls: Some(raw_tool_calls),
-        }
-    }
-
     /// Returns the message role (`system`, `user`, `assistant`, or `tool`).
     #[must_use]
     pub fn role(&self) -> &str {
@@ -135,32 +91,11 @@ impl Message {
     }
 
     /// Returns the message text, or `""` when the content is a
-    /// content-parts array rather than a string (only
-    /// [`Message::from_validated_parts`] builds that form).
+    /// content-parts array rather than a string (only the engine builds
+    /// that form).
     #[must_use]
     pub fn content(&self) -> &str {
         self.content.as_str().unwrap_or("")
-    }
-
-    /// Returns the raw content value (a string or a content-parts array).
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's pre-dispatch
-    /// size estimate, which needs the parts a plain [`Message::content`]
-    /// read flattens away; not host API.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn content_value(&self) -> &Value {
-        &self.content
-    }
-
-    /// Returns the raw `tool_calls` array an assistant turn holds.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's pre-dispatch
-    /// size estimate; not host API.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn raw_tool_calls(&self) -> Option<&[Value]> {
-        self.tool_calls.as_deref()
     }
 }
 
@@ -192,10 +127,11 @@ pub struct ToolSchema {
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
 /// `#[doc(hidden)]`: `ToolSchema` is built only inside the workspace (from the
-/// executor's `Tool` contract), so the raw-`Value` validation and its error
-/// stay out of the documented API (client F8, lib F3). The type is visible
-/// only so the companion `promptforge-engine` crate can box it as an error
-/// source.
+/// executor's `Tool` contract, through
+/// [`crate::detail::tool_schema_new`]), so the raw-`Value` validation and its
+/// error stay out of the documented API (client F8, lib F3). The type is
+/// visible only so the companion `promptforge-engine` crate can box it as an
+/// error source.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[doc(hidden)]
 #[non_exhaustive]
@@ -216,55 +152,6 @@ pub enum ToolSchemaError {
     },
 }
 
-impl ToolSchema {
-    /// Builds a tool schema, validating the wire name and that the
-    /// parameters are a JSON object.
-    ///
-    /// `#[doc(hidden)]` (client F8, lib F3): the raw [`serde_json::Value`]
-    /// schema enters here only from the executor's internal tool contract, so
-    /// the raw JSON never appears in a documented constructor signature.
-    /// External callers advertise tools through the `Tool` trait and the
-    /// executor.
-    ///
-    /// # Errors
-    /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains
-    /// a character outside `[A-Za-z0-9_.-]`, and
-    /// [`ToolSchemaError::NonObjectSchema`] when `parameters` is not a JSON
-    /// object, so a tool can never be advertised to the model with an unusable
-    /// name or a non-object JSON Schema (F7).
-    #[doc(hidden)]
-    pub fn new(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        parameters: Value,
-    ) -> std::result::Result<ToolSchema, ToolSchemaError> {
-        let name = name.into();
-        if name.is_empty() {
-            return Err(ToolSchemaError::InvalidName {
-                name,
-                reason: "must not be empty",
-            });
-        }
-        if !name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
-        {
-            return Err(ToolSchemaError::InvalidName {
-                name,
-                reason: "may contain only [A-Za-z0-9_.-]",
-            });
-        }
-        if !parameters.is_object() {
-            return Err(ToolSchemaError::NonObjectSchema { name });
-        }
-        Ok(ToolSchema {
-            name,
-            description: description.into(),
-            parameters,
-        })
-    }
-}
-
 /// A tool invocation requested by the model.
 ///
 /// `OpenAI` returns tool calls with `function.arguments` as a JSON-encoded
@@ -274,23 +161,13 @@ impl ToolSchema {
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop; read
-    /// through [`ToolCall::id`] in host code.
-    #[doc(hidden)]
-    pub id: String,
+    pub(crate) id: String,
     /// The name of the tool to invoke.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop; read
-    /// through [`ToolCall::name`] in host code.
-    #[doc(hidden)]
-    pub name: String,
-    /// The parsed arguments for the call.
-    ///
-    /// `#[doc(hidden)]` (F8): the raw wire JSON stays out of the documented
-    /// API; host code inspects arguments through [`ToolCall::arguments`].
-    #[doc(hidden)]
-    pub arguments: Value,
+    pub(crate) name: String,
+    /// The parsed arguments for the call. The raw wire JSON stays
+    /// crate-private (F8): hosts inspect arguments through
+    /// [`ToolCall::arguments`].
+    pub(crate) arguments: Value,
 }
 
 impl ToolCall {
@@ -414,49 +291,35 @@ pub enum CompletionResult {
 /// metadata - the serving model plus the canonical metrics vocabulary
 /// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
 /// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
-/// accounting. The fields are `#[doc(hidden)]` cross-crate seams for the
-/// executor's tool loop and the opt-in debug-capture seam; they are not part
-/// of the public host API, which reads through the accessor methods.
+/// accounting. Hosts read through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
-    #[doc(hidden)]
-    pub result: CompletionResult,
+    pub(crate) result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    #[doc(hidden)]
-    pub finish_reason: Option<String>,
+    pub(crate) finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
-    #[doc(hidden)]
-    pub reasoning_content: Option<String>,
+    pub(crate) reasoning_content: Option<String>,
     /// The model that served the call, empty when the body named none.
-    #[doc(hidden)]
-    pub model: String,
+    pub(crate) model: String,
     /// Token accounting, when the backend reported `usage`.
-    #[doc(hidden)]
-    pub usage: Option<Usage>,
+    pub(crate) usage: Option<Usage>,
     /// llama.cpp's `timings` extension, when that backend served the call.
-    #[doc(hidden)]
-    pub llama_timings: Option<LlamaTimings>,
+    pub(crate) llama_timings: Option<LlamaTimings>,
     /// vLLM's `metrics` extension, when that backend served the call.
-    #[doc(hidden)]
-    pub vllm_metrics: Option<VllmMetrics>,
+    pub(crate) vllm_metrics: Option<VllmMetrics>,
     /// Timing measured by this client's own clock: time to first token,
     /// mean inter-token latency, and end-to-end wall time for the stream.
-    #[doc(hidden)]
-    pub client_timing: Option<ClientTiming>,
+    pub(crate) client_timing: Option<ClientTiming>,
     /// One line per response metadata section that was present but
-    /// malformed and degraded to `None`, for the host to log; empty for a
-    /// well-formed body.
-    #[doc(hidden)]
-    pub metadata_diagnostics: Vec<String>,
+    /// malformed and degraded to `None`; empty for a well-formed body.
+    pub(crate) metadata_diagnostics: Vec<String>,
     /// The JSON body sent to the gateway.
-    #[doc(hidden)]
-    pub request_body: Value,
+    pub(crate) request_body: Value,
     /// The buffered chat-completion body reassembled from the streamed
     /// chunks, in the same shape a non-streaming backend would return.
-    #[doc(hidden)]
-    pub response_body: Value,
+    pub(crate) response_body: Value,
 }
 
 impl Completion {
@@ -497,21 +360,6 @@ impl Completion {
     #[must_use]
     pub fn llama_timings(&self) -> Option<&LlamaTimings> {
         self.llama_timings.as_ref()
-    }
-
-    /// Returns vLLM's per-request `metrics`, when that backend served the
-    /// call.
-    #[must_use]
-    pub fn vllm_metrics(&self) -> Option<&VllmMetrics> {
-        self.vllm_metrics.as_ref()
-    }
-
-    /// Returns one line per response metadata section that was present but
-    /// malformed and so degraded to `None` (or a body naming no string
-    /// `model`): the host's to log, since the vocabulary reaches no logger.
-    #[must_use]
-    pub fn metadata_diagnostics(&self) -> &[String] {
-        &self.metadata_diagnostics
     }
 
     /// Returns the timing this client measured on its own clock, when the

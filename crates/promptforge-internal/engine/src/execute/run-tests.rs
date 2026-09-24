@@ -6,15 +6,17 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use promptforge_model_client::detail::tool_schema_new;
 use promptforge_model_client::model::{ModelInvocation, Temperature};
+use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::event::Event;
 use promptforge_types::tools::ToolId;
 use serde_json::json;
 
 use super::*;
 use crate::execute::protocol::StoreOp;
-use crate::model::{Message, ToolSchema};
-use crate::model::{ModelBinding, ModelId};
+use crate::model::Message;
+use crate::model::ModelBinding;
 
 /// A context for the run `run-test` under fixed host inputs; nothing here
 /// reads the seed or `sys.when`.
@@ -37,7 +39,7 @@ fn binding() -> ModelBinding {
     ModelBinding::new(
         "writer",
         "A general model for tests",
-        ModelId::from_validated("gateway", "test-model"),
+        model_id_from_validated("gateway", "test-model"),
         ModelInvocation {
             temperature: Some(Temperature::new(0.2).expect("0.2 is in range")),
             max_tokens: NonZeroU32::new(256),
@@ -55,7 +57,7 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
         binding,
         messages: vec![Message::user("ask")],
         tools: vec![
-            ToolSchema::new("grab", "Grab a value", json!({ "type": "object" }))
+            tool_schema_new("grab", "Grab a value", json!({ "type": "object" }))
                 .expect("a valid schema"),
         ],
         stream: true,

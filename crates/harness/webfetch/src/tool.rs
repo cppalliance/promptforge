@@ -207,8 +207,12 @@ fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> CallResult {
 
 #[async_trait::async_trait]
 impl Tool for WebFetch {
+    #[expect(
+        clippy::expect_used,
+        reason = "the id is a literal of the tool id grammar; a parse failure is a defect in this file, not a caller-actionable condition"
+    )]
     fn id(&self) -> ToolId {
-        ToolId::from_validated("promptforge/web/fetch")
+        ToolId::parse("promptforge/web/fetch").expect("the literal web_fetch id parses")
     }
 
     #[expect(

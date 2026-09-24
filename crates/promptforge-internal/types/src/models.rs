@@ -66,11 +66,8 @@ impl ModelId {
 
     /// Builds an identity from components already known to be valid.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for workspace-internal callers
-    /// reconstructing an identity from an existing [`ModelId`]'s parts, where
-    /// [`ModelId::new`]'s validation is redundant. Not host API.
-    #[doc(hidden)]
-    pub fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
+    /// Crate-internal: backs [`crate::detail::model_id_from_validated`].
+    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
         ModelId {
             server: server.into(),
             name: name.into(),

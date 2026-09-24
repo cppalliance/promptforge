@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
+use promptforge_model_client::detail::tool_call_arguments;
 use promptforge_types::metrics::ToolCallEvent;
 
 use crate::execute::protocol::{Answer, ChatResult};
@@ -336,22 +337,22 @@ impl Round {
         let events: Vec<ToolCallEvent> = calls
             .iter()
             .map(|call| ToolCallEvent {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                arguments: call.arguments.clone(),
+                id: call.id().to_owned(),
+                name: call.name().to_owned(),
+                arguments: tool_call_arguments(call).clone(),
             })
             .collect();
         self.emitter
             .assistant_tool_calls(&self.section, turn, &served.model, &events);
         if let Some(rogue) = calls
             .iter()
-            .find(|call| !advertised.contains_key(&call.name))
+            .find(|call| !advertised.contains_key(call.name()))
         {
             self.emitter
                 .report(&self.section, lifecycle::TOOL_CALL_FAILED);
             return Ok(Err(Error::OutOfScopeToolCall {
-                name: rogue.name.clone(),
-                global_exists: global_exists(&rogue.name)?,
+                name: rogue.name().to_owned(),
+                global_exists: global_exists(rogue.name())?,
                 in_scope: advertised.keys().cloned().collect(),
             }));
         }

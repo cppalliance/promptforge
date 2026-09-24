@@ -33,6 +33,7 @@
 use std::collections::BTreeSet;
 
 use promptforge_model_client::client::Message;
+use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::Value;
 
 use crate::Error;
@@ -313,7 +314,7 @@ fn wire_message(record: &MessageRecord) -> Message {
                 .collect(),
         )
     };
-    Message::from_validated_parts(
+    message_from_validated_parts(
         record.role.as_str(),
         content,
         record.tool_call_id.clone(),

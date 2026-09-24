@@ -245,7 +245,7 @@ fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
 
 #[test]
 fn from_validated_builds_a_static_id_without_revalidating() {
-    let id = ToolId::from_validated("promptforge/web/search");
+    let id = crate::detail::tool_id_from_validated("promptforge/web/search");
     assert_eq!(id.name(), "search");
     assert_eq!(
         id.capability(),

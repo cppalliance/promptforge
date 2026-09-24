@@ -182,15 +182,16 @@ impl From<CompletionError> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detail::error_http;
 
     #[test]
     fn a_timeout_marked_transport_failure_reports_is_timeout() {
-        let timed_out = CompletionError::from(Error::http(crate::Timeout(Box::new(
+        let timed_out = CompletionError::from(error_http(crate::Timeout(Box::new(
             std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
         ))));
         assert!(timed_out.is_timeout());
         assert_eq!(timed_out.kind(), CompletionErrorKind::Transport);
-        let plain = CompletionError::from(Error::http(std::io::Error::other("reset")));
+        let plain = CompletionError::from(error_http(std::io::Error::other("reset")));
         assert!(!plain.is_timeout());
         let body_read = CompletionError::from(Error::BackendBodyRead {
             status: 500,

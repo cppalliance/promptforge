@@ -2,6 +2,7 @@
 
 use mlua::Lua;
 use promptforge_model_client::client::Message;
+use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::{Value, json};
 
 use super::{Compactor, OverflowReason, install_compactors, is_context_overflow, precheck};
@@ -172,7 +173,7 @@ fn precheck_counts_tool_call_arguments_and_part_text() {
     let context = std::num::NonZeroU32::new(16).expect("non-zero");
     // An assistant tool-call turn whose visible text is empty still sends
     // its arguments onto the wire; the estimate must count them.
-    let calls = vec![Message::from_validated_parts(
+    let calls = vec![message_from_validated_parts(
         "assistant",
         Value::String(String::new()),
         None,
@@ -186,7 +187,7 @@ fn precheck_counts_tool_call_arguments_and_part_text() {
         precheck(&calls, context).expect_err("tool-call arguments count toward the estimate");
     assert_eq!(reason, OverflowReason::Precheck);
     // A multimodal parts array contributes its text parts.
-    let parts = vec![Message::from_validated_parts(
+    let parts = vec![message_from_validated_parts(
         "user",
         json!([{ "type": "text", "text": "x".repeat(4096) }]),
         None,

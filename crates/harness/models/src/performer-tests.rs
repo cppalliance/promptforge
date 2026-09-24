@@ -20,7 +20,7 @@ fn binding() -> ModelBinding {
     ModelBinding::new(
         "writer",
         "the round's model",
-        ModelId::from_validated("gateway", "m"),
+        ModelId::gateway("m").expect("a literal model name is valid"),
         ModelInvocation {
             temperature: None,
             max_tokens: None,

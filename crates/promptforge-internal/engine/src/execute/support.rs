@@ -3,6 +3,10 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use promptforge_model_client::detail::{
+    completion_into_result, completion_take_request_body, completion_take_response_body,
+    completion_vllm_metrics,
+};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
@@ -66,7 +70,7 @@ pub(crate) fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
     let metrics = CallMetrics {
         usage: completion.usage().cloned(),
         llama: completion.llama_timings().cloned(),
-        vllm: completion.vllm_metrics().cloned(),
+        vllm: completion_vllm_metrics(completion).cloned(),
         client: completion.client_timing().cloned(),
     };
     let measured = metrics.usage.is_some()
@@ -99,11 +103,9 @@ pub(crate) fn report_model_turn(
     emitter: &Emitter,
     section: &str,
     turn: u32,
-    completion: Completion,
+    mut completion: Completion,
     origin: ReplyOrigin,
 ) -> (CompletionResult, Served) {
-    // Extracted before the debug capture, which moves the request body out
-    // of the completion.
     let metrics = call_metrics(&completion);
     let model = completion.model().to_owned();
     let thinking = completion
@@ -112,13 +114,13 @@ pub(crate) fn report_model_turn(
         .map(str::to_owned);
     let finish_reason = completion.finish_reason().map(str::to_owned);
     if emitter.captures_debug() {
-        emitter.request(section, turn, completion.request_body);
+        emitter.request(section, turn, completion_take_request_body(&mut completion));
         emitter.response(
             section,
             turn,
-            completion.response_body.clone(),
-            completion.finish_reason.clone(),
-            completion.reasoning_content.clone(),
+            completion_take_response_body(&mut completion),
+            finish_reason.clone(),
+            completion.reasoning_content().map(str::to_owned),
         );
     }
     emitter.report(section, lifecycle::MODEL_TURN_COMPLETED);
@@ -133,7 +135,7 @@ pub(crate) fn report_model_turn(
         model,
         metrics,
     };
-    let outcome = completion.result;
+    let outcome = completion_into_result(completion);
     if let CompletionResult::Text(text) = &outcome {
         if served.finish_reason.as_deref() == Some("length") {
             emitter.report(section, lifecycle::MODEL_TURN_TRUNCATED);

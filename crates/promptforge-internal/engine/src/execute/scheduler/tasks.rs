@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
+use promptforge_vfs::detail::access_spawn;
 
 use crate::execute::protocol::Answer;
 use crate::execute::section_context::TaskSeed;
@@ -204,9 +205,11 @@ impl Scheduler {
         // is the last fallible step that can leave nothing behind, so it
         // runs ahead of the id allocation and the arena push rather than
         // orphaning a started chain that is neither enqueued nor slotted.
-        let access = spawner_access
-            .spawn(prompt_origin(&prompt, worker.name(), worker.blocks()))
-            .map_err(Error::Store)?;
+        let access = access_spawn(
+            &spawner_access,
+            prompt_origin(&prompt, worker.name(), worker.blocks()),
+        )
+        .map_err(Error::Store)?;
         // The task's id is the spawner's next child index, shared with
         // `call` children, so it depends only on the spawner's own
         // dispatch order; the task is its chain, named from the other side.

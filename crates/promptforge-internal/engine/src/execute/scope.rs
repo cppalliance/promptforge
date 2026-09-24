@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::lua::ToolBinding;
 use crate::model::ToolSchema;
 use crate::{Error, Result};
+use promptforge_model_client::detail::tool_schema_new;
 use promptforge_types::event::lifecycle;
 
 use promptforge_types::emitter::Emitter;
@@ -74,7 +75,7 @@ pub(crate) fn prepare_scoped_tools(
         // F7: build every advertised schema through the validated constructor,
         // so an unusable wire name or a non-object JSON Schema is refused here
         // rather than sent to the model.
-        let schema = ToolSchema::new(
+        let schema = tool_schema_new(
             binding.alias().to_owned(),
             description,
             binding.schema().clone(),
