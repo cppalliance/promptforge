@@ -6,6 +6,8 @@ use super::*;
 mod backing;
 #[path = "workspace-tests-grants.rs"]
 mod grants;
+#[path = "workspace-tests-jail.rs"]
+mod jail;
 #[path = "workspace-tests-pointer.rs"]
 mod pointer;
 #[path = "workspace-tests-ui-state.rs"]
@@ -140,7 +142,7 @@ fn a_symlink_escape_is_rejected() {
     let linked = std::os::windows::fs::symlink_dir(outside.path(), &link);
     let Ok(()) = linked else {
         // Symlink creation needs a privilege some Windows hosts lack.
-        eprintln!("skipping: symlink creation failed");
+        jail::symlink_unavailable(std::env::var_os("CI").is_some(), "symlink creation failed");
         return;
     };
     let error = workspace
@@ -164,7 +166,7 @@ fn a_dangling_symlink_write_is_rejected() {
     let linked = std::os::windows::fs::symlink_file(&target, &link);
     let Ok(()) = linked else {
         // Symlink creation needs a privilege some Windows hosts lack.
-        eprintln!("skipping: symlink creation failed");
+        jail::symlink_unavailable(std::env::var_os("CI").is_some(), "symlink creation failed");
         return;
     };
     let error = workspace

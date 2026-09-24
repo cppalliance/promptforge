@@ -681,7 +681,7 @@ Components, in dependency order:
 
 <step-3>
 
-### Step 3: Fail the symlink tests under CI and cover the jail's edge cases
+### Step 3: Fail the symlink tests under CI and cover the jail's edge cases [completed]
 
 - Component: Trustworthy tests
 - Piece: flaky-tests and security-tests, the workspace half of each
