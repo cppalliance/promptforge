@@ -355,7 +355,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 
 <step-2>
 
-### Step 2: Remove the facade's test-support feature and module, move its two consumers off it, and collapse the surface check to one build
+### Step 2: Remove the facade's test-support feature and module, move its two consumers off it, and collapse the surface check to one build [completed]
 
 - Component: test-support
 - Component placement: second. It is the only component that changes the dependency graph, so `doctest-cycle` follows it and reviews the final graph. Its collapse edits to `crates/build-xtask/src/api.rs`, `crates/build-xtask/src/api/listing-tests.rs`, and `crates/build-xtask/src/api/fixture-test-support.rs` (sites listed below) land before `listing-fidelity` adds to those files. That keeps Step 2's line numbers exact, and the new listing fixtures get written once, against the single-build loader.

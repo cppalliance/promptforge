@@ -6,7 +6,6 @@
 use rustdoc_types::{GenericBound, GenericParamDef, Id, Path, TraitBoundModifier, Type};
 
 use super::super::super::fixture::workspace;
-use super::super::super::load::Build;
 use super::super::super::report;
 use super::*;
 
@@ -326,9 +325,7 @@ const FACADE: &str = "//! Facade.\npub use promptforge_inner::Local;\n\
 #[ignore = "needs the pinned nightly"]
 fn the_listing_drops_markers_and_collapses_auto_and_derive_style_impls() {
     let root = workspace(INNER, FACADE);
-    let listing = report(root.path(), &[Build::Default])
-        .expect("the fixture documents")
-        .listing;
+    let listing = report(root.path()).expect("the fixture documents").listing;
     let wrapper_auto = ["Freeze", "Send", "Sync", "Unpin"].map(|name| {
         format!(
             "impl<T> core::marker::{name} for promptforge::Wrapper<T> where T: core::marker::{name}"

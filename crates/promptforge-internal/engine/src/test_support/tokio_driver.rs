@@ -81,7 +81,7 @@ pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 /// use std::sync::Arc;
 ///
 /// use promptforge::cancel::CancelHandle;
-/// use promptforge::test_support::{Performers, drive_tokio};
+/// use promptforge_engine::test_support::{Performers, drive_tokio};
 /// use promptforge::timestamp::Timestamp;
 /// use promptforge::{Prompt, Run, RunContext, RunResult};
 ///

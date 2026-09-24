@@ -1,9 +1,5 @@
-//! Internal crate discovery, rustdoc JSON from another nightly, and the
-//! `test-support` build: the test drivers the facade exposes only under
-//! that feature are closure checked too, and stay out of the listing.
+//! Internal crate discovery and rustdoc JSON from another nightly.
 
-use super::super::fixture::{leak, workspace};
-use super::super::report;
 use super::*;
 
 #[test]
@@ -57,47 +53,5 @@ fn json_in_another_format_version_names_the_pinned_nightly() {
             PINNED.nightly, PINNED.rustdoc_types
         )),
         "{error}"
-    );
-}
-
-#[test]
-#[ignore = "needs the pinned nightly"]
-fn the_test_support_build_is_closure_checked_and_left_out_of_the_listing() {
-    let root = workspace(
-        "//! Inner.\n\n/// Kept internal.\npub struct Secret;\n\n/// Exposed.\npub struct Visible;\n\n\
-         /// A test driver.\n#[cfg(feature = \"test-support\")]\npub fn driver() -> Secret {\n    Secret\n}\n",
-        "//! Facade.\npub use promptforge_inner::Visible;\n\n\
-         /// Test drivers.\n#[cfg(feature = \"test-support\")]\npub mod test_support {\n    \
-         pub use promptforge_inner::driver;\n}\n",
-    );
-    let report = report(root.path(), &Build::ALL).expect("the fixture documents");
-    let leak = leak("promptforge_inner");
-    let findings: Vec<(String, Vec<Build>)> = report
-        .findings
-        .iter()
-        .map(|(finding, builds)| (finding.to_string(), builds.iter().copied().collect()))
-        .collect();
-    assert_eq!(
-        findings,
-        [(
-            format!(
-                "promptforge::test_support::driver: mentions `promptforge_inner::Secret` in its \
-                 signature: {leak}"
-            ),
-            vec![Build::TestSupport]
-        )]
-    );
-    assert!(
-        report
-            .listing
-            .contains(&"pub struct promptforge::Visible".to_owned())
-    );
-    assert!(
-        report
-            .listing
-            .iter()
-            .all(|line| !line.contains("test_support")),
-        "{:?}",
-        report.listing
     );
 }

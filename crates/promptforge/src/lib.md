@@ -31,8 +31,6 @@ A host parses a source into a [`Prompt`], prepares a [`RunContext`] through an [
 
 - [`capabilities`]: capability identities and the global naming grammar that capability and tool ids share.
 
-With the `test-support` feature on, a `test_support` module adds the engine's test drivers for companion crates' suites.
-
 # The host loop
 
 A [`Run`] is a deterministic state machine over one prompt. The host calls [`step`](Run::step), which drains every chain that can make progress and returns [`Step::Pending`] with the leaf effects those chains issued, each stamped with the [`Provenance`](ids::Provenance) of the task that built it, beside the events the step reported. The host performs the effects however it likes and hands each answer back through [`resume`](Run::resume), one call per arriving answer, then steps again. `step`, `resume`, and [`cancel`](Run::cancel) are infallible by design: a run's failures are values in [`RunResult::Failure`], so the host owns the loop and the retry policy without catching a panic.

@@ -101,13 +101,6 @@ pub mod effect {
 
 /// A grouping module may live in its own file.
 pub mod event;
-
-/// The engine's test drivers.
-#[cfg(feature = "test-support")]
-pub mod test_support {
-    #[cfg(feature = "test-support")]
-    pub use promptforge_engine::test_support::drive_tokio;
-}
 "#;
     let violations = check(text);
     assert!(violations.is_empty(), "{violations:?}");
@@ -230,7 +223,7 @@ fn an_item_definition_inside_a_grouping_module_is_rejected() {
 }
 
 #[test]
-fn attributes_other_than_doc_and_the_test_support_cfg_are_rejected() {
+fn attributes_other_than_doc_are_rejected() {
     for (text, line) in [
         ("#![forbid(unsafe_code)]\n", 1),
         (
@@ -240,6 +233,10 @@ fn attributes_other_than_doc_and_the_test_support_cfg_are_rejected() {
         ("#[cfg(test)]\npub use promptforge_engine::Run;", 1),
         (
             "#[cfg(feature = \"other\")]\npub use promptforge_engine::Run;",
+            1,
+        ),
+        (
+            "#[cfg(feature = \"test-support\")]\npub use promptforge_engine::Run;",
             1,
         ),
         (

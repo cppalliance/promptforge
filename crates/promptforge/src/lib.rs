@@ -206,13 +206,3 @@ pub mod replay {
 
     pub use promptforge_types::replay::Flags;
 }
-
-#[cfg(feature = "test-support")]
-pub mod test_support {
-    #![doc = include_str!("test_support.md")]
-
-    pub use promptforge_engine::test_support::BoxFuture;
-    pub use promptforge_engine::test_support::Performer;
-    pub use promptforge_engine::test_support::Performers;
-    pub use promptforge_engine::test_support::drive_tokio;
-}

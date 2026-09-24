@@ -6,7 +6,7 @@
 //! enables (`promptforge-engine`'s tokio test driver). That exemption
 //! is safe only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
-//! `promptforge = { workspace = true, features = ["test-support"] }`
+//! `promptforge-engine = { workspace = true, features = ["test-support"] }`
 //! would pull the test drivers back into a shipping binary. This guard closes
 //! that path. It scans every crate under `crates/` (containers included),
 //! the `[dependencies]` and `[build-dependencies]` tables and their
@@ -17,14 +17,14 @@
 //! It also scans each crate's `[features]` table: a value of the form
 //! `<dep>/test-support` or `<dep>?/test-support` enables the feature on
 //! a non-dev dependency (cargo forbids `[features]` from naming
-//! dev-dependencies), so `default = ["promptforge/test-support"]`
+//! dev-dependencies), so `default = ["promptforge-engine/test-support"]`
 //! is the same leak spelled through a feature. `<dep>` is resolved through
 //! the crate's own dependency entries and their `package` renames. One
 //! shape is exempt: an engine crate's own `test-support` feature forwarding
-//! to another engine crate's `test-support` (the facade forwarding the
-//! engine's, or one container crate forwarding a sibling's), because that
-//! forwarding is gated by a feature this guard already confines to dev
-//! tables.
+//! to another engine crate's `test-support` (one container crate
+//! forwarding a sibling's; the guard counts the facade as an engine crate
+//! too), because that forwarding is gated by a feature this guard already
+//! confines to dev tables.
 //!
 //! The check reads declared dependencies, not the resolved graph, so
 //! `workspace-hack` unification is irrelevant to it. Manifests that cannot

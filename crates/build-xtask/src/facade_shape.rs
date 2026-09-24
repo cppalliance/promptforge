@@ -1,9 +1,8 @@
 //! The facade shape check, live: every `.rs` file under the `promptforge`
 //! facade's `src/` holds only grouping `pub mod` blocks with doc comments,
-//! single-item `pub use internal_crate::path::Item;` re-exports, doc
-//! attributes, and `#[cfg(feature = "test-support")]`, so every surface
-//! item is defined in an internal crate. Runs as part of
-//! `cargo test -p build-xtask` and `cargo xtask tidy`.
+//! single-item `pub use internal_crate::path::Item;` re-exports, and doc
+//! attributes, so every surface item is defined in an internal crate. Runs
+//! as part of `cargo test -p build-xtask` and `cargo xtask tidy`.
 //!
 //! A re-export's path must start at a crate the facade manifest declares
 //! under `[dependencies]`. Uniform paths resolve any other head, such as a
@@ -20,7 +19,7 @@ use std::path::Path;
 
 use proc_macro2::Span;
 use syn::spanned::Spanned;
-use syn::{Attribute, Expr, ExprLit, Item, ItemMod, ItemUse, Lit, Meta, MetaNameValue};
+use syn::{Attribute, Item, ItemMod, ItemUse, Meta};
 use syn::{UseTree, Visibility};
 
 /// The facade's crate directory, relative to the workspace root.
@@ -28,7 +27,7 @@ pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
 
 const REEXPORT: &str = "a single-item re-export `pub use internal_crate::path::Item;`";
 const FACADE_ITEMS: &str = "only grouping `pub mod` blocks and single-item `pub use` re-exports";
-const FACADE_ATTRIBUTES: &str = "only doc attributes and `#[cfg(feature = \"test-support\")]`";
+const FACADE_ATTRIBUTES: &str = "only doc attributes";
 
 /// Runs the shape check over every `.rs` file under the facade's `src/`.
 /// A missing crate root, an unreadable manifest, or an unreadable file is
@@ -184,7 +183,7 @@ impl Checker<'_> {
 
     fn attributes(&mut self, attrs: &[Attribute]) {
         for attr in attrs {
-            if !attr.path().is_ident("doc") && !is_test_support_cfg(attr) {
+            if !attr.path().is_ident("doc") {
                 self.report(attr.span(), "disallowed attribute", FACADE_ATTRIBUTES);
             }
         }
@@ -242,17 +241,6 @@ fn definition(item: &Item) -> (&'static str, Span) {
 /// as opposed to a doc setting such as `#[doc(hidden)]`.
 fn is_doc_comment(attr: &Attribute) -> bool {
     attr.path().is_ident("doc") && matches!(attr.meta, Meta::NameValue(_))
-}
-
-/// Whether an attribute is exactly `cfg(feature = "test-support")`.
-fn is_test_support_cfg(attr: &Attribute) -> bool {
-    attr.path().is_ident("cfg") && attr.parse_args::<MetaNameValue>().is_ok_and(|meta| {
-        meta.path.is_ident("feature")
-            && matches!(
-                &meta.value,
-                Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) if value.value() == "test-support"
-            )
-    })
 }
 
 #[cfg(test)]

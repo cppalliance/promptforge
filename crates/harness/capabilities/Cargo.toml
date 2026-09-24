@@ -22,9 +22,8 @@ tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The activation suite drives activated prompts through the engine's tokio
-# test driver and reads the store the capability wrote into.
-promptforge = { workspace = true, features = ["test-support"] }
+# The runtime the `Tool::call` dispatch test awaits on; the activation
+# suite drives its runs synchronously.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber.workspace = true
 

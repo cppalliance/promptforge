@@ -11,11 +11,12 @@ use harness_capabilities::{
 };
 use promptforge::Prompt;
 use promptforge::Run;
+use promptforge::Step;
 use promptforge::cancel::CancelHandle;
-use promptforge::test_support::{Performers, drive_tokio};
+use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::Origin;
+use promptforge::vfs::{Origin, perform_store_op};
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
 /// The run's store mount inside its VFS, where `store.read('x')` resolves
@@ -61,21 +62,38 @@ pub(super) fn prepare_activated(
 /// The harness's run path with capabilities: activates against
 /// `registry`, installs the catalog, prepares, merges the activation
 /// report, refuses an unsatisfiable prompt, and otherwise drives the run
-/// on the engine's tokio test driver with refusing performers (no fixture
-/// here performs a chat, tool, or input effect).
-pub(super) async fn run_activated(
-    registry: CapabilityRegistry,
+/// on the store-only loop below (no fixture here performs a chat, tool,
+/// or input effect).
+pub(super) fn run_activated(
+    registry: &CapabilityRegistry,
     prompt: &Prompt,
     ctx: RunContext,
 ) -> RunResult {
     let (ctx, requirements, _activation) =
-        prepare_activated(Environment::new(), Some(&registry), prompt, ctx);
+        prepare_activated(Environment::new(), Some(registry), prompt, ctx);
     if let Some(refusal) = requirements.refusal() {
         return RunResult::Failure(refusal);
     }
-    let run = Run::new(Arc::new(prompt.clone()), "", ctx);
-    let cancel = run.cancel_handle();
-    drive_tokio(run, Performers::refusing(), |_event| {}, cancel).await
+    drive_store_only(Run::new(Arc::new(prompt.clone()), "", ctx))
+}
+
+/// Drives `run` to its result, answering [`Effect::Store`] through
+/// [`perform_store_op`] and panicking on any other effect, which names a
+/// fixture that issues something this suite does not host.
+fn drive_store_only(mut run: Run) -> RunResult {
+    loop {
+        match run.step() {
+            Step::Pending { effects, .. } => {
+                for (id, _provenance, effect) in effects {
+                    let Effect::Store { access, op } = effect else {
+                        panic!("the activation suite performs only store effects: {effect:?}");
+                    };
+                    run.resume(id, EffectAnswer::Store(perform_store_op(&access, op)));
+                }
+            }
+            Step::Done { result, .. } => return result,
+        }
+    }
 }
 
 /// What one activation observed: the marker round-trip through the

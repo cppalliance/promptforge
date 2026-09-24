@@ -1,19 +1,14 @@
 //! Builds rustdoc JSON for the facade and every crate under
-//! `crates/promptforge-internal/`, once per [`Build`], and parses it.
+//! `crates/promptforge-internal/` with default features, and parses it.
 //!
-//! One `cargo doc` invocation per build selects the facade and every
-//! internal crate, so each internal crate is documented with the features
-//! that build of the facade activates. Selecting an internal crate as a
-//! root also turns on its `default` feature, which the facade's own graph
-//! turns on too, since no internal crate declares one.
-//!
-//! Each build has its own target directory under `target/xtask-api/`:
-//! rustdoc writes `doc/<crate>.json` whatever the features, so a shared
-//! directory could leave one build's JSON behind as the other's when
-//! cargo judges the doc unit fresh.
+//! One `cargo doc` invocation selects the facade and every internal
+//! crate, so each internal crate is documented with the features the
+//! facade activates. Selecting an internal crate as a root also turns on
+//! its `default` feature, which the facade's own graph turns on too,
+//! since no internal crate declares one. The JSON lands under
+//! `target/xtask-api/`.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -39,38 +34,7 @@ const RUSTDOC_FLAGS: [&str; 6] = [
     "warn",
 ];
 
-/// One configuration of the facade the checks run over.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Build {
-    /// The facade's default features: the surface hosts get.
-    Default,
-    /// The facade's `test-support` feature on, so the test drivers are
-    /// checked for closure too.
-    TestSupport,
-}
-
-impl Build {
-    /// Both builds, in report order.
-    pub(crate) const ALL: [Build; 2] = [Build::Default, Build::TestSupport];
-
-    fn features(self) -> &'static [&'static str] {
-        match self {
-            Build::Default => &[],
-            Build::TestSupport => &["--features", "promptforge/test-support"],
-        }
-    }
-}
-
-impl fmt::Display for Build {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Build::Default => "default",
-            Build::TestSupport => "test-support",
-        })
-    }
-}
-
-/// The parsed rustdoc JSON of one build.
+/// The parsed rustdoc JSON of the facade and its internal crates.
 #[derive(Debug)]
 pub(crate) struct Loaded {
     /// The facade crate.
@@ -111,14 +75,11 @@ pub(crate) fn internal_packages(root: &Path) -> Result<Vec<String>, String> {
     Ok(packages)
 }
 
-/// Builds and parses one build's rustdoc JSON for the workspace at `root`.
-pub(crate) fn load(root: &Path, build: Build) -> Result<Loaded, String> {
+/// Builds and parses the rustdoc JSON for the workspace at `root`.
+pub(crate) fn load(root: &Path) -> Result<Loaded, String> {
     let packages = internal_packages(root)?;
-    let target = root
-        .join("target")
-        .join("xtask-api")
-        .join(build.to_string());
-    run_cargo_doc(root, &target, &packages, build)?;
+    let target = root.join("target").join("xtask-api");
+    run_cargo_doc(root, &target, &packages)?;
     let doc = target.join("doc");
     let facade = read_crate(&doc, FACADE)?;
     let mut internal = BTreeMap::new();
@@ -142,12 +103,7 @@ pub(crate) fn cargo(root: &Path) -> Command {
     command
 }
 
-fn run_cargo_doc(
-    root: &Path,
-    target: &Path,
-    packages: &[String],
-    build: Build,
-) -> Result<(), String> {
+fn run_cargo_doc(root: &Path, target: &Path, packages: &[String]) -> Result<(), String> {
     let mut command = cargo(root);
     command
         .env("CARGO_ENCODED_RUSTDOCFLAGS", RUSTDOC_FLAGS.join("\u{1f}"))
@@ -158,17 +114,16 @@ fn run_cargo_doc(
     for package in packages {
         command.args(["-p", package]);
     }
-    command.args(build.features());
     let output = command
         .output()
-        .map_err(|error| format!("{build} build: cannot run cargo: {error}"))?;
+        .map_err(|error| format!("cannot run cargo: {error}"))?;
     if output.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     let tail: Vec<&str> = stderr.lines().rev().take(40).collect();
     Err(format!(
-        "{build} build: `cargo doc` for rustdoc JSON failed ({}):\n{}",
+        "`cargo doc` for rustdoc JSON failed ({}):\n{}",
         output.status,
         tail.into_iter().rev().collect::<Vec<_>>().join("\n")
     ))

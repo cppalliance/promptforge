@@ -4,7 +4,6 @@
 //! alone fails `--check` while a plain run only prints it.
 
 use super::super::fixture::{leak, workspace, write};
-use super::super::load::Build;
 use super::super::{Mode, execute, report};
 use super::*;
 
@@ -136,16 +135,11 @@ fn bless_refuses_while_a_violation_remains() {
 #[ignore = "needs the pinned nightly"]
 fn a_violation_alone_fails_check_and_a_plain_run_only_prints_it() {
     let root = workspace(LEAKING_INNER, LEAKING_FACADE);
-    let listing = report(root.path(), &[Build::Default])
-        .expect("the fixture documents")
-        .listing;
+    let listing = report(root.path()).expect("the fixture documents").listing;
     std::fs::write(path(root.path()), text(&listing)).expect("the listing writes");
     let leak = leak("promptforge_inner");
     let expected = [
-        format!(
-            "[default, test-support] promptforge::make: mentions `promptforge_inner::Secret` in \
-             its signature: {leak}"
-        ),
+        format!("promptforge::make: mentions `promptforge_inner::Secret` in its signature: {leak}"),
         "api: 1 violations; the listing matches public-api.txt".to_owned(),
     ];
     let check = execute(root.path(), Mode::Check).expect("the fixture documents");

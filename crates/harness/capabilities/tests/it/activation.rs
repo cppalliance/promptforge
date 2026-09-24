@@ -185,18 +185,17 @@ fn an_optional_activation_failure_is_logged_and_contributes_nothing() {
     );
 }
 
-#[tokio::test]
-async fn the_run_path_refuses_a_missing_required_capability_with_a_notice_naming_it() {
+#[test]
+fn the_run_path_refuses_a_missing_required_capability_with_a_notice_naming_it() {
     let prompt = parse(DECLARES_REQUIRED, "declares-required");
     // An empty registry: activation reports the declared required
     // capability absent, and the run path folds that report into its
     // refusal.
     let result = run_activated(
-        CapabilityRegistry::new(),
+        &CapabilityRegistry::new(),
         &prompt,
         context("refuse-missing"),
-    )
-    .await;
+    );
     let RunResult::Failure(error) = result else {
         panic!("a prompt missing a required capability is refused: {result:?}");
     };
@@ -208,8 +207,8 @@ async fn the_run_path_refuses_a_missing_required_capability_with_a_notice_naming
     );
 }
 
-#[tokio::test]
-async fn the_run_path_activates_over_the_store_the_run_reads() {
+#[test]
+fn the_run_path_activates_over_the_store_the_run_reads() {
     let prompt = parse(READS_ACTIVATION_MARKER, "reads-activation-marker");
     let (fixture, activations) = Fixture::new("promptforge/web", false);
     let mut registry = CapabilityRegistry::new();
@@ -217,7 +216,7 @@ async fn the_run_path_activates_over_the_store_the_run_reads() {
     // The run path activates exactly once, over the run's own router: the
     // marker the capability wrote through its services is what the prompt
     // reads back through `store`.
-    let result = run_activated(registry, &prompt, context("activate-once")).await;
+    let result = run_activated(&registry, &prompt, context("activate-once"));
     let RunResult::Ok(text) = result else {
         panic!("the activated run reads its capability's marker: {result:?}");
     };

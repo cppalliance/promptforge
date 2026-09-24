@@ -128,8 +128,8 @@ fn a_co_activation_conflict_fails_preparation_naming_both() {
     }
 }
 
-#[tokio::test]
-async fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
+#[test]
+fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
     let prompt = parse(DECLARES_CONFLICTING, "declares-conflicting");
     let mut registry = CapabilityRegistry::new();
     registry
@@ -146,7 +146,7 @@ async fn the_run_path_refuses_a_conflicting_pair_with_a_notice_naming_both() {
             vec![],
         )))
         .expect("terminal registers");
-    let result = run_activated(registry, &prompt, context("refuse-conflict")).await;
+    let result = run_activated(&registry, &prompt, context("refuse-conflict"));
     let RunResult::Failure(error) = result else {
         panic!("a conflicting pair is refused: {result:?}");
     };
@@ -332,13 +332,13 @@ fn a_transport_illegal_wire_name_is_rejected_at_assembly() {
     );
 }
 
-#[tokio::test]
-async fn a_capability_both_activation_and_prepare_report_missing_is_named_once() {
+#[test]
+fn a_capability_both_activation_and_prepare_report_missing_is_named_once() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     // The declared capability is absent from an empty registry (activation
     // reports it) and its exact slot finds nothing in the catalog (prepare
     // reports it): the merged refusal names it once.
-    let result = run_activated(CapabilityRegistry::new(), &prompt, context("refuse-once")).await;
+    let result = run_activated(&CapabilityRegistry::new(), &prompt, context("refuse-once"));
     let RunResult::Failure(error) = result else {
         panic!("an absent required capability is refused: {result:?}");
     };

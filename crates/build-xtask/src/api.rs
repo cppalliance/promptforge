@@ -1,13 +1,12 @@
 //! `cargo xtask api`: proves the `promptforge` facade's surface closed and
 //! snapshots it, from rustdoc JSON built on the pinned nightly.
 //!
-//! The facade and every internal crate are documented twice, once with
-//! the facade's default features and once with `test-support` on. Both
-//! builds are checked: each facade `use` must resolve to a single item
-//! defined in an internal crate, every path a surface item's signature,
-//! fields, bounds, impls, or doc links name must be a facade re-export,
-//! std, core, alloc, or an allowlisted crate, and no surface doc text may
-//! name an internal crate. The default build's listing is compared with
+//! The facade and every internal crate are documented once, with the
+//! facade's default features: each facade `use` must resolve to a single
+//! item defined in an internal crate, every path a surface item's
+//! signature, fields, bounds, impls, or doc links name must be a facade
+//! re-export, std, core, alloc, or an allowlisted crate, and no surface
+//! doc text may name an internal crate. The listing is compared with
 //! `crates/promptforge/public-api.txt`.
 //!
 //! - `cargo +<pinned nightly> xtask api` prints every violation and the
@@ -25,12 +24,10 @@ mod render;
 mod toolchain;
 mod walk;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 use std::process::ExitCode;
-
-use load::Build;
 
 const USAGE: &str = "usage: cargo xtask api [--check | --bless]";
 
@@ -71,11 +68,10 @@ pub(crate) struct Outcome {
     pub(crate) failed: bool,
 }
 
-/// Every build's findings, each with the builds it appears in, and the
-/// default build's listing.
-#[derive(Debug, Default)]
+/// The findings every check reported, and the surface listing.
+#[derive(Debug)]
 pub(crate) struct Report {
-    pub(crate) findings: BTreeMap<Finding, BTreeSet<Build>>,
+    pub(crate) findings: BTreeSet<Finding>,
     pub(crate) listing: Vec<String>,
 }
 
@@ -114,7 +110,7 @@ fn outcome(root: &Path, args: &[String], active: Option<&str>) -> Result<Outcome
 
 /// Builds, checks, and compares the workspace at `root` in `mode`.
 pub(crate) fn execute(root: &Path, mode: Mode) -> Result<Outcome, String> {
-    let report = report(root, &Build::ALL)?;
+    let report = report(root)?;
     let path = listing::path(root);
     let committed = match std::fs::read_to_string(&path) {
         Ok(text) => Some(text),
@@ -123,14 +119,7 @@ pub(crate) fn execute(root: &Path, mode: Mode) -> Result<Outcome, String> {
     };
     let difference = listing::difference(committed.as_deref(), &report.listing);
     let violations = report.findings.len();
-    let mut lines: Vec<String> = report
-        .findings
-        .iter()
-        .map(|(finding, builds)| {
-            let builds: Vec<String> = builds.iter().map(ToString::to_string).collect();
-            format!("[{}] {finding}", builds.join(", "))
-        })
-        .collect();
+    let mut lines: Vec<String> = report.findings.iter().map(ToString::to_string).collect();
     if mode == Mode::Bless {
         if violations > 0 {
             lines.push(format!(
@@ -163,23 +152,17 @@ pub(crate) fn execute(root: &Path, mode: Mode) -> Result<Outcome, String> {
     Ok(Outcome { lines, failed })
 }
 
-/// Loads each of `builds` and runs every check over it.
-pub(crate) fn report(root: &Path, builds: &[Build]) -> Result<Report, String> {
-    let mut report = Report::default();
-    for &build in builds {
-        let loaded = load::load(root, build)?;
-        let (surface, mut findings) = items::Surface::resolve(&loaded);
-        let visits = walk::visits(&loaded, &surface);
-        findings.extend(closure::findings(&loaded, &surface, &visits));
-        findings.extend(doc_text::findings(&loaded, &surface, &visits));
-        if build == Build::Default {
-            report.listing = listing::lines(&surface, &visits);
-        }
-        for finding in findings {
-            report.findings.entry(finding).or_default().insert(build);
-        }
-    }
-    Ok(report)
+/// Loads the facade's rustdoc JSON and runs every check over it.
+pub(crate) fn report(root: &Path) -> Result<Report, String> {
+    let loaded = load::load(root)?;
+    let (surface, mut findings) = items::Surface::resolve(&loaded);
+    let visits = walk::visits(&loaded, &surface);
+    findings.extend(closure::findings(&loaded, &surface, &visits));
+    findings.extend(doc_text::findings(&loaded, &surface, &visits));
+    Ok(Report {
+        findings: findings.into_iter().collect(),
+        listing: listing::lines(&surface, &visits),
+    })
 }
 
 #[cfg(test)]

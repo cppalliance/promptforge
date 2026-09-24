@@ -9,8 +9,6 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use super::load::Build;
-
 const WORKSPACE: &str = "[workspace]\nresolver = \"3\"\nmembers = [\
     \"crates/promptforge\", \"crates/promptforge-internal/*\", \"crates/serde\"]\n";
 
@@ -100,12 +98,12 @@ pub(crate) fn write(root: &Path, path: &str, text: &str) {
     std::fs::write(file, text).expect("the fixture file writes");
 }
 
-/// The default build's findings for the workspace at `root`, as printed.
+/// The findings for the workspace at `root`, as printed.
 pub(crate) fn findings(root: &Path) -> BTreeSet<String> {
-    super::report(root, &[Build::Default])
+    super::report(root)
         .expect("the fixture documents")
         .findings
-        .keys()
+        .iter()
         .map(ToString::to_string)
         .collect()
 }

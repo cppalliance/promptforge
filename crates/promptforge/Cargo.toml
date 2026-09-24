@@ -21,18 +21,9 @@ promptforge-types.workspace = true
 promptforge-vfs.workspace = true
 workspace-hack.workspace = true
 
-[features]
-# The engine's test drivers, for companion crates' suites; only
-# dev-dependency tables may enable it.
-test-support = ["promptforge-engine/test-support"]
-
 [dev-dependencies]
 # The prepare suite's tool descriptors carry JSON parameter schemas.
 serde_json.workspace = true
-
-[[test]]
-name = "suite"
-required-features = ["test-support"]
 
 [lints]
 workspace = true
