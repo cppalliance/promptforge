@@ -28,22 +28,22 @@ fn write_crate(root: &Path, dir: &str, name: &str, manifest: &str) {
         .expect("lib.rs writes");
 }
 
-/// A fake workspace holding the two root engine crates and one container
-/// engine crate, each exposing a `test-support` feature, so a fixture can
-/// add one consumer and see only that consumer's findings.
+/// A fake workspace holding three container engine crates, each exposing
+/// a `test-support` feature, so a fixture can add one consumer and see
+/// only that consumer's findings.
 fn engine_root() -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
     let features = "[features]\ntest-support = []\n";
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge-internal/engine",
+        "promptforge-engine",
         features,
     );
     write_crate(
         root.path(),
-        "promptforge-api-types",
-        "promptforge-api-types",
+        "promptforge-internal/types",
+        "promptforge-types",
         features,
     );
     write_crate(
@@ -73,13 +73,13 @@ fn a_dependencies_table_enabling_an_engine_test_support_feature_is_reported() {
         "harness/capabilities",
         "harness-capabilities",
         "[dependencies]\n\
-         promptforge-api-runtime = { workspace = true, features = [\"test-support\"] }\n",
+         promptforge-engine = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("[dependencies]")
-            && violations[0].contains("promptforge-api-runtime/test-support")
+            && violations[0].contains("promptforge-engine/test-support")
             && violations[0].contains("capabilities"),
         "the leak names the table, the feature, and the consuming crate: {violations:?}"
     );
@@ -92,9 +92,9 @@ fn a_dev_dependencies_table_enabling_an_engine_test_support_feature_passes() {
         root.path(),
         "harness/capabilities",
         "harness-capabilities",
-        "[dependencies]\npromptforge-api-runtime = { workspace = true }\n\
+        "[dependencies]\npromptforge-engine = { workspace = true }\n\
          [dev-dependencies]\n\
-         promptforge-api-runtime = { workspace = true, features = [\"test-support\"] }\n\
+         promptforge-engine = { workspace = true, features = [\"test-support\"] }\n\
          [target.'cfg(unix)'.dev-dependencies]\n\
          promptforge-lua = { workspace = true, features = [\"test-support\"] }\n",
     );
@@ -113,18 +113,20 @@ fn build_and_target_tables_are_scanned_renames_resolved_and_non_engine_features_
         "harness/runner",
         "harness-runner",
         "[build-dependencies]\n\
-         rt = { package = \"promptforge-api-runtime\", features = [\"test-support\"] }\n\
+         rt = { package = \"promptforge-engine\", features = [\"test-support\"] }\n\
          [target.'cfg(windows)'.dependencies]\n\
          promptforge-lua = { workspace = true, features = [\"serialize\", \"test-support\"] }\n\
          [dependencies]\n\
-         promptforge-api-types = { workspace = true, features = [\"serde\"] }\n\
+         promptforge-types = { workspace = true, features = [\"serde\"] }\n\
          harness-capabilities = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
-        violations.iter().any(|v| v.contains("[build-dependencies]")
-            && v.contains("promptforge-api-runtime/test-support")),
+        violations
+            .iter()
+            .any(|v| v.contains("[build-dependencies]")
+                && v.contains("promptforge-engine/test-support")),
         "the renamed build-dependency is reported by package name: {violations:?}"
     );
     assert!(
@@ -141,7 +143,7 @@ fn a_workspace_dependencies_entry_enabling_an_engine_test_support_feature_is_rep
     std::fs::write(
         root.path().join("Cargo.toml"),
         "[workspace]\nmembers = []\n[workspace.dependencies]\n\
-         promptforge-api-runtime = { path = \"crates/promptforge-api-runtime\", features = [\"test-support\"] }\n\
+         promptforge-engine = { path = \"crates/promptforge-internal/engine\", features = [\"test-support\"] }\n\
          promptforge-lua = { path = \"crates/promptforge-internal/lua\" }\n",
     )
     .expect("the root manifest writes");
@@ -149,7 +151,7 @@ fn a_workspace_dependencies_entry_enabling_an_engine_test_support_feature_is_rep
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("[workspace.dependencies]")
-            && violations[0].contains("promptforge-api-runtime/test-support"),
+            && violations[0].contains("promptforge-engine/test-support"),
         "the inherited entry is reported against the root manifest: {violations:?}"
     );
 }
@@ -162,12 +164,12 @@ fn a_features_value_enabling_an_engine_test_support_feature_is_reported() {
         "workshop/server",
         "workshop-server",
         "[dependencies]\n\
-         promptforge-api-runtime = { workspace = true }\n\
-         rt-types = { package = \"promptforge-api-types\", workspace = true, optional = true }\n\
+         promptforge-engine = { workspace = true }\n\
+         rt-types = { package = \"promptforge-types\", workspace = true, optional = true }\n\
          promptforge-lua = { workspace = true, optional = true }\n\
          harness-capabilities = { workspace = true }\n\
          [features]\n\
-         default = [\"promptforge-api-runtime/test-support\"]\n\
+         default = [\"promptforge-engine/test-support\"]\n\
          types = [\"rt-types?/test-support\"]\n\
          fixtures = [\"dep:promptforge-lua\", \"harness-capabilities/test-support\", \"promptforge-lua/serialize\"]\n",
     );
@@ -175,7 +177,7 @@ fn a_features_value_enabling_an_engine_test_support_feature_is_reported() {
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
         violations.iter().any(|v| v.contains("[features] default")
-            && v.contains("promptforge-api-runtime/test-support")
+            && v.contains("promptforge-engine/test-support")
             && v.contains("server")),
         "the plain dependency-feature reference names the feature, the engine crate, and the consuming crate: {violations:?}"
     );
@@ -183,7 +185,7 @@ fn a_features_value_enabling_an_engine_test_support_feature_is_reported() {
         violations
             .iter()
             .any(|v| v.contains("[features] types")
-                && v.contains("promptforge-api-types/test-support")),
+                && v.contains("promptforge-types/test-support")),
         "the weak `?/` reference resolves its `package` rename: {violations:?}"
     );
 }
@@ -193,8 +195,8 @@ fn an_engine_crate_forwarding_its_own_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge-internal/engine",
+        "promptforge-engine",
         "[dependencies]\npromptforge-lua = { workspace = true }\n\
          [features]\ntest-support = [\"promptforge-lua/test-support\"]\n\
          other = [\"promptforge-lua/serialize\"]\n",
@@ -207,14 +209,14 @@ fn an_engine_crate_forwarding_its_own_test_support_feature_passes() {
 }
 
 #[test]
-fn the_facade_forwarding_the_runtime_test_support_feature_passes() {
+fn the_facade_forwarding_the_engine_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
         "promptforge",
         "promptforge",
-        "[dependencies]\npromptforge-api-runtime = { workspace = true }\n\
-         [features]\ntest-support = [\"promptforge-api-runtime/test-support\"]\n",
+        "[dependencies]\npromptforge-engine = { workspace = true }\n\
+         [features]\ntest-support = [\"promptforge-engine/test-support\"]\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert!(
@@ -228,8 +230,8 @@ fn an_engine_crate_enabling_a_sibling_test_support_feature_outside_dev_is_report
     let root = engine_root();
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge-internal/engine",
+        "promptforge-engine",
         "[dependencies]\npromptforge-lua = { workspace = true, features = [\"test-support\"] }\n\
          [features]\ntest-support = []\n",
     );

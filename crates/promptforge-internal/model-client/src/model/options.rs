@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 use std::sync::Mutex;
 
-use promptforge_api_types::models::ModelId;
+use promptforge_types::models::ModelId;
 
 use crate::{Error, Result};
 

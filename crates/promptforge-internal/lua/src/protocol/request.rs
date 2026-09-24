@@ -2,8 +2,8 @@
 //! yield, the store operations they hold, and the message-record types
 //! the chat request is built from.
 
-use promptforge_api_types::ids::{TaskId, TaskOrigin};
 use promptforge_model_client::model::ModelBinding;
+use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::Error;
 

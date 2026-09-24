@@ -2,8 +2,8 @@
 //! descriptor's data is copied verbatim and its structured-output flag
 //! selects the binding's output kind.
 
-use promptforge_api_types::capabilities::CapabilityId;
-use promptforge_api_types::tools::{ToolDescriptor, ToolId};
+use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
 use super::{ToolBinding, ToolOutputKind};

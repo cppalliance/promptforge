@@ -1,9 +1,9 @@
 //! The answer vocabulary: one dispatched request's outcome and the payload
 //! types its variants hold.
 
-use promptforge_api_types::event::Event;
-use promptforge_api_types::ids::{TaskId, TaskOrigin};
-use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge_types::event::Event;
+use promptforge_types::ids::{TaskId, TaskOrigin};
+use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};

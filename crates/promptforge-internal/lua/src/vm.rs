@@ -52,8 +52,8 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// # Examples
 /// ```no_run
 /// use promptforge_lua::SectionVm;
-/// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-/// use promptforge_api_types::untrusted::GuardNonce;
+/// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+/// use promptforge_types::untrusted::GuardNonce;
 ///
 /// let nonce = GuardNonce::from_seed(1);
 /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
@@ -233,8 +233,8 @@ impl SectionVm {
     /// # Examples
     /// ```no_run
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_api_types::untrusted::GuardNonce;
+    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+    /// use promptforge_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
@@ -318,7 +318,7 @@ impl SectionVm {
     /// block coroutine the VM starts polls it, and a set flag aborts the
     /// running chunk as [`Error::Interrupted`]. A VM without one is never
     /// cancelled. The first install wins.
-    pub fn set_cancel(&self, cancel: promptforge_api_types::cancel::CancelHandle) {
+    pub fn set_cancel(&self, cancel: promptforge_types::cancel::CancelHandle) {
         self.instruction_budget.set_cancel(cancel);
     }
 
@@ -437,8 +437,8 @@ impl SectionVm {
     /// # Examples
     /// ```no_run
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_api_types::untrusted::GuardNonce;
+    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+    /// use promptforge_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
@@ -749,7 +749,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if host values have not been injected, execution
     /// fails, or the program returns a non-scalar value.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
     /// tests, not host API.
     #[doc(hidden)]
     pub fn run_chunk(
@@ -786,8 +786,8 @@ impl SectionVm {
     /// # Examples
     /// ```no_run
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_api_types::untrusted::GuardNonce;
+    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+    /// use promptforge_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
@@ -891,7 +891,7 @@ impl SectionVm {
     /// Returns a snapshot of the shared tool set and the live section
     /// addition runtime.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
     /// tests, not host API.
     ///
     /// # Errors
@@ -912,7 +912,7 @@ impl SectionVm {
     /// Test-only: production reads the run's shared set through the model
     /// view; tests snapshot straight from the VM.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s tests,
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s tests,
     /// not host API.
     ///
     /// # Errors
@@ -997,8 +997,8 @@ impl SectionVm {
     /// # Examples
     /// ```no_run
     /// use promptforge_lua::SectionVm;
-    /// use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-    /// use promptforge_api_types::untrusted::GuardNonce;
+    /// use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+    /// use promptforge_types::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);

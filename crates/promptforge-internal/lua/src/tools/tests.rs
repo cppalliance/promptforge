@@ -1,7 +1,7 @@
 //! Tests for the `tools` namespace installers, alias decoding, and the local params schema.
 
 use mlua::{Lua, Value, Variadic};
-use promptforge_api_types::untrusted::GuardNonce;
+use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
 use super::decode::{add_local_params_schema, collect_tools_add_entries, tool_alias};
@@ -10,7 +10,7 @@ use super::{install_tool_call_counts, install_tools};
 use crate::handles::ToolSet;
 use crate::scope::{TaskAllowlist, ToolRuntime};
 use crate::{SectionVm, ToolBinding};
-use promptforge_api_types::tools::ToolId;
+use promptforge_types::tools::ToolId;
 use std::sync::{Arc, Mutex};
 
 /// A fresh stock handle's access capability for a test VM.
@@ -316,8 +316,8 @@ fn tool_call_counts_seed_read_and_reject_unknown_keys() {
 }
 
 /// A trivial tool as data, so the counts test can bind an alias.
-fn echo_tool() -> promptforge_api_types::tools::ToolDescriptor {
-    promptforge_api_types::tools::ToolDescriptor::new(
+fn echo_tool() -> promptforge_types::tools::ToolDescriptor {
+    promptforge_types::tools::ToolDescriptor::new(
         ToolId::parse("tests/tools/echo").expect("valid id"),
         "echo",
         "echo tool",

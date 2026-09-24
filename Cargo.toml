@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/store", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness/runner", "crates/harness/models", "crates/harness/capabilities", "crates/harness/log", "crates/harness/sessions", "crates/harness/web", "crates/harness/webfetch", "crates/harness/web-search"]
+members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/store", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/shell", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness/runner", "crates/harness/models", "crates/harness/capabilities", "crates/harness/log", "crates/harness/sessions", "crates/harness/web", "crates/harness/webfetch", "crates/harness/web-search"]
 # crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
 # package both esbuild-built UIs consume, so the crates/* glob skips it.
 # crates/promptforge-internal, crates/gateway, crates/workshop, and
@@ -27,8 +27,8 @@ repository = "https://github.com/cppalliance/promptforge"
 base64 = "0.22"
 bytes = "1"
 promptforge = { path = "crates/promptforge", version = "0.3.0" }
-promptforge-api-runtime = { path = "crates/promptforge-api-runtime", version = "0.3.0" }
-promptforge-api-types = { path = "crates/promptforge-api-types", version = "0.3.0" }
+promptforge-engine = { path = "crates/promptforge-internal/engine", version = "0.3.0" }
+promptforge-types = { path = "crates/promptforge-internal/types", version = "0.3.0" }
 gateway-api-types = { path = "crates/gateway-api-types", version = "0.3.0" }
 gateway-cloud-providers = { path = "crates/gateway/cloud-providers", version = "0.3.0" }
 gateway = { path = "crates/gateway/app", version = "0.3.0" }

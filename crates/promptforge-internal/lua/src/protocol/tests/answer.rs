@@ -57,8 +57,8 @@ fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
     // absent optional field (`finish_reason`, `metrics`) is nil rather
     // than the serde bridge's NULL sentinel, so an author's truth test
     // works. An empty answer is still a sequence.
-    use promptforge_api_types::event::Event;
-    use promptforge_api_types::ids::Provenance;
+    use promptforge_types::event::Event;
+    use promptforge_types::ids::Provenance;
     let lua = Lua::new();
     let task: TaskId = "0.1".parse().expect("a task id parses");
     let events = vec![
@@ -79,7 +79,7 @@ fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
             finish_reason: None,
             model: "m".to_owned(),
             metrics: None,
-            origin: promptforge_api_types::event::ReplyOrigin::Chat,
+            origin: promptforge_types::event::ReplyOrigin::Chat,
         },
     ];
     let (envelope, retained) = Answer::<Error>::TaskEvents(Ok(events))

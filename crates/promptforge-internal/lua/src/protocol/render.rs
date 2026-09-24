@@ -47,7 +47,7 @@ const EVENT_TABLE_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::Serializ
 /// serde-boundary conversion for events; no codec reaches author code.
 fn event_sequence(
     lua: &Lua,
-    events: &[promptforge_api_types::event::Event],
+    events: &[promptforge_types::event::Event],
 ) -> mlua::Result<mlua::Table> {
     let sequence = lua.create_table_with_capacity(events.len(), 0)?;
     for (position, event) in events.iter().enumerate() {
@@ -59,7 +59,7 @@ fn event_sequence(
 /// Renders task ids as a 1-based sequence of their path strings.
 fn task_id_sequence(
     lua: &Lua,
-    tasks: &[promptforge_api_types::ids::TaskId],
+    tasks: &[promptforge_types::ids::TaskId],
 ) -> mlua::Result<mlua::Table> {
     let sequence = lua.create_table_with_capacity(tasks.len(), 0)?;
     for (position, task) in tasks.iter().enumerate() {

@@ -11,9 +11,9 @@ use std::num::NonZeroU32;
 use mlua::{AnyUserData, Function, Lua, MultiValue, Value};
 use serde_json::json;
 
-use promptforge_api_types::ids::{TaskId, TaskOrigin};
-use promptforge_api_types::metrics::{CallMetrics, ToolCallEvent};
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
+use promptforge_types::ids::{TaskId, TaskOrigin};
+use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use crate::{Error, LuaModelHandle};
 

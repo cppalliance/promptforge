@@ -1,8 +1,8 @@
 //! The parse entry point: frontmatter decoding, H1 validation, and the
 //! assembly of a [`Prompt`] from its headings, fences, and sections.
 
-use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-use promptforge_api_types::event::{Event, lifecycle};
+use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+use promptforge_types::event::{Event, lifecycle};
 
 use crate::build::{
     Frontmatter, Heading, build_sections, collect_headings, line_add, split_frontmatter,
@@ -21,7 +21,7 @@ impl Prompt {
     /// They are values for the caller to log; nothing is read back.
     ///
     /// ```
-    /// use promptforge_api_types::event::Event;
+    /// use promptforge_types::event::Event;
     /// use promptforge_parser::{Prompt, ParseErrorKind};
     ///
     /// let source = "---\nname: greeter\ndescription: says hi\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";

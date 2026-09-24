@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use promptforge_api_types::metrics::ClientTiming;
+use promptforge_types::metrics::ClientTiming;
 use serde_json::{Map, Value};
 
 use super::{Completion, StreamDelta};

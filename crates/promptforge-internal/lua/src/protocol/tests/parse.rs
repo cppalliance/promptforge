@@ -164,7 +164,7 @@ fn a_tool_call_with_a_tool_object_alias_decodes_to_its_alias() {
     let handle = crate::LuaToolHandle::from_binding(
         "echo",
         "echo tool",
-        &promptforge_api_types::tools::ToolId::parse("tests/tools/echo").expect("valid id"),
+        &promptforge_types::tools::ToolId::parse("tests/tools/echo").expect("valid id"),
     );
     let userdata = lua.create_userdata(handle).expect("userdata");
     table.raw_set("alias", userdata).expect("raw_set");

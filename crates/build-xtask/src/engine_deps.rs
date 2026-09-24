@@ -1,7 +1,7 @@
 //! Engine manifest guard: the sans-I/O engine crates declare no async
 //! runtime and no HTTP client.
 //!
-//! The engine (`promptforge-api-runtime` and the crates under
+//! The engine (the `promptforge` facade and the crates under
 //! `crates/promptforge-internal/`) is a deterministic state machine; every
 //! wait becomes an effect the harness performs. Its manifests therefore may
 //! not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in

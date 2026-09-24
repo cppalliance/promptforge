@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use promptforge_api_types::emitter::Emitter;
+use promptforge_types::emitter::Emitter;
 
 use super::contract::{ArgsDecl, CapabilityDecl, ModelRoles, ToolSlots};
 use super::fence::{RawBlock, lua_block_location, split_section_blocks};

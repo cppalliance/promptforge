@@ -12,7 +12,7 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use promptforge_api_types::metrics::ClientTiming;
+use promptforge_types::metrics::ClientTiming;
 use serde_json::Value;
 
 use super::{Applied, Completion, SseScanner, StreamAccumulator, StreamDelta};

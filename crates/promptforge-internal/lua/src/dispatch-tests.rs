@@ -1,7 +1,7 @@
 //! Tests for the shared tool-dispatch body: the fixture tools and recorder
 //! every dispatch test uses, and the synchronous `prepare_dispatch` tests.
 
-use promptforge_api_types::tools::{
+use promptforge_types::tools::{
     OutputTrust, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::json;

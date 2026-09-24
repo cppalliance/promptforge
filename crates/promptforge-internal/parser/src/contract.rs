@@ -18,8 +18,8 @@ use std::marker::PhantomData;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use promptforge_api_types::names::GlobalName;
-use promptforge_api_types::tools::ToolId;
+use promptforge_types::names::GlobalName;
+use promptforge_types::tools::ToolId;
 
 mod args;
 mod models;

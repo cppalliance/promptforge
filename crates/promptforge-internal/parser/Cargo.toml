@@ -13,8 +13,8 @@ categories = ["text-processing", "parsing"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-promptforge-api-types.workspace = true
 promptforge-lua.workspace = true
+promptforge-types.workspace = true
 pulldown-cmark.workspace = true
 serde.workspace = true
 serde_yaml_ng.workspace = true

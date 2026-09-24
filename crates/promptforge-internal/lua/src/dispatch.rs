@@ -13,10 +13,10 @@
 //! executor already depends on - is what stops dispatch semantics from
 //! forking.
 
-use promptforge_api_types::emitter::Emitter;
-use promptforge_api_types::event::lifecycle;
-use promptforge_api_types::tools::{OutputTrust, ToolError, ToolOutput};
-use promptforge_api_types::untrusted::GuardNonce;
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::lifecycle;
+use promptforge_types::tools::{OutputTrust, ToolError, ToolOutput};
+use promptforge_types::untrusted::GuardNonce;
 
 use crate::error::{Error, Result};
 use crate::{ToolBinding, ToolCallCounts};

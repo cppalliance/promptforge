@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::program::map_chunk_line_to_absolute;
 use crate::vm::{LocalTools, LuaOutcome, run_chunk};
-use promptforge_api_types::tools::ToolDescriptor;
 use promptforge_store::Store;
+use promptforge_types::tools::ToolDescriptor;
 use serde_json::json;
 use shared_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 
@@ -1818,7 +1818,7 @@ stack traceback:
 
 #[test]
 fn long_running_lua_block_cancels_cooperatively() {
-    use promptforge_api_types::cancel::CancelHandle;
+    use promptforge_types::cancel::CancelHandle;
     use std::time::{Duration, Instant};
 
     // An unbounded loop that, without cooperative cancellation, would run
@@ -2168,7 +2168,7 @@ fn dangerous_globals_absent() {
 
 #[test]
 fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
-    use promptforge_api_types::cancel::CancelHandle;
+    use promptforge_types::cancel::CancelHandle;
     use std::time::{Duration, Instant};
 
     // No instruction ceiling aborts a runaway block anymore; the cancel flag,

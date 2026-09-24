@@ -10,8 +10,8 @@ mod chat;
 mod tasks;
 
 use mlua::{Lua, LuaSerdeExt, Value};
-use promptforge_api_types::ids::TaskOrigin;
 use promptforge_model_client::model::ModelBinding;
+use promptforge_types::ids::TaskOrigin;
 
 use chat::parse_chat;
 use tasks::{

@@ -10,7 +10,7 @@
 //! callers that ignore the return value keep working.
 
 use mlua::{LuaSerdeExt, MetaMethod, UserData, UserDataFields, UserDataMethods, Value};
-use promptforge_api_types::tools::ToolId;
+use promptforge_types::tools::ToolId;
 use serde_json::{Value as Json, json};
 
 /// Inspectable Tool object for a bound slot.

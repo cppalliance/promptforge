@@ -547,7 +547,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-4>
 
-### Step 4: Move the types and runtime crates into the container
+### Step 4: Move the types and runtime crates into the container [completed]
 
 - Component: facade-firewall
 - Piece: engine relocation. It comes after the migration, because container privacy blocks outside crates from the moved crates. Its two steps are sequential: this step deletes the transitional exception as soon as the runtime is inside the container, and Step 5 then changes only edges inside the container and the facade's paths.

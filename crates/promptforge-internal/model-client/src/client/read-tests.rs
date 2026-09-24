@@ -12,7 +12,7 @@ use serde_json::json;
 use super::*;
 use crate::client::CompletionResult;
 use crate::model::CompletionErrorKind;
-use promptforge_api_types::metrics::ClientTiming;
+use promptforge_types::metrics::ClientTiming;
 
 /// A chunk source over canned chunks; it never pends, so the tests need
 /// no executor.

@@ -86,15 +86,10 @@ fn an_outside_crate_reaching_past_the_one_public_crate_is_reported() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge-lua\" }\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n",
+        "[dependencies]\npromptforge-lua = { path = \"../promptforge-lua\" }\npromptforge = { path = \"../promptforge\" }\n",
     );
     write_crate(root.path(), "promptforge-lua", "promptforge-lua", "");
-    write_crate(
-        root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
-        "",
-    );
+    write_crate(root.path(), "promptforge", "promptforge", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
@@ -104,20 +99,39 @@ fn an_outside_crate_reaching_past_the_one_public_crate_is_reported() {
 }
 
 #[test]
-fn a_gateway_crate_depending_on_promptforge_api_runtime_is_reported() {
+fn an_outside_crate_depending_on_a_root_promptforge_crate_other_than_the_facade_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop-sessions",
+        "workshop-sessions",
+        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
+         promptforge-api-types = { path = \"../promptforge-api-types\" }\n",
+    );
+    for name in ["promptforge-api-runtime", "promptforge-api-types"] {
+        write_crate(root.path(), name, name, "");
+    }
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 2, "{violations:?}");
+    assert!(
+        violations.iter().all(
+            |v| v.starts_with("workshop-sessions depends on promptforge-")
+                && v.ends_with("only through promptforge")
+        ),
+        "promptforge is the one public crate, wherever the others sit: {violations:?}"
+    );
+}
+
+#[test]
+fn a_gateway_crate_depending_on_the_promptforge_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "gateway-routing",
         "gateway-routing",
-        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n",
+        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
-        "",
-    );
+    write_crate(root.path(), "promptforge", "promptforge", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
@@ -187,44 +201,34 @@ fn a_promptforge_crate_depending_on_gateway_or_workshop_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
-        "[dependencies]\ngateway-protocol = { path = \"../gateway-protocol\" }\nworkshop-protocol = { path = \"../workshop-protocol\" }\n",
+        "promptforge-internal/engine",
+        "promptforge-engine",
+        "[dependencies]\ngateway-protocol = { path = \"../../gateway-protocol\" }\nworkshop-protocol = { path = \"../../workshop-protocol\" }\n",
     );
     write_crate(root.path(), "gateway-protocol", "gateway-protocol", "");
     write_crate(root.path(), "workshop-protocol", "workshop-protocol", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
-        violations
-            .iter()
-            .all(|v| v.contains("promptforge-api-runtime")),
+        violations.iter().all(|v| v.contains("promptforge-engine")),
         "the violations name the promptforge crate: {violations:?}"
     );
 }
 
 #[test]
-fn an_outside_crate_depending_on_the_public_crates_passes() {
+fn an_outside_crate_depending_on_the_facade_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n\
-         promptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
-         promptforge-api-types = { path = \"../promptforge-api-types\" }\n",
+        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n",
     );
-    for name in [
-        "promptforge",
-        "promptforge-api-runtime",
-        "promptforge-api-types",
-    ] {
-        write_crate(root.path(), name, name, "");
-    }
+    write_crate(root.path(), "promptforge", "promptforge", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the facade and both public crates are legal dependencies for outside crates: {violations:?}"
+        "the facade is the one legal promptforge dependency for outside crates: {violations:?}"
     );
 }
 
@@ -277,15 +281,13 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
         root.path(),
         "harness/runner",
         "harness-runner",
-        "[dependencies]\npromptforge-api-runtime = { path = \"../../promptforge-api-runtime\" }\n\
-         promptforge-api-types = { path = \"../../promptforge-api-types\" }\n\
+        "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n\
          gateway-api-types = { path = \"../../gateway-api-types\" }\n\
          gateway-api-discovery = { path = \"../../gateway-api-discovery\" }\n\
          shared-vfs = { path = \"../../shared-vfs\" }\n",
     );
     for name in [
-        "promptforge-api-runtime",
-        "promptforge-api-types",
+        "promptforge",
         "gateway-api-types",
         "gateway-api-discovery",
         "shared-vfs",
@@ -295,7 +297,7 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the promptforge public pair, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
+        "the promptforge facade, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
     );
 }
 
@@ -339,7 +341,7 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
 }
 
 #[test]
-fn a_harness_crate_reaching_past_the_promptforge_public_pair_is_reported() {
+fn a_harness_crate_reaching_past_the_promptforge_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -397,17 +399,12 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     let dep = "[dependencies]\nharness-api = { path = \"../harness-api\" }\n";
     write_crate(root.path(), "harness-api", "harness-api", "");
-    write_crate(
-        root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
-        dep,
-    );
+    write_crate(root.path(), "promptforge", "promptforge", dep);
     write_crate(root.path(), "gateway-routing", "gateway-routing", dep);
     write_crate(root.path(), "shared-vfs", "shared-vfs", dep);
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 3, "{violations:?}");
-    for package in ["promptforge-api-runtime", "gateway-routing", "shared-vfs"] {
+    for package in ["promptforge", "gateway-routing", "shared-vfs"] {
         assert!(
             violations
                 .iter()
@@ -419,7 +416,7 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
 
 #[test]
 fn family_classification_follows_the_naming_rules() {
-    assert_eq!(family("promptforge-api-runtime"), Family::Promptforge);
+    assert_eq!(family("promptforge-engine"), Family::Promptforge);
     assert_eq!(family("gateway"), Family::Gateway);
     assert_eq!(family("gateway-config"), Family::Gateway);
     assert_eq!(family("workshop"), Family::Workshop);

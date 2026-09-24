@@ -9,8 +9,8 @@
 
 use std::sync::Mutex;
 
-use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-use promptforge_api_types::event::Event;
+use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+use promptforge_types::event::Event;
 
 /// One event folded to what a suite compares: a payload-free boundary by
 /// its serialized `kind`, the author's `log` checkpoint with its message,

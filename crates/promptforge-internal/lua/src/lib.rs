@@ -24,7 +24,7 @@
 //! `SectionVm::run_chunk` as [`Error::Lua`].
 //!
 //! Most of this crate is a `#[doc(hidden)]` cross-crate seam for
-//! `promptforge-api-runtime`'s executor, which drives the VM and the coroutine
+//! `promptforge-engine`'s executor, which drives the VM and the coroutine
 //! protocol; [`LuaProgram`] is the documented exception.
 
 // These imports are re-exported `pub(crate)` so the child modules can pull
@@ -42,12 +42,12 @@ pub(crate) use mlua::{
 };
 pub(crate) use serde_json::Value as Json;
 
-pub(crate) use promptforge_api_types::emitter::Emitter;
-pub(crate) use promptforge_api_types::event::lifecycle;
-pub(crate) use promptforge_api_types::tools::ToolId;
-pub(crate) use promptforge_api_types::untrusted::GuardNonce;
 pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
 pub(crate) use promptforge_store::{Access, Store};
+pub(crate) use promptforge_types::emitter::Emitter;
+pub(crate) use promptforge_types::event::lifecycle;
+pub(crate) use promptforge_types::tools::ToolId;
+pub(crate) use promptforge_types::untrusted::GuardNonce;
 
 pub(crate) use crate::compactors::install_compactors;
 pub(crate) use crate::error::Result;
@@ -118,7 +118,7 @@ pub(crate) use handles::resolve_section_target;
 mod models;
 mod protocol;
 
-// The executor-facing surface: every item `promptforge-api-runtime` names crosses
+// The executor-facing surface: every item `promptforge-engine` names crosses
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
 // `LuaProgram` is the documented exception.
 #[doc(hidden)]

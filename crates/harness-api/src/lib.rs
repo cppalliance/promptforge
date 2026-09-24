@@ -7,11 +7,10 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness public API; may depend on: `promptforge-api-runtime`,
-//!   `promptforge-api-types`, `gateway-api-types`,
-//!   `gateway-api-discovery`, `shared-*`, and the crates under
-//!   `crates/harness/`. Never on a `workshop-*` crate or a private
-//!   `gateway-*` crate. Read `AGENTS.md` before adding an import.
+//! - Family: harness public API; may depend on: `promptforge`,
+//!   `gateway-api-types`, `gateway-api-discovery`, `shared-*`, and the
+//!   crates under `crates/harness/`. Never on a `workshop-*` crate or a
+//!   private `gateway-*` crate. Read `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - A gateway bearer key is never written to logs or `Debug` output.

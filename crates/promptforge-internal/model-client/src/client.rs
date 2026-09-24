@@ -24,9 +24,9 @@ mod request;
 mod stream;
 mod wire;
 
-// Canonical in `promptforge-api-types`; re-exported so the
+// Canonical in `promptforge-types`; re-exported so the
 // `promptforge_model_client::client::StreamDelta` path keeps resolving.
-pub use promptforge_api_types::wire::StreamDelta;
+pub use promptforge_types::wire::StreamDelta;
 #[doc(hidden)]
 pub use read::{ChunkSource, read_body_capped, read_completion_stream};
 #[doc(hidden)]

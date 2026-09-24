@@ -16,7 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # The canonical metrics vocabulary (Usage, LlamaTimings, VllmMetrics,
 # ClientTiming, CallMetrics) this crate parses response bodies into and
 # re-exports.
-promptforge-api-types.workspace = true
+promptforge-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

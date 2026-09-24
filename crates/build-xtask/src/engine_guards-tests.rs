@@ -95,8 +95,6 @@ fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
         names,
         [
             "promptforge",
-            "promptforge-api-runtime",
-            "promptforge-api-types",
             "promptforge-internal/lua",
             "promptforge-internal/store",
         ],
@@ -105,27 +103,27 @@ fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
 }
 
 #[test]
-fn the_facade_forwarding_the_runtime_test_support_feature_passes_every_engine_guard() {
+fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_guard() {
     let root = tempfile::TempDir::new().expect("tempdir");
     test_support::write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge-internal/engine",
+        "promptforge-engine",
         "[dependencies]\ntokio = { version = \"1\", optional = true }\n\
          [features]\ntest-support = [\"dep:tokio\"]\n",
     );
     test_support::write_crate(
         root.path(),
-        "promptforge-api-types",
-        "promptforge-api-types",
+        "promptforge-internal/types",
+        "promptforge-types",
         "",
     );
     test_support::write_crate(
         root.path(),
         "promptforge",
         "promptforge",
-        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
-         [features]\ntest-support = [\"promptforge-api-runtime/test-support\"]\n",
+        "[dependencies]\npromptforge-engine = { path = \"../promptforge-internal/engine\" }\n\
+         [features]\ntest-support = [\"promptforge-engine/test-support\"]\n",
     );
     let violations = engine_guard_violations(root.path());
     assert!(
@@ -213,18 +211,21 @@ fn a_forbidden_dependency_in_a_container_crate_fails_the_guard() {
 #[test]
 fn a_missing_root_engine_crate_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    for name in ["promptforge", "promptforge-api-types"] {
-        write_crate(
-            root.path(),
-            name,
-            "[dependencies]\nserde = \"1\"\n",
-            "pub struct Live;\n",
-        );
-    }
+    write_crate(
+        root.path(),
+        "promptforge-internal/engine",
+        "[dependencies]\nserde = \"1\"\n",
+        "pub struct Live;\n",
+    );
+    let facade_manifest = root
+        .path()
+        .join("crates")
+        .join("promptforge")
+        .join("Cargo.toml");
     let violations = engine_guard_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("promptforge-api-runtime")
+        violations[0].starts_with(&facade_manifest.display().to_string())
             && violations[0].contains("unreadable manifest"),
         "{violations:?}"
     );

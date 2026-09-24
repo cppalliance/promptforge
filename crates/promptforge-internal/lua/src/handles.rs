@@ -1,7 +1,7 @@
 //! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua.
 
-use promptforge_api_types::capabilities::CapabilityId;
-use promptforge_api_types::tools::ToolDescriptor;
+use promptforge_types::capabilities::CapabilityId;
+use promptforge_types::tools::ToolDescriptor;
 
 use super::{Error, Json, Mutex, Result, ToolId, Value};
 
@@ -78,7 +78,7 @@ impl ToolBinding {
     /// from the descriptor, the slot's description is `description`, with
     /// no override.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
     /// tests, not host API.
     #[doc(hidden)]
     #[must_use]
@@ -156,7 +156,7 @@ pub struct ToolSet {
 impl ToolSet {
     /// Builds a set from owned parts, for executor test doubles.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-api-runtime`'s executor
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
     /// tests, not host API.
     #[doc(hidden)]
     #[must_use]

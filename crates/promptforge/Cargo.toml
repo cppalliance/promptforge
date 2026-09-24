@@ -12,19 +12,23 @@ documentation = "https://cppalliance.github.io/promptforge/"
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path.
 [dependencies]
-promptforge-api-runtime.workspace = true
-promptforge-api-types.workspace = true
+promptforge-engine.workspace = true
 promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
 promptforge-store.workspace = true
+promptforge-types.workspace = true
 shared-vfs.workspace = true
 workspace-hack.workspace = true
 
 [features]
 # The engine's test drivers, for companion crates' suites; only
 # dev-dependency tables may enable it.
-test-support = ["promptforge-api-runtime/test-support"]
+test-support = ["promptforge-engine/test-support"]
+
+[dev-dependencies]
+# The prepare suite's tool descriptors carry JSON parameter schemas.
+serde_json.workspace = true
 
 [[test]]
 name = "suite"

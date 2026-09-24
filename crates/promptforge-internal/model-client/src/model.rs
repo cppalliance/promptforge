@@ -19,9 +19,9 @@ pub use options::{
     TemperatureError,
 };
 // The model identity/catalog vocabulary is canonical in
-// `promptforge-api-types` and re-exported here so existing
+// `promptforge-types` and re-exported here so existing
 // `promptforge_model_client::model::` paths keep resolving.
-pub use promptforge_api_types::models::{
+pub use promptforge_types::models::{
     ModelCatalog, ModelCatalogError, ModelDescriptor, ModelId, ModelIdError, ThinkingMode,
 };
 

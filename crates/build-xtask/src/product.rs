@@ -16,17 +16,14 @@
 //!   on gateway crates only through the public pair.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
-//!   the family only through `promptforge`, `promptforge-api-runtime`, or
-//!   `promptforge-api-types`.
+//!   the family only through `promptforge`.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness/`
 //!   directories are private to their families; only the crates inside a
 //!   container and the container's named outside exception (`promptforge`
 //!   for `crates/promptforge-internal/`, `harness-api` for
 //!   `crates/harness/`; the gateway and workshop containers name none) may
-//!   depend on the crates it holds. `TRANSITIONAL_CONTAINER_EXCEPTIONS`
-//!   admits `promptforge-api-runtime` into `crates/promptforge-internal/`
-//!   as well, until the runtime moves inside it. Containers nest:
+//!   depend on the crates it holds. Containers nest:
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
 //!   with `gateway-stt` as its public member - the one crate inside the
 //!   family outside the subsystem may name.
@@ -125,17 +122,7 @@ const SHELL: &str = "workshop";
 /// The server crate the shell must never name directly.
 const SERVER: &str = "workshop-server";
 /// The promptforge-family crates outside crates may depend on directly.
-const PUBLIC_PROMPTFORGE: [&str; 3] = [
-    "promptforge",
-    "promptforge-api-runtime",
-    "promptforge-api-types",
-];
-/// `(container, crate)` pairs admitted into a container beside its named
-/// exception. Temporary: the runtime depends on the engine container's
-/// crates from outside it until it moves in, which leaves exactly one
-/// named outside crate per container again.
-const TRANSITIONAL_CONTAINER_EXCEPTIONS: [(&str, &str); 1] =
-    [("promptforge-internal", "promptforge-api-runtime")];
+const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
@@ -163,8 +150,6 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             .dir
             .starts_with(Path::new("crates").join(&container));
         let named = container_named_exception(&container) == Some(package.package.as_str());
-        let transitional = TRANSITIONAL_CONTAINER_EXCEPTIONS
-            .contains(&(container.as_str(), package.package.as_str()));
         // The build-* crates are meta tooling, not a product family: they
         // may depend into any container.
         let meta = family(&package.package) == Family::Build;
@@ -175,7 +160,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
                 Some(parent) => package.dir.starts_with(Path::new("crates").join(parent)),
                 None => package.dir.starts_with("crates"),
             };
-        if !inside && !named && !transitional && !meta && !public {
+        if !inside && !named && !meta && !public {
             return Some(match container_face(&container) {
                 Some(face) => format!(
                     "crates/{container} is private to its family; only {face} may depend into it"
@@ -219,7 +204,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             && !PUBLIC_PROMPTFORGE.contains(&dep.package.as_str())
         {
             Some(
-                "outside crates may depend on the promptforge family only through promptforge, promptforge-api-runtime, and promptforge-api-types"
+                "outside crates may depend on the promptforge family only through promptforge"
                     .to_owned(),
             )
         } else {

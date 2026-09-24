@@ -16,7 +16,7 @@
 //!
 //! The metrics vocabulary ([`Usage`], [`LlamaTimings`], [`VllmMetrics`],
 //! [`ClientTiming`], [`CallMetrics`]) is canonical in
-//! `promptforge-api-types` and re-exported here: the reassembly parses each
+//! `promptforge-types` and re-exported here: the reassembly parses each
 //! response body's call metadata into it, and [`client::Completion`] holds
 //! the result. The model identity/catalog vocabulary ([`model::ModelId`],
 //! [`model::ModelCatalog`], [`model::ModelDescriptor`],
@@ -25,7 +25,7 @@
 //!
 //! The HTTP client that sends a round to the gateway and fetches its model
 //! list is the harness's (`harness-models`), the engine's production host;
-//! it reaches this vocabulary through the `promptforge-api-runtime` crate.
+//! it reaches this vocabulary through the `promptforge` facade.
 //! This crate contains no HTTP, no prompt parser, no Lua runtime, and no
 //! executor.
 
@@ -38,6 +38,4 @@ pub(crate) use crate::error::Result;
 #[doc(hidden)]
 pub use crate::error::{Error, Timeout};
 
-pub use promptforge_api_types::metrics::{
-    CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
-};
+pub use promptforge_types::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};

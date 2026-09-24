@@ -7,7 +7,7 @@ use super::*;
 
 #[test]
 fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
-    use promptforge_api_types::metrics::{ClientTiming, Usage};
+    use promptforge_types::metrics::{ClientTiming, Usage};
 
     let lua = Lua::new();
     let result = ChatResult {

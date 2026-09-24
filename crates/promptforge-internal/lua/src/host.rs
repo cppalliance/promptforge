@@ -1,6 +1,6 @@
 //! Host callbacks installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
 
-use promptforge_api_types::event::lifecycle::Lifecycle;
+use promptforge_types::event::lifecycle::Lifecycle;
 
 use super::{
     Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,

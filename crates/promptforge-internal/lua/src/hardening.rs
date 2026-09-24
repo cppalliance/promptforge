@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use promptforge_api_types::cancel::CancelHandle;
+use promptforge_types::cancel::CancelHandle;
 
 use super::{
     Arc, AtomicU64, Error, HOOK_BUDGET, HOOK_INTERVAL, HookTriggers, Lua, MultiValue, Ordering,

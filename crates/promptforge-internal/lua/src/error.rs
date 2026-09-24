@@ -1,11 +1,11 @@
 //! The crate's internal error type.
 //!
-//! [`Error`] mirrors `promptforge-api-runtime`'s own internal error type: it
+//! [`Error`] mirrors `promptforge-engine`'s own internal error type: it
 //! is never part of the documented API. The executor's public boundary
-//! (`promptforge_api_runtime::RunError`) wraps and classifies core's own error type,
+//! (`promptforge_engine::RunError`) wraps and classifies core's own error type,
 //! which maps this one back variant-for-variant through
 //! `From<promptforge_lua::Error>`. The internal type is `#[doc(hidden)]` and
-//! re-exported only so `promptforge-api-runtime` can perform that mapping verbatim;
+//! re-exported only so `promptforge-engine` can perform that mapping verbatim;
 //! it is not a stable API and is not marked `#[non_exhaustive]`, so the
 //! mapping stays total.
 
@@ -52,7 +52,7 @@ impl std::error::Error for SharedSource {
 /// bridging, capability binding, and Lua compile/runtime failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
-/// companion `promptforge-api-runtime` crate can convert it back onto its own
+/// companion `promptforge-engine` crate can convert it back onto its own
 /// internal type variant-for-variant. It is not host API.
 #[derive(Debug, thiserror::Error)]
 #[doc(hidden)]
@@ -196,7 +196,7 @@ impl Error {
 
     /// Wraps a tool failure as [`Error::Tool`], preserving the tool's own
     /// error as the `#[source]` cause rather than discarding it.
-    pub(crate) fn tool(source: promptforge_api_types::tools::ToolError) -> Error {
+    pub(crate) fn tool(source: promptforge_types::tools::ToolError) -> Error {
         Error::Tool {
             message: source.to_string(),
             source: Box::new(source),
@@ -205,7 +205,7 @@ impl Error {
 }
 
 /// Maps the gateway-client error type onto this one. `ModelSetLock`
-/// flattens to [`Error::Lua`], matching the mapping `promptforge-api-runtime`
+/// flattens to [`Error::Lua`], matching the mapping `promptforge-engine`
 /// has always applied. Any remaining transport variant is unreachable on the
 /// model-resolution path and degrades to its display string rather than
 /// fabricating a classification.

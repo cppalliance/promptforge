@@ -18,13 +18,13 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_api_types::emitter::{DebugMode, Emitter, EventSink};
-use promptforge_api_types::untrusted::GuardNonce;
 use promptforge_lua::{
     LuaProgram, MessageContent, MessageRecord, MessageRole, SectionVm, ToolCallRecord, ToolSet,
     project_messages,
 };
 use promptforge_model_client::model::ModelSet;
+use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
+use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
 const SECTION: &str = "Bench";

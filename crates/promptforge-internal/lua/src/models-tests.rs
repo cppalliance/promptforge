@@ -172,7 +172,7 @@ fn the_handle_exposes_label_and_the_full_keyword_set() {
 fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     let emitter = crate::tests::recording::null_emitter();
     let mut vm = crate::SectionVm::new(
-        &promptforge_api_types::untrusted::GuardNonce::from_seed(1),
+        &promptforge_types::untrusted::GuardNonce::from_seed(1),
         &emitter,
         "S",
     )

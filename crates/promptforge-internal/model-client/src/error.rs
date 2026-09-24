@@ -1,11 +1,11 @@
 //! The crate's internal error type.
 //!
-//! [`Error`] mirrors the role `promptforge-api-runtime`'s internal error
+//! [`Error`] mirrors the role `promptforge-engine`'s internal error
 //! type plays there: it is never part of the documented API. Every public
 //! boundary returns its own typed error ([`crate::model::CompletionError`],
 //! [`crate::model::ModelIdError`]); those wrappers classify this internal
 //! type and preserve its source. The internal type is `#[doc(hidden)]` and
-//! re-exported only so `promptforge-api-runtime` can map every variant back
+//! re-exported only so `promptforge-engine` can map every variant back
 //! onto its own internal type verbatim, and so the transport that performs
 //! a round (the harness's gateway client, reaching it through that crate)
 //! can build the [`CompletionError`](crate::model::CompletionError) it
@@ -19,7 +19,7 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// catalog transport failures.
 ///
 /// `#[doc(hidden)]`: this type exists in the public item tree only so the
-/// companion `promptforge-api-runtime` crate can convert it back onto its own
+/// companion `promptforge-engine` crate can convert it back onto its own
 /// internal type variant-for-variant, and so a transport can construct the
 /// failure it reports. It is not host API.
 #[derive(Debug, thiserror::Error)]
@@ -128,7 +128,7 @@ pub enum Error {
     /// A lock on the shared model set was poisoned.
     ///
     /// `Display` is the bare message so the companion crate can reclassify the
-    /// failure (`promptforge-api-runtime` maps it onto its own Lua-layer variant)
+    /// failure (`promptforge-engine` maps it onto its own Lua-layer variant)
     /// without a wording change.
     #[error("{0}")]
     ModelSetLock(String),

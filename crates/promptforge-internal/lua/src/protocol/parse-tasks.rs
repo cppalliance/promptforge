@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use mlua::Value;
-use promptforge_api_types::ids::{TaskId, TaskOrigin};
+use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::Error;
 

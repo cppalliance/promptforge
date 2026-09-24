@@ -4792,18 +4792,19 @@ dependencies = [
 name = "promptforge"
 version = "0.3.0"
 dependencies = [
- "promptforge-api-runtime",
- "promptforge-api-types",
+ "promptforge-engine",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
  "promptforge-store",
+ "promptforge-types",
+ "serde_json",
  "shared-vfs",
  "workspace-hack",
 ]
 
 [[package]]
-name = "promptforge-api-runtime"
+name = "promptforge-engine"
 version = "0.3.0"
 dependencies = [
  "async-trait",
@@ -4811,11 +4812,11 @@ dependencies = [
  "bytes",
  "criterion",
  "mlua",
- "promptforge-api-types",
  "promptforge-lua",
  "promptforge-model-client",
  "promptforge-parser",
  "promptforge-store",
+ "promptforge-types",
  "promptforge-vfs",
  "reqwest",
  "serde",
@@ -4827,27 +4828,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-api-types"
-version = "0.3.0"
-dependencies = [
- "rand 0.9.5",
- "serde",
- "serde_json",
- "shared-vfs",
- "thiserror 2.0.19",
- "time",
- "workspace-hack",
-]
-
-[[package]]
 name = "promptforge-lua"
 version = "0.3.0"
 dependencies = [
  "criterion",
  "mlua",
- "promptforge-api-types",
  "promptforge-model-client",
  "promptforge-store",
+ "promptforge-types",
  "promptforge-vfs",
  "serde",
  "serde_json",
@@ -4860,7 +4848,7 @@ dependencies = [
 name = "promptforge-model-client"
 version = "0.3.0"
 dependencies = [
- "promptforge-api-types",
+ "promptforge-types",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -4872,8 +4860,8 @@ name = "promptforge-parser"
 version = "0.3.0"
 dependencies = [
  "mlua",
- "promptforge-api-types",
  "promptforge-lua",
+ "promptforge-types",
  "pulldown-cmark",
  "serde",
  "serde_yaml_ng",
@@ -4888,6 +4876,19 @@ dependencies = [
  "promptforge-vfs",
  "shared-vfs",
  "thiserror 2.0.19",
+ "workspace-hack",
+]
+
+[[package]]
+name = "promptforge-types"
+version = "0.3.0"
+dependencies = [
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "shared-vfs",
+ "thiserror 2.0.19",
+ "time",
  "workspace-hack",
 ]
 
