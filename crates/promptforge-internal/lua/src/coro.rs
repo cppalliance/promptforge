@@ -28,7 +28,7 @@ const SHIM_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_coro.
 const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
 
 /// The `tasks` namespace chunk's name, `@`-prefixed as the prelude's is.
-const TASKS_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_tasks.lua";
+const TASKS_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_tasks.lua";
 
 /// The `tasks` namespace source: spawn, the waits, the checks, note, and
 /// cancel, split from the prelude so neither chunk outgrows the file
@@ -36,7 +36,7 @@ const TASKS_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_tasks.lua";
 const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
 
 /// The `fanout` chunk's name, `@`-prefixed as the prelude's is.
-const FANOUT_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_fanout.lua";
+const FANOUT_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_fanout.lua";
 
 /// The `fanout` shim source: Lua over the task protocol (`spawn`,
 /// `when_any`, `cancel`), split from the prelude for the same file-ceiling
@@ -465,3 +465,7 @@ pub fn install_store_shims(lua: &Lua) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "coro-tests.rs"]
+mod tests;

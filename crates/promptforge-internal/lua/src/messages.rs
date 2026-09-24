@@ -25,7 +25,7 @@ use super::{Error, Lua, LuaProgram, Result, SharedSource};
 /// The builders chunk's name: `@`-prefixed so PUC renders it verbatim as a
 /// file path, making unexpected shim errors clickable `file:line:`
 /// references with no `[string "..."]` wrapper.
-const MESSAGES_CHUNK_NAME: &str = "@crates/promptforge/lua/src/__impl_messages.lua";
+const MESSAGES_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_messages.lua";
 
 /// The builders source, embedded verbatim so chunk line 1 is file line 1.
 const MESSAGES_SOURCE: &str = include_str!("__impl_messages.lua");

@@ -221,3 +221,12 @@ fn the_builders_run_under_the_hardened_section_sandbox() {
     );
     vm.teardown(&observer, "Test");
 }
+
+#[test]
+fn the_messages_chunk_name_resolves_to_the_builders_file() {
+    crate::tests::assert_chunk_name_resolves(
+        "MESSAGES_CHUNK_NAME",
+        super::MESSAGES_CHUNK_NAME,
+        super::MESSAGES_SOURCE,
+    );
+}

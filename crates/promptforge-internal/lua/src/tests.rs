@@ -3123,3 +3123,48 @@ fn argv_read_back_rejects_a_non_data_assignment() {
     );
     vm.teardown(&null_emitter(), "Argv");
 }
+
+/// The 1-based number of the first line where two texts differ. When one is
+/// a prefix of the other, that is the first line past the shorter text.
+fn first_differing_line(left: &str, right: &str) -> usize {
+    left.lines()
+        .zip(right.lines())
+        .position(|(a, b)| a != b)
+        .map_or_else(
+            || left.lines().count().min(right.lines().count()) + 1,
+            |index| index + 1,
+        )
+}
+
+/// Asserts that a shim chunk name is a live repository path: that stripping
+/// its `@` prefix and resolving the rest from the repository root reaches
+/// the very file whose text the constant's sibling `include_str!` embedded.
+///
+/// A chunk name only earns its verbatim `file:line:` rendering while it
+/// points at the real file, and nothing else in the crate checks it.
+pub(crate) fn assert_chunk_name_resolves(constant: &str, chunk_name: &str, embedded: &str) {
+    let Some(relative) = chunk_name.strip_prefix('@') else {
+        panic!(
+            "{constant}: required a chunk name carrying the `@` prefix PUC renders verbatim, \
+             actual {chunk_name:?}"
+        );
+    };
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(relative);
+    let Ok(on_disk) = std::fs::read_to_string(&path) else {
+        panic!(
+            "{constant}: chunk name {chunk_name:?} does not resolve; required a readable file \
+             under the repository root, actual nothing readable at {}",
+            path.display()
+        );
+    };
+    assert!(
+        on_disk == embedded,
+        "{constant}: chunk name {chunk_name:?} resolves to a different file than the one \
+         embedded beside the constant; required identical text, actual a first difference at \
+         line {} of {}",
+        first_differing_line(&on_disk, embedded),
+        path.display()
+    );
+}
