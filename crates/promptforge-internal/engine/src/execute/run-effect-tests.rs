@@ -8,7 +8,7 @@ use promptforge_model_client::client::StreamAccumulator;
 use serde_json::json;
 
 use super::*;
-use crate::model::ClientError;
+use promptforge_model_client::Error as ClientError;
 
 /// Serializes the record and reads it back.
 fn round_trip(record: &AnswerRecord) -> AnswerRecord {

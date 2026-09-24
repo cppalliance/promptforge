@@ -35,10 +35,8 @@ use crate::{Error, Result};
 /// Blank lines, `:` comments, and non-`data:` fields (`event:`, `id:`,
 /// `retry:`) are skipped; the caller sees only payload text.
 ///
-/// `#[doc(hidden)]`: a cross-crate seam for the transports that read a
-/// completion stream (the harness's model client and the engine's test
-/// client), not host API.
-#[doc(hidden)]
+/// Engine-internal: a transport reaches it only through
+/// [`read_completion_stream`](super::read_completion_stream).
 #[derive(Debug, Default)]
 pub struct SseScanner {
     buffer: Vec<u8>,
@@ -76,10 +74,6 @@ impl SseScanner {
 }
 
 /// The outcome of applying one `data:` payload.
-///
-/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
-/// host API.
-#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Applied {
     /// The payload advanced the accumulation; `delta` is true when it
@@ -112,9 +106,8 @@ struct ToolCallParts {
 /// chunk `stream_options.include_usage` appends, and are handed to the
 /// lenient metadata parser unjudged.
 ///
-/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
-/// host API.
-#[doc(hidden)]
+/// Engine-internal: a transport reaches it only through
+/// [`read_completion_stream`](super::read_completion_stream).
 #[derive(Debug, Default)]
 pub struct StreamAccumulator {
     /// Answer text; `None` until the first `content` fragment arrives.
@@ -445,9 +438,9 @@ fn append_string_fragment(
 /// smuggle terminal control sequences into a diagnostic (F5). An empty body is
 /// reported as a fixed marker.
 ///
-/// `#[doc(hidden)]`: shared with the transports so a backend error body is
-/// bounded and escaped by one rule everywhere; not host API.
-#[doc(hidden)]
+/// A transport runs a non-success status's error body through here before
+/// storing it in [`ClientError::Backend`](crate::Error::Backend), so every
+/// transport bounds and escapes a backend body by the same rule.
 #[must_use]
 pub fn escape_controls(body: &str, max: usize) -> String {
     if body.is_empty() {

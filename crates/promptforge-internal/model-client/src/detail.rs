@@ -4,8 +4,8 @@
 //! is reachable from a host. Each function stands in for what would
 //! otherwise be an inherent method or a public field on a host-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
-//! a message holds, taking the raw JSON bodies a completion holds, and
-//! wrapping a transport failure.
+//! a message holds, reading a tool schema's wire parts, taking the raw
+//! JSON bodies a completion holds, and wrapping a transport failure.
 
 use promptforge_types::metrics::VllmMetrics;
 use serde_json::Value;
@@ -106,6 +106,19 @@ pub fn tool_schema_new(
         description: description.into(),
         parameters,
     })
+}
+
+/// Returns a tool schema's wire name, which keys the executor's dispatch
+/// map.
+#[must_use]
+pub fn tool_schema_name(schema: &ToolSchema) -> &str {
+    &schema.name
+}
+
+/// Returns a tool schema's model-facing description.
+#[must_use]
+pub fn tool_schema_description(schema: &ToolSchema) -> &str {
+    &schema.description
 }
 
 /// Returns a tool call's parsed arguments as the raw wire JSON the

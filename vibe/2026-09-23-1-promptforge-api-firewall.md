@@ -710,7 +710,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-9>
 
-### Step 9: Clear every doc(hidden) and turn on the ban
+### Step 9: Clear every doc(hidden) and turn on the ban [completed]
 
 - Component: surface-closure
 - Piece: hidden items, after Step 8.

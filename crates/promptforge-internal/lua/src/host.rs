@@ -163,7 +163,7 @@ fn read_store_bounded(
                 store.read(path)
             }
         }
-        None => Err(promptforge_store::StoreError::invalid_range(
+        None => Err(promptforge_store::detail::store_error_invalid_range(
             path,
             "start is required when end is given",
         )),

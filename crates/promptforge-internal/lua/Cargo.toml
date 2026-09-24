@@ -23,17 +23,21 @@ thiserror.workspace = true
 workspace-hack.workspace = true
 
 [features]
-# Test-only installs for companion crates' suites (`tools.call_as_model`);
-# never enabled by a production dependent.
+# Test-only installs and helpers for companion crates' suites and this
+# crate's bench (`tools.call_as_model`, `SectionVm::run_chunk`,
+# `ToolSet::for_test`); never enabled by a production dependent.
 test-support = []
 
 [dev-dependencies]
 criterion.workspace = true
 promptforge-vfs.workspace = true
 
+# The bench runs chunks through `SectionVm::run_chunk`, a test-support
+# helper.
 [[bench]]
 name = "surface"
 harness = false
+required-features = ["test-support"]
 
 [lints]
 workspace = true

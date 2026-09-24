@@ -4,9 +4,9 @@
 //! is never part of the documented API. The executor's public boundary
 //! (`promptforge_engine::RunError`) wraps and classifies core's own error type,
 //! which maps this one back variant-for-variant through
-//! `From<promptforge_lua::Error>`. The internal type is `#[doc(hidden)]` and
-//! re-exported only so `promptforge-engine` can perform that mapping verbatim;
-//! it is not a stable API and is not marked `#[non_exhaustive]`, so the
+//! `From<promptforge_lua::Error>`. The internal type is public only so
+//! `promptforge-engine` can perform that mapping verbatim; the facade does
+//! not re-export it, and it is not marked `#[non_exhaustive]`, so the
 //! mapping stays total.
 
 use promptforge_model_client::Error as GatewayClientError;
@@ -24,7 +24,6 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// The compiled-program statics (the coroutine shim and the messages
 /// library) are the callers, through [`crate::detail::shared_source_new`].
 #[derive(Debug, Clone)]
-#[doc(hidden)]
 pub struct SharedSource(pub(crate) std::sync::Arc<dyn std::error::Error + Send + Sync>);
 
 impl std::fmt::Display for SharedSource {
@@ -42,11 +41,9 @@ impl std::error::Error for SharedSource {
 /// The crate's internal error type, spanning sandbox construction, host
 /// bridging, capability binding, and Lua compile/runtime failures.
 ///
-/// `#[doc(hidden)]`: this type exists in the public item tree only so the
-/// companion `promptforge-engine` crate can convert it back onto its own
-/// internal type variant-for-variant. It is not host API.
+/// Public only so `promptforge-engine` can convert it back onto its own
+/// internal type variant-for-variant; the facade does not re-export it.
 #[derive(Debug, thiserror::Error)]
-#[doc(hidden)]
 pub enum Error {
     /// A section's Lua phase failed a host contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
@@ -64,7 +61,7 @@ pub enum Error {
     /// (F4) alongside the mapped prompt-location message.
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
-    /// from a concrete `mlua::Error` (see [`Error::lua`] and
+    /// from a concrete `mlua::Error` (see `Error::lua` and
     /// [`crate::LuaProgram::map_runtime_error`]), so the failure chain
     /// survives through the public wrappers' `source()` instead of being
     /// flattened to a string.

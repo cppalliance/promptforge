@@ -23,9 +23,9 @@
 //! transition. A failed store op raises a Lua error, which surfaces from
 //! `SectionVm::run_chunk` as [`Error::Lua`].
 //!
-//! Most of this crate is a `#[doc(hidden)]` cross-crate seam for
-//! `promptforge-engine`'s executor, which drives the VM and the coroutine
-//! protocol; [`LuaProgram`] is the documented exception.
+//! Most of this crate's public items exist for `promptforge-engine`'s
+//! executor, which drives the VM and the coroutine protocol; the facade
+//! re-exports only the store protocol ([`StoreOp`], [`StoreOutcome`]).
 
 // These imports are re-exported `pub(crate)` so the child modules can pull
 // the full shared surface with a single `use super::*;`.
@@ -55,7 +55,6 @@ pub(crate) use crate::messages::install_messages;
 pub(crate) use crate::models::install_models;
 pub(crate) use crate::models::{LuaModelHandle, ModelsInferHook};
 
-#[doc(hidden)]
 pub use crate::error::{Error, SharedSource};
 
 /// How many instructions between hook firings.
@@ -91,7 +90,6 @@ pub mod detail;
 mod error;
 #[path = "error-value.rs"]
 mod error_value;
-#[doc(hidden)]
 pub use error_value::{ErrorKind, ErrorValue, Raised, error_table};
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
@@ -103,7 +101,6 @@ mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod host;
-#[doc(hidden)]
 pub use host::install_ui;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
 mod tools;
@@ -120,44 +117,28 @@ mod models;
 mod protocol;
 
 // The executor-facing surface: every item `promptforge-engine` names crosses
-// here. These are `#[doc(hidden)]` cross-crate seams, not host API;
-// `LuaProgram` is the documented exception.
-#[doc(hidden)]
+// here. The facade re-exports only `StoreOp` and `StoreOutcome`.
 pub use crate::argv::Argv;
-#[doc(hidden)]
 pub use collection::render_item;
-#[doc(hidden)]
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[cfg(feature = "test-support")]
-#[doc(hidden)]
 pub use coro::{install_model_chat_shim, install_model_tool_call_shim};
-#[doc(hidden)]
 pub use coro::{install_section_loop_shim, install_section_user_input_shim, install_store_shims};
-#[doc(hidden)]
 pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
-#[doc(hidden)]
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
-#[doc(hidden)]
 pub use host::run_store_op;
-#[doc(hidden)]
 pub use models::ModelRuntime;
-#[doc(hidden)]
 pub use projection::project_messages;
-#[doc(hidden)]
 pub use prose::ProseState;
-#[doc(hidden)]
 pub use protocol::{
     Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
     StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, UserInputOutcome,
     YieldParse,
 };
-#[doc(hidden)]
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
-#[doc(hidden)]
 pub use sys::enrich_sys_model;
-#[doc(hidden)]
 pub use vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
 
 pub use program::LuaProgram;

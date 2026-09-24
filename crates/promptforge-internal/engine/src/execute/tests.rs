@@ -31,6 +31,7 @@ use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_lua::ToolOutputKind;
+use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
 use promptforge_model_client::model::ModelCatalog;
 use promptforge_store::StoreExt;
 
@@ -92,7 +93,8 @@ fn tool_description_override_appears_in_model_schema() {
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(
-        schemas[0].description, "echo capability for live matching",
+        tool_schema_description(&schemas[0]),
+        "echo capability for live matching",
         "no override anywhere must advertise the bound tool's description"
     );
 
@@ -110,7 +112,10 @@ fn tool_description_override_appears_in_model_schema() {
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
-    assert_eq!(schemas[0].description, "Author override for the model");
+    assert_eq!(
+        tool_schema_description(&schemas[0]),
+        "Author override for the model"
+    );
 
     vm.teardown(&null_emitter(), "Override");
 }
@@ -160,7 +165,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
-        schemas[0].description, "bind override",
+        tool_schema_description(&schemas[0]),
+        "bind override",
         "the bind/always override must beat the catalog text"
     );
 
@@ -178,7 +184,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
-        schemas[0].description, "add override",
+        tool_schema_description(&schemas[0]),
+        "add override",
         "the add override must beat the bind/always override"
     );
 

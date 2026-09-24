@@ -155,7 +155,7 @@ impl<E: ErrorValue> Answer<E> {
     /// (`kind`, `message` as the error's display string, and the kind's
     /// fields, with `tostring` returning the message) - the shim raises it
     /// with `error(result, 0)`, so a printing author sees exactly the host's
-    /// message and a branching one reads `kind` - and the typed [`Error`]
+    /// message and a branching one reads `kind` - and the typed error
     /// is returned alongside for the driver to retain. A successful
     /// `when_any` whose member failed retains the member's error the same
     /// way, since a shim may re-raise it at once.

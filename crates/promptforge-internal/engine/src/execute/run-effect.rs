@@ -22,6 +22,7 @@
 
 use std::sync::Arc;
 
+use promptforge_model_client::detail::tool_schema_name;
 use promptforge_types::event::Event;
 use promptforge_types::ids::TaskId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
@@ -156,7 +157,10 @@ impl Effect {
                     model: binding.id().name().to_owned(),
                     alias: binding.alias().to_owned(),
                     messages: messages.iter().map(wire_value).collect(),
-                    tools: tools.iter().map(|schema| schema.name.clone()).collect(),
+                    tools: tools
+                        .iter()
+                        .map(|schema| tool_schema_name(schema).to_owned())
+                        .collect(),
                     temperature: invocation.temperature.map(Temperature::get),
                     max_tokens: invocation.max_tokens.map(std::num::NonZeroU32::get),
                     thinking: invocation.thinking,

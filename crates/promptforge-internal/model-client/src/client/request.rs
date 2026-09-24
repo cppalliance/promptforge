@@ -18,10 +18,12 @@ use crate::model::CompletionOptions;
 /// `options.model` names the model on the wire; optional `temperature`,
 /// `max_tokens`, and `thinking` extend the request when present.
 ///
-/// `#[doc(hidden)]`: a cross-crate seam for the transports that send a
-/// round (the harness's model client and the engine's test client), not
-/// host API.
-#[doc(hidden)]
+/// A transport performing a `Chat` effect passes the effect's messages,
+/// tools, and options here, sends the result as the JSON body of its
+/// chat-completions request, and later hands the same value to
+/// [`read_completion_stream`](super::read_completion_stream). Building the
+/// body anywhere else would let two transports send different requests
+/// for one effect.
 #[must_use]
 pub fn build_request_body(
     messages: &[Message],

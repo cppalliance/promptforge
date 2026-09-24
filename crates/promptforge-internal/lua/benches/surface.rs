@@ -1,7 +1,7 @@
 //! Benchmarks for the active unified-surface leaf paths in the Lua boundary:
 //! `messages.new()` builder construction and per-dispatch projection.
 //!
-//! Run with `cargo bench -p promptforge-lua`.
+//! Run with `cargo bench -p promptforge-lua --features test-support`.
 
 // The criterion_group! macro expansion generates an undocumented public
 // entry point; bench targets have no docs contract.

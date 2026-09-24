@@ -569,7 +569,7 @@ impl From<crate::model::CompletionError> for Error {
 /// total.
 impl From<crate::parser::ParseError> for Error {
     fn from(error: crate::parser::ParseError) -> Self {
-        match error.into_inner() {
+        match promptforge_parser::detail::parse_error_into_inner(error) {
             ParserError::ParseFrontmatter {
                 message,
                 source,
@@ -871,7 +871,8 @@ mod tests {
         // error type's `Config` variant with its concrete cause attached;
         // the cause survives both the public CompletionError::source and
         // the mapping onto this crate's error type, classified as Config.
-        use crate::model::{ClientError, CompletionError, CompletionErrorKind};
+        use crate::model::{CompletionError, CompletionErrorKind};
+        use promptforge_model_client::Error as ClientError;
 
         let cause = std::io::Error::other("gateway URL is not a valid URL");
         let completion = CompletionError::from(ClientError::Config {

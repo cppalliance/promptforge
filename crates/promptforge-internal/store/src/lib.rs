@@ -18,6 +18,7 @@
 //!
 //! This crate defines the facade and its error vocabulary only.
 
+pub mod detail;
 mod error;
 mod path;
 

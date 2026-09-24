@@ -12,11 +12,9 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// The parser's internal error type, classified into [`ParseError`] at
 /// the public boundary.
 ///
-/// `#[doc(hidden)]`: this type exists in the public item tree only so the
-/// companion `promptforge-engine` crate can convert it back onto its own
-/// internal type variant-for-variant. It is not host API.
+/// Public only so `promptforge-engine` can convert it back onto its own
+/// internal type variant-for-variant; the facade does not re-export it.
 #[derive(Debug, thiserror::Error)]
-#[doc(hidden)]
 pub enum Error {
     /// The prompt frontmatter was not valid YAML, preserving the decode
     /// failure as the `#[source]` cause so [`ParseError`] can expose the
@@ -271,14 +269,10 @@ impl ParseError {
         self.column
     }
 
-    /// Unwraps the internal error.
-    ///
-    /// `#[doc(hidden)]`: cross-crate seam for `promptforge-engine`'s
-    /// own internal error type, mirroring the `promptforge-lua` precedent.
-    /// Not host API.
-    #[doc(hidden)]
+    /// Unwraps the internal error; the engine reaches it through
+    /// [`crate::detail::parse_error_into_inner`].
     #[must_use]
-    pub fn into_inner(self) -> Error {
+    pub(crate) fn into_inner(self) -> Error {
         *self.inner
     }
 }

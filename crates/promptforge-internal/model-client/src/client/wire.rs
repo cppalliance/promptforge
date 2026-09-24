@@ -108,32 +108,23 @@ impl Message {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ToolSchema {
-    /// The tool's wire name.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's dispatch map,
-    /// not host API.
-    #[doc(hidden)]
-    pub name: String,
-    /// A one-sentence description shown to the model.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for the executor's scope tests,
-    /// not host API.
-    #[doc(hidden)]
-    pub description: String,
+    /// The tool's wire name; the engine reads it through
+    /// [`crate::detail::tool_schema_name`].
+    pub(crate) name: String,
+    /// A one-sentence description shown to the model; the engine reads it
+    /// through [`crate::detail::tool_schema_description`].
+    pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
     pub(crate) parameters: Value,
 }
 
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
-/// `#[doc(hidden)]`: `ToolSchema` is built only inside the workspace (from the
-/// executor's `Tool` contract, through
-/// [`crate::detail::tool_schema_new`]), so the raw-`Value` validation and its
-/// error stay out of the documented API (client F8, lib F3). The type is
-/// visible only so the companion `promptforge-engine` crate can box it as an
-/// error source.
+/// `ToolSchema` is built only inside the engine (from the executor's `Tool`
+/// contract, through [`crate::detail::tool_schema_new`]), so the raw-`Value`
+/// validation and its error stay off the facade (client F8, lib F3). The
+/// type is public so `promptforge-engine` can box it as an error source.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[doc(hidden)]
 #[non_exhaustive]
 pub enum ToolSchemaError {
     /// The wire name was empty or held a character outside `[A-Za-z0-9_.-]`.

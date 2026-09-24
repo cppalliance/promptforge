@@ -37,7 +37,6 @@ const METATABLE_REGISTRY: &str = "promptforge.error_value.metatable";
 /// the protocol and a new failure classifies into one of these rather than
 /// inventing a tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[doc(hidden)]
 pub enum ErrorKind {
     /// The model tool loop ran its iteration cap without a final reply.
     ToolLoopExhausted,
@@ -122,7 +121,6 @@ impl std::fmt::Display for ErrorKind {
 /// The envelope renderer requires this of the driver's error type, so a
 /// failure answered to Lua always has a kind; an internal type that gains a
 /// variant classifies it here.
-#[doc(hidden)]
 pub trait ErrorValue: std::fmt::Display {
     /// The kind the table's `kind` field names.
     fn kind(&self) -> ErrorKind;
@@ -173,7 +171,6 @@ impl ErrorValue for Error {
 /// the case for a Lua-side raise. The executor maps it back onto its own
 /// internal type by kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[doc(hidden)]
 pub struct Raised {
     /// The kind the table named.
     pub kind: ErrorKind,
@@ -239,7 +236,6 @@ fn finish_table(lua: &Lua, kind: ErrorKind, fields: Table) -> mlua::Result<Table
 ///
 /// # Errors
 /// Returns an `mlua` error if the table cannot be created on `lua`.
-#[doc(hidden)]
 pub fn error_table(lua: &Lua, error: &impl ErrorValue) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     table.raw_set("message", error.to_string())?;

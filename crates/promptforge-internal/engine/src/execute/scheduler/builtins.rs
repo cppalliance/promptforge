@@ -43,6 +43,7 @@ use crate::execute::section_context::TaskSeed;
 use crate::lua::{SectionVm, TaskAllowlist, ToolBinding, ToolSet};
 use crate::model::ToolSchema;
 use crate::{Error, Result};
+use promptforge_model_client::detail::tool_schema_name;
 use promptforge_types::event::lifecycle;
 
 use super::dispatch::unbound_tool_call;
@@ -100,7 +101,10 @@ pub(super) fn scope_halves(
     let mut bound = Vec::with_capacity(aliases.len());
     let mut locals = Vec::new();
     for alias in aliases {
-        if let Some(schema) = local_schemas.iter().find(|schema| &schema.name == alias) {
+        if let Some(schema) = local_schemas
+            .iter()
+            .find(|schema| tool_schema_name(schema) == alias)
+        {
             locals.push(schema.clone());
             continue;
         }

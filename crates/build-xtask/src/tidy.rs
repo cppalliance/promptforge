@@ -1,8 +1,9 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
 //! the harness family, the sans-I/O engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
-//! `engine_guards`), and the `promptforge` facade's source shape (run
-//! from `facade_shape`).
+//! `engine_guards`), the `promptforge` facade's source shape (run
+//! from `facade_shape`), and the `doc(hidden)` ban over the engine
+//! crates (run from `doc_hidden`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
@@ -54,6 +55,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     ));
     violations.extend(crate::engine_guards::engine_guard_violations(root));
     violations.extend(crate::facade_shape::facade_shape_violations(root));
+    violations.extend(crate::doc_hidden::doc_hidden_violations(root));
     violations
 }
 

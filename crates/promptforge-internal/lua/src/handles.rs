@@ -78,9 +78,9 @@ impl ToolBinding {
     /// from the descriptor, the slot's description is `description`, with
     /// no override.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
-    /// tests, not host API.
-    #[doc(hidden)]
+    /// A test helper for `promptforge-engine`'s executor tests, so it exists
+    /// only under `test-support`.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn for_test(alias: &str, description: &str, descriptor: &ToolDescriptor) -> Self {
         Self {
@@ -156,9 +156,9 @@ pub struct ToolSet {
 impl ToolSet {
     /// Builds a set from owned parts, for executor test doubles.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
-    /// tests, not host API.
-    #[doc(hidden)]
+    /// A test helper for `promptforge-engine`'s executor tests, so it exists
+    /// only under `test-support`.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
         Self { bindings, always }

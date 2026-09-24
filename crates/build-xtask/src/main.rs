@@ -11,6 +11,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then edit.
 
 mod api;
+mod doc_hidden;
 mod engine_deps;
 mod engine_guards;
 mod facade_shape;

@@ -6,8 +6,8 @@
 //! of the matching [`Event`] variant, declared once from one list so a
 //! boundary cannot gain a constant without gaining a variant.
 //!
-//! `#[doc(hidden)]`: a cross-crate emit-site seam for the engine crates,
-//! not host API. A host reads the events themselves.
+//! An emit-site vocabulary for the engine crates; the facade does not
+//! re-export it. A host reads the events themselves.
 
 use super::Event;
 use crate::ids::Provenance;

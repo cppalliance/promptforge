@@ -36,7 +36,6 @@ pub mod model;
 mod normalize;
 
 pub(crate) use crate::error::Result;
-#[doc(hidden)]
 pub use crate::error::{Error, Timeout};
 
 pub use promptforge_types::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};

@@ -63,8 +63,11 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         current_tool_bindings(tools.set(), &runtime).expect("the always scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
-    assert_eq!(schemas[0].name, "local_alias");
-    assert_eq!(schemas[0].description, "Concrete description.");
+    assert_eq!(tool_schema_name(&schemas[0]), "local_alias");
+    assert_eq!(
+        tool_schema_description(&schemas[0]),
+        "Concrete description."
+    );
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, host) = loop_context(&prompt, tools);
@@ -136,7 +139,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
-    assert_eq!(schemas[0].name, "section_tool");
+    assert_eq!(tool_schema_name(&schemas[0]), "section_tool");
     vm.teardown(&null_emitter(), "Only");
 
     // The same `tools.add` inside a section scopes the alias for the

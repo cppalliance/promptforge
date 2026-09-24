@@ -20,6 +20,7 @@ pub use promptforge_lua::LuaProgram;
 
 mod build;
 mod contract;
+pub mod detail;
 mod error;
 mod fence;
 mod list;

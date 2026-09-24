@@ -54,7 +54,6 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{AbandonReason, Provenance, TaskId, TaskOrigin};
 use crate::metrics::{CallMetrics, ToolCallEvent};
 
-#[doc(hidden)]
 #[path = "event-lifecycle.rs"]
 pub mod lifecycle;
 

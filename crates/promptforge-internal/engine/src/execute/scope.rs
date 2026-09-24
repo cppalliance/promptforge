@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::lua::ToolBinding;
 use crate::model::ToolSchema;
 use crate::{Error, Result};
-use promptforge_model_client::detail::tool_schema_new;
+use promptforge_model_client::detail::{tool_schema_name, tool_schema_new};
 use promptforge_types::event::lifecycle;
 
 use promptforge_types::emitter::Emitter;
@@ -91,7 +91,7 @@ pub(crate) fn prepare_scoped_tools(
     // the `tool_call` arm answers their calls on the section VM. The alias
     // was validated at `tools.add_local` registration.
     for schema in local_schemas {
-        dispatch.insert(schema.name.clone(), DispatchTarget::Local);
+        dispatch.insert(tool_schema_name(schema).to_owned(), DispatchTarget::Local);
         schemas.push(schema.clone());
     }
     Ok((schemas, dispatch))

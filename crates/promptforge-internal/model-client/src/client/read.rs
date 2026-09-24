@@ -19,21 +19,32 @@ use super::{Applied, Completion, SseScanner, StreamAccumulator, StreamDelta};
 use crate::Error;
 use crate::model::CompletionError;
 
-/// A response body read one chunk at a time: the transport's side of the
-/// reassembly.
+/// A response body read one chunk at a time: the part of a model round a
+/// transport supplies.
 ///
-/// `#[doc(hidden)]`: a cross-crate seam for the stream transports (the
-/// harness's model client and the engine's test client), not host API.
-#[doc(hidden)]
+/// A transport performs a `Chat` effect in four moves. It builds the body
+/// with [`build_request_body`](super::build_request_body) and sends it,
+/// noting its clock just before. It wraps the response body in a
+/// `ChunkSource`. On a non-success status it reads the error body whole
+/// with [`read_body_capped`], bounds and escapes it with
+/// [`escape_controls`](super::escape_controls), and fails the round with
+/// [`ClientError::Backend`](crate::Error::Backend). Otherwise it hands the
+/// source to [`read_completion_stream`], whose [`Completion`] answers the
+/// effect. The codec never opens a connection or reads a clock: the
+/// source is the only I/O it touches.
 pub trait ChunkSource {
     /// One chunk of body bytes, in whatever buffer the transport yields.
     type Chunk: AsRef<[u8]>;
 
     /// Returns the next chunk, or `None` once the body is exhausted.
     ///
-    /// The transport maps its own read failure onto the
-    /// [`CompletionError`] it reports, wrapping a timeout in
-    /// [`Timeout`](crate::Timeout) so `is_timeout` survives the erasure.
+    /// A read failure is the transport's own error, reported as the
+    /// [`CompletionError`] the round fails with: box it into
+    /// [`ClientError::Http`](crate::Error::Http) and convert with
+    /// [`CompletionError::from`]. Wrap a timeout in
+    /// [`ClientTimeout`](crate::Timeout) before boxing it, so
+    /// [`CompletionError::is_timeout`] still holds after the concrete type
+    /// is erased.
     fn next_chunk(
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Chunk>, CompletionError>> + Send;
@@ -42,18 +53,17 @@ pub trait ChunkSource {
 /// Reads a whole response body from `source`, refusing it once it would
 /// exceed `cap` bytes.
 ///
-/// `content_length` is the advertised length when the transport knows it;
-/// it short-circuits an oversize body, and the streamed chunks are bounded
-/// so a gateway that omits or lies about the length still cannot force an
-/// unbounded allocation before decoding.
-///
-/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
-/// host API.
+/// This is for a body the transport decodes whole rather than as a
+/// stream: the error body of a non-success status, or a JSON document such
+/// as the gateway's model list. `content_length` is the advertised length
+/// when the transport knows it; it short-circuits an oversize body, and
+/// the chunks are counted as they arrive, so a gateway that omits or lies
+/// about the length still cannot force an unbounded allocation before
+/// decoding.
 ///
 /// # Errors
 /// Returns a `MalformedResponse`-kind [`CompletionError`] when the body
 /// would exceed `cap`, and the source's own error when a read fails.
-#[doc(hidden)]
 pub async fn read_body_capped<S: ChunkSource>(
     source: &mut S,
     content_length: Option<u64>,
@@ -83,14 +93,18 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// bounded by `max_bytes`, forwarding each live delta to `on_delta`, and
 /// finishes the accumulation into the [`Completion`].
 ///
+/// `request_body` is the body the transport sent, as
+/// [`build_request_body`](super::build_request_body) returned it; the
+/// completion carries it back, so a run's debug capture records exactly
+/// what was sent. `on_delta` receives each
+/// [`StreamDelta`] as it is decoded, for a host that shows the reply as it
+/// arrives; the completion holds the whole turn either way.
+///
 /// `started` is the transport's clock reading from before it sent the
 /// request and `now` is that clock; the TTFT, mean inter-token latency,
 /// and end-to-end figures on the completion's [`ClientTiming`] are
 /// measured against them. Reading the clock is the transport's business:
-/// this crate never does.
-///
-/// `#[doc(hidden)]`: a cross-crate seam for the stream transports, not
-/// host API.
+/// the codec never does.
 ///
 /// # Errors
 /// Returns a `MalformedResponse`-kind [`CompletionError`] when the stream
@@ -98,7 +112,6 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// error when a read fails, and the reassembly's errors otherwise (a
 /// malformed chunk, a mid-stream error envelope, a truncated tool-call
 /// batch, an empty turn).
-#[doc(hidden)]
 pub async fn read_completion_stream<S: ChunkSource>(
     source: &mut S,
     request_body: Value,

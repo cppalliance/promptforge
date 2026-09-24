@@ -1,29 +1,46 @@
-//! The crate's internal error type.
+//! The crate's error type and the transport's timeout marker.
 //!
-//! [`Error`] mirrors the role `promptforge-engine`'s internal error
-//! type plays there: it is never part of the documented API. Every public
+//! [`Error`] is what a failed model round is built from. Every public
 //! boundary returns its own typed error ([`crate::model::CompletionError`],
-//! [`crate::model::ModelIdError`]); those wrappers classify this internal
-//! type and preserve its source. The internal type is `#[doc(hidden)]` and
-//! re-exported only so `promptforge-engine` can map every variant back
-//! onto its own internal type verbatim, and so the transport that performs
-//! a round (the harness's gateway client, reaching it through that crate)
-//! can build the [`CompletionError`](crate::model::CompletionError) it
-//! answers with; it is not a stable API and is not marked
-//! `#[non_exhaustive]`, so that mapping stays total.
+//! [`crate::model::ModelIdError`]); those wrappers classify this type and
+//! preserve it as their source. It is public so a transport can build the
+//! [`CompletionError`](crate::model::CompletionError) it answers with, and
+//! so `promptforge-engine` can map every variant back onto its own
+//! internal type verbatim. It is not marked `#[non_exhaustive]`, so that
+//! mapping stays total.
 
 /// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
-/// The crate's internal error type, spanning completion transport and
-/// catalog transport failures.
+/// Why a model round or a model-list fetch failed, as a transport builds
+/// it.
 ///
-/// `#[doc(hidden)]`: this type exists in the public item tree only so the
-/// companion `promptforge-engine` crate can convert it back onto its own
-/// internal type variant-for-variant, and so a transport can construct the
-/// failure it reports. It is not host API.
+/// A transport does not return this directly: it converts it with
+/// [`CompletionError::from`](crate::model::CompletionError) into the
+/// [`CompletionError`](crate::model::CompletionError) its round fails
+/// with, which classifies it into a
+/// [`CompletionErrorKind`](crate::model::CompletionErrorKind) and keeps it
+/// as the error's source.
+///
+/// A transport builds these variants:
+/// - while reading its configuration: [`MissingEnv`](Error::MissingEnv),
+///   [`InvalidEnv`](Error::InvalidEnv), [`Config`](Error::Config), and
+///   [`InvalidConfig`](Error::InvalidConfig)
+/// - when the host turned gateway access off:
+///   [`GatewayDisabled`](Error::GatewayDisabled)
+/// - when a send or a read fails: [`Http`](Error::Http), wrapping a
+///   timeout in [`ClientTimeout`](Timeout) first
+/// - on a non-success status: [`Backend`](Error::Backend) with the body
+///   bounded and escaped, or [`BackendBodyRead`](Error::BackendBodyRead)
+///   when that body cannot be read
+/// - on a body it decodes itself and cannot understand:
+///   [`MalformedResponse`](Error::MalformedResponse) or
+///   [`MalformedResponseSource`](Error::MalformedResponseSource)
+///
+/// The read loop and the engine raise the rest. The engine maps every
+/// variant onto its own error type, so the enum is not
+/// `#[non_exhaustive]`.
 #[derive(Debug, thiserror::Error)]
-#[doc(hidden)]
 pub enum Error {
     /// A required environment variable was missing.
     #[error("missing environment variable: {0}")]
@@ -127,23 +144,22 @@ pub enum Error {
 
     /// A lock on the shared model set was poisoned.
     ///
-    /// `Display` is the bare message so the companion crate can reclassify the
-    /// failure (`promptforge-engine` maps it onto its own Lua-layer variant)
-    /// without a wording change.
+    /// `Display` is the bare message so the engine can reclassify the
+    /// failure onto its own Lua-layer variant without a wording change.
     #[error("{0}")]
     ModelSetLock(String),
 }
 
-/// A transport failure that was a timeout: the marker the transport wraps
-/// its own timeout error in, so the classification survives the type
-/// erasure of [`Error::Http`] and [`Error::BackendBodyRead`] without this
-/// crate naming the HTTP client. The transport's error stays reachable as
-/// the `#[source]`.
+/// A transport failure that was a timeout.
 ///
-/// `#[doc(hidden)]`: a cross-crate seam for the transports, not host API.
+/// A transport wraps its own timeout error in this marker before boxing it
+/// into [`Error::Http`] or [`Error::BackendBodyRead`], so
+/// [`CompletionError::is_timeout`](crate::model::CompletionError::is_timeout)
+/// still answers after the concrete type is erased, and the codec never
+/// names the transport's HTTP client. The transport's error stays
+/// reachable as the `#[source]`.
 #[derive(Debug, thiserror::Error)]
 #[error("request timed out")]
-#[doc(hidden)]
 pub struct Timeout(#[source] pub BoxedSource);
 
 /// Crate-internal result alias over [`Error`].

@@ -457,7 +457,7 @@ impl SectionVm {
 
     /// Installs host values while seeding `var` from an earlier VM.
     ///
-    /// The `var` global is a guarded proxy (see [`guarded_var`]): writes are
+    /// The `var` global is a guarded proxy (see `guarded_var`): writes are
     /// validated for JSON-representability at the assigning line, and the
     /// hidden data table behind it is what [`var`](Self::var) reads back.
     /// `access` is the chain step's VFS capability: the `store` table's
@@ -742,16 +742,15 @@ impl SectionVm {
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
     /// the chunk may call `call`, `jump`, or `fanout`, those must
-    /// already be installed by
-    /// [`install_control_globals`](Self::install_control_globals).
+    /// already be installed by `install_control_globals`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, execution
     /// fails, or the program returns a non-scalar value.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
-    /// tests, not host API.
-    #[doc(hidden)]
+    /// A test helper for `promptforge-engine`'s executor tests, so it exists
+    /// only under `test-support`.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn run_chunk(
         &self,
         program: &LuaProgram,
@@ -891,12 +890,12 @@ impl SectionVm {
     /// Returns a snapshot of the shared tool set and the live section
     /// addition runtime.
     ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s executor
-    /// tests, not host API.
+    /// A test helper for `promptforge-engine`'s executor tests, so it exists
+    /// only under `test-support`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shared tool set's mutex is poisoned.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn tool_bag_handles(&self) -> Result<(ToolSet, Arc<Mutex<ToolRuntime>>)> {
         let tools = self
             .bound_tools
@@ -910,14 +909,12 @@ impl SectionVm {
     /// selection runtime.
     ///
     /// Test-only: production reads the run's shared set through the model
-    /// view; tests snapshot straight from the VM.
-    ///
-    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-engine`'s tests,
-    /// not host API.
+    /// view; tests snapshot straight from the VM, so it exists only under
+    /// `test-support`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shared model set's mutex is poisoned.
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn model_bag_handles(&self) -> Result<(ModelSet, Arc<Mutex<ModelRuntime>>)> {
         let models = self
             .bound_models
@@ -940,7 +937,7 @@ impl SectionVm {
     /// converted to a Lua table, and its scalar return value is rendered as a
     /// string. A nil return yields an empty string. The `jump` global is
     /// nilled for the handler's duration and restored afterward (see
-    /// [`LocalTools::call`]).
+    /// `LocalTools::call`).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
