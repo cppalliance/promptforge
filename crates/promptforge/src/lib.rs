@@ -17,8 +17,9 @@ pub use promptforge_parser::ParseError;
 pub use promptforge_parser::ParseErrorKind;
 pub use promptforge_parser::Prompt;
 
-/// The effects a run issues, the answers a host returns, and their records.
 pub mod effect {
+    #![doc = include_str!("effect.md")]
+
     pub use promptforge_engine::AnswerRecord;
     pub use promptforge_engine::ChatAnswerRecord;
     pub use promptforge_engine::Effect;
@@ -30,15 +31,17 @@ pub mod effect {
     pub use promptforge_engine::ToolAnswerRecord;
 }
 
-/// The events a run reports for its host to log.
 pub mod event {
+    #![doc = include_str!("event.md")]
+
     pub use promptforge_types::emitter::DebugMode;
     pub use promptforge_types::event::Event;
     pub use promptforge_types::event::ReplyOrigin;
 }
 
-/// The identities of a run's chains and tasks, and the provenance on every report.
 pub mod ids {
+    #![doc = include_str!("ids.md")]
+
     pub use promptforge_types::ids::AbandonReason;
     pub use promptforge_types::ids::ChainId;
     pub use promptforge_types::ids::ParseIdError;
@@ -47,8 +50,9 @@ pub mod ids {
     pub use promptforge_types::ids::TaskOrigin;
 }
 
-/// What a model round exchanges, and the catalog and bindings a run resolves.
 pub mod model {
+    #![doc = include_str!("model.md")]
+
     pub use promptforge_engine::ModelBindings;
     pub use promptforge_model_client::client::Completion;
     pub use promptforge_model_client::client::CompletionResult;
@@ -72,8 +76,9 @@ pub mod model {
     pub use promptforge_types::wire::StreamDelta;
 }
 
-/// The sans-I/O model-round codec a host's transport runs.
 pub mod transport {
+    #![doc = include_str!("transport.md")]
+
     pub use promptforge_model_client::Error as ClientError;
     pub use promptforge_model_client::Timeout as ClientTimeout;
     pub use promptforge_model_client::client::ChunkSource;
@@ -83,8 +88,9 @@ pub mod transport {
     pub use promptforge_model_client::client::read_completion_stream;
 }
 
-/// Tool descriptors, catalogs, identities, output, and errors.
 pub mod tools {
+    #![doc = include_str!("tools.md")]
+
     pub use promptforge_engine::ToolBindings;
     pub use promptforge_types::tools::OutputTrust;
     pub use promptforge_types::tools::ToolCatalog;
@@ -99,8 +105,9 @@ pub mod tools {
     pub use promptforge_types::tools::ToolOutput;
 }
 
-/// Capability identities and the global naming grammar they are built on.
 pub mod capabilities {
+    #![doc = include_str!("capabilities.md")]
+
     pub use promptforge_types::capabilities::CapabilityId;
     pub use promptforge_types::capabilities::CapabilityIdError;
     pub use promptforge_types::capabilities::CapabilityIdErrorKind;
@@ -109,8 +116,9 @@ pub mod capabilities {
     pub use promptforge_types::names::GlobalNameErrorKind;
 }
 
-/// What a parsed prompt declares in its frontmatter.
 pub mod prompt {
+    #![doc = include_str!("prompt.md")]
+
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
     pub use promptforge_parser::ArgsDecl;
@@ -124,21 +132,9 @@ pub mod prompt {
     pub use promptforge_parser::ToolSlots;
 }
 
-/// The virtual filesystem a run's store lives in, and the host extension point behind it.
-///
-/// # Examples
-/// A [`VfsRef`](crate::vfs::VfsRef) over a
-/// [`MemoryBackend`](crate::vfs::MemoryBackend) keeps its files in memory:
-/// ```
-/// use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
-///
-/// let vfs = VfsRef::new(MemoryBackend::new());
-/// let access = vfs.acquire(Origin::new("memory backend example"))?;
-/// access.write("/notes.md", b"todo")?;
-/// assert_eq!(access.read("/notes.md")?, b"todo");
-/// # Ok::<(), promptforge::vfs::VfsError>(())
-/// ```
 pub mod vfs {
+    #![doc = include_str!("vfs.md")]
+
     pub use promptforge_engine::perform_store_op;
     pub use promptforge_lua::StoreOp;
     pub use promptforge_lua::StoreOutcome;
@@ -174,19 +170,22 @@ pub mod vfs {
     pub use promptforge_vfs::VfsRefBuilder;
 }
 
-/// Cooperative cancellation for a run.
 pub mod cancel {
+    #![doc = include_str!("cancel.md")]
+
     pub use promptforge_types::cancel::CancelHandle;
     pub use promptforge_types::cancel::Cancelled;
 }
 
-/// The UTC instant a run starts from.
 pub mod timestamp {
+    #![doc = include_str!("timestamp.md")]
+
     pub use promptforge_types::timestamp::Timestamp;
 }
 
-/// The model-call metrics events carry.
 pub mod metrics {
+    #![doc = include_str!("metrics.md")]
+
     pub use promptforge_types::metrics::CallMetrics;
     pub use promptforge_types::metrics::ClientTiming;
     pub use promptforge_types::metrics::LlamaTimings;
@@ -195,20 +194,23 @@ pub mod metrics {
     pub use promptforge_types::metrics::VllmMetrics;
 }
 
-/// What a user-input wait is answered with.
 pub mod input {
+    #![doc = include_str!("input.md")]
+
     pub use promptforge_engine::input::InputError;
     pub use promptforge_engine::input::InputOutcome;
 }
 
-/// The behavior flags a run records for replay.
 pub mod replay {
+    #![doc = include_str!("replay.md")]
+
     pub use promptforge_types::replay::Flags;
 }
 
-/// The engine's test drivers, for companion crates' suites.
 #[cfg(feature = "test-support")]
 pub mod test_support {
+    #![doc = include_str!("test_support.md")]
+
     pub use promptforge_engine::test_support::BoxFuture;
     pub use promptforge_engine::test_support::Performer;
     pub use promptforge_engine::test_support::Performers;

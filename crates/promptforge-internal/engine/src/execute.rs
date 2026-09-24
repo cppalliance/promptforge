@@ -1,65 +1,8 @@
 //! Section lifecycle execution and fall-through.
 //!
-//! The run walks top-level sections in file order, creating one isolated
-//! section VM for each. The VM is fully equipped (host values, store, log,
-//! control globals) before the shared Lua library replays as the section's
-//! first chunk, then ordered section blocks use that same VM. Prose never
-//! infers: each prose block stashes the pending Markdown buffer, and the
-//! next Lua block reads it as its fresh read-only lazy `prose` template.
-//! A scalar Lua return ends the chain it fires in.
-//!
-//! Running off the last section ends the run: the result is the last
-//! scalar return, else a generic completion.
-//!
-//! The walk is level-independent and descends only on a jump: a jump to a
-//! child heading starts a child-level walk over the jumper's children under
-//! the same rules, and the parent walk resumes after the jumper when that
-//! level exhausts.
-//!
-//! One run-scoped store handle travels with the run's [`RunContext`] (the
-//! stock handle by default), shared by
-//! every section, so
-//! bulk state persists across the context-clearing transitions even though a
-//! section's Lua state never does.
-//!
-//! A run reports itself as it goes, as values: every boundary - the run's
-//! start and end, each section, model turn, tool call, and
-//! harness-mediated store operation - is an
-//! [`Event`](promptforge_types::event::Event) pushed into the run's
-//! event buffer, stamped with the
-//! [`Provenance`](promptforge_types::ids::Provenance) of the chain that
-//! reported it (its nearest enclosing task and that task's next sequence
-//! number). Every `step` of the run drains the buffer and returns the
-//! batch to the host, which appends it to its log. Reporting is a side
-//! channel and never a decision: nothing the run does depends on who
-//! reads its events.
-//!
-//! Rust installs the run's filled tool and model slots - bound at prepare
-//! from the frontmatter against the host-supplied catalog - into each
-//! section VM. Prompt-wide aliases and section additions form the
-//! effective model-visible scope, whose tools are advertised under their
-//! local aliases from the descriptor each binding holds; a call is
-//! issued as a `ToolCall` effect naming the tool's id, and the host
-//! resolves the implementation.
-//!
-//! Lua `call()` starts a contained chain at a visible section (fresh VM,
-//! recursion capped at 8): the chain runs from the target
-//! with every normal walk rule - fall-through, jumps, child
-//! chains - and the outer walk never moves while it runs. When the chain
-//! ends (its level exhausts or a return fires), its final text is the call's
-//! return value; a return ends only the chain it fires in.
-//! Lua `jump(target)` transfers control to a named section.
-//!
-//! # Runtime
-//!
-//! The engine is a pure state machine (`run::Run`). Section Lua yields
-//! request messages to the chain-stack scheduler, which turns each leaf
-//! request into an effect value the host performs and answers, so a run
-//! works without a runtime of its own - the host's loop performs on whatever
-//! it likes, and the serial driver in `test_support` runs any prompt on the
-//! calling thread, host calls included. Concurrency (a fanout's arms) comes
-//! from interleaving chains at their effect boundaries rather than from
-//! worker threads.
+//! The host-facing design - the section walk, the host loop, reporting,
+//! tool binding, and running without a runtime - is documented on the
+//! `promptforge` facade's crate page and its role modules.
 //!
 //! # Module layout
 //!

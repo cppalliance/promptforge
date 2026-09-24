@@ -1,27 +1,6 @@
 //! The run: the engine's host boundary, four methods exchanging effects and
-//! events as values.
-//!
-//! A [`Run`] is a deterministic state machine over one prompt. The host
-//! calls [`step`](Run::step), which drains every chain that can make
-//! progress and returns the leaf [`Effect`]s those chains issued (each
-//! stamped with the [`Provenance`] of the task that built it) beside the
-//! [`Event`]s the step reported; the host performs the effects however it
-//! likes and hands each answer back through [`resume`](Run::resume), one
-//! per arriving answer, then steps again. The run performs no I/O, reads
-//! no clock, and holds no host trait objects: given the same context and
-//! the same answers it issues the same effects, events, and ids.
-//!
-//! [`Step::Done`] is withheld while any issued effect is unanswered, so a
-//! host that has answered every effect it was handed - a drop counts - can
-//! rely on the run's end being the end of every effect too. An effect a
-//! chain stopped waiting for (its task was cancelled or abandoned) still
-//! wants its one answer; the run discards it on arrival.
-//!
-//! [`cancel`](Run::cancel) sets the run's synchronous flag. The Lua
-//! instruction hook polls it, so a running chunk aborts promptly; the next
-//! `step` tears every chain down and reports the run as cancelled once the
-//! outstanding effects are answered - a host cancelling a run answers each
-//! effect it abandons with [`EffectAnswer::Dropped`].
+//! events as values. The host loop is documented on the `promptforge`
+//! facade's crate page and its `effect` and `cancel` modules.
 //!
 //! The effect vocabulary itself - [`Effect`], its serializable
 //! [`EffectRecord`], [`EffectAnswer`], and [`EffectId`] - is defined in the

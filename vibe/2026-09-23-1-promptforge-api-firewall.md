@@ -782,7 +782,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-12>
 
-### Step 12: Write the facade topic docs and gate them
+### Step 12: Write the facade topic docs and gate them [completed]
 
 - Component: facade-docs
 - Component order: fifth and last. The topic docs describe the final surface, and the old-name sweep needs every rename done.

@@ -140,6 +140,11 @@ jobs:
       - name: Docs
         run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api
 
+      # The facade as hosts read it: default features, so the topic docs
+      # must stand without the test-support module.
+      - name: Facade docs
+        run: cargo doc -p promptforge --no-deps
+
   check-workshop:
     runs-on: windows-latest
     steps:
