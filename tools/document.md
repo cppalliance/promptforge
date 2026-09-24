@@ -30,10 +30,10 @@ This tool rebuilds the PromptForge user guides. It reads the repository sources.
 
 ## Dispatch
 
-Run variable: LENS. Values: `workshop`, `gateway`, `language`, `agent`, `intro`, `all`.
+Run variable: LENS. Values: `gateway`, `language`, `agent`, `intro`, `all`.
 
 - LENS names a set: run the pipeline for that one lens.
-- LENS is empty or `all`: run `workshop`, `gateway`, `language`, `agent` in that order. Then run `intro`. Then run the assembler with `cargo run -p build-user-guide`.
+- LENS is empty or `all`: run `gateway`, `language`, `agent` in that order. Then run `intro`. Then run the assembler with `cargo run -p build-user-guide`.
 
 Each lens block declares the audience, the target paths, the extraction guidance, the noise filter, the output directory, and the template shape.
 
@@ -99,15 +99,6 @@ The `intro` lens runs a reduced pipeline. It has no extract stage and no tier st
 - Scratch lives in `guide/scratch/intro/`.
 
 ## Lens blocks
-
-<lens-workshop>
-Audience: the end user of the Workshop desktop application.
-Targets: `crates/workshop/shell/`, `crates/workshop/server/`, including `crates/workshop/ui/src/`.
-Extract: what the user sees and operates. The chat and agent surface. The editor. The status bar. The menus. Voice input. The update flow. Routes and protocol only where they produce user-visible behavior.
-Noise: Rust internals, wire protocol details, test infrastructure.
-Output: `guide/src/workshop/`.
-Template: the Tour. Dependency order. Each chapter builds on the last.
-</lens-workshop>
 
 <lens-gateway>
 Audience: the gateway operator.

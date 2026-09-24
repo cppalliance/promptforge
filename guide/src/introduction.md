@@ -24,8 +24,6 @@ The parts connect in one direction. The Workshop and the library sit on the engi
 
 Each audience has one documentation set.
 
-If you use the Workshop desktop application, read [the Workshop set](workshop/index.md). It teaches the workbench, the chat surface, the editor, voice input, models and profiles, and updates.
-
 If you operate the gateway, read [the Gateway set](gateway/index.md). It teaches installation, the configuration file, remote and local models, speech-to-text, profiles, and the operational surface.
 
 If you write prompts, read [the Prompt Language set](language/index.md). It teaches the .md prompt syntax: frontmatter, sections and blocks, Lua globals, prose substitution, models, tools, control flow, and fanout.

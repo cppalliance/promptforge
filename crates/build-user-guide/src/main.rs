@@ -13,9 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-/// The four documentation sets, in audience order, with their part titles.
+/// The three documentation sets, in audience order, with their part titles.
 const SETS: &[(&str, &str)] = &[
-    ("workshop", "The Workshop"),
     ("gateway", "The Gateway"),
     ("language", "The Prompt Language"),
     ("agent", "Agent Programs"),
@@ -307,15 +306,14 @@ mod tests {
             })
             .collect();
         let summary = render_summary(&parts);
-        let workshop = summary.find("# The Workshop").expect("workshop part");
         let gateway = summary.find("# The Gateway").expect("gateway part");
         let language = summary
             .find("# The Prompt Language")
             .expect("language part");
         let agent = summary.find("# Agent Programs").expect("agent part");
-        assert!(workshop < gateway && gateway < language && language < agent);
+        assert!(gateway < language && language < agent);
         assert!(summary.contains("- [Introduction](introduction.md)"));
-        assert!(summary.contains("- [The Window](workshop/01-the-window.md)"));
+        assert!(summary.contains("- [Start](gateway/01-start.md)"));
     }
 
     #[test]
@@ -354,9 +352,8 @@ mod tests {
             fs::read_to_string(dir.path().join("src").join("SUMMARY.md")).expect("summary");
         assert_eq!(first, second);
         let export =
-            fs::read_to_string(dir.path().join("promptforge-workshop-guide.md")).expect("export");
-        assert!(export.contains("# The Workshop"));
-        assert!(export.contains("# The Window"));
-        assert!(export.contains("# The Editor"));
+            fs::read_to_string(dir.path().join("promptforge-gateway-guide.md")).expect("export");
+        assert!(export.contains("# The Gateway"));
+        assert!(export.contains("# Start"));
     }
 }

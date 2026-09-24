@@ -661,7 +661,7 @@ Components, in dependency order:
 
 <step-2>
 
-### Step 2: Delete the workshop's human docs
+### Step 2: Delete the workshop's human docs [completed]
 
 - Component: Workshop docs removal
 - Piece: docs removal

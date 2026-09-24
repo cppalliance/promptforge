@@ -2,21 +2,6 @@
 
 - [Introduction](introduction.md)
 
-# The Workshop
-
-- [Overview](workshop/index.md)
-- [The Application](workshop/01-application.md)
-- [The Workbench](workshop/02-workbench.md)
-- [Menus and Commands](workshop/03-menus.md)
-- [The Status Bar](workshop/04-status-bar.md)
-- [Models and Profiles](workshop/05-models.md)
-- [The Chat Surface](workshop/06-chat.md)
-- [Voice Input](workshop/07-voice.md)
-- [The Workspace](workshop/08-workspace.md)
-- [Workspace Files](workshop/09-workspace-files.md)
-- [The Editor](workshop/10-editor.md)
-- [Updates and Configuration](workshop/11-updates.md)
-
 # The Gateway
 
 - [Overview](gateway/index.md)
