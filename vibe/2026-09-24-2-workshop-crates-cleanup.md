@@ -731,7 +731,7 @@ Components, in dependency order:
 
 <step-6>
 
-### Step 6: Pin the /ws frames in a shared fixture
+### Step 6: Pin the /ws frames in a shared fixture [completed]
 
 - Component: Trustworthy tests
 - Piece: wire-fixture

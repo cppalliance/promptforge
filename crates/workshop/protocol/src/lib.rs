@@ -11,9 +11,12 @@
 //! fixture `tests/fixtures/agent-frames.json`, asserted as the same JSON
 //! by the fixture test here and by the SPA suite's
 //! `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift on either
-//! side fails that side's tests. The wire shapes are additionally frozen
-//! end to end by the characterization tests in `workshop-server`'s
-//! `tests/it`.
+//! side fails that side's tests. The workshop-socket frame family is
+//! pinned the same way by `tests/fixtures/workshop-frames.json`, asserted
+//! by the `workshop_frames` test here and by the SPA suite's
+//! `crates/workshop/ui/test/workshop-wire-fixtures.mjs`. The wire shapes
+//! are additionally frozen end to end by the characterization tests in
+//! `workshop-server`'s `tests/it`.
 //!
 //! ## Invariants
 //!
@@ -26,10 +29,11 @@
 //!
 //! # Inbound workshop-socket frames
 //!
-//! `{"type":"select_model","model":"..."}` selects the chat model: the
-//! menu validates the id against the retained catalog and publishes a
-//! fresh [`WorkbenchFrame`] on success; an unknown model is refused
-//! with an `error` frame. `{"type":"switch_profile","name":"..."}`
+//! `{"type":"select_model","model":"..."}`
+//! ([`SelectModelFrame`]) selects the chat model: the menu validates the
+//! id against the retained catalog and publishes a fresh
+//! [`WorkbenchFrame`] on success; an unknown model is refused with an
+//! `error` frame. `{"type":"switch_profile","name":"..."}`
 //! ([`SwitchProfileFrame`]) selects a gateway profile, `null` selecting
 //! no profile: the pending snapshot publishes immediately, the steps of
 //! the selection arrive as [`StatusFrame`]s, and the settled menu
@@ -140,6 +144,6 @@ pub use agent::{
 pub use catalog::{CatalogFrame, CatalogPush, is_chat_capable};
 pub use error::{ErrorEnvelope, ErrorFrame};
 pub use input::{InputFrame, InputResponse};
-pub use menu::SwitchProfileFrame;
+pub use menu::{SelectModelFrame, SwitchProfileFrame};
 pub use status::{Activity, Severity, StatusBarUpdate, StatusFrame};
 pub use workbench::{WorkbenchFrame, WorkbenchSnapshot};

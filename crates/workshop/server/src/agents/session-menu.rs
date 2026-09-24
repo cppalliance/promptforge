@@ -15,7 +15,7 @@ use workshop_gateway::{
     GatewayClient, GatewayError, GatewayResponse, GatewaySnapshot, SwitchResponse,
 };
 use workshop_menu::{MenuBus, SwitchOutcome};
-use workshop_protocol::{Activity, SwitchProfileFrame};
+use workshop_protocol::{Activity, SelectModelFrame, SwitchProfileFrame};
 use workshop_registry::Push;
 
 use crate::agents::relay::value_from_bytes;
@@ -36,7 +36,7 @@ pub(super) async fn select_model(
     frame: &serde_json::Value,
     socket: &mut WebSocket,
 ) {
-    let Some(model) = frame.get("model").and_then(serde_json::Value::as_str) else {
+    let Ok(request) = serde_json::from_value::<SelectModelFrame>(frame.clone()) else {
         send_error(socket, id, "select_model needs a \"model\" string").await;
         return;
     };
@@ -44,7 +44,7 @@ pub(super) async fn select_model(
         send_error(socket, id, "the model menu is unavailable").await;
         return;
     };
-    if let Err(refusal) = menu.set_selected(model) {
+    if let Err(refusal) = menu.set_selected(&request.model) {
         send_error(socket, id, refusal.to_string()).await;
     }
 }

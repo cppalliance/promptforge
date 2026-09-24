@@ -9,7 +9,10 @@
 // crates/workshop/protocol/tests/fixtures/agent-frames.json,
 // asserted as the same JSON by both suites (test/agent-wire-fixtures.mjs
 // here, the workshop-protocol fixture test there), so drift on either side fails
-// that side's tests.
+// that side's tests. The workshop-socket frame family is pinned the same
+// way by crates/workshop/protocol/tests/fixtures/workshop-frames.json,
+// asserted by test/workshop-wire-fixtures.mjs here and the workshop_frames
+// fixture test there.
 
 /** One observer status update, as sent by the server. */
 export interface StatusFrame {
@@ -59,6 +62,17 @@ export interface WorkbenchFrame {
   switch_in_flight: boolean;
   selected: string | null;
   chat_ready: boolean;
+}
+
+/**
+ * The client frame selecting the chat model:
+ * `{"type":"select_model","model":"..."}`. The server validates the id
+ * against the retained catalog and publishes a fresh workbench snapshot
+ * on success; an unknown model is refused with an `error` frame.
+ */
+export interface SelectModelFrame {
+  type: "select_model";
+  model: string;
 }
 
 // --- Agent-session frames (/agents/ws) --------------------------------------

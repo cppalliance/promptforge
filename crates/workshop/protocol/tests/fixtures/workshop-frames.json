@@ -1,0 +1,23 @@
+{
+  "error": { "type": "error", "message": "unknown model", "id": 3 },
+  "models": { "type": "models", "models": [{ "id": "test-model", "object": "model" }] },
+  "select_model": { "type": "select_model", "model": "test-model" },
+  "status": {
+    "type": "status",
+    "label": "Ready",
+    "description": "idle",
+    "severity": "info",
+    "activity": "general",
+    "busy": false
+  },
+  "switch_profile": { "type": "switch_profile", "name": "beta" },
+  "workbench": {
+    "type": "workbench",
+    "profiles": ["main", "coding"],
+    "active": "main",
+    "switching": null,
+    "switch_in_flight": false,
+    "selected": "test-model",
+    "chat_ready": true
+  }
+}

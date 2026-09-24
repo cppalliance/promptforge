@@ -2,3 +2,4 @@
 
 mod fixture;
 mod frames;
+mod workshop_frames;

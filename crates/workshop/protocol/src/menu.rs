@@ -1,6 +1,22 @@
-//! Inbound Model-menu frames: the profile selection event.
+//! Inbound Model-menu frames: the model and profile selection events.
 
 use serde::{Deserialize, Deserializer};
+
+/// The inbound model selection: `{"type":"select_model","model":"..."}`.
+///
+/// `model` is the retained catalog id to select; the key itself is
+/// required, so a frame that omits it is malformed rather than an empty
+/// selection. The session routes on the envelope's `type` and
+/// deserializes the body with serde, which ignores the envelope tag and
+/// the optional `id` the session echoes on a refusal. Like every inbound
+/// frame it takes no delivery classification, because the server pushes
+/// none.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct SelectModelFrame {
+    /// The catalog id to select for chat.
+    pub model: String,
+}
 
 /// The inbound profile selection: `{"type":"switch_profile","name":...}`.
 ///

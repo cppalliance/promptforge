@@ -7,7 +7,7 @@
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type { CatalogModel, StatusFrame, WorkbenchFrame } from "./protocol";
+import type { CatalogModel, SelectModelFrame, StatusFrame, WorkbenchFrame } from "./protocol";
 
 interface ServerFrame {
   type?: unknown;
@@ -181,7 +181,7 @@ export class WorkshopSocket extends Disposable {
    * refusal from the server arrives as an error frame, not here.
    */
   selectModel(id: string): boolean {
-    return this.sendFrame({ type: "select_model", model: id });
+    return this.sendFrame({ type: "select_model", model: id } satisfies SelectModelFrame);
   }
 
   /**
