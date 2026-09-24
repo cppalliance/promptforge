@@ -207,6 +207,23 @@ fn an_engine_crate_forwarding_its_own_test_support_feature_passes() {
 }
 
 #[test]
+fn the_facade_forwarding_the_runtime_test_support_feature_passes() {
+    let root = engine_root();
+    write_crate(
+        root.path(),
+        "promptforge",
+        "promptforge",
+        "[dependencies]\npromptforge-api-runtime = { workspace = true }\n\
+         [features]\ntest-support = [\"promptforge-api-runtime/test-support\"]\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the facade is an engine crate, so forwarding its own test-support is gated: {violations:?}"
+    );
+}
+
+#[test]
 fn an_engine_crate_enabling_a_sibling_test_support_feature_outside_dev_is_reported() {
     let root = engine_root();
     write_crate(

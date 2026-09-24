@@ -4798,6 +4798,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge"
+version = "0.3.0"
+dependencies = [
+ "promptforge-api-runtime",
+ "promptforge-api-types",
+ "promptforge-lua",
+ "promptforge-model-client",
+ "promptforge-parser",
+ "promptforge-store",
+ "shared-vfs",
+ "workspace-hack",
+]
+
+[[package]]
 name = "promptforge-api-runtime"
 version = "0.3.0"
 dependencies = [

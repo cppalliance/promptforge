@@ -1,0 +1,34 @@
+[package]
+name = "promptforge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge API: the one crate a host depends on to parse prompts and drive their runs"
+documentation = "https://cppalliance.github.io/promptforge/"
+
+# Every crate that defines a re-exported item: each `pub use` names the
+# defining crate's path.
+[dependencies]
+promptforge-api-runtime.workspace = true
+promptforge-api-types.workspace = true
+promptforge-lua.workspace = true
+promptforge-model-client.workspace = true
+promptforge-parser.workspace = true
+promptforge-store.workspace = true
+shared-vfs.workspace = true
+workspace-hack.workspace = true
+
+[features]
+# The engine's test drivers, for companion crates' suites; only
+# dev-dependency tables may enable it.
+test-support = ["promptforge-api-runtime/test-support"]
+
+[[test]]
+name = "suite"
+required-features = ["test-support"]
+
+[lints]
+workspace = true

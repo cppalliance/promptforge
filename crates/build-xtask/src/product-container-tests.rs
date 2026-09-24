@@ -1,8 +1,8 @@
 //! Container-privacy fixtures: the manifestless `crates/<family>/`
 //! containers are private to their families, with the named exceptions.
 
-use super::product_boundary_violations;
 use super::test_support::write_crate;
+use super::{container_named_exception, product_boundary_violations};
 
 #[test]
 fn an_outside_crate_depending_into_the_private_container_is_reported() {
@@ -24,7 +24,7 @@ fn an_outside_crate_depending_into_the_private_container_is_reported() {
     assert!(
         violations[0].contains("workshop-sessions depends on promptforge-lua")
             && violations[0].contains("crates/promptforge-internal is private to its family")
-            && violations[0].contains("promptforge-api-runtime"),
+            && violations[0].contains("only promptforge may depend into it"),
         "the violation includes the container privacy message: {violations:?}"
     );
 }
@@ -52,12 +52,12 @@ fn a_container_crate_depending_on_a_container_sibling_passes() {
 }
 
 #[test]
-fn the_public_runtime_depending_into_the_container_passes() {
+fn the_facade_depending_into_the_engine_container_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge",
+        "promptforge",
         "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
     );
     write_crate(
@@ -69,7 +69,62 @@ fn the_public_runtime_depending_into_the_container_passes() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the named public crate may depend into the container: {violations:?}"
+        "the facade is the container's one named crate: {violations:?}"
+    );
+}
+
+#[test]
+fn the_runtime_enters_the_engine_container_only_through_the_transitional_entry() {
+    assert_eq!(
+        container_named_exception("promptforge-internal"),
+        Some("promptforge"),
+        "the facade, not the runtime, is the container's named crate"
+    );
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "promptforge-api-runtime",
+        "promptforge-api-runtime",
+        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n\
+         harness-runner = { path = \"../harness/runner\" }\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        "",
+    );
+    write_crate(root.path(), "harness/runner", "harness-runner", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("promptforge-api-runtime depends on harness-runner:")
+            && violations[0].contains("crates/harness is private to its family"),
+        "the transitional entry admits the runtime into the engine container alone: {violations:?}"
+    );
+}
+
+#[test]
+fn a_root_crate_other_than_the_facade_and_the_runtime_is_still_rejected() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "promptforge-api-types",
+        "promptforge-api-types",
+        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/lua",
+        "promptforge-lua",
+        "",
+    );
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("promptforge-api-types depends on promptforge-lua:")
+            && violations[0].contains("only promptforge may depend into it"),
+        "the runtime's sibling public crate has no transitional entry: {violations:?}"
     );
 }
 

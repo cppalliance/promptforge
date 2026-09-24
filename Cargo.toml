@@ -26,6 +26,7 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
+promptforge = { path = "crates/promptforge", version = "0.3.0" }
 promptforge-api-runtime = { path = "crates/promptforge-api-runtime", version = "0.3.0" }
 promptforge-api-types = { path = "crates/promptforge-api-types", version = "0.3.0" }
 gateway-api-types = { path = "crates/gateway-api-types", version = "0.3.0" }

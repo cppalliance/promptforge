@@ -474,7 +474,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-2>
 
-### Step 2: Audit the surface and create the facade
+### Step 2: Audit the surface and create the facade [completed]
 
 - Component: facade-firewall
 - Component order: second. It needs the directory that Step 1 freed. It also has to come before the checks, which read the facade and the internal crates at their final paths.

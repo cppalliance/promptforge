@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
+use crate::product::test_support;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -28,8 +29,8 @@ fn write_crate(root: &Path, dir: &str, manifest: &str, lib: &str) {
     std::fs::write(src.join("lib.rs"), lib).expect("lib.rs writes");
 }
 
-/// A fake workspace whose two root engine crates are clean, so a fixture
-/// can add one container crate and see only that crate's findings.
+/// A fake workspace whose root engine crates are clean, so a fixture can
+/// add one container crate and see only that crate's findings.
 fn clean_engine_root() -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
     for name in ENGINE_ROOT_CRATES {
@@ -64,7 +65,7 @@ fn engine_sources_name_no_retired_symbols() {
 }
 
 #[test]
-fn the_engine_crate_set_is_the_two_root_crates_plus_every_container_member() {
+fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
     let root = clean_engine_root();
     write_crate(
         root.path(),
@@ -93,12 +94,43 @@ fn the_engine_crate_set_is_the_two_root_crates_plus_every_container_member() {
     assert_eq!(
         names,
         [
+            "promptforge",
             "promptforge-api-runtime",
             "promptforge-api-types",
             "promptforge-internal/lua",
             "promptforge-internal/store",
         ],
         "harness and gateway crates are outside the engine"
+    );
+}
+
+#[test]
+fn the_facade_forwarding_the_runtime_test_support_feature_passes_every_engine_guard() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    test_support::write_crate(
+        root.path(),
+        "promptforge-api-runtime",
+        "promptforge-api-runtime",
+        "[dependencies]\ntokio = { version = \"1\", optional = true }\n\
+         [features]\ntest-support = [\"dep:tokio\"]\n",
+    );
+    test_support::write_crate(
+        root.path(),
+        "promptforge-api-types",
+        "promptforge-api-types",
+        "",
+    );
+    test_support::write_crate(
+        root.path(),
+        "promptforge",
+        "promptforge",
+        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
+         [features]\ntest-support = [\"promptforge-api-runtime/test-support\"]\n",
+    );
+    let violations = engine_guard_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "the facade is an engine crate, so forwarding its own test-support is gated: {violations:?}"
     );
 }
 
@@ -181,12 +213,14 @@ fn a_forbidden_dependency_in_a_container_crate_fails_the_guard() {
 #[test]
 fn a_missing_root_engine_crate_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    write_crate(
-        root.path(),
-        "promptforge-api-types",
-        "[dependencies]\nserde = \"1\"\n",
-        "pub struct Live;\n",
-    );
+    for name in ["promptforge", "promptforge-api-types"] {
+        write_crate(
+            root.path(),
+            name,
+            "[dependencies]\nserde = \"1\"\n",
+            "pub struct Live;\n",
+        );
+    }
     let violations = engine_guard_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(

@@ -210,25 +210,21 @@ fn an_outside_crate_depending_on_the_public_crates_passes() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
+        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n\
+         promptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
          promptforge-api-types = { path = \"../promptforge-api-types\" }\n",
     );
-    write_crate(
-        root.path(),
+    for name in [
+        "promptforge",
         "promptforge-api-runtime",
-        "promptforge-api-runtime",
-        "",
-    );
-    write_crate(
-        root.path(),
         "promptforge-api-types",
-        "promptforge-api-types",
-        "",
-    );
+    ] {
+        write_crate(root.path(), name, name, "");
+    }
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "both public crates are legal dependencies for outside crates: {violations:?}"
+        "the facade and both public crates are legal dependencies for outside crates: {violations:?}"
     );
 }
 
