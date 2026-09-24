@@ -2,9 +2,9 @@
 
 The PromptForge run-scoped virtual filesystem facade. A prompt run keeps its
 bulk state in virtual files addressed by logical string paths: `Store` is a
-concrete facade over a prefix-scoped VFS access capability from `shared-vfs`
-(the run's `VfsRef` includes the store mount, installed by
-`promptforge-vfs`'s stock constructors), built by `Store::new(&access)`.
+concrete facade over a prefix-scoped VFS access capability from
+`promptforge-vfs` (the run's `VfsRef` includes the store mount, installed by
+that crate's stock constructors), built by `Store::new(&access)`.
 Every operation is attributed to the access's identity, so a conflicting
 operation by a second live identity surfaces as `StoreError::WriteRace`.
 

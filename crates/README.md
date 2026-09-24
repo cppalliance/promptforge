@@ -1,6 +1,6 @@
 # crates/
 
-`crates/` is the workspace's public and shared layer - the family containers (`promptforge/`, `gateway/`, `workshop/`, `harness/`) are private, and cross-family dependencies resolve only here.
+`crates/` is the workspace's public and shared layer - the family containers (`promptforge-internal/`, `gateway/`, `workshop/`, `harness/`) are private, and cross-family dependencies resolve only here.
 
 ## gateway-api-types
 
@@ -10,13 +10,9 @@ The gateway's public vocabulary crate: the versioned provider model sheet schema
 
 The gateway discovery seam: the `gateway.json` discovery file, the launch lock, stale detection, and the health probe. The gateway writes it at boot and the workshop shell, server, and gateway client read it to attach to a running gateway. No workspace dependencies.
 
-## promptforge-api-runtime
+## promptforge
 
-The PromptForge runtime: prompt parsing and the sans-IO `Run` state machine that executes sections as effects a host performs. The harness (and, in the interim, the workshop sessions) drives the engine through it, and it is one of the two promptforge crates outside crates may name. Depends on promptforge-api-types, shared-vfs, and the promptforge container crates (lua, parser, store, vfs, model-client). The first-party capabilities and the tool implementations behind a run live in the harness, not here.
-
-## promptforge-api-types
-
-The promptforge public types: untrusted-content guards, cooperative cancellation, run observation, and the model and tool vocabulary. Nearly every promptforge consumer and several workshop crates depend on it; it is the other half of the family's public surface. Depends only on shared-vfs.
+The PromptForge API: the one promptforge crate outside crates may name. A facade of single-item re-exports grouped into documented role modules - prompt parsing, the sans-IO `Run` state machine that executes sections as effects a host performs, and the effect, event, model, transport, tool, capability, and vfs vocabulary those effects carry. The harness and the workshop crates reach the engine only through it. Its surface is committed as `public-api.txt` and checked by `cargo xtask api --check`. Depends on the crates in `promptforge-internal/` that define what it re-exports. The first-party capabilities and the tool implementations behind a run live in the harness, not here.
 
 ## shared-error-source
 
@@ -25,10 +21,6 @@ The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSourc
 ## shared-loopback
 
 The loopback wall: the `require_loopback` and `require_loopback_host` middleware plus the per-product WebSocket origin policies. The gateway applies it to the admin surface and every loopback-bound build, and config-ui wraps its SPA assets with it. No workspace dependencies; axum is the only third-party crate.
-
-## shared-vfs
-
-Generic virtual filesystem machinery: canonical interned paths, the claims model, the mount router, and the host and memory backends. It is the permanent bottom of the dependency stack for the promptforge executor and workshop sessions. Std only - no dependencies at all, enforced by its own manifest test.
 
 ## workspace-hack
 

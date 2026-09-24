@@ -13,7 +13,7 @@ use harness_web::Web;
 
 let capability = Web::new("https://gateway.example.com/v1", "bearer-token")?;
 assert_eq!(capability.id().to_string(), "promptforge/web");
-# Ok::<(), promptforge_api_types::tools::ToolError>(())
+# Ok::<(), promptforge::tools::ToolError>(())
 ```
 
 The fetch tool enforces the crate's SSRF policy (see `harness-webfetch`);

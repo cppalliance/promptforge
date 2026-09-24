@@ -22,7 +22,7 @@ use crate::error_value::{Raised, install_error_value, install_normalize_failure,
 
 /// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
 /// path, making unexpected shim errors clickable `file:line:` references.
-const SHIM_CHUNK_NAME: &str = "@crates/promptforge-api-runtime/src/lua/__impl_coro.lua";
+const SHIM_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_coro.lua";
 
 /// The shim source, embedded verbatim so chunk line 1 is file line 1.
 const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");

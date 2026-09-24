@@ -1,4 +1,4 @@
-# promptforge-api-types
+# promptforge-types
 
 This crate holds shared host-support primitives and canonical runtime-event vocabulary.
 

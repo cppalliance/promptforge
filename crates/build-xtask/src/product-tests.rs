@@ -105,10 +105,10 @@ fn an_outside_crate_depending_on_a_root_promptforge_crate_other_than_the_facade_
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-api-runtime = { path = \"../promptforge-api-runtime\" }\n\
-         promptforge-api-types = { path = \"../promptforge-api-types\" }\n",
+        "[dependencies]\npromptforge-extra = { path = \"../promptforge-extra\" }\n\
+         promptforge-spare = { path = \"../promptforge-spare\" }\n",
     );
-    for name in ["promptforge-api-runtime", "promptforge-api-types"] {
+    for name in ["promptforge-extra", "promptforge-spare"] {
         write_crate(root.path(), name, name, "");
     }
     let violations = product_boundary_violations(root.path());

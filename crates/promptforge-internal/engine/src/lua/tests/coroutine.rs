@@ -117,7 +117,7 @@ fn at_named_chunk_errors_render_verbatim_through_resume() {
     let vm = scheduler_vm(&ModelSet::default(), None);
     let program = LuaProgram::compile_internal(
         "local x = nil\nreturn x.field",
-        "@crates/promptforge-api-runtime/src/lua/__impl_probe.lua",
+        "@crates/promptforge-internal/engine/src/lua/__impl_probe.lua",
     )
     .expect("the probe compiles");
     let error = match vm.start_block_coro(&program) {
@@ -126,7 +126,7 @@ fn at_named_chunk_errors_render_verbatim_through_resume() {
     };
     let raw = error.to_string();
     assert!(
-        raw.contains("crates/promptforge-api-runtime/src/lua/__impl_probe.lua:2:"),
+        raw.contains("crates/promptforge-internal/engine/src/lua/__impl_probe.lua:2:"),
         "the error renders as a verbatim file:line: {raw}"
     );
     assert!(

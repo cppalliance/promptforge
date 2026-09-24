@@ -357,7 +357,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
         .expect_err("the reassigned var fails the snapshot");
     let raw = error.to_string();
     assert!(
-        raw.contains("crates/promptforge-api-runtime/src/lua/__impl_coro.lua:"),
+        raw.contains("crates/promptforge-internal/lua/src/__impl_coro.lua:"),
         "the shim frame renders as a verbatim file:line: {raw}"
     );
     assert!(
@@ -370,7 +370,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
     );
     let mapped = program.map_runtime_error(&error).to_string();
     assert!(
-        mapped.contains("crates/promptforge-api-runtime/src/lua/__impl_coro.lua:"),
+        mapped.contains("crates/promptforge-internal/lua/src/__impl_coro.lua:"),
         "the line mapper leaves the shim frame unmapped: {mapped}"
     );
     assert!(

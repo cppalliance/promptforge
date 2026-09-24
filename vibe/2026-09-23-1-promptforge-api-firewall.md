@@ -808,7 +808,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-13>
 
-### Step 13: Update AGENTS.md, sweep old names, and run the exit gates
+### Step 13: Update AGENTS.md, sweep old names, and run the exit gates [completed]
 
 - Component: facade-docs
 - Piece: repository docs, after Step 12.

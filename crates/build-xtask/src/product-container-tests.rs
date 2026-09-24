@@ -84,8 +84,8 @@ fn a_root_promptforge_crate_other_than_the_facade_depending_into_the_engine_cont
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-api-runtime",
-        "promptforge-api-runtime",
+        "promptforge-extra",
+        "promptforge-extra",
         "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
     );
     write_crate(
@@ -97,7 +97,7 @@ fn a_root_promptforge_crate_other_than_the_facade_depending_into_the_engine_cont
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("promptforge-api-runtime depends on promptforge-lua:")
+        violations[0].starts_with("promptforge-extra depends on promptforge-lua:")
             && violations[0].contains("only promptforge may depend into it"),
         "no crate outside the container but the facade enters it: {violations:?}"
     );

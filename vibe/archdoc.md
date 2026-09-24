@@ -11,8 +11,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - gateway: independent server process that owns model routing, provider access, and local inference lifecycle; exposes protocol data and discovery; depends on: shared substrate
 - CLI: thin shell adapter that supplies inputs and host resources to the executor; depends on: executor, gateway, store, shared substrate
 - workshop UI: desktop authoring shell and in-process server that drive agent sessions through `harness-api` and attach over the gateway protocol; persists user-scoped UI state through `workshop-user-state` (one JSON file in the state directory) and workspace-scoped UI state through the `.pfwork` workspace file; depends on: harness, gateway, store, shared substrate
-- store: run-scoped Store facade over the VFS layer, exposed as `vfs.store(&access)`; depends on: VFS layer
-- VFS layer: canonical paths, claims, routing, and memory and host backends (`shared-vfs`), plus the policy gate (`promptforge-vfs`); depends on: none
+- store: run-scoped Store facade over the VFS layer, built with `Store::new(&access)`; depends on: VFS layer
+- VFS layer: canonical paths, claims, routing, memory and host backends, and the policy gate, all in `promptforge-vfs`; depends on: none
 - Lua VM boundary: sandbox and coroutine bridge between prompt code and host capabilities; every suspending author function is a Lua shim that yields a request value the executor answers, so the boundary itself performs no I/O and names no transport; depends on: store, shared substrate (model wire vocabulary only, no gateway crate)
 - shared substrate: cross-product progress, loopback discovery, protocol, and gateway discovery facilities, plus the error-source wrappers (`shared-error-source`) that every family wraps its third-party causes through, one per wrapped error behind its own feature; depends on: none
 

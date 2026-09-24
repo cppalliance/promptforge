@@ -1,8 +1,8 @@
-# promptforge-api-runtime
+# promptforge-engine
 
-This crate owns PromptForge document execution and run orchestration. The crate root is the one public facade: hosts name the run, effect, context, and error types through `promptforge_api_runtime`, `execute` is private, and only `model`, `parser`, `input`, and `types` remain public vocabulary modules. The single-public-crate rule that makes it, with `promptforge-api-types`, the only promptforge-* dependency an outside crate may name is stated in the root `AGENTS.md` and enforced by `cargo test -p build-xtask`.
+This crate owns PromptForge document execution and run orchestration. It is private to `crates/promptforge-internal/`: hosts reach it only through the `promptforge` facade, which re-exports the run, effect, context, and error types from this crate's root. `execute` is private, and only `model`, `parser`, and `input` remain public modules, plus `test_support` behind the `test-support` feature. The single-public-crate rule that makes `promptforge` the only promptforge crate an outside crate may name is stated in the root `AGENTS.md` and enforced by `cargo test -p build-xtask`.
 
-- The crate root is the only public path for host types. The thin `lua`, `untrusted`, `store`, and `tools` modules are crate-internal import surfaces for the crates that own them; do not add public compatibility paths or re-exports.
-- Concrete providers stay in their provider crates. `promptforge-api-runtime` may re-export them for crate-internal use but never reacquires provider implementation.
+- The crate root is the only public path for the `execute` module's items, so the facade names them `promptforge_engine::X`, never a path through `execute`. The public `input` and `test_support` modules are the exceptions: the facade re-exports their items by module path. The thin `lua`, `untrusted`, `store`, and `tools` modules are crate-internal import surfaces for the crates that own them; do not add public compatibility paths or re-exports.
+- Concrete providers stay in their provider crates. The engine may re-export them for crate-internal use but never reacquires provider implementation.
 - Store access is decided only by the executor: every `Access` handle is minted from the chain's claims inside the engine; a host performing a `Store` effect uses the handle it was given and never derives, widens, or retains store scope.
-- The executor imports parser, Lua, model-client, store, tool, and host-support vocabulary from the private crates under `crates/promptforge/`. Those crates never depend on this executor.
+- The executor imports parser, Lua, model-client, store, vfs, and host-support vocabulary from its sibling crates under `crates/promptforge-internal/`. Those crates never depend on this executor.

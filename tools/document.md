@@ -120,7 +120,7 @@ Template: the Cookbook. Group chapters by operator goal.
 
 <lens-language>
 Audience: the prompt author.
-Targets: `crates/promptforge/parser/`, `crates/promptforge-api-runtime/`, `prompts/`, `README.md`.
+Targets: `crates/promptforge-internal/parser/`, `crates/promptforge-internal/engine/`, `prompts/`, `README.md`.
 Extract: the .md prompt syntax. Frontmatter. Sections. Lazy prose. Lua blocks. Tool and model binding. models.infer and models.loop. Message builders. The store. var. call. fanout. jump.
 Noise: the Rust API, gateway operation.
 Output: `guide/src/language/`.

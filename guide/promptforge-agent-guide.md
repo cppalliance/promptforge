@@ -54,7 +54,7 @@ Everything else is the prompt language, exactly as the Prompt Language set teach
 
 ## The moving parts
 
-An agent run takes two products. The harness, reached through `harness-api`, owns discovery, launch, and the session extras: the input broker behind `user_input()`, the `ui()` snapshot, and the persisting run log. `promptforge-api-runtime` is the unified runtime that parses and runs the prompt itself. The final chapter of this set walks through the built-in chat program, the one agent every install already has.
+An agent run takes two products. The harness, reached through `harness-api`, owns discovery, launch, and the session extras: the input broker behind `user_input()`, the `ui()` snapshot, and the persisting run log. The `promptforge` crate is the unified runtime that parses and runs the prompt itself. The final chapter of this set walks through the built-in chat program, the one agent every install already has.
 
 ---
 

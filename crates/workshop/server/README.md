@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (Markdown agent prompts on the unified `promptforge-api-runtime` runtime), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, workspace APIs, and a same-origin payload-opaque relay to Gateway Realtime transcription. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame.
+The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (Markdown agent prompts on the unified PromptForge engine, through the `promptforge` crate), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, workspace APIs, and a same-origin payload-opaque relay to Gateway Realtime transcription. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame.
 
 ## Quick start
 

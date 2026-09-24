@@ -1,6 +1,6 @@
-# promptforge-api-types
+# promptforge-types
 
-Small shared host-support primitives for the PromptForge runtime:
+Small shared host-support primitives for the PromptForge engine:
 `untrusted` wraps untrusted external data in a nonce-guarded envelope,
 `cancel` is the polled cancellation tree the engine observes, `event` is
 the report-only `Event` vocabulary a run returns to its host, `emitter` is
