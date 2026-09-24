@@ -8,7 +8,7 @@ The PromptForge engine: the sans-IO `Run` state machine that executes a parsed p
 
 ## promptforge-types
 
-The shared vocabulary most of the facade is built on: the tool, capability, and global-name vocabulary, the model identity, catalog, and streaming wire vocabulary, chain and task identity with replay provenance and flags, and the run timestamp. It also holds the host-support primitives: untrusted-content guards, cooperative cancellation, run observation, and the metrics vocabulary. Nearly every engine crate builds on it and reports through it. No workspace dependencies beyond workspace-hack.
+The shared vocabulary most of the facade is built on: the tool, capability, and global-name vocabulary, the model identity, catalog, and streaming wire vocabulary, chain and task identity with replay provenance and flags, and the run timestamp. It also holds the host-support primitives: untrusted-content guards, cooperative cancellation, run observation, and the metrics vocabulary. Nearly every engine crate builds on it and reports through it. No workspace dependencies beyond workspace-hack and the doctest-only `promptforge` dev-dependency the root `AGENTS.md` excepts, which its doc examples alone compile against.
 
 ## promptforge-lua
 

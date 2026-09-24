@@ -419,7 +419,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 
 <step-3>
 
-### Step 3: Record the doctest-only facade dev-dependency exception and correct the six crate statements
+### Step 3: Record the doctest-only facade dev-dependency exception and correct the six crate statements [completed]
 
 - Component: doctest-cycle
 - Component placement: third, after `test-support`. Step 2 gave the graph its end state, so the `cargo tree` review here checks the final graph. It edits `AGENTS.md` line 35, above lines 55-56 that Step 2 changed in place, so line numbers stay exact.

@@ -32,7 +32,7 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - The Workshop shell (the `workshop` crate) depends on `workshop-server-api` and never on `workshop-server`; the facade is the shell's entire view of the server
 - Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates. PromptForge's own public surface is the `promptforge` facade, and its types crate (`promptforge-types`) has left shared-* for the private container; Gateway's is gateway-api-types and gateway-api-discovery, named gateway-* now that both have left shared-*; the types crate contains the wire vocabulary only, never code
 - Crates named build-* are for building specific outputs
-- Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies
+- Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies. One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths hosts see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules.
 
 ## Engineering
 
