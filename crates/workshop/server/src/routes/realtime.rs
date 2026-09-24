@@ -180,3 +180,7 @@ async fn close_browser(browser: &mut WebSocket) {
 async fn close_gateway(gateway: &mut GatewayRealtimeSocket) {
     let _bounded = tokio::time::timeout(RELAY_IO_DEADLINE, gateway.close(None)).await;
 }
+
+#[cfg(test)]
+#[path = "realtime-tests.rs"]
+mod tests;

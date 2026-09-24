@@ -718,7 +718,7 @@ Components, in dependency order:
 
 <step-5>
 
-### Step 5: Pin the realtime relay refusals
+### Step 5: Pin the realtime relay refusals [completed]
 
 - Component: Trustworthy tests
 - Piece: security-tests
