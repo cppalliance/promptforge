@@ -421,6 +421,8 @@ pub(crate) mod linux {
 
 /// The grayed variant of an RGBA icon: each pixel's luma with the alpha
 /// untouched, for the Starting phase.
+/// Gated on its callers, the Windows and Linux backends, plus the tests.
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the fixed-point luma sums to at most 255"
@@ -435,11 +437,14 @@ pub(crate) fn grayed(rgba: &[u8]) -> Vec<u8> {
 
 /// The error variant of an RGBA icon: red-dominant with the alpha
 /// untouched, for the Error phase. `r / 2 + 128` cannot overflow.
+/// Gated on its callers, the Windows and Linux backends, plus the tests.
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
 pub(crate) fn error_tint(rgba: &[u8]) -> Vec<u8> {
     tint(rgba, |r, g, b| (r / 2 + 128, g / 3, b / 3))
 }
 
 /// Maps every pixel's RGB channels through `f`, preserving alpha.
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
 fn tint(rgba: &[u8], f: impl Fn(u8, u8, u8) -> (u8, u8, u8)) -> Vec<u8> {
     debug_assert!(
         rgba.len().is_multiple_of(4),
