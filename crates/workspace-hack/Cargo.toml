@@ -59,6 +59,7 @@ smallvec = { version = "1", default-features = false, features = ["const_new", "
 stable_deref_trait = { version = "1" }
 string_cache = { version = "0.9", default-features = false, features = ["serde_support"] }
 subtle = { version = "2" }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "full", "visit-mut"] }
 sync_wrapper = { version = "1", default-features = false, features = ["futures"] }
 tauri-utils = { version = "2", default-features = false, features = ["build-2", "compression", "resources"] }
 time = { version = "0.3", features = ["macros", "serde-human-readable"] }
@@ -193,7 +194,7 @@ libc = { version = "0.2", default-features = false, features = ["extra_traits"] 
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit-mut"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }
@@ -239,7 +240,7 @@ libc = { version = "0.2", default-features = false, features = ["extra_traits"] 
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 rustix = { version = "1", features = ["io_uring", "pipe", "process", "time"] }
 slab = { version = "0.4" }
-syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit-mut"] }
+syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["fold"] }
 tar = { version = "0.4" }
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 toml_datetime = { version = "1", features = ["serde"] }

@@ -611,7 +611,7 @@ The design is a pure facade, package `promptforge`, over private crates in `crat
 
 <step-6>
 
-### Step 6: Add the facade shape check
+### Step 6: Add the facade shape check [completed]
 
 - Component: surface-checks
 - Component order: third. The checks read the facade and the internal crates at their final paths, so they come after the firewall. They come before the closure fixes, because `cargo xtask api` produces the list of leaks to fix and proves the fixes complete.

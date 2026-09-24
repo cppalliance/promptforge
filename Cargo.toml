@@ -115,6 +115,13 @@ mlua = { version = "0.12", features = ["lua55", "vendored", "serialize", "send"]
 # already pulls in, instead of compiling two toml lines (and the 0.8 line's
 # exclusive toml_edit 0.19 and winnow 0.5 tail).
 toml = "1"
+# Parses the promptforge facade's source for build-xtask's shape check;
+# `full` is the feature that parses items and `use` trees. 3 is the newest
+# major the lockfile already carries.
+syn = { version = "3", features = ["full"] }
+# `span-locations` makes a span parsed outside a proc macro report its line,
+# which the shape check prints with every violation.
+proc-macro2 = { version = "1", features = ["span-locations"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tower = { version = "0.5", features = ["util"] }

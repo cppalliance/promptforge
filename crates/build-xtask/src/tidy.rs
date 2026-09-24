@@ -1,7 +1,8 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
-//! the harness family, and the sans-I/O engine (manifest guard,
+//! the harness family, the sans-I/O engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
-//! `engine_guards`).
+//! `engine_guards`), and the `promptforge` facade's source shape (run
+//! from `facade_shape`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
@@ -52,6 +53,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
         &root.join("crates").join("harness-api"),
     ));
     violations.extend(crate::engine_guards::engine_guard_violations(root));
+    violations.extend(crate::facade_shape::facade_shape_violations(root));
     violations
 }
 
@@ -357,7 +359,7 @@ fn slash_path(root: &Path, file: &Path) -> String {
 }
 
 /// Every `.rs` file under `dir`, recursively.
-fn rust_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn rust_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_rust_files(dir, &mut files);
     files

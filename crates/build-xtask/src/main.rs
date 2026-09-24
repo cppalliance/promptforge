@@ -9,6 +9,7 @@
 
 mod engine_deps;
 mod engine_guards;
+mod facade_shape;
 mod harness_bans;
 mod manifest;
 mod new_crate;
