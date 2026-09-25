@@ -22,7 +22,7 @@
 // invalidating nothing; Save As and Duplicate seeding the save picker
 // with "<current name>.pfwork", appending .pfwork to a bare name exactly
 // once (never doubling an existing extension, any case), posting to
-// save_as or duplicate, then invalidating, emitting, and recording the
+// save-as or duplicate, then invalidating, emitting, and recording the
 // new path, with a cancel posting nothing and a refusal painting the
 // error; and the client's typed parse of the wire shape (snake_case
 // window_state) with a malformed answer refused. The UI state the switch
@@ -453,7 +453,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
   const posts = postsSince(fetchesBefore);
-  check("a picked name is posted once to /workspace/file/save_as", posts.length === 1 && posts[0].url === "/workspace/file/save_as");
+  check("a picked name is posted once to /workspace/file/save-as", posts.length === 1 && posts[0].url === "/workspace/file/save-as");
   check("a bare name is posted with .pfwork appended", posts[0]?.body?.path === SAVED);
   check("a successful save-as fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
   const emitted = window.__TAURI_EVENTS__.emitted;

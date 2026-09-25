@@ -21,6 +21,7 @@ use crate::workspace_file::{
 use super::confine::names_same_file;
 use super::{GrantEntry, GrantMeta, Workspace, WorkspaceSummary};
 
+#[path = "backing-ui-state-memory.rs"]
 mod ui_state_memory;
 
 /// The display name of a workspace that has no file yet.

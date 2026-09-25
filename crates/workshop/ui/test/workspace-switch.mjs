@@ -473,7 +473,7 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
   );
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
-  check("a picked name is posted to /workspace/file/save_as", fetches.at(-1)?.url === "/workspace/file/save_as" && fetches.at(-1)?.body?.path === SAVED_PATH);
+  check("a picked name is posted to /workspace/file/save-as", fetches.at(-1)?.url === "/workspace/file/save-as" && fetches.at(-1)?.body?.path === SAVED_PATH);
   const sets = storage.sets.slice(setsBefore);
   check("a successful save-as makes exactly three workspace writes", sets.length === 3 && sets.every((entry) => entry.bucket === "workspace"));
   check("the three writes cover layout, tree, and closed_editors once each", [...new Set(sets.map((entry) => entry.key))].sort().join(",") === "closed_editors,layout,tree");
@@ -615,7 +615,7 @@ const ZETA_PATH = "C:\\work\\Zeta.pfwork";
   check("a timed-out save-as paints the deadline error", statusMessages.at(-1)?.label.includes("deadline") === true);
   check(
     "a timed-out save-as re-reads GET /workspace/file/current",
-    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save_as,GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save-as,GET /workspace/file/current",
   );
   const sets = storage.sets.slice(setsBefore);
   check(
@@ -640,7 +640,7 @@ const ZETA_PATH = "C:\\work\\Zeta.pfwork";
   await flush();
   check(
     "a timed-out save-as that never landed re-reads GET /workspace/file/current",
-    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save_as,GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save-as,GET /workspace/file/current",
   );
   check("a timed-out save-as that never landed writes nothing", storage.sets.length === setsBefore);
   check("a timed-out save-as that never landed announces nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);

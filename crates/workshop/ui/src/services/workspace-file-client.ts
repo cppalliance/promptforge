@@ -1,5 +1,5 @@
 // Validated HTTP boundary for the workspace-file APIs: the workspace as
-// a document. GET current, POST open / save_as /
+// a document. GET current, POST open / save-as /
 // duplicate, and PUT window-state, every one same-origin. Every switch
 // answers with the workspace as it now stands, so the caller never needs
 // a second round trip to learn what it switched to. Responses arrive as
@@ -155,7 +155,7 @@ export function openWorkspaceFile(path: string): Promise<WorkspaceFileResponse> 
  * switches to it; a taken path is refused as a conflict.
  */
 export function saveWorkspaceFileAs(path: string): Promise<WorkspaceFileResponse> {
-  return switchTo("/workspace/file/save_as", path);
+  return switchTo("/workspace/file/save-as", path);
 }
 
 /** Copies the current workspace file to `path` and switches to the copy. */

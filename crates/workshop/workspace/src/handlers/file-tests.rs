@@ -115,7 +115,7 @@ async fn save_as_then_current_shows_the_new_path_and_name() {
 
     let response = send(
         &workspace,
-        json_request("POST", "/workspace/file/save_as", path_body(&file_path)),
+        json_request("POST", "/workspace/file/save-as", path_body(&file_path)),
     )
     .await;
 
@@ -256,7 +256,7 @@ async fn save_as_onto_a_taken_path_answers_conflict() {
 
     let response = send(
         &workspace,
-        json_request("POST", "/workspace/file/save_as", path_body(&taken)),
+        json_request("POST", "/workspace/file/save-as", path_body(&taken)),
     )
     .await;
 
@@ -375,7 +375,7 @@ async fn a_malformed_file_body_answers_bad_request() {
     let workspace = Workspace::new();
     for uri in [
         "/workspace/file/open",
-        "/workspace/file/save_as",
+        "/workspace/file/save-as",
         "/workspace/file/duplicate",
     ] {
         let response = send(&workspace, json_request("POST", uri, "{".to_owned())).await;

@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use super::actor::SCHEMA_V1;
 use super::*;
 
+#[path = "tests-mutations.rs"]
 mod mutations;
+#[path = "tests-ui-state-kv.rs"]
 mod ui_state_kv_tests;
 
 #[test]

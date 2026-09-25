@@ -701,7 +701,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-8>
 
-### Step 8: Apply the layout rule to the workspace and rename the Save Workspace As route
+### Step 8: Apply the layout rule to the workspace and rename the Save Workspace As route [completed]
 
 - Component: Workspace
 - Component placement: fifth, because the shared state-bucket and envelope helpers, the `save_timeout.rs` split, and the surface edits must hit the workspace's final paths.

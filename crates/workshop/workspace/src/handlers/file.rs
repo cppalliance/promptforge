@@ -30,7 +30,7 @@ pub(super) fn routes() -> axum::Router<Workspace> {
     axum::Router::new()
         .route("/workspace/file/current", get(current_file))
         .route("/workspace/file/open", post(open_file))
-        .route("/workspace/file/save_as", post(save_as_file))
+        .route("/workspace/file/save-as", post(save_as_file))
         .route("/workspace/file/duplicate", post(duplicate_file))
         .route("/workspace/file/window-state", put(put_window_state))
 }
@@ -60,7 +60,7 @@ impl From<WorkspaceSummary> for WorkspaceFileResponse {
     }
 }
 
-/// The JSON body of `POST /workspace/file/{open,save_as,duplicate}`.
+/// The JSON body of `POST /workspace/file/{open,save-as,duplicate}`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct FilePathRequest {
     /// The workspace file to open, or the path to create the new file at.
@@ -142,4 +142,5 @@ async fn after_switch(workspace: &Workspace, result: Result<(), WorkspaceError>)
 }
 
 #[cfg(test)]
+#[path = "file-tests.rs"]
 mod tests;

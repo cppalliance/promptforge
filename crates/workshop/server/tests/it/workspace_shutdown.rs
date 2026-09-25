@@ -63,7 +63,7 @@ async fn a_graceful_shutdown_leaves_one_file_that_a_relaunch_reopens() {
     let root = tempfile::TempDir::new().expect("tempdir");
     let file = home.path().join("Name.pfwork");
 
-    let saved = post_path(&client, &first, "/workspace/file/save_as", &file).await;
+    let saved = post_path(&client, &first, "/workspace/file/save-as", &file).await;
     assert_eq!(saved["name"], "Name", "save as switches to the new file");
     let granted = post_path(&client, &first, "/workspace/grant", root.path()).await;
     let granted = granted["granted"].clone();

@@ -30,11 +30,15 @@ use crate::workspace_file::{WindowState, now_rfc3339};
 mod backing;
 mod confine;
 mod pointer;
+#[cfg(feature = "test-fixtures")]
+mod stall;
 mod token;
 mod tree;
 
 use backing::Backing;
 use confine::{canonicalize_simplified, reject_forbidden};
+#[cfg(feature = "test-fixtures")]
+pub use stall::WriteStallHandle;
 use token::{current_token, file_token};
 #[cfg(test)]
 use token::{hash_token, mtime_token};
@@ -177,7 +181,7 @@ pub struct Workspace {
     /// The grant-set generation behind [`Workspace::subscribe_roots`].
     roots_generation: watch::Sender<u64>,
     #[cfg(feature = "test-fixtures")]
-    pub(crate) stall: Arc<crate::workspace_stall::WriteStall>,
+    pub(crate) stall: Arc<stall::WriteStall>,
 }
 
 impl Default for Workspace {
@@ -192,7 +196,7 @@ impl Default for Workspace {
             pointer: None,
             roots_generation: watch::Sender::default(),
             #[cfg(feature = "test-fixtures")]
-            stall: Arc::new(crate::workspace_stall::WriteStall::new()),
+            stall: Arc::new(stall::WriteStall::new()),
         }
     }
 }
@@ -417,9 +421,3 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_close;
-#[cfg(test)]
-mod tests_reopen;
-#[cfg(test)]
-mod tests_switch;

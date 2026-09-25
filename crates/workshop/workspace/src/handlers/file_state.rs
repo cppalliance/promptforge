@@ -67,4 +67,5 @@ async fn store(
 }
 
 #[cfg(test)]
+#[path = "file_state-tests.rs"]
 mod tests;

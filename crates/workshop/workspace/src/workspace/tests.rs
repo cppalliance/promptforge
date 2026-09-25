@@ -3,10 +3,13 @@
 use super::*;
 
 mod backing;
+mod close;
 mod grants;
 mod jail;
 mod pointer;
-mod ui_state_memory_tests;
+mod reopen;
+mod switch;
+mod ui_state_memory;
 
 /// A workspace with one granted tempdir, returned alongside so the
 /// directory outlives the test.
