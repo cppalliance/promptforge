@@ -654,6 +654,26 @@ Components, in dependency order:
   - workshop UI `npm run build`, `npm test` (136 passed), `npm run typecheck`: pass
   - gateway config UI `npm run build`, `npm test` (178 passed), `npm run typecheck`: pass
   - Note: the workshop UI `npm test` boots the workbench from `dist/`, so it needs `npm run build` first; the recorded order is build then test.
+- Exit results (Step 34; all pass, each at least as green as the baseline above):
+  - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`: pass (3915 passed, 54 skipped; baseline 3899)
+  - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`: pass
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass (247 passed, 4 skipped; baseline 234)
+  - `cargo nextest run --locked -p workshop-server --features headless`: pass (143 passed, 2 skipped; baseline 130)
+  - `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`: pass
+  - `cargo test -p build-xtask`: pass (169 passed, 18 ignored)
+  - `cargo clippy` (main partition and workshop partition, `-D warnings`): pass
+  - `cargo check -p gateway --no-default-features`: pass
+  - `cargo fmt --all --check`: pass
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo doc -p promptforge --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo +nightly-2026-09-05 xtask api --check`: pass (0 violations)
+  - `mdbook build guide`: pass
+  - `cargo run -p build-user-guide`: pass (no tracked file under `guide/` changed; no workshop export)
+  - workshop UI `npm run build`, `npm test` (139 passed), `npm run typecheck`: pass
+  - gateway config UI `npm run build`, `npm test` (178 passed), `npm run typecheck`: pass
+  - `cargo workshop`: pass (desktop app built from `crates/workshop/desktop`)
+  - Retired-name grep (workshop/shell, Tier: shell, StatusBarShell, createStatusBarShell, ws-shell, mountLiveShell, showShell, WorkshopObserver, "workbench socket", "lazy shell", "empty shell", "boot shell", and `-w SHELL` in `crates/build-xtask/src`): clean
+  - Remaining "shell" in scope: terminal command shell and third-party NSIS keywords only (two frame-sense shared-ui references fixed in this step)
 - Tests: none added. The recorded list is the comparison point for every later step.
 - Commit: "Seed the workshop crates cleanup plan", holding the `vibe/` plan copy, `vibe/ACTIVE`, and the recorded baseline results.
 
@@ -1202,7 +1222,7 @@ Components, in dependency order:
 
 <step-34>
 
-### Step 34: Run the exit gates
+### Step 34: Run the exit gates [completed]
 
 - Component: Exit
 - Piece: exit

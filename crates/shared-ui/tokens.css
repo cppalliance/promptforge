@@ -74,7 +74,7 @@
   --cursor-shadow-secondary: #0000001F;
   --cursor-shadow-tertiary: #0000000F;
 
-  /* VS Code theme surfaces (white-based alpha, for shell chrome) */
+  /* VS Code theme surfaces (white-based alpha, for desk chrome) */
   --bg: #181818;
   --bg-raised: #141414;
   --bg-hover: #F0F0F011;
