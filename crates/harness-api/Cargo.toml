@@ -10,7 +10,7 @@ description = "PromptForge harness public API: the surface through which Worksho
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "sessions"]
 categories = ["development-tools", "api-bindings"]
-documentation = "https://cppalliance.github.io/promptforge/"
+documentation = "https://cppalliance.github.io/promptforge/harness/harness_api/index.html"
 
 [dependencies]
 # The awaitable cancel token (`cancel::CancelHandle`) a client selects

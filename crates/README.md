@@ -36,7 +36,7 @@ The build-script helper that bundles a crate's `ui/` with esbuild into `OUT_DIR`
 
 ## build-user-guide
 
-Assembles the user guide from `guide/src/<set>/` into the summary, per-part indexes, and the assembled exports. Run by hand and in CI; nothing depends on it. No workspace dependencies.
+Checks the user guide chapters in `guide/src/<set>/` and writes the per-set exports. Its `stage <out>` mode writes one mdBook tree per book, with each book's summary and per-part indexes, for `cargo xtask site`. Run by hand and in CI; nothing depends on it. No workspace dependencies.
 
 ## build-workshop
 

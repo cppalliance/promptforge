@@ -4,7 +4,6 @@
 /vibe-review.md
 /conformance-audit.md
 /local/
-/guide/book/
 /guide/scratch/
 *.env
 # Standing guard: the operator's real secrets file must never be tracked.

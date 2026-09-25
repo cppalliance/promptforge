@@ -7,7 +7,7 @@ repository.workspace = true
 publish = false
 
 description = "PromptForge API: the one crate a host depends on to parse prompts and drive their runs"
-documentation = "https://cppalliance.github.io/promptforge/"
+documentation = "https://cppalliance.github.io/promptforge/promptforge/promptforge/index.html"
 
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path.

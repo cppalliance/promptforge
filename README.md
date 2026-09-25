@@ -106,7 +106,7 @@ flowchart LR
 
 - [PromptForge Guide](https://cppalliance.github.io/promptforge/) - four documentation sets: the Workshop, the gateway, the prompt language, and agent programs
 
-Build the guide locally with `mdbook build guide`.
+Build the guide locally with `cargo xtask site --books-only`.
 
 ![Filing cabinets](images/banner-06.png)
 

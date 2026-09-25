@@ -548,7 +548,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-8>
 
-### Step 8: Retire the combined book and update references
+### Step 8: Retire the combined book and update references [completed]
 
 - Component: Pages deployment
 - Piece: housekeeping. Built after the workflow.
@@ -558,9 +558,11 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
   - `tools/document.md` lines 89 and 288: `mdbook build guide` becomes `cargo xtask site --books-only`. That tool edits chapters only, so it does not need the slower rustdoc builds.
   - `guide/CONTRIBUTING.md`: the assembler owns the staged SUMMARY and index files, and the build command changes.
   - `crates/README.md`: the `build-user-guide` description.
+  - `README.md` line 109 and `AGENTS.md` line 67: `mdbook build guide` becomes `cargo xtask site --books-only`, because `guide/book.toml` is retired in this step and the old command stops working.
+  - `tools/document.md` no longer exists (it was deleted in `f4da7811`, before this plan ran), so it needs no edit.
   - `documentation =` in `crates/promptforge/Cargo.toml` and `crates/harness-api/Cargo.toml`, set to the URLs given under Housekeeping.
   - All of these are factual path and command edits, with no new prose.
-- Tests: `cargo run -p build-user-guide` passes and does not recreate any retired file, and `cargo test -p build-user-guide` passes; a full `cargo xtask site` passes; `node --test crates/workshop/ui/test/docs-claims.mjs` still finds markdown under `guide/src`; `rg "mdbook build guide"` finds nothing in `tools/`, `guide/`, or `crates/README.md`; the `ci.yml` "Docs" and "Facade docs" commands pass unchanged; `git status` is clean after a build.
+- Tests: `cargo run -p build-user-guide` passes and does not recreate any retired file, and `cargo test -p build-user-guide` passes; a full `cargo xtask site` passes; `node --test crates/workshop/ui/test/docs-claims.mjs` still finds markdown under `guide/src`; `rg "mdbook build guide"` finds nothing in `tools/`, `guide/`, `crates/README.md`, `README.md`, or `AGENTS.md`; the `ci.yml` "Docs" and "Facade docs" commands pass unchanged; `git status` is clean after a build.
 - Commit: combined book retired and references updated.
 
 </step-8>
