@@ -915,7 +915,7 @@ Components, in dependency order:
 
 <step-16>
 
-### Step 16: Move config-ui's views to pages
+### Step 16: Move config-ui's views to pages [completed]
 
 - Component: Shell vocabulary
 - Piece: config-ui

@@ -32,12 +32,12 @@ import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
 import { SheetStore } from "./services/sheet-store";
-import { createDiscoverView } from "./views/discover-view";
-import { createCloudModelsView } from "./views/cloud-models-view";
-import { createModelsView } from "./views/models-view";
-import { createProfilesView } from "./views/profiles-view";
-import { createSecretsView } from "./views/secrets-view";
-import { createSettingsView } from "./views/settings-view";
+import { createDiscoverView } from "./pages/discover-page";
+import { createCloudModelsView } from "./pages/cloud-models-page";
+import { createModelsView } from "./pages/models-page";
+import { createProfilesView } from "./pages/profiles-page";
+import { createSecretsView } from "./pages/secrets-page";
+import { createSettingsView } from "./pages/settings-page";
 
 export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
 export { SheetStore } from "./services/sheet-store";
