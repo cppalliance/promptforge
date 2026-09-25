@@ -408,7 +408,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-6>
 
-### Step 6: List linked folders as directories
+### Step 6: List linked folders as directories [completed]
 
 - Component: Workspace confinement
 

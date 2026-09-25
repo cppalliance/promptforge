@@ -434,7 +434,8 @@ impl Workspace {
         }
     }
 
-    /// Lists one level of an existing confined directory.
+    /// Lists one level of an existing confined directory. A link to a folder
+    /// lists as that folder, any other link as itself; opening either confines.
     fn directory_listing(&self, path: &Path) -> Result<TreeListing, WorkspaceError> {
         let canonical = self.confine_existing(path)?;
         let metadata =
@@ -447,9 +448,17 @@ impl Workspace {
             fs::read_dir(&canonical).map_err(|source| WorkspaceError::ListDirectory { source })?
         {
             let entry = entry.map_err(|source| WorkspaceError::ListDirectory { source })?;
-            let metadata = entry
+            let own = entry
                 .metadata()
                 .map_err(|source| WorkspaceError::InspectPath { source })?;
+            let metadata = if own.is_symlink() {
+                fs::metadata(entry.path())
+                    .ok()
+                    .filter(fs::Metadata::is_dir)
+                    .unwrap_or(own)
+            } else {
+                own
+            };
             let kind = if metadata.is_dir() {
                 EntryKind::Directory
             } else {
