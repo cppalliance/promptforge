@@ -10,12 +10,12 @@
 use std::time::Duration;
 
 mod events;
-pub(crate) mod progress;
+pub(crate) mod progress_stream;
 mod socket;
 mod sse;
 
 pub use events::{ForwardedResponse, GatewayResponse, SwitchProfileBody, SwitchResponse};
-pub(crate) use progress::ProgressStream;
+pub(crate) use progress_stream::ProgressStream;
 pub use socket::GatewayRealtimeSocket;
 use sse::read;
 
@@ -369,7 +369,7 @@ impl GatewayClient {
     pub async fn subscribe_progress(&self) -> Result<ProgressStream, GatewayError> {
         let request = self.authorize(self.http.get(format!("{}/admin/progress", self.base_url)));
         let response = self.send_bounded(request).await?;
-        progress::subscribe(response).await
+        progress_stream::subscribe(response).await
     }
 }
 

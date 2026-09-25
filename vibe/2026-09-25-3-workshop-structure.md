@@ -630,7 +630,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-5>
 
-### Step 5: Rename the gateway modules and share the heartbeat's stop-and-rebind logic
+### Step 5: Rename the gateway modules and share the heartbeat's stop-and-rebind logic [completed]
 
 - Component: Gateway
 - Artifacts:

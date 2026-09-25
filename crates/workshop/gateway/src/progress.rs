@@ -28,8 +28,8 @@ use tokio::time::Instant;
 
 use workshop_registry::Push;
 
-use crate::gateway::ProgressStream;
-use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
+use crate::binding::{GatewayBinding, GatewaySnapshot};
+use crate::client::ProgressStream;
 use crate::heartbeat::GatewayHealth;
 
 #[cfg(test)]
@@ -108,29 +108,41 @@ pub(crate) fn spawn_with_timing(
 }
 
 /// Why one wait ended early.
-enum Ended {
+pub(crate) enum Ended {
     /// The stop signal fired, or a control channel closed: the task
     /// returns.
     Stop,
-    /// The endpoint binding was replaced: subscribe to the new one now.
+    /// The endpoint binding was replaced: start over against the new one.
     Rebind,
     /// The gateway's reachability changed, or the stream closed: fall
     /// back to the reconnect loop.
     Lost,
 }
 
-/// The control signals every wait in the loop listens to beside its own
-/// future.
-struct Signals<'a> {
-    stop: &'a mut oneshot::Receiver<()>,
-    reachable: &'a mut watch::Receiver<bool>,
-    gateway_changed: &'a mut watch::Receiver<u64>,
+/// The control signals every wait in a loop listens to beside its own
+/// future. The heartbeat writes reachability rather than following it,
+/// so it leaves `reachable` empty.
+pub(crate) struct Signals<'a> {
+    pub(crate) stop: &'a mut oneshot::Receiver<()>,
+    pub(crate) reachable: Option<&'a mut watch::Receiver<bool>>,
+    pub(crate) gateway_changed: &'a mut watch::Receiver<u64>,
+}
+
+impl Signals<'_> {
+    /// The current reachability verdict, marked seen so the next wait
+    /// wakes only on a later change. Without a watch it reads reachable.
+    fn reachable_now(&mut self) -> bool {
+        self.reachable
+            .as_deref_mut()
+            .is_none_or(|reachable| *reachable.borrow_and_update())
+    }
 }
 
 /// The subscription loop, in named phases: idle while unreachable,
 /// subscribe, drive the subscription, and recover from its end. Every
-/// wait goes through [`until`], so the stop signal wins each select and
-/// the presenter's deadlines keep ticking between subscriptions.
+/// wait goes through [`until`] and [`ticking`], so the stop signal wins
+/// each select and the presenter's deadlines keep ticking between
+/// subscriptions.
 async fn run(
     gateway: &GatewayBinding,
     push: &Push,
@@ -142,7 +154,7 @@ async fn run(
     let mut gateway_changed = gateway.subscribe();
     let mut signals = Signals {
         stop,
-        reachable: &mut reachable,
+        reachable: Some(&mut reachable),
         gateway_changed: &mut gateway_changed,
     };
     let mut presenter = Presenter::new(timing.policy);
@@ -170,8 +182,13 @@ async fn idle_until_reachable(
     presenter: &mut Presenter,
     push: &Push,
 ) -> Result<(), Ended> {
-    while !*signals.reachable.borrow_and_update() {
-        match until(std::future::pending::<()>(), signals, presenter, push).await {
+    while !signals.reachable_now() {
+        match until(
+            ticking(std::future::pending::<()>(), presenter, push),
+            signals,
+        )
+        .await
+        {
             Err(Ended::Stop) => return Err(Ended::Stop),
             Err(Ended::Lost | Ended::Rebind) | Ok(()) => {}
         }
@@ -190,10 +207,8 @@ async fn subscribe(
     push: &Push,
 ) -> Result<ProgressStream, Ended> {
     match until(
-        snapshot.client().subscribe_progress(),
+        ticking(snapshot.client().subscribe_progress(), presenter, push),
         signals,
-        presenter,
-        push,
     )
     .await
     {
@@ -206,10 +221,12 @@ async fn subscribe(
     // A declined subscription waits out the resubscribe delay, then loops
     // around to try again.
     match until(
-        tokio::time::sleep(timing.resubscribe_delay),
+        ticking(
+            tokio::time::sleep(timing.resubscribe_delay),
+            presenter,
+            push,
+        ),
         signals,
-        presenter,
-        push,
     )
     .await
     {
@@ -228,7 +245,7 @@ async fn drive_stream(
 ) -> Ended {
     tokio::pin!(stream);
     loop {
-        match until(stream.next(), signals, presenter, push).await {
+        match until(ticking(stream.next(), presenter, push), signals).await {
             Err(ended) => break ended,
             Ok(Some(Ok(snapshot))) => presenter.apply(snapshot, Instant::now(), push),
             // One malformed snapshot or a terminal read failure; the
@@ -259,12 +276,14 @@ async fn recover(
         }
         Ended::Lost => presenter.detach(Instant::now(), push),
     }
-    if *signals.reachable.borrow_and_update() {
+    if signals.reachable_now() {
         match until(
-            tokio::time::sleep(timing.resubscribe_delay),
+            ticking(
+                tokio::time::sleep(timing.resubscribe_delay),
+                presenter,
+                push,
+            ),
             signals,
-            presenter,
-            push,
         )
         .await
         {
@@ -275,31 +294,45 @@ async fn recover(
     Ok(())
 }
 
-/// Awaits `future` with the control signals and the presenter's next
-/// deadline armed beside it. A control signal ends the wait early with
-/// its [`Ended`]; a presenter deadline ticks the presenter and keeps
-/// waiting, so a minimum-visible hold lapses on time even while the loop
-/// is between subscriptions. Both watch senders live in the registry's
-/// [`GatewayHandles`](crate::GatewayHandles) for the process lifetime, so
-/// a closed watch means shutdown.
-async fn until<F: Future>(
+/// Awaits `future` with the control signals armed beside it. A control
+/// signal ends the wait early with its [`Ended`]. Both watch senders live
+/// in the registry's [`GatewayHandles`](crate::GatewayHandles) for the
+/// process lifetime, so a closed watch means shutdown.
+pub(crate) async fn until<F: Future>(
     future: F,
     signals: &mut Signals<'_>,
-    presenter: &mut Presenter,
-    push: &Push,
 ) -> Result<F::Output, Ended> {
+    tokio::select! {
+        _ = &mut *signals.stop => Err(Ended::Stop),
+        changed = reachability_changed(signals.reachable.as_deref_mut()) => {
+            Err(if changed.is_err() { Ended::Stop } else { Ended::Lost })
+        }
+        changed = signals.gateway_changed.changed() => {
+            Err(if changed.is_err() { Ended::Stop } else { Ended::Rebind })
+        }
+        output = future => Ok(output),
+    }
+}
+
+/// Resolves on the next reachability change, or never without a watch.
+async fn reachability_changed(
+    reachable: Option<&mut watch::Receiver<bool>>,
+) -> Result<(), watch::error::RecvError> {
+    match reachable {
+        Some(reachable) => reachable.changed().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Awaits `future` while ticking the presenter at each of its deadlines,
+/// so a minimum-visible hold lapses on time even while the loop is
+/// between subscriptions.
+async fn ticking<F: Future>(future: F, presenter: &mut Presenter, push: &Push) -> F::Output {
     tokio::pin!(future);
     loop {
         tokio::select! {
-            _ = &mut *signals.stop => return Err(Ended::Stop),
-            changed = signals.reachable.changed() => {
-                return Err(if changed.is_err() { Ended::Stop } else { Ended::Lost });
-            }
-            changed = signals.gateway_changed.changed() => {
-                return Err(if changed.is_err() { Ended::Stop } else { Ended::Rebind });
-            }
             () = wake_at(presenter.next_wake()) => presenter.tick(Instant::now(), push),
-            output = &mut future => return Ok(output),
+            output = &mut future => return output,
         }
     }
 }

@@ -8,9 +8,9 @@ use std::sync::Arc;
 use workshop_registry::{BackgroundTaskAdapter, Registration, Registry, ShutdownHandle};
 use workshop_support::ReconnectBackoff;
 
-use crate::gateway_binding::GatewayBinding;
-use crate::gateway_progress;
+use crate::binding::GatewayBinding;
 use crate::heartbeat::{self, GatewayHealth};
+use crate::progress;
 
 /// The gateway subsystem's shared handles: the atomically replaceable
 /// endpoint binding every gateway call snapshots, and the heartbeat's
@@ -91,7 +91,7 @@ pub fn register_tasks(
         let binding = handles.binding().clone();
         let health = handles.health().clone();
         move || {
-            let task = gateway_progress::spawn(binding.clone(), registry.push(), health.clone());
+            let task = progress::spawn(binding.clone(), registry.push(), health.clone());
             ShutdownHandle::new(move || task.shutdown())
         }
     })));

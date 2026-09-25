@@ -3,7 +3,7 @@
 //! server.
 //!
 //! One task is spawned with the server ([`spawn`]): while the gateway
-//! answers, it probes through [`GatewayClient::health`](crate::gateway::GatewayClient::health) on the fixed
+//! answers, it probes through [`GatewayClient::health`](crate::client::GatewayClient::health) on the fixed
 //! [`HEARTBEAT_INTERVAL`] and publishes the outcome to the shared
 //! [`GatewayHealth`] flag the gateway-dependent routes read; while the
 //! gateway is unreachable, the next probe instead waits out a delay
@@ -36,11 +36,9 @@ use workshop_protocol::{Activity, Severity, StatusBarUpdate};
 use workshop_registry::Push;
 use workshop_support::ReconnectBackoff;
 
-use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
-
-#[path = "heartbeat-refresh.rs"]
-mod refresh;
-pub use refresh::{refresh_catalog, refresh_profiles};
+use crate::binding::{GatewayBinding, GatewaySnapshot};
+use crate::progress::{Ended, Signals, until};
+use crate::refresh::{refresh_catalog, refresh_profiles};
 
 /// The status line announcing that the gateway answers its health probe.
 pub(crate) const CONNECTED_LABEL: &str = "Connected to gateway";
@@ -203,19 +201,18 @@ struct RefreshState {
     selection_restored: bool,
 }
 
-/// Why a phase of the probe loop ended before it completed.
-enum Phase {
-    /// The stop signal fired, or a control channel closed: end the loop.
-    Stop,
-    /// The gateway binding was replaced: reset iteration state and
-    /// restart the loop from its top.
-    Rebind,
+/// What the probe loop has learned about the current binding: the last
+/// probe verdict and which menu sources have converged. A replaced
+/// binding starts it over.
+#[derive(Default)]
+struct BindingState {
+    last: Option<bool>,
+    refresh: RefreshState,
 }
 
-/// The probe loop, in named phases: wait out the probe interval, probe
-/// the health endpoint, announce a transition, refresh stale menu sources,
-/// and restore the selection. The stop signal wins every select, and a
-/// replaced binding restarts the iteration from the top.
+/// The probe loop: repeats [`cycle`] until the stop signal or an
+/// exhausted backoff budget ends it. A replaced binding restarts the
+/// cycle from the top with fresh state.
 async fn run(
     gateway: &GatewayBinding,
     push: &Push,
@@ -224,70 +221,77 @@ async fn run(
     backoff: &ReconnectBackoff,
     stop: &mut oneshot::Receiver<()>,
 ) {
-    let mut last: Option<bool> = None;
-    let mut refresh = RefreshState::default();
     let mut gateway_changed = gateway.subscribe();
+    let mut signals = Signals {
+        stop,
+        reachable: None,
+        gateway_changed: &mut gateway_changed,
+    };
+    let mut state = BindingState::default();
     loop {
-        match await_probe_interval(last, interval, backoff, push, stop, &mut gateway_changed).await
+        match cycle(
+            gateway,
+            push,
+            health,
+            interval,
+            backoff,
+            &mut signals,
+            &mut state,
+        )
+        .await
         {
             Ok(()) => {}
-            Err(Phase::Stop) => break,
-            Err(Phase::Rebind) => {
-                last = None;
-                refresh = RefreshState::default();
-                continue;
-            }
-        }
-        let snapshot = gateway.snapshot();
-        let generation = snapshot.generation();
-        let reachable = match probe(snapshot.as_ref(), stop, &mut gateway_changed).await {
-            Ok(reachable) => reachable,
-            Err(Phase::Stop) => break,
-            Err(Phase::Rebind) => {
-                last = None;
-                refresh = RefreshState::default();
-                continue;
-            }
-        };
-        if gateway.generation() != generation {
-            last = None;
-            refresh = RefreshState::default();
-            continue;
-        }
-        announce_transition(push, health, reachable, &mut last);
-        if !reachable {
-            refresh = RefreshState::default();
-            continue;
-        }
-        if !refresh.profiles_ready || !refresh.catalog_ready {
-            match refresh_sources(
-                snapshot.as_ref(),
-                push,
-                &mut refresh,
-                stop,
-                &mut gateway_changed,
-            )
-            .await
-            {
-                Ok(()) => {}
-                Err(Phase::Stop) => break,
-                Err(Phase::Rebind) => {
-                    last = None;
-                    refresh = RefreshState::default();
-                    continue;
-                }
-            }
-        }
-        if refresh.profiles_ready && refresh.catalog_ready && !refresh.selection_restored {
-            // A fresh boot has no selection, so restore the remembered
-            // model for the now-known active profile (else the first
-            // catalog model); a reconnect whose selection survived the
-            // outage is a no-op. This branch runs exactly once per reachable
-            // convergence because both readiness facts remain true.
-            push.menu().restore_selection();
-            refresh.selection_restored = true;
+            Err(Ended::Stop) => break,
+            // With no reachability watch armed, `Lost` never arrives.
+            Err(Ended::Rebind | Ended::Lost) => state = BindingState::default(),
         }
     }
+}
+
+/// One pass of the probe loop, in named phases: wait out the probe
+/// interval, probe the health endpoint, announce a transition, refresh
+/// stale menu sources, and restore the selection. Every wait goes through
+/// [`until`], so the stop signal and a replaced binding end the pass
+/// early.
+async fn cycle(
+    gateway: &GatewayBinding,
+    push: &Push,
+    health: &GatewayHealth,
+    interval: Duration,
+    backoff: &ReconnectBackoff,
+    signals: &mut Signals<'_>,
+    state: &mut BindingState,
+) -> Result<(), Ended> {
+    await_probe_interval(state.last, interval, backoff, push, signals).await?;
+    let snapshot = gateway.snapshot();
+    let generation = snapshot.generation();
+    let reachable = until(snapshot.client().health(), signals).await?;
+    if gateway.generation() != generation {
+        return Err(Ended::Rebind);
+    }
+    announce_transition(push, health, reachable, &mut state.last);
+    let refresh = &mut state.refresh;
+    if !reachable {
+        *refresh = RefreshState::default();
+        return Ok(());
+    }
+    if !refresh.profiles_ready || !refresh.catalog_ready {
+        until(
+            refresh_incomplete_sources(&snapshot, push, refresh),
+            signals,
+        )
+        .await?;
+    }
+    if refresh.profiles_ready && refresh.catalog_ready && !refresh.selection_restored {
+        // A fresh boot has no selection, so restore the remembered
+        // model for the now-known active profile (else the first
+        // catalog model); a reconnect whose selection survived the
+        // outage is a no-op. This branch runs exactly once per reachable
+        // convergence because both readiness facts remain true.
+        push.menu().restore_selection();
+        refresh.selection_restored = true;
+    }
+    Ok(())
 }
 
 /// The wait before a probe: skipped on the first, `interval` while the
@@ -300,9 +304,8 @@ async fn await_probe_interval(
     interval: Duration,
     backoff: &ReconnectBackoff,
     push: &Push,
-    stop: &mut oneshot::Receiver<()>,
-    gateway_changed: &mut watch::Receiver<u64>,
-) -> Result<(), Phase> {
+    signals: &mut Signals<'_>,
+) -> Result<(), Ended> {
     let Some(reachable) = last else {
         return Ok(());
     };
@@ -316,38 +319,9 @@ async fn await_probe_interval(
             "the reconnect budget is exhausted; restart the workshop to retry",
             Activity::General,
         );
-        return Err(Phase::Stop);
+        return Err(Ended::Stop);
     };
-    tokio::select! {
-        _ = &mut *stop => Err(Phase::Stop),
-        changed = gateway_changed.changed() => {
-            if changed.is_err() {
-                Err(Phase::Stop)
-            } else {
-                Err(Phase::Rebind)
-            }
-        }
-        () = tokio::time::sleep(wait) => Ok(()),
-    }
-}
-
-/// One bounded health probe against the current snapshot's client.
-async fn probe(
-    snapshot: &GatewaySnapshot,
-    stop: &mut oneshot::Receiver<()>,
-    gateway_changed: &mut watch::Receiver<u64>,
-) -> Result<bool, Phase> {
-    tokio::select! {
-        _ = &mut *stop => Err(Phase::Stop),
-        changed = gateway_changed.changed() => {
-            if changed.is_err() {
-                Err(Phase::Stop)
-            } else {
-                Err(Phase::Rebind)
-            }
-        }
-        reachable = snapshot.client().health() => Ok(reachable),
-    }
+    until(tokio::time::sleep(wait), signals).await
 }
 
 /// Publishes the probe outcome and, when it differs from the last
@@ -381,36 +355,14 @@ fn announce_transition(
     }
 }
 
-/// Refreshes the menu sources that have not converged, racing the stop
-/// signal and a binding replacement against the refresh. All menu state
-/// is server-owned and reaches the UI via socket pushes - the UI fetches
-/// nothing on boot - so every transition into reachable, boot's first
-/// probe included, (re)populates the profile state and the model catalog.
-/// Healthy ticks independently repeat either refresh until both sources
-/// are populated, because health and one ready source do not imply the
-/// other source is ready; the probe interval bounds retries and keeps this
-/// from becoming a busy loop.
-async fn refresh_sources(
-    snapshot: &GatewaySnapshot,
-    push: &Push,
-    refresh: &mut RefreshState,
-    stop: &mut oneshot::Receiver<()>,
-    gateway_changed: &mut watch::Receiver<u64>,
-) -> Result<(), Phase> {
-    tokio::select! {
-        _ = &mut *stop => Err(Phase::Stop),
-        changed = gateway_changed.changed() => {
-            if changed.is_err() {
-                Err(Phase::Stop)
-            } else {
-                Err(Phase::Rebind)
-            }
-        }
-        () = refresh_incomplete_sources(snapshot, push, refresh) => Ok(()),
-    }
-}
-
 /// Refreshes only the gateway-owned menu sources that have not converged.
+/// All menu state is server-owned and reaches the UI via socket pushes -
+/// the UI fetches nothing on boot - so every transition into reachable,
+/// boot's first probe included, (re)populates the profile state and the
+/// model catalog. Healthy ticks independently repeat either refresh until
+/// both sources are populated, because health and one ready source do not
+/// imply the other source is ready; the probe interval bounds retries and
+/// keeps this from becoming a busy loop.
 async fn refresh_incomplete_sources(
     snapshot: &GatewaySnapshot,
     push: &Push,

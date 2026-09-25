@@ -21,25 +21,22 @@
 //!   `gateway_api_types::Progress` alone: no progress machinery is
 //!   shared with the gateway family.
 
-mod gateway;
-mod gateway_binding;
-mod gateway_progress;
+mod binding;
+mod client;
 mod handles;
 mod heartbeat;
+mod progress;
+mod refresh;
 mod resolve;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod test_gateway;
 
-pub use gateway::{
+pub use binding::{GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater};
+pub use client::{
     ForwardedResponse, GatewayClient, GatewayError, GatewayRealtimeSocket, GatewayResponse,
     REQUEST_TIMEOUT, SwitchProfileBody, SwitchResponse,
 };
-pub use gateway_binding::{
-    GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater,
-};
 pub use handles::{GatewayHandles, GatewayTaskRegistrations, register, register_tasks};
-pub use heartbeat::{
-    GatewayHealth, Heartbeat, join_status, refresh_catalog, refresh_profiles,
-    spawn as spawn_heartbeat,
-};
+pub use heartbeat::{GatewayHealth, Heartbeat, join_status, spawn as spawn_heartbeat};
+pub use refresh::{refresh_catalog, refresh_profiles};
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway, report, resolve};

@@ -361,5 +361,7 @@ async fn a_reconnect_rests_the_bar_and_resubscribes_once() {
     subscriber.shutdown().await;
 }
 
+#[path = "tests-presenter.rs"]
 mod presenter;
+#[path = "tests-recovery.rs"]
 mod recovery;

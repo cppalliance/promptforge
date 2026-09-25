@@ -3,7 +3,7 @@
 use workshop_protocol::is_chat_capable;
 use workshop_registry::Push;
 
-use crate::gateway::GatewayClient;
+use crate::client::GatewayClient;
 
 /// Re-fetches the gateway's model catalog and pushes it to every session.
 ///

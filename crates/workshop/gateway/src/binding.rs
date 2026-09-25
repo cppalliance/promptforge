@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use arc_swap::ArcSwap;
 use tokio::sync::watch;
 
-use crate::gateway::{GatewayClient, GatewayError};
+use crate::client::{GatewayClient, GatewayError};
 
 /// One immutable generation of every gateway client credential.
 pub struct GatewaySnapshot {
