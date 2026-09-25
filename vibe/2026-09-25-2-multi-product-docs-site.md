@@ -467,7 +467,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-4>
 
-### Step 4: Stage mode
+### Step 4: Stage mode [completed]
 
 - Component: Book assembler
 - Piece: staging. Built after the book table.

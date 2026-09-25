@@ -1,16 +1,22 @@
 //! Assembles the PromptForge guide: checks every set's chapters under
 //! `guide/src/<set>/` and writes the per-set single-file exports,
-//! `guide/promptforge-<set>-guide.md`.
+//! `guide/promptforge-<set>-guide.md`. With `stage <out>`, it instead
+//! stages one mdBook source tree per book under the absolute folder `<out>`
+//! (see `stage.rs`).
 //!
 //! Chapter files have a numeric prefix (`01-frontmatter.md`) so a name sort
 //! is the reading order. The generator owns the chapters; this crate owns the
 //! exports, which are never hand-edited.
 
+use std::env;
+use std::ffi::OsString;
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+
+mod stage;
 
 /// The books in audience order, each with its sets and their part titles.
 /// This is the only list of books; nothing else names them.
@@ -55,7 +61,15 @@ impl std::error::Error for AssembleError {}
 fn main() {
     let workspace = workspace_root();
     let guide = workspace.join("guide");
-    if let Err(error) = assemble(&guide) {
+    let args: Vec<OsString> = env::args_os().skip(1).collect();
+    let result = match args.as_slice() {
+        [] => assemble(&guide),
+        [mode, out] if mode == "stage" => stage::stage(&guide, Path::new(out)),
+        _ => Err(AssembleError(format!(
+            "usage: build-user-guide [stage <absolute-out>], got {args:?}"
+        ))),
+    };
+    if let Err(error) = result {
         eprintln!("error: {error}");
         process::exit(1);
     }
@@ -150,13 +164,6 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
 }
 
 /// Renders a part landing page: the part title and its chapter list.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "exercised by tests until the stage mode renders books"
-    )
-)]
 fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     let mut out = format!("# {part_title}\n");
     for chapter in chapters {
@@ -166,17 +173,11 @@ fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     out
 }
 
-/// Renders SUMMARY.md: the introduction, then the parts in audience order
-/// with every chapter linked.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "exercised by tests until the stage mode renders books"
-    )
-)]
+/// Renders a book's SUMMARY.md: its parts in audience order, each opening on
+/// the set's overview, with every chapter linked. There is no introduction
+/// entry, so the book opens on its first set's `index.md`.
 fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
-    let mut out = String::from("# Summary\n\n- [Introduction](introduction.md)\n");
+    let mut out = String::from("# Summary\n");
     for (set, part_title, chapters) in parts {
         let _ = write!(out, "\n# {part_title}\n\n- [Overview]({set}/index.md)\n");
         for chapter in chapters {
@@ -207,13 +208,6 @@ fn render_export(
 
 /// Verifies that every relative link target in SUMMARY.md resolves to a file
 /// under `src/`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "exercised by tests until the stage mode renders books"
-    )
-)]
 fn check_links(summary: &str, src: &Path) -> Result<(), AssembleError> {
     for line in summary.lines() {
         let Some(start) = line.find("](") else {
@@ -261,9 +255,22 @@ fn workspace_root() -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Builds a fake guide tree with every set in `BOOKS` and returns its root.
-    fn fake_guide() -> tempfile::TempDir {
+    /// Builds a fake guide tree with every book's `book.toml`, the mdBook
+    /// back-link script, and every set in `BOOKS`, and returns its root.
+    pub(crate) fn fake_guide() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
+        for (book, _) in BOOKS {
+            let book_dir = dir.path().join("books").join(book);
+            fs::create_dir_all(&book_dir).expect("mkdir book");
+            fs::write(
+                book_dir.join("book.toml"),
+                format!("[book]\ntitle = \"{book}\"\n"),
+            )
+            .expect("book.toml");
+        }
+        let chrome = dir.path().join("chrome");
+        fs::create_dir_all(&chrome).expect("mkdir chrome");
+        fs::write(chrome.join("back-link.js"), "// All docs link.\n").expect("back-link.js");
         let src = dir.path().join("src");
         for (set, _) in sets() {
             fs::create_dir_all(src.join(set)).expect("mkdir set");
@@ -338,7 +345,7 @@ mod tests {
             .expect("language part");
         let agent = summary.find("# Agent Programs").expect("agent part");
         assert!(gateway < language && language < agent);
-        assert!(summary.contains("- [Introduction](introduction.md)"));
+        assert!(!summary.contains("introduction.md"), "{summary}");
         assert!(summary.contains("- [Start](gateway/01-start.md)"));
     }
 
