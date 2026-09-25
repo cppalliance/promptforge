@@ -2,7 +2,7 @@
 // session - agent windows are modal, so the socket's whole life is one
 // session plus the agent list that precedes it. The frame shapes live in
 // protocol.ts; the Rust half of the routing is
-// crates/workshop/sessions/src/agents/socket.rs.
+// crates/workshop/server/src/agents/socket.rs.
 //
 // Routing follows the SPA's delivery discipline, one class per frame:
 //

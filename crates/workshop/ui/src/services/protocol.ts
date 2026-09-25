@@ -78,7 +78,7 @@ export interface SelectModelFrame {
 // --- Agent-session frames (/agents/ws) --------------------------------------
 // The Rust half of this family is the frame structs in
 // crates/workshop/protocol/src and the routing in
-// crates/workshop/sessions/src/agents/socket.rs. Delivery classes mirror the Rust docs:
+// crates/workshop/server/src/agents/socket.rs. Delivery classes mirror the Rust docs:
 // durable frames deliver exactly (the event log's per-client cursor and the
 // wait registry's resend-on-attach are the repair paths), ephemeral frames
 // may drop under lag and repair from a complete snapshot or a superseding

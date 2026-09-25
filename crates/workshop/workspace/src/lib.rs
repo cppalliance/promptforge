@@ -10,7 +10,7 @@
 //!
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`, and the service crates.
-//!   Read `AGENTS.md` before adding an import.
+//!   Read the repository-root `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Every request path is checked lexically (no `..`, and on Windows no

@@ -6,19 +6,27 @@
 //! so the composition root never hand-wires what a subsystem can
 //! announce itself.
 //!
+//! The runtime links the subsystem-named seams carry: the gateway
+//! drives the menu through [`MenuPush`], publishing a model catalog
+//! forces a menu reconcile through [`Push::push_models_catalog`], and
+//! agent sessions read the workspace's granted roots through
+//! [`WorkspaceRoots`].
+//!
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: `workshop-protocol` (the wire
-//!   types the push-channel contributions use). Read `AGENTS.md`
-//!   before adding an import.
+//!   types the push-channel contributions use). Read the
+//!   repository-root `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Every subsystem trait is sealed (a private empty supertrait), so
 //!   only this crate implements them: registrants plug in through the
 //!   adapters provided here, never by implementing a trait downstream.
-//! - Never add a field, slot, or accessor naming a subsystem; a new
-//!   subsystem changes its own crate and one `register` call, never
-//!   this crate.
+//! - Subsystem names live only in the sealed traits ([`MenuSink`],
+//!   [`CatalogSink`], [`StatusSink`], [`WorkspaceRoots`], [`MenuPush`]):
+//!   a new subsystem adds its trait and adapter here and changes nothing
+//!   else; the collections stay keyed by type, never by a per-subsystem
+//!   field or accessor.
 //! - An unregistered contribution is a graceful no-op, never an error:
 //!   consumers branch on `None` and continue degraded, and the [`Push`]
 //!   facade drops intents whose sink is unregistered. The composition

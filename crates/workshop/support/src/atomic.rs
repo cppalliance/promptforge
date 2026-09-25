@@ -1,5 +1,6 @@
-//! Crash-safe file writes shared by the workspace write endpoint and the
-//! menu's model-memory persistence: each write lands in a uniquely named
+//! Crash-safe file writes shared by the workspace write endpoint and
+//! pointer module, the user-state store, and the menu's model-memory
+//! persistence: each write lands in a uniquely named
 //! sibling temp file, is synced to disk, and is renamed over the target,
 //! so a crash at any moment leaves either the old contents or the new,
 //! never a truncation. The startup sweep removes temp files orphaned by

@@ -6,7 +6,7 @@
 //! ## Invariants
 //!
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
-//!   `workshop-support`. Read `AGENTS.md` before adding an import.
+//!   `workshop-support`. Read the repository-root `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Sending on the bus never blocks: a send with no subscribers is a

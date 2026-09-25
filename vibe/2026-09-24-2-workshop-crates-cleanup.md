@@ -1181,7 +1181,7 @@ Components, in dependency order:
 
 <step-33>
 
-### Step 33: Correct the code-level docs
+### Step 33: Correct the code-level docs [completed]
 
 - Component: Code-level docs
 - Piece: docs

@@ -2,12 +2,12 @@
 //! HTTP client for the PromptForge gateway's OpenAI-compatible API, the
 //! replaceable endpoint binding and discovery-file resolution, the
 //! reachability heartbeat, the gateway progress subscriber, and the
-//! workshop's run event log.
+//! gateway cache API.
 //!
 //! ## Invariants
 //!
 //! - Tier: service; may depend on: `workshop-protocol`, `workshop-registry`,
-//!   `workshop-support`. Read `AGENTS.md` before adding an import.
+//!   `workshop-support`. Read the repository-root `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - No axum type appears in this crate's public API: the domain code

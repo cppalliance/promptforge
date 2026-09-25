@@ -21,7 +21,7 @@
 //! ## Invariants
 //!
 //! - Tier: vocabulary; may depend on: no internal `workshop-*` crates.
-//!   Read `AGENTS.md` before adding an import.
+//!   Read the repository-root `AGENTS.md` before adding an import.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Zero I/O: no sockets, tasks, or clocks, so every wire shape is

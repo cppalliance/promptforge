@@ -48,7 +48,7 @@ version = "0.38"
 version = "0.61"
 
 # Linux microphone permission: WebKitGTK ships with enable-media-stream off
-# and a deny-all permission handler; src/bridge.rs opts the session in.
+# and a deny-all permission handler; src/linux_media.rs opts the session in.
 [target.'cfg(target_os = "linux")'.dependencies.webkit2gtk]
 version = "2.0.2"
 
@@ -69,8 +69,8 @@ gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
 # Not `workspace = true`: the WebView2 file-drop bridge (src/bridge.rs) is
 # raw COM and cannot be written without unsafe, and a workspace `forbid`
 # cannot be overridden by a module allow. The workspace lint set is
-# mirrored with unsafe_code lowered to deny, which bridge.rs alone opts
-# out of.
+# mirrored with unsafe_code lowered to deny (which bridge.rs alone opts
+# out of) and clippy pedantic lowered to warn.
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
