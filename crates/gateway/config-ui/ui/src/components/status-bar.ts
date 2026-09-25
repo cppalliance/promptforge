@@ -1,5 +1,5 @@
-// The fixed bottom status bar [VS Code], built on the shared shell
-// (shared-ui/status-bar): the shell owns the bar, the text region, and
+// The fixed bottom status bar [VS Code], built on the shared view
+// (shared-ui/status-bar): the view owns the bar, the text region, and
 // the busy barberpole beside the indicators; this component populates
 // them from the extended GET /admin/status response. The endpoint LED
 // strip (green ready, amber provisioning, gray unconfigured) stands in
@@ -13,11 +13,11 @@
 // that keeps page content clear of the fixed strip.
 
 import { X, createElement as lucideElement } from "lucide";
-import { createStatusBarShell } from "shared-ui/status-bar";
+import { createStatusBarView } from "shared-ui/status-bar";
 
 import type { EndpointStatus, GatewayApi, GatewayStatus } from "../services/gateway-api";
 
-/** The status poll cadence; the bar is the shell's only live status consumer. */
+/** The status poll cadence; the bar is the view's only live status consumer. */
 const STATUS_POLL_MS = 2000;
 
 /** Construction dependencies for the status bar. */
@@ -58,14 +58,14 @@ function summaryText(models: number, vramGb: number): string {
 
 /** Creates the status bar. */
 export function createStatusBar(options: StatusBarOptions): StatusBar {
-  const shell = createStatusBarShell();
-  const element = shell.element;
+  const view = createStatusBarView();
+  const element = view.element;
 
-  // Idle state: the endpoint LED strip fills the shell's indicators
+  // Idle state: the endpoint LED strip fills the view's indicators
   // group; the model/VRAM summary sits in the extras region.
   const leds = document.createElement("div");
   leds.className = "status-leds";
-  shell.indicators.append(leds);
+  view.indicators.append(leds);
   const summary = document.createElement("span");
   summary.className = "status-bar-summary";
 
@@ -85,7 +85,7 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
   cancel.className = "button button-xs button-outline status-bar-cancel";
   cancel.textContent = "Cancel";
   queueGroup.append(pendingNote, pendingList, cancel);
-  shell.extras.append(summary, queueGroup);
+  view.extras.append(summary, queueGroup);
 
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -134,8 +134,8 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
     update(status: GatewayStatus): void {
       // The Progress snapshot is the busy signal and the text; the queue
       // readout only adds the cancel controls while a command runs.
-      shell.setBusy(status.progress.busy);
-      shell.setText(status.progress.busy ? status.progress.text : "");
+      view.setBusy(status.progress.busy);
+      view.setText(status.progress.busy ? status.progress.text : "");
       const active = status.queue.active;
       if (active !== null) {
         summary.hidden = true;

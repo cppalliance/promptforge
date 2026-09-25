@@ -1,6 +1,6 @@
 // Pins the bottom status bar: the idle LED strip maps each endpoint's
 // ready/provisioning flags to its LED state beside the model/VRAM
-// summary; a busy Progress snapshot shows the shared shell's barberpole
+// summary; a busy Progress snapshot shows the shared view's barberpole
 // beside the still-visible LEDs with the activity text in the text
 // region; an active queue command adds the pending count with per-entry
 // cancel buttons and a cancel button that calls POST /admin/queue/cancel;

@@ -132,8 +132,8 @@ const WORKSPACE_DOC = {
 };
 
 // Asserts the user-bucket stores against `doc`, or the defaults when
-// `doc` is null. Zoom applies to the document in browser mode (no Tauri
-// shell in the fixture): a restore sets the root zoom and pins the body;
+// `doc` is null. Zoom applies to the document in browser mode (no desktop app
+// in the fixture): a restore sets the root zoom and pins the body;
 // the default path never touches either.
 function checkUserStores({ resolveService, document }, doc, failures) {
   const expect = (what, actual, expected) => {

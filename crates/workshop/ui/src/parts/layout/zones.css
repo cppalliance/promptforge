@@ -5,13 +5,13 @@
    panel-types.ts). Themed values come from the :root tokens in
    shared-ui/tokens.css. */
 
-.ws-shell {
+.ws-desk {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
-/* The dockview column fills the shell: the dock fills it. */
+/* The dockview column fills the desk: the dock fills it. */
 .ws-dock-column {
   flex: 1;
   display: flex;
@@ -269,7 +269,7 @@
   background: var(--bg-hover);
 }
 
-/* The lazy-load shell sits between dockview's content container and the
+/* The placeholder sits between dockview's content container and the
    real panel, so it must hand the container's height straight through:
    every panel root sizes itself with `height: 100%` and needs a
    definite-height parent, or its feed grows with content instead of

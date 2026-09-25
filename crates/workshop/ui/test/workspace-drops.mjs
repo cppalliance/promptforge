@@ -185,7 +185,7 @@ for (const desktop of [false, true]) {
 
 // --- The WebView2 bridge receives a drop's File objects ----------------------
 
-// A drop holding files posts them to the shell under the workspace-drop
+// A drop holding files posts them to the desktop app under the workspace-drop
 // message; without the bridge (plain browser) the same drop is only
 // default-suppressed. jsdom lacks DragEvent and File, so plain markers
 // stand in for the File objects - the module hands them over untouched.

@@ -1,5 +1,5 @@
 // Guard for the UI-state migration (plan step 13): the SPA keeps no
-// browser-storage state. The shell binds the server to an OS-assigned
+// browser-storage state. The desktop app binds the server to an OS-assigned
 // loopback port, so the page origin - and every origin-scoped storage
 // entry with it - changes on each launch; every store now reads and
 // writes through the server-backed UI-state adapter instead. Walks every

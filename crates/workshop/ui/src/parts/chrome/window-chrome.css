@@ -7,7 +7,7 @@
    [hidden] rule must keep winning over the base rule's display:flex, which
    the attribute selector's extra specificity guarantees. The bar is a
    fixed-height row in the body's column flex layout - icon, menus, drag
-   region, then the three window controls in Windows order - and the shell
+   region, then the three window controls in Windows order - and the desk
    below absorbs it without overlap. Hover states flip instantly like native
    chrome, so nothing here animates.
    -------------------------------------------------------------------------- */
@@ -37,7 +37,7 @@
   margin-inline: var(--space-lg) var(--space-xs);
 }
 
-/* macOS overlay chrome (the shell's titleBarStyle Overlay + hiddenTitle):
+/* macOS overlay chrome (the desktop app's titleBarStyle Overlay + hiddenTitle):
    the native traffic lights float over the bar's left edge, so the icon
    and menus shift right clear of them - VS Code's hiddenInset spacing.
    window-chrome.ts adds the modifier class only in the desktop app. */

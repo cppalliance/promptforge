@@ -1,4 +1,4 @@
-// The status bar shell shared by both UIs: a permanent full-width footer
+// The status bar view shared by both UIs: a permanent full-width footer
 // with a text region on the left and, on the right, a barberpole beside
 // the indicators group. The barberpole is an indeterminate busy signal:
 // it shows while work is in flight and hides otherwise, and it never
@@ -6,13 +6,13 @@
 // populates the indicators group with its own LEDs (the workshop:
 // recording + activity; the gateway: per-endpoint capability) and the
 // extras region with its own controls (the gateway: the model summary,
-// the pending-queue count, and the cancel buttons). The shell owns no
+// the pending-queue count, and the cancel buttons). The view owns no
 // timers, listeners, or polling; the consumer drives it through setText
 // and setBusy and owns every lifecycle.
 
 import "./status-bar.css";
 
-/** Options for {@link StatusBarShell.setText}. */
+/** Options for {@link StatusBarView.setText}. */
 export interface StatusBarText {
   /** Paint the text in the error color. */
   readonly error?: boolean;
@@ -20,8 +20,8 @@ export interface StatusBarText {
   readonly tooltip?: string;
 }
 
-/** The mounted shell and its regions. */
-export interface StatusBarShell {
+/** The mounted view and its regions. */
+export interface StatusBarView {
   /** The `<footer class="status-bar">` element; the consumer appends it. */
   readonly element: HTMLElement;
   /** The left text region. */
@@ -42,8 +42,8 @@ export interface StatusBarShell {
   setBusy(busy: boolean): void;
 }
 
-/** Creates the status bar shell. */
-export function createStatusBarShell(): StatusBarShell {
+/** Creates the status bar view. */
+export function createStatusBarView(): StatusBarView {
   const element = document.createElement("footer");
   element.className = "status-bar";
   element.setAttribute("role", "status");

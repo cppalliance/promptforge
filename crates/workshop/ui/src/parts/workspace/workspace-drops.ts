@@ -9,7 +9,7 @@
 // window. In a plain browser neither the bridge nor the event exists and
 // normal HTML drag/drop of file contents keeps working untouched.
 //
-// The shell never touches the OS drop itself (WebView2's own drop target
+// The desktop app never touches the OS drop itself (WebView2's own drop target
 // is what keeps HTML5 drag-and-drop alive for Dockview), so the page must
 // suppress the browser's default file-drop action - navigating away to
 // the dropped file - itself. Only drags of OS files are suppressed;

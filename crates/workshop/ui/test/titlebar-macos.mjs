@@ -1,4 +1,4 @@
-// Title bar under macOS overlay chrome (plan step 22): the shell runs the
+// Title bar under macOS overlay chrome (plan step 22): the desktop app runs the
 // window with titleBarStyle Overlay and a hidden title, so the native
 // traffic lights float over the bar's left edge and cover
 // close/minimize/zoom. window-chrome.ts detects the platform through the

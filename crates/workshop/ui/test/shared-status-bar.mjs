@@ -1,4 +1,4 @@
-// Unit test for the shared status bar shell (shared-ui/status-bar.ts):
+// Unit test for the shared status bar view (shared-ui/status-bar.ts):
 // the barberpole beside the consumer's indicators group (setBusy shows
 // and hides the barberpole, the group stays visible throughout and keeps
 // its contents, the barberpole precedes the group in DOM order), the
@@ -33,7 +33,7 @@ const bundle = await esbuild.build({
   // and jsdom applies no stylesheets anyway.
   loader: { ".css": "empty" },
 });
-const { createStatusBarShell } = await import(
+const { createStatusBarView } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 
@@ -42,71 +42,71 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-const shell = createStatusBarShell();
-window.document.body.append(shell.element);
+const view = createStatusBarView();
+window.document.body.append(view.element);
 
 // A consumer's indicator: busy toggling must never touch its contents.
 const led = window.document.createElement("span");
 led.className = "status-bar__led";
-shell.indicators.append(led);
+view.indicators.append(led);
 
-// --- The shell's structure ----------------------------------------------------
+// --- The view's structure ----------------------------------------------------
 
-check("the element is the status-bar footer", shell.element.matches("footer.status-bar"));
-check("the bar is a polite live region", shell.element.getAttribute("aria-live") === "polite");
+check("the element is the status-bar footer", view.element.matches("footer.status-bar"));
+check("the bar is a polite live region", view.element.getAttribute("aria-live") === "polite");
 check(
-  "the barberpole is the shell's element of that class",
-  shell.barberpole === shell.element.querySelector(".status-bar__barberpole"),
+  "the barberpole is the view's element of that class",
+  view.barberpole === view.element.querySelector(".status-bar__barberpole"),
 );
-check("the barberpole starts hidden", shell.barberpole.hidden === true);
-check("the indicators group starts visible", shell.indicators.hidden === false);
+check("the barberpole starts hidden", view.barberpole.hidden === true);
+check("the indicators group starts visible", view.indicators.hidden === false);
 check(
   "the barberpole sits in the right group",
-  shell.barberpole.parentElement?.matches(".status-bar__right") === true,
+  view.barberpole.parentElement?.matches(".status-bar__right") === true,
 );
 check(
   "the barberpole precedes the indicators group in DOM order",
-  (shell.barberpole.compareDocumentPosition(shell.indicators) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+  (view.barberpole.compareDocumentPosition(view.indicators) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
 );
 check(
   "the barberpole is an indeterminate progressbar to assistive tech",
-  shell.barberpole.getAttribute("role") === "progressbar" &&
-    !shell.barberpole.hasAttribute("aria-valuenow"),
+  view.barberpole.getAttribute("role") === "progressbar" &&
+    !view.barberpole.hasAttribute("aria-valuenow"),
 );
-check("no <progress> element remains in the shell", shell.element.querySelector("progress") === null);
-check("the text region starts empty", shell.text.textContent === "");
-check("the extras region is empty until the consumer fills it", shell.extras.childElementCount === 0);
+check("no <progress> element remains in the view", view.element.querySelector("progress") === null);
+check("the text region starts empty", view.text.textContent === "");
+check("the extras region is empty until the consumer fills it", view.extras.childElementCount === 0);
 
 // --- The busy toggle --------------------------------------------------------------
 
-shell.setBusy(true);
-check("setBusy(true) shows the barberpole", shell.barberpole.hidden === false);
-check("setBusy(true) leaves the indicators group visible", shell.indicators.hidden === false);
-check("setBusy(true) kept the consumer's LED in the group", shell.indicators.contains(led));
+view.setBusy(true);
+check("setBusy(true) shows the barberpole", view.barberpole.hidden === false);
+check("setBusy(true) leaves the indicators group visible", view.indicators.hidden === false);
+check("setBusy(true) kept the consumer's LED in the group", view.indicators.contains(led));
 
-shell.setBusy(true);
-check("a repeated setBusy(true) keeps the barberpole shown", shell.barberpole.hidden === false);
+view.setBusy(true);
+check("a repeated setBusy(true) keeps the barberpole shown", view.barberpole.hidden === false);
 
-shell.setBusy(false);
-check("setBusy(false) hides the barberpole", shell.barberpole.hidden === true);
-check("setBusy(false) leaves the indicators group visible", shell.indicators.hidden === false);
-check("the group still holds the consumer's LED", shell.indicators.contains(led));
-check("the shell exposes no renderSlot", typeof shell.renderSlot === "undefined");
-check("the shell exposes no progress element", typeof shell.progress === "undefined");
+view.setBusy(false);
+check("setBusy(false) hides the barberpole", view.barberpole.hidden === true);
+check("setBusy(false) leaves the indicators group visible", view.indicators.hidden === false);
+check("the group still holds the consumer's LED", view.indicators.contains(led));
+check("the view exposes no renderSlot", typeof view.renderSlot === "undefined");
+check("the view exposes no progress element", typeof view.progress === "undefined");
 
 // --- The text region --------------------------------------------------------------
 
-shell.setText("Downloading model", { tooltip: "1 of 2" });
-check("setText sets the label", shell.text.textContent === "Downloading model");
-check("setText sets the tooltip on the bar", shell.element.title === "1 of 2");
-check("the error styling starts off", !shell.text.classList.contains("status-bar__text--error"));
+view.setText("Downloading model", { tooltip: "1 of 2" });
+check("setText sets the label", view.text.textContent === "Downloading model");
+check("setText sets the tooltip on the bar", view.element.title === "1 of 2");
+check("the error styling starts off", !view.text.classList.contains("status-bar__text--error"));
 
-shell.setText("The download failed", { error: true });
-check("an error label takes the error styling", shell.text.classList.contains("status-bar__text--error"));
-check("a missing tooltip clears the bar's title", shell.element.title === "");
+view.setText("The download failed", { error: true });
+check("an error label takes the error styling", view.text.classList.contains("status-bar__text--error"));
+check("a missing tooltip clears the bar's title", view.element.title === "");
 
-shell.setText("Ready", { error: false });
-check("a later setText clears the error styling", !shell.text.classList.contains("status-bar__text--error"));
+view.setText("Ready", { error: false });
+check("a later setText clears the error styling", !view.text.classList.contains("status-bar__text--error"));
 
 if (failures.length > 0) {
   console.error(`shared-status-bar: ${failures.length} failure(s)`);

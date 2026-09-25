@@ -15,7 +15,7 @@
 // the path in the recent-files store, with nothing painted on the status
 // bar; a run with a path argument (Open Recent, Ctrl+P; TWF-003) posting
 // that path without ever reaching the picker, a non-string or absent
-// argument still reaching it; a shell that rejects the emit leaving the open committed (the
+// argument still reaching it; a desktop app that rejects the emit leaving the open committed (the
 // recent recorded, the invalidation fired, a console.warn and no
 // unhandled rejection); a server refusal painting the error on the
 // status bar while emitting nothing, recording nothing, and

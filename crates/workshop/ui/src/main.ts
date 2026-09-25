@@ -117,7 +117,7 @@ registerService(
 // updates the status bar renders as they arrive, catalog pushes, and
 // workbench snapshots. Chat goes over the agent panel's own /agents/ws
 // socket, composed inside the panel. The status bar builds its own
-// shell (shared-ui) and appends it as the body's full-width footer.
+// view (shared-ui) and appends it as the body's full-width footer.
 const statusBar = disposables.add(new StatusBar());
 const updates = disposables.add(new UpdateService());
 // The shared toast stack shows the update notifications; the workshop
@@ -128,14 +128,14 @@ disposables.add(toDisposable(() => toasts.element.remove()));
 disposables.add(new UpdateView(updates, toasts));
 updates.startAutoCheck();
 // The custom title bar stays hidden in a plain browser; it only appears
-// when the desktop shell sets its initialization flag.
+// when the desktop app sets its initialization flag.
 disposables.add(setupWindowChrome());
 // Native webview zoom does not persist across sessions, so the stored
 // factor is re-applied on every boot from the user bucket; the writer
 // installs after the restore so the restore never echoes the factor back.
 restoreZoom(storage.get("user", "zoom"));
 disposables.add(persistZoom((value) => storage.set("user", "zoom", value)));
-// Native Explorer drops arrive as a typed event from the desktop shell;
+// Native Explorer drops arrive as a typed event from the desktop app;
 // each path becomes a workspace grant. Inert in a plain browser.
 disposables.add(setupWorkspaceDrops(statusBar));
 // The Gateway Config panel's postMessage bridge: API forwards go through

@@ -1,4 +1,4 @@
-// The UI-state adapter: browser storage over HTTP. The shell binds the
+// The UI-state adapter: browser storage over HTTP. The desktop app binds the
 // server to an OS-assigned loopback port, so the page origin - and with it
 // every origin-scoped storage entry - changes on each launch. This module
 // replaces that storage with two server-backed buckets of opaque JSON

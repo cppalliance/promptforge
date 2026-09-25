@@ -20,7 +20,7 @@ export interface WorkspaceGrant {
   readonly exists: boolean;
 }
 
-/** The shell's saved window geometry, in logical pixels. */
+/** The desktop app's saved window geometry, in logical pixels. */
 export interface WindowState {
   readonly width: number;
   readonly height: number;
@@ -164,7 +164,7 @@ export function duplicateWorkspaceFile(path: string): Promise<WorkspaceFileRespo
 }
 
 /**
- * Saves the shell's window geometry into the open workspace file.
+ * Saves the desktop app's window geometry into the open workspace file.
  * Answers whether it was written: false when the workspace is ephemeral
  * and has nowhere to keep it.
  */

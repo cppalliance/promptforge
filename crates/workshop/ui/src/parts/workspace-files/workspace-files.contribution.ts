@@ -15,8 +15,8 @@
 // open dropped the roots before re-creating the tree, save as and
 // duplicate keep the grants) so the window title and the tree refresh
 // without a second roots fetch, emits the promptforge:workspace-opened
-// Tauri event so the shell can fetch and apply the file's window
-// geometry (native geometry is the shell's to apply, never the page's),
+// Tauri event so the desktop app can fetch and apply the file's window
+// geometry (native geometry is the desktop app's to apply, never the page's),
 // and records the file in the recent-files store. Failures paint the
 // status bar, exactly as the other file actions do; success is silent,
 // the refreshed tree being its own confirmation; a cancelled picker is
@@ -58,7 +58,7 @@ import { buildLayoutEnvelope } from "../layout/layout-persistence";
 import { STATUS_BAR } from "../status/status-bar";
 import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../workspace/workspace-drops";
 
-/** The Tauri event the shell listens for to re-apply window geometry. */
+/** The Tauri event the desktop app listens for to re-apply window geometry. */
 export const WORKSPACE_OPENED_EVENT = "promptforge:workspace-opened";
 
 /** The workspace file extension, as the pickers filter and the save paths end. */
@@ -93,7 +93,7 @@ function addAction(action: ActionDescriptor): void {
 }
 
 /**
- * Tells the shell a workspace file is now current. The event only
+ * Tells the desktop app a workspace file is now current. The event only
  * matters for geometry, which the open already committed, so a failed
  * emit is logged and never undoes the open.
  */
@@ -109,7 +109,7 @@ async function announceOpened(path: string): Promise<void> {
 /**
  * The page's side of a committed switch, shared by every action: the
  * workspace-changed event for its other listeners (the window title,
- * the tree panel), the shell event, and the recent entry. Runs only
+ * the tree panel), the desktop app event, and the recent entry. Runs only
  * after the server has answered success, so nothing here can undo it.
  * The tree invalidation is not its job: Open drops the roots before it
  * applies the file's state (applyOpenedWorkspaceState), and Save As and
@@ -200,7 +200,7 @@ async function pickWorkspaceFile(): Promise<string | null> {
 
 /**
  * Open Workspace from File...: the open on the server, the file's UI
- * state applied to the live stores, then the invalidation, the shell
+ * state applied to the live stores, then the invalidation, the desktop app
  * event, and the recent entry. With a string `path` argument (an Open
  * Recent row or a Ctrl+P hit) the picker is skipped and the argument is
  * the file; otherwise the native picker filtered to .pfwork supplies it.

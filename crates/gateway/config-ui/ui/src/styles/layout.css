@@ -1420,7 +1420,7 @@
 	}
 }
 
-/* Bottom status bar [VS Code]: the shared shell (shared-ui/status-bar)
+/* Bottom status bar [VS Code]: the shared view (shared-ui/status-bar)
    provides the bar, the text, the slot's progress/indicators swap, and
    the extras region; this file pins it to the viewport bottom and adds
    the gateway's own content - the endpoint LED strip in the indicators

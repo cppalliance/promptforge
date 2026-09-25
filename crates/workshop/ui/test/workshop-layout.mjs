@@ -346,8 +346,8 @@ check("the envelope records the zone groups",
 new StatusBar();
 check("the status bar is a direct child of body",
   !!window.document.querySelector("body > .status-bar"));
-check("the status bar is outside the shell and the dock",
-  window.document.querySelector(".ws-shell .status-bar") === null &&
+check("the status bar is outside the desk and the dock",
+  window.document.querySelector(".ws-desk .status-bar") === null &&
     window.document.querySelector("#dock .status-bar") === null);
 check("the status bar never enters the serialized layout",
   !JSON.stringify(envelope.layout).includes("status-bar"));

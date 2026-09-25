@@ -100,7 +100,7 @@ export function setupWindowChrome(): IDisposable {
     controls.hidden = true;
     return store;
   }
-  // macOS overlay chrome: the shell runs the window with titleBarStyle
+  // macOS overlay chrome: the desktop app runs the window with titleBarStyle
   // Overlay and a hidden title, so the native traffic lights float over
   // the bar's left edge and cover close/minimize/zoom. The custom
   // Windows-style cluster would double them, so it hides, and the bar

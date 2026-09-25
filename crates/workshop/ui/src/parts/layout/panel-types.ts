@@ -40,11 +40,11 @@ export type { PanelFeatureModule, PanelType, PanelTypeEntry } from "../../servic
 /**
  * A dockview content renderer standing in for a panel whose feature
  * chunk is still loading. The element mounts into the dock immediately
- * (an empty shell keeps the layout stable); when the thunk resolves, the
+ * (a placeholder keeps the layout stable); when the thunk resolves, the
  * directory's register() has run and the real panel's element swaps in,
  * receiving the init parameters dockview delivered at mount, plus the
- * last dimensions the dock laid the shell out at. Disposing before the
- * load resolves cancels the swap. The shell's sizing (a full-height flex
+ * last dimensions the dock laid the placeholder out at. Disposing before the
+ * load resolves cancels the swap. The placeholder's sizing (a full-height flex
  * column, .ws-panel-lazy in zones.css) is what lets the real panel's
  * `height: 100%` resolve against the dock's content container.
  */

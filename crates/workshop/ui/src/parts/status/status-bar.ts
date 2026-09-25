@@ -1,14 +1,14 @@
 // The status bar renderer: consumes the observer's status frames off the
-// persistent socket and paints them into the shared status bar shell
+// persistent socket and paints them into the shared status bar view
 // (shared-ui/status-bar), which owns the bar, the text region, and the
 // busy barberpole beside the indicators. Info and error frames set the
 // text (the description shows as the tooltip) and drive the barberpole;
 // debug frames are internal instrumentation: they never touch the text
 // or the barberpole, but they do pulse the LED. The workshop's
-// indicators group holds the recording and activity LEDs; the shell's
+// indicators group holds the recording and activity LEDs; the view's
 // extras region stays empty.
 
-import { createStatusBarShell, type StatusBarShell } from "shared-ui/status-bar";
+import { createStatusBarView, type StatusBarView } from "shared-ui/status-bar";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE, type ContextKey } from "../../services/context-key-service";
@@ -22,7 +22,7 @@ type PulseActivity = "thinking" | "generating";
 const DEFAULT_LED_PULSE_MS = 250;
 
 export class StatusBar extends Disposable {
-  private readonly shell: StatusBarShell;
+  private readonly view: StatusBarView;
   private readonly led: HTMLElement;
   private readonly rec: HTMLElement;
   private readonly lit = new Set<PulseActivity>();
@@ -36,7 +36,7 @@ export class StatusBar extends Disposable {
   constructor() {
     super();
     this.visibleKey = getService(CONTEXT_KEY_SERVICE).createKey("statusBarVisible", true);
-    this.shell = createStatusBarShell();
+    this.view = createStatusBarView();
     // The workshop's indicators: the recording LED has the --rec
     // marker; the activity LED is the unmarked one.
     this.rec = document.createElement("span");
@@ -45,11 +45,11 @@ export class StatusBar extends Disposable {
     this.led = document.createElement("span");
     this.led.className = "status-bar__led";
     this.led.setAttribute("aria-hidden", "true");
-    this.shell.indicators.append(this.rec, this.led);
-    this.shell.setText("Ready");
-    // The bar is the body's full-width footer, below the shell.
-    document.body.append(this.shell.element);
-    this._register(toDisposable(() => this.shell.element.remove()));
+    this.view.indicators.append(this.rec, this.led);
+    this.view.setText("Ready");
+    // The bar is the body's full-width footer, below the desk.
+    document.body.append(this.view.element);
+    this._register(toDisposable(() => this.view.element.remove()));
     // The pulse decay timer is the bar's only other owned resource.
     this._register(
       toDisposable(() => {
@@ -83,11 +83,11 @@ export class StatusBar extends Disposable {
       if (this.sustained) this.lit.add(this.sustained);
       this.applyLed();
     }
-    this.shell.setText(frame.label, {
+    this.view.setText(frame.label, {
       tooltip: frame.description,
       error: frame.severity === "error",
     });
-    this.shell.setBusy(frame.busy);
+    this.view.setBusy(frame.busy);
   }
 
   /**
@@ -114,12 +114,12 @@ export class StatusBar extends Disposable {
 
   /** Shows a locally-originated message (e.g. dictation errors). The next observer frame overwrites it. */
   showLocal(label: string, severity: "info" | "error"): void {
-    this.shell.setText(label, { error: severity === "error" });
+    this.view.setText(label, { error: severity === "error" });
   }
 
   /** Whether the bar is currently shown. */
   get isVisible(): boolean {
-    return !this.shell.element.hidden;
+    return !this.view.element.hidden;
   }
 
   /**
@@ -128,7 +128,7 @@ export class StatusBar extends Disposable {
    * row's checkbox follows.
    */
   setVisible(visible: boolean): void {
-    this.shell.element.hidden = !visible;
+    this.view.element.hidden = !visible;
     this.visibleKey.set(visible);
   }
 
@@ -161,8 +161,8 @@ export class StatusBar extends Disposable {
    */
   reset(): void {
     this.sustained = null;
-    this.shell.setText("Reconnecting...");
-    this.shell.setBusy(false);
+    this.view.setText("Reconnecting...");
+    this.view.setBusy(false);
   }
 
   /** Applies the lit set: green wins while generating and thinking coincide. */

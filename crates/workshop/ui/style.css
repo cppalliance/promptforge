@@ -62,7 +62,7 @@ body {
   line-height: 1.55;
 }
 
-/* The window is one column: the shell fills it above the full-width
+/* The window is one column: the desk fills it above the full-width
    status bar. */
 body {
   display: flex;

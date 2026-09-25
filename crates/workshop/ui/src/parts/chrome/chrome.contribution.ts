@@ -114,9 +114,9 @@ addAction({
 });
 
 // File > Exit (plan step 20's menu assembly; the catalog's chrome row).
-// The run body invokes the shell's quit command - the same
+// The run body invokes the desktop app's quit command - the same
 // gateway-shutdown-then-exit path the native menu's quit item runs -
-// which the shell step lands in promptforge/crates/workshop; until then
+// which the desktop app step lands in promptforge/crates/workshop; until then
 // an activation rejects and surfaces on the status bar, never
 // plugin-process exit(0), which would strand the sidecar gateway.
 // Desktop-only: the !isWeb precondition disables the row in a browser.

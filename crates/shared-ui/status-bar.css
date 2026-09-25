@@ -6,7 +6,7 @@
    live in the components layer so a consumer's own rules (the gateway's
    fixed positioning) override these. */
 
-/* The status bar: a permanent full-width footer below the shell. The
+/* The status bar: a permanent full-width footer below the desk. The
    left text shows the current label; the extras region holds consumer
    controls; the right group holds the barberpole and then the slot with
    the consumer's LED indicators group. The barberpole hides while idle

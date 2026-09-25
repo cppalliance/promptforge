@@ -899,7 +899,7 @@ Components, in dependency order:
 
 <step-15>
 
-### Step 15: Retire "shell" in the shared status bar and the workshop UI
+### Step 15: Retire "shell" in the shared status bar and the workshop UI [completed]
 
 - Component: Shell vocabulary
 - Piece: UI names

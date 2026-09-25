@@ -1,14 +1,14 @@
-// Regression test for the lazy panel shell's sizing contract
+// Regression test for the lazy panel placeholder's sizing contract
 // (src/parts/layout/panel-types.ts LazyPanel, .ws-panel-lazy in
 // src/parts/layout/zones.css, and the agent session's feed/input split in
 // src/parts/agent/agent-session.css). Dockview mounts the LazyPanel element
 // as the content of a leaf; the real panel swaps in underneath it. Every
-// panel root sizes itself with `height: 100%`, so the shell between it
+// panel root sizes itself with `height: 100%`, so the placeholder between it
 // and dockview's content container must pass the container's height
 // through - otherwise the agent feed grows with its transcript instead of
 // scrolling, pushes the prompt input below the window, and softlocks the
 // panel. jsdom has no layout engine, so the test pins the structural
-// contract: the declared styles the cascade assigns to the shell, the
+// contract: the declared styles the cascade assigns to the placeholder, the
 // panel root, and the feed; the feed-then-input DOM order; the autoscroll
 // landing on the feed element when a message appends; and LazyPanel
 // forwarding dockview's layout(width, height) to the real panel.
@@ -69,7 +69,7 @@ const html = await readFile(path.join(uiDir, "index.html"), "utf8");
 const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/", pretendToBeVisual: true });
 const { window } = dom;
 
-// The sheets whose declarations size the shell, the panel root, and the
+// The sheets whose declarations size the placeholder, the panel root, and the
 // feed. jsdom resolves declared values through the cascade (it applies
 // no layout), so the assertions read the declared contract, not pixels.
 const style = window.document.createElement("style");
@@ -201,7 +201,7 @@ async function flush() {
 
 const computed = (element) => window.getComputedStyle(element);
 
-// --- The agent session mounts through the lazy shell into the dock ----------
+// --- The agent session mounts through the lazy placeholder into the dock ----------
 
 window.localStorage.clear();
 const dock = createDockview(window.document.getElementById("dock"), {
@@ -219,23 +219,23 @@ await flush();
 
 const panelRoot = window.document.querySelector("#dock .ws-agent-panel");
 check("the agent panel mounted into the dock", panelRoot !== null);
-const shell = panelRoot?.parentElement ?? null;
-check("the agent panel mounts inside the lazy shell", shell?.classList.contains("ws-panel-lazy") === true);
+const placeholder = panelRoot?.parentElement ?? null;
+check("the agent panel mounts inside the lazy placeholder", placeholder?.classList.contains("ws-panel-lazy") === true);
 check(
-  "the lazy shell is a direct child of dockview's content container",
-  shell?.parentElement?.classList.contains("dv-content-container") === true,
+  "the lazy placeholder is a direct child of dockview's content container",
+  placeholder?.parentElement?.classList.contains("dv-content-container") === true,
 );
 
-// The sizing chain: the shell hands the container's height through, the
-// panel root fills the shell, the feed is the flexible scroll region.
-if (shell !== null) {
-  const shellStyle = computed(shell);
-  check("the lazy shell is full height", shellStyle.height === "100%");
+// The sizing chain: the placeholder hands the container's height through, the
+// panel root fills the placeholder, the feed is the flexible scroll region.
+if (placeholder !== null) {
+  const placeholderStyle = computed(placeholder);
+  check("the lazy placeholder is full height", placeholderStyle.height === "100%");
   check(
-    "the lazy shell is a flex column",
-    shellStyle.display === "flex" && shellStyle.flexDirection === "column",
+    "the lazy placeholder is a flex column",
+    placeholderStyle.display === "flex" && placeholderStyle.flexDirection === "column",
   );
-  check("the lazy shell may shrink below its content", shellStyle.minHeight === "0px");
+  check("the lazy placeholder may shrink below its content", placeholderStyle.minHeight === "0px");
 }
 if (panelRoot !== null) {
   const rootStyle = computed(panelRoot);
@@ -320,8 +320,8 @@ globalThis.__makeSizedPanel = () => ({
 });
 
 const lazy = createPanelComponent({ id: "sized", name: "sized" });
-check("the lazy shell has its sizing class", lazy.element.className === "ws-panel-lazy");
-check("the lazy shell implements layout", typeof lazy.layout === "function");
+check("the lazy placeholder has its sizing class", lazy.element.className === "ws-panel-lazy");
+check("the lazy placeholder implements layout", typeof lazy.layout === "function");
 // A resize before the chunk resolves replays at the swap.
 lazy.layout?.(640, 480);
 lazy.init({ params: {}, api: {} });
