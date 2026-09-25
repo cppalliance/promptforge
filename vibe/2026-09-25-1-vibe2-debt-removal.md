@@ -369,7 +369,7 @@ use super::*;
 
 <step-3>
 
-### Step 3: Restore the heartbeat test's real-time quiet window
+### Step 3: Restore the heartbeat test's real-time quiet window [completed]
 
 - Component: workshop-server
 - Component placement: third of three. It is the top tier: it depends on `workshop-workspace` and embeds the UI bundle. It goes last so the closing exit checks, which include the docs step this component adds, see every change.
