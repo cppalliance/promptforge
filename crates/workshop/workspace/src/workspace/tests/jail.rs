@@ -8,6 +8,7 @@
 //! prefix-matches the canonical path against the canonical grants. These
 //! tests pin that behavior for the spellings a request can arrive in.
 
+#[cfg(windows)]
 use super::*;
 
 /// Turns a silent skip into a failure under CI, and prints the reason
