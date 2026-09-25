@@ -530,7 +530,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-12>
 
-### Step 12: Push fresh roots on every grant, revoke, and switch
+### Step 12: Push fresh roots on every grant, revoke, and switch [completed]
 
 - Component: State propagation
 

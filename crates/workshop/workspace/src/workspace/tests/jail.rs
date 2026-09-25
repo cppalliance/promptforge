@@ -10,6 +10,8 @@
 
 use super::*;
 
+use crate::workspace::confine::modified_ms;
+
 /// Turns a silent skip into a failure under CI, and prints the reason
 /// otherwise so the caller can `return`. The `ci` flag is read by the
 /// caller through `std::env::var_os("CI").is_some()`, so no test ever calls

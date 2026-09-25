@@ -21,6 +21,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use serde::Serialize;
+use tokio::sync::watch;
 
 use crate::error::WorkspaceError;
 use crate::workspace_file::{WindowState, now_rfc3339};
@@ -29,9 +30,10 @@ mod backing;
 mod confine;
 mod pointer;
 mod token;
+mod tree;
 
 use backing::Backing;
-use confine::{canonicalize_simplified, modified_ms, reject_forbidden};
+use confine::{canonicalize_simplified, reject_forbidden};
 use token::{current_token, file_token};
 #[cfg(test)]
 use token::{hash_token, mtime_token};
@@ -171,6 +173,8 @@ pub struct Workspace {
     /// Where the last-used file is remembered between runs; `None` when
     /// built without a state directory (see [`Workspace::with_state_dir`]).
     pointer: Option<pointer::LastWorkspacePointer>,
+    /// The grant-set generation behind [`Workspace::subscribe_roots`].
+    roots_generation: watch::Sender<u64>,
     #[cfg(feature = "test-fixtures")]
     pub(crate) stall: Arc<crate::workspace_stall::WriteStall>,
 }
@@ -185,6 +189,7 @@ impl Default for Workspace {
             switches: Arc::default(),
             closed: Arc::default(),
             pointer: None,
+            roots_generation: watch::Sender::default(),
             #[cfg(feature = "test-fixtures")]
             stall: Arc::new(crate::workspace_stall::WriteStall::new()),
         }
@@ -253,6 +258,8 @@ impl Workspace {
                 added_at: (self.now)(),
             })
             .clone();
+        drop(grants);
+        self.bump_roots();
         Ok((root, meta))
     }
 
@@ -287,6 +294,7 @@ impl Workspace {
             .remove(&canonical)
             .is_some();
         if removed {
+            self.bump_roots();
             Ok(canonical)
         } else {
             Err(WorkspaceError::NotGranted)
@@ -305,19 +313,20 @@ impl Workspace {
             .collect()
     }
 
-    /// Lists one level of `path`, or the granted roots when `path` is
-    /// `None` or empty. Directories sort before files, each group ordered
-    /// by name.
-    ///
-    /// # Errors
-    /// Returns [`WorkspaceError`] when the path is forbidden, outside every
-    /// grant, missing, not a directory, or cannot be listed.
-    pub fn tree(&self, path: Option<&Path>) -> Result<TreeListing, WorkspaceError> {
-        match path {
-            None => Ok(self.grants_listing()),
-            Some(path) if path.as_os_str().is_empty() => Ok(self.grants_listing()),
-            Some(path) => self.directory_listing(path),
-        }
+    /// A watch on the grant-set generation, which every grant, revoke,
+    /// and workspace switch bumps, so a subscriber re-reads
+    /// [`Workspace::granted_roots`] when it changes.
+    #[must_use]
+    pub fn subscribe_roots(&self) -> watch::Receiver<u64> {
+        self.roots_generation.subscribe()
+    }
+
+    /// Bumps the grant-set generation, waking every roots subscriber.
+    /// Called after the grants lock is released, so a woken subscriber
+    /// reads the new set.
+    fn bump_roots(&self) {
+        self.roots_generation
+            .send_modify(|generation| *generation = generation.wrapping_add(1));
     }
 
     /// Reads a confined UTF-8 text file with its size and conflict
@@ -401,91 +410,6 @@ impl Workspace {
             size: metadata.len(),
             token: file_token(&metadata, text.as_bytes()),
             text: text.to_owned(),
-        })
-    }
-
-    /// The granted roots rendered as a synthetic directory listing.
-    fn grants_listing(&self) -> TreeListing {
-        let entries = self
-            .granted_roots()
-            .into_iter()
-            .map(|root| {
-                let metadata = fs::metadata(&root).ok();
-                // The folder's own name reads better than the full path in
-                // the tree; the path stays available as the row tooltip. A
-                // drive root (C:\) has no file name and shows the path.
-                let name = root.file_name().map_or_else(
-                    || root.to_string_lossy().into_owned(),
-                    |name| name.to_string_lossy().into_owned(),
-                );
-                TreeEntry {
-                    name,
-                    path: root,
-                    kind: EntryKind::Directory,
-                    size: 0,
-                    modified_ms: metadata.as_ref().map_or(0, modified_ms),
-                    exists: metadata.is_some(),
-                }
-            })
-            .collect();
-        TreeListing {
-            path: None,
-            entries,
-        }
-    }
-
-    /// Lists one level of an existing confined directory. A link to a folder
-    /// lists as that folder, any other link as itself; opening either confines.
-    fn directory_listing(&self, path: &Path) -> Result<TreeListing, WorkspaceError> {
-        let canonical = self.confine_existing(path)?;
-        let metadata =
-            fs::metadata(&canonical).map_err(|source| WorkspaceError::InspectPath { source })?;
-        if !metadata.is_dir() {
-            return Err(WorkspaceError::NotADirectory);
-        }
-        let mut entries = Vec::new();
-        for entry in
-            fs::read_dir(&canonical).map_err(|source| WorkspaceError::ListDirectory { source })?
-        {
-            let entry = entry.map_err(|source| WorkspaceError::ListDirectory { source })?;
-            let own = entry
-                .metadata()
-                .map_err(|source| WorkspaceError::InspectPath { source })?;
-            let metadata = if own.is_symlink() {
-                fs::metadata(entry.path())
-                    .ok()
-                    .filter(fs::Metadata::is_dir)
-                    .unwrap_or(own)
-            } else {
-                own
-            };
-            let kind = if metadata.is_dir() {
-                EntryKind::Directory
-            } else {
-                EntryKind::File
-            };
-            entries.push(TreeEntry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                path: entry.path(),
-                kind,
-                size: if metadata.is_file() {
-                    metadata.len()
-                } else {
-                    0
-                },
-                modified_ms: modified_ms(&metadata),
-                exists: true,
-            });
-        }
-        entries.sort_by(|a, b| {
-            (a.kind != EntryKind::Directory)
-                .cmp(&(b.kind != EntryKind::Directory))
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        Ok(TreeListing {
-            path: Some(canonical),
-            entries,
         })
     }
 }

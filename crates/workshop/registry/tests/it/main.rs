@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use workshop_protocol::{Activity, Severity, StatusBarUpdate};
 use workshop_registry::{Registry, StatusChannel, StatusChannelAdapter};
@@ -141,10 +141,9 @@ fn the_workspace_roots_handle_serves_the_registrants_grants() {
         registry.state::<dyn WorkspaceRoots>().is_none(),
         "an unregistered roots handle is a graceful no-op"
     );
-    let registration =
-        registry.register_state::<dyn WorkspaceRoots>(Arc::new(WorkspaceRootsAdapter::new(|| {
-            vec![PathBuf::from("/granted")]
-        })));
+    let registration = registry.register_state::<dyn WorkspaceRoots>(Arc::new(
+        WorkspaceRootsAdapter::new(|| vec![PathBuf::from("/granted")], || watch::channel(0).1),
+    ));
     let roots = registry
         .state::<dyn WorkspaceRoots>()
         .expect("the registered roots handle is served");
@@ -154,6 +153,34 @@ fn the_workspace_roots_handle_serves_the_registrants_grants() {
         registry.state::<dyn WorkspaceRoots>().is_none(),
         "the key empties when the guard drops"
     );
+}
+
+#[test]
+fn the_workspace_roots_handle_serves_the_registrants_change_signal() {
+    use std::path::PathBuf;
+
+    use workshop_registry::{WorkspaceRoots, WorkspaceRootsAdapter};
+
+    let registry = Registry::new();
+    let generation = watch::Sender::new(0_u64);
+    let _registration = registry.register_state::<dyn WorkspaceRoots>(Arc::new(
+        WorkspaceRootsAdapter::new(Vec::<PathBuf>::new, {
+            let generation = generation.clone();
+            move || generation.subscribe()
+        }),
+    ));
+    let mut receiver = registry
+        .state::<dyn WorkspaceRoots>()
+        .expect("the registered roots handle is served")
+        .subscribe();
+    generation.send_modify(|value| *value += 1);
+    assert!(
+        receiver
+            .has_changed()
+            .expect("the registrant's sender is alive"),
+        "a bump through the registrant's sender reaches the subscriber"
+    );
+    assert_eq!(*receiver.borrow_and_update(), 1);
 }
 
 #[test]

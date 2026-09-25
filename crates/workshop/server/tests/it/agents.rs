@@ -356,4 +356,5 @@ pub(crate) fn delta_text(turn: &Turn) -> String {
 mod lifecycle;
 mod refusals;
 mod replacement;
+mod revoke;
 mod turns;

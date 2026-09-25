@@ -35,10 +35,13 @@ fn the_host_snapshot_serves_the_selection_and_the_granted_roots() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let granted = dir.path().to_path_buf();
     let _roots =
-        registry.register_state::<dyn WorkspaceRoots>(Arc::new(WorkspaceRootsAdapter::new({
-            let granted = granted.clone();
-            move || vec![granted.clone()]
-        })));
+        registry.register_state::<dyn WorkspaceRoots>(Arc::new(WorkspaceRootsAdapter::new(
+            {
+                let granted = granted.clone();
+                move || vec![granted.clone()]
+            },
+            || watch::channel(0).1,
+        )));
 
     let snapshot = host_snapshot(&registry);
     assert_eq!(snapshot.selected_model.as_deref(), Some("test-model"));

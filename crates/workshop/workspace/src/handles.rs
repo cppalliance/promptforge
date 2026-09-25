@@ -1,8 +1,9 @@
 //! The workspace subsystem's registration: its `/workspace/*` routes,
 //! merged into the server's API router, the workspace itself as its
-//! state handle set, its granted-roots view, which same-tier
-//! subsystems read instead of naming this crate, and the shutdown lever
-//! that closes the workspace file inside the server's graceful stop.
+//! state handle set, its granted-roots view and change signal, which
+//! same-tier subsystems read instead of naming this crate, and the
+//! shutdown lever that closes the workspace file inside the server's
+//! graceful stop.
 
 use std::sync::Arc;
 
@@ -42,10 +43,16 @@ pub fn register(registry: &Registry, workspace: &Workspace) -> WorkspaceRegistra
     })));
     let state = registry.register_state::<Workspace>(Arc::new(workspace.clone()));
     let roots =
-        registry.register_state::<dyn WorkspaceRoots>(Arc::new(WorkspaceRootsAdapter::new({
-            let workspace = workspace.clone();
-            move || workspace.granted_roots()
-        })));
+        registry.register_state::<dyn WorkspaceRoots>(Arc::new(WorkspaceRootsAdapter::new(
+            {
+                let workspace = workspace.clone();
+                move || workspace.granted_roots()
+            },
+            {
+                let workspace = workspace.clone();
+                move || workspace.subscribe_roots()
+            },
+        )));
     WorkspaceRegistrations {
         routes,
         state,

@@ -9,8 +9,9 @@
 //! registry's collections and pushes all three, host first, so the
 //! binding that triggers a relaunch never finds a stale selection behind
 //! it. [`forward`] is the long-lived half: it wakes on the gateway
-//! binding's replacement watch, the catalog's chat-generation watch, and
-//! the menu's snapshot bus, and pushes again.
+//! binding's replacement watch, the catalog's chat-generation watch, the
+//! menu's snapshot bus, and the workspace's grant-set generation watch,
+//! and pushes again.
 
 use harness_api::{CatalogBinding, GatewayBinding, Harness, HostSnapshot};
 use tokio::sync::{broadcast, watch};
@@ -79,8 +80,9 @@ fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
 
 /// Keeps the harness's bindings current: pushes all three again whenever
 /// the gateway binding is replaced, the chat-capable catalog changes
-/// generation, or the menu publishes a snapshot. Runs until every source
-/// has closed (the server's state is gone) or the harness is unregistered.
+/// generation, the menu publishes a snapshot, or the workspace's granted
+/// roots change. Runs until every source has closed (the server's state
+/// is gone) or the harness is unregistered.
 ///
 /// A fresh watch receiver treats the current value as seen, so a change
 /// landing between the composition root's push and these subscriptions
@@ -102,9 +104,12 @@ pub(crate) async fn forward(registry: Registry) {
                     Some(handles.menu().subscribe()),
                 )
             });
+    let mut roots_rx = registry
+        .state::<dyn WorkspaceRoots>()
+        .map(|roots| roots.subscribe());
     push_bindings(&registry, &harness);
     loop {
-        if gateway_rx.is_none() && catalog_rx.is_none() && menu_rx.is_none() {
+        if gateway_rx.is_none() && catalog_rx.is_none() && menu_rx.is_none() && roots_rx.is_none() {
             return;
         }
         tokio::select! {
@@ -117,6 +122,12 @@ pub(crate) async fn forward(registry: Registry) {
             open = changed(&mut catalog_rx) => {
                 if !open {
                     catalog_rx = None;
+                    continue;
+                }
+            }
+            open = changed(&mut roots_rx) => {
+                if !open {
+                    roots_rx = None;
                     continue;
                 }
             }
