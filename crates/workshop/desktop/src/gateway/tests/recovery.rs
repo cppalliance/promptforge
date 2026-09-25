@@ -58,7 +58,6 @@ fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_at
         },
         server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
-            open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
         agents: workshop_server_api::AgentsConfig::default(),

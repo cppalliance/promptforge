@@ -4,8 +4,7 @@
 //! The desktop app hosts the workshop server in-process, so the listener
 //! settings are the desktop app's own: the bind is always `127.0.0.1:0` (an
 //! OS-assigned port - a fixed port is a conflict class the
-//! single-instance handoff cannot close) and `open_browser` stays off
-//! (the desktop app drives its own window). A discovered `workshop.toml` still
+//! single-instance handoff cannot close). A discovered `workshop.toml` still
 //! owns the `[gateway]` connection settings and the state and
 //! agent-program paths; the gateway endpoint itself resolves inside the
 //! server, gateway discovery file first, explicit config second.
@@ -86,10 +85,9 @@ fn profile_dir(home: &Path) -> PathBuf {
 }
 
 /// Forces the listener settings the desktop app owns onto a loaded config: the
-/// ephemeral loopback bind and no browser opening.
+/// ephemeral loopback bind.
 fn shape_for_desktop(config: &mut Config) {
     config.server.bind = DESKTOP_BIND.to_string();
-    config.server.open_browser = false;
 }
 
 /// The no-file configuration: no explicit gateway (endpoint resolution
@@ -103,7 +101,6 @@ fn default_config(home: Option<&Path>) -> Config {
         },
         server: workshop_server_api::ServerConfig {
             bind: DESKTOP_BIND.to_string(),
-            open_browser: false,
             state_dir: PathBuf::new(),
         },
         agents: workshop_server_api::AgentsConfig::default(),
@@ -192,15 +189,12 @@ mod tests {
              [server]\nbind = \"127.0.0.1:7910\"\nopen_browser = true\n",
         )
         .expect("write fixture");
-        let config = load_in(&exe, &cwd, Some(&home)).expect("loads");
+        let config = load_in(&exe, &cwd, Some(&home))
+            .expect("an old config with the retired browser key still loads");
         assert_eq!(config.gateway.base_url, "http://gateway.lan:9999");
         assert_eq!(
             config.server.bind, DESKTOP_BIND,
             "the desktop app owns the listener: an OS-assigned loopback port"
-        );
-        assert!(
-            !config.server.open_browser,
-            "the desktop app drives its own window"
         );
         assert_eq!(
             config.server.state_dir,
@@ -218,7 +212,6 @@ mod tests {
             "an empty base_url is the not-explicit signal resolution reads"
         );
         assert_eq!(config.server.bind, DESKTOP_BIND);
-        assert!(!config.server.open_browser);
         assert_eq!(config.server.state_dir, profile_dir(&home));
         assert_eq!(config.agents.path, profile_dir(&home).join("agents"));
     }

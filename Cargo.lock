@@ -8566,13 +8566,11 @@ dependencies = [
 name = "workshop-server"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "axum",
  "build-ui",
  "futures-util",
  "gateway-api-discovery",
  "harness-api",
- "open",
  "promptforge",
  "reqwest",
  "rust-embed",
@@ -8586,7 +8584,6 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tracing",
- "tracing-subscriber",
  "url",
  "workshop-gateway",
  "workshop-menu",

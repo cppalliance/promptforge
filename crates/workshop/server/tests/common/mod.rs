@@ -54,7 +54,6 @@ impl TestServer {
             },
             server: ServerConfig {
                 bind: "127.0.0.1:0".to_string(),
-                open_browser: false,
                 state_dir: state_dir.path().to_path_buf(),
             },
             agents: AgentsConfig::default(),

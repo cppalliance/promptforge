@@ -1,7 +1,7 @@
 //! PromptForge Workshop HTTP server.
 //!
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
-//! and the axum router so `src/main.rs` stays a thin entry point. Start at
+//! and the axum router. Start at
 //! [`Config::load`] for configuration, [`AgentSessions`] for the
 //! agent-session opener behind `/agents/ws` (every session runs in the
 //! harness, reached through `harness-api`), and [`router`] for the HTTP

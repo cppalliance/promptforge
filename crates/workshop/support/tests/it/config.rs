@@ -111,26 +111,19 @@ fn explicit_state_dir_and_agents_path_are_kept_verbatim() {
 }
 
 #[test]
-fn open_browser_defaults_to_false_and_parses_when_set() {
-    let raw = r#"
+fn a_retired_open_browser_key_still_parses_and_is_ignored() {
+    let base = r#"
 [gateway]
 base_url = "http://127.0.0.1:8081"
 api_key = "k"
 "#;
-    let config = Config::from_toml_str(raw).expect("fixture parses");
-    assert!(!config.server.open_browser, "default is off");
-
-    let raw = r#"
-[gateway]
-base_url = "http://127.0.0.1:8081"
-api_key = "k"
-
-[server]
-open_browser = true
-"#;
-    let config = Config::from_toml_str(raw).expect("fixture parses");
-    assert!(config.server.open_browser);
-    assert_eq!(config.server.bind, "127.0.0.1:7910", "bind still defaults");
+    let old = format!("{base}\n[server]\nopen_browser = true\n");
+    let config = Config::from_toml_str(&old).expect("an old config with the retired key parses");
+    assert_eq!(
+        config,
+        Config::from_toml_str(base).expect("fixture parses"),
+        "the retired key changes nothing"
+    );
 }
 
 #[test]

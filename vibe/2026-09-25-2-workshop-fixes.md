@@ -444,7 +444,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-8>
 
-### Step 8: Delete the standalone server binary and drop `open_browser`
+### Step 8: Delete the standalone server binary and drop `open_browser` [completed]
 
 - Component: Binary removal
 

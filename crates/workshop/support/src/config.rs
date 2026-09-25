@@ -137,10 +137,6 @@ pub struct GatewayConfig {
 pub struct ServerConfig {
     /// Address the workshop server binds to.
     pub bind: String,
-    /// When true, the server binary opens the system browser at its address
-    /// once it is serving. The desktop app sets up its own window and
-    /// ignores this flag; it exists for the browser-tab frame.
-    pub open_browser: bool,
     /// Directory holding the server's persistent state: agent session
     /// event logs sit under `state_dir/sessions/`, and the per-profile
     /// model memory and boot orphan sweep anchor here. Defaults to the
@@ -153,7 +149,6 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: DEFAULT_ADDR.to_string(),
-            open_browser: false,
             state_dir: PathBuf::new(),
         }
     }

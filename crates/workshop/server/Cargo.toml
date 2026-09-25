@@ -8,19 +8,13 @@ publish = false
 
 description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop app"
 
-[[bin]]
-name = "workshop-server"
-path = "src/main.rs"
-
 [dependencies]
-anyhow.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 # The harness public API: agent sessions run in the harness, which the
 # composition root constructs, registers, and pushes the server's gateway
 # binding, chat catalog, and host snapshot into as data.
 harness-api.workspace = true
-open.workspace = true
 # The engine's public API: the events the agent socket frames as
 # transcript entries and the status relay derives status from.
 promptforge.workspace = true
@@ -35,7 +29,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 url.workspace = true
 workshop-gateway.workspace = true
 workshop-menu.workspace = true

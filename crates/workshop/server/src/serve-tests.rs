@@ -13,7 +13,6 @@ fn test_config(bind: &str, state_dir: &Path) -> Config {
         },
         server: ServerConfig {
             bind: bind.to_string(),
-            open_browser: false,
             state_dir: state_dir.to_path_buf(),
         },
         agents: AgentsConfig::default(),

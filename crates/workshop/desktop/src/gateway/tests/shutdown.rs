@@ -101,7 +101,6 @@ fn shutdown_revokes_publication_before_waking_a_late_worker() {
         },
         server: workshop_server_api::ServerConfig {
             bind: "127.0.0.1:0".to_owned(),
-            open_browser: false,
             state_dir: state_dir.path().to_owned(),
         },
         agents: workshop_server_api::AgentsConfig::default(),
