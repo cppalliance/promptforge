@@ -210,6 +210,19 @@ struct RefreshState {
     selection_restored: bool,
 }
 
+/// Why a phase of the probe loop ended before it completed.
+enum Phase {
+    /// The stop signal fired, or a control channel closed: end the loop.
+    Stop,
+    /// The gateway binding was replaced: reset iteration state and
+    /// restart the loop from its top.
+    Rebind,
+}
+
+/// The probe loop, in named phases: wait out the probe interval, probe
+/// the health endpoint, announce a transition, refresh stale menu sources,
+/// and restore the selection. The stop signal wins every select, and a
+/// replaced binding restarts the iteration from the top.
 async fn run(
     gateway: &GatewayBinding,
     push: &Push,
@@ -222,101 +235,54 @@ async fn run(
     let mut refresh = RefreshState::default();
     let mut gateway_changed = gateway.subscribe();
     loop {
-        // The first probe runs immediately; every later one waits here.
-        if let Some(reachable) = last {
-            let wait = if reachable {
-                interval
-            } else if let Some(delay) = backoff.next_delay() {
-                delay
-            } else {
-                push.push_failure(
-                    "Gateway reconnect stopped",
-                    "the reconnect budget is exhausted; restart the workshop to retry",
-                    Activity::General,
-                );
-                break;
-            };
-            tokio::select! {
-                _ = &mut *stop => break,
-                changed = gateway_changed.changed() => {
-                    if changed.is_err() {
-                        break;
-                    }
-                    last = None;
-                    refresh = RefreshState::default();
-                    continue;
-                }
-                () = tokio::time::sleep(wait) => {}
-            }
-        }
-        let snapshot = gateway.snapshot();
-        let generation = snapshot.generation();
-        let reachable = tokio::select! {
-            _ = &mut *stop => break,
-            changed = gateway_changed.changed() => {
-                if changed.is_err() {
-                    break;
-                }
+        match await_probe_interval(last, interval, backoff, push, stop, &mut gateway_changed).await
+        {
+            Ok(()) => {}
+            Err(Phase::Stop) => break,
+            Err(Phase::Rebind) => {
                 last = None;
                 refresh = RefreshState::default();
                 continue;
             }
-            reachable = snapshot.client().health() => reachable,
+        }
+        let snapshot = gateway.snapshot();
+        let generation = snapshot.generation();
+        let reachable = match probe(snapshot.as_ref(), stop, &mut gateway_changed).await {
+            Ok(reachable) => reachable,
+            Err(Phase::Stop) => break,
+            Err(Phase::Rebind) => {
+                last = None;
+                refresh = RefreshState::default();
+                continue;
+            }
         };
         if gateway.generation() != generation {
             last = None;
             refresh = RefreshState::default();
             continue;
         }
-        health.publish(reachable);
-        let transitioned = last != Some(reachable);
-        last = Some(reachable);
-        if transitioned {
-            // The menu recomputes chat_ready from reachability, so the
-            // verdict feeds it before any slower refresh work below.
-            push.menu().set_gateway_reachable(reachable);
-            if reachable {
-                push.push_status_update(
-                    CONNECTED_LABEL,
-                    "the gateway answers its health probe",
-                    Activity::General,
-                );
-            } else {
-                push.push_status_update(
-                    UNREACHABLE_LABEL,
-                    UNREACHABLE_DESCRIPTION,
-                    Activity::General,
-                );
-            }
-        }
+        announce_transition(push, health, reachable, &mut last);
         if !reachable {
             refresh = RefreshState::default();
             continue;
         }
         if !refresh.profiles_ready || !refresh.catalog_ready {
-            // All menu state is server-owned and reaches the UI via
-            // socket pushes - the UI fetches nothing on boot - so every
-            // transition into reachable, boot's first probe included,
-            // (re)populates the profile state and the model catalog.
-            // Healthy ticks independently repeat either refresh until both
-            // sources are populated, because health and one ready source do
-            // not imply the other source is ready. The interval above bounds
-            // retries and keeps this from becoming a busy loop.
-            tokio::select! {
-                _ = &mut *stop => break,
-                changed = gateway_changed.changed() => {
-                    if changed.is_err() {
-                        break;
-                    }
+            match refresh_sources(
+                snapshot.as_ref(),
+                push,
+                &mut refresh,
+                stop,
+                &mut gateway_changed,
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(Phase::Stop) => break,
+                Err(Phase::Rebind) => {
                     last = None;
                     refresh = RefreshState::default();
                     continue;
                 }
-                () = refresh_incomplete_sources(
-                    &snapshot,
-                    push,
-                    &mut refresh,
-                ) => {}
             }
         }
         if refresh.profiles_ready && refresh.catalog_ready && !refresh.selection_restored {
@@ -328,6 +294,124 @@ async fn run(
             push.menu().restore_selection();
             refresh.selection_restored = true;
         }
+    }
+}
+
+/// The wait before a probe: skipped on the first, `interval` while the
+/// gateway answered last time, and the backoff's next delay while it did
+/// not, ending the loop when the backoff's budget exhausts.
+async fn await_probe_interval(
+    last: Option<bool>,
+    interval: Duration,
+    backoff: &ReconnectBackoff,
+    push: &Push,
+    stop: &mut oneshot::Receiver<()>,
+    gateway_changed: &mut watch::Receiver<u64>,
+) -> Result<(), Phase> {
+    let Some(reachable) = last else {
+        return Ok(());
+    };
+    let wait = if reachable {
+        interval
+    } else if let Some(delay) = backoff.next_delay() {
+        delay
+    } else {
+        push.push_failure(
+            "Gateway reconnect stopped",
+            "the reconnect budget is exhausted; restart the workshop to retry",
+            Activity::General,
+        );
+        return Err(Phase::Stop);
+    };
+    tokio::select! {
+        _ = &mut *stop => Err(Phase::Stop),
+        changed = gateway_changed.changed() => {
+            if changed.is_err() {
+                Err(Phase::Stop)
+            } else {
+                Err(Phase::Rebind)
+            }
+        }
+        () = tokio::time::sleep(wait) => Ok(()),
+    }
+}
+
+/// One bounded health probe against the current snapshot's client.
+async fn probe(
+    snapshot: &GatewaySnapshot,
+    stop: &mut oneshot::Receiver<()>,
+    gateway_changed: &mut watch::Receiver<u64>,
+) -> Result<bool, Phase> {
+    tokio::select! {
+        _ = &mut *stop => Err(Phase::Stop),
+        changed = gateway_changed.changed() => {
+            if changed.is_err() {
+                Err(Phase::Stop)
+            } else {
+                Err(Phase::Rebind)
+            }
+        }
+        reachable = snapshot.client().health() => Ok(reachable),
+    }
+}
+
+/// Publishes the probe outcome and, when it differs from the last
+/// verdict, reports the transition to the menu and the status bar.
+fn announce_transition(
+    push: &Push,
+    health: &GatewayHealth,
+    reachable: bool,
+    last: &mut Option<bool>,
+) {
+    health.publish(reachable);
+    let transitioned = *last != Some(reachable);
+    *last = Some(reachable);
+    if transitioned {
+        // The menu recomputes chat_ready from reachability, so the
+        // verdict feeds it before any slower refresh work below.
+        push.menu().set_gateway_reachable(reachable);
+        if reachable {
+            push.push_status_update(
+                CONNECTED_LABEL,
+                "the gateway answers its health probe",
+                Activity::General,
+            );
+        } else {
+            push.push_status_update(
+                UNREACHABLE_LABEL,
+                UNREACHABLE_DESCRIPTION,
+                Activity::General,
+            );
+        }
+    }
+}
+
+/// Refreshes the menu sources that have not converged, racing the stop
+/// signal and a binding replacement against the refresh. All menu state
+/// is server-owned and reaches the UI via socket pushes - the UI fetches
+/// nothing on boot - so every transition into reachable, boot's first
+/// probe included, (re)populates the profile state and the model catalog.
+/// Healthy ticks independently repeat either refresh until both sources
+/// are populated, because health and one ready source do not imply the
+/// other source is ready; the probe interval bounds retries and keeps this
+/// from becoming a busy loop.
+async fn refresh_sources(
+    snapshot: &GatewaySnapshot,
+    push: &Push,
+    refresh: &mut RefreshState,
+    stop: &mut oneshot::Receiver<()>,
+    gateway_changed: &mut watch::Receiver<u64>,
+) -> Result<(), Phase> {
+    tokio::select! {
+        _ = &mut *stop => Err(Phase::Stop),
+        changed = gateway_changed.changed() => {
+            if changed.is_err() {
+                Err(Phase::Stop)
+            } else {
+                Err(Phase::Rebind)
+            }
+        }
+        () = refresh_incomplete_sources(snapshot, push, refresh) => Ok(()),
     }
 }
 

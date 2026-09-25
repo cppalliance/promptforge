@@ -29,7 +29,8 @@ use tokio::time::Instant;
 
 use workshop_registry::Push;
 
-use crate::gateway_binding::GatewayBinding;
+use crate::gateway::ProgressStream;
+use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
 use crate::heartbeat::GatewayHealth;
 
 #[cfg(test)]
@@ -127,10 +128,10 @@ struct Signals<'a> {
     gateway_changed: &'a mut watch::Receiver<u64>,
 }
 
-/// The subscription loop: idle while the gateway is unreachable, and while
-/// reachable hold one subscription whose snapshots drive the presenter.
-/// Every wait goes through [`until`], so the stop signal wins each select
-/// and the presenter's deadlines keep ticking between subscriptions.
+/// The subscription loop, in named phases: idle while unreachable,
+/// subscribe, drive the subscription, and recover from its end. Every
+/// wait goes through [`until`], so the stop signal wins each select and
+/// the presenter's deadlines keep ticking between subscriptions.
 async fn run(
     gateway: &GatewayBinding,
     push: &Push,
@@ -147,84 +148,132 @@ async fn run(
     };
     let mut presenter = Presenter::new(timing.policy);
     loop {
-        while !*signals.reachable.borrow_and_update() {
-            match until(
-                std::future::pending::<()>(),
-                &mut signals,
-                &mut presenter,
-                push,
-            )
-            .await
-            {
-                Err(Ended::Stop) => return,
-                Err(Ended::Lost | Ended::Rebind) | Ok(()) => {}
-            }
+        if let Err(Ended::Stop) = idle_until_reachable(&mut signals, &mut presenter, push).await {
+            return;
         }
         let snapshot = gateway.snapshot();
-        let stream = match until(
-            snapshot.client().subscribe_progress(),
-            &mut signals,
-            &mut presenter,
+        let stream = match subscribe(&snapshot, timing, &mut signals, &mut presenter, push).await {
+            Ok(stream) => stream,
+            Err(Ended::Stop) => return,
+            Err(Ended::Lost | Ended::Rebind) => continue,
+        };
+        let ended = drive_stream(stream, &mut signals, &mut presenter, push).await;
+        if let Err(Ended::Stop) = recover(ended, timing, &mut signals, &mut presenter, push).await {
+            return;
+        }
+    }
+}
+
+/// Idles while the gateway reads unreachable, waking on any control
+/// signal. Returns to proceed with a subscription, or on stop.
+async fn idle_until_reachable(
+    signals: &mut Signals<'_>,
+    presenter: &mut Presenter,
+    push: &Push,
+) -> Result<(), Ended> {
+    while !*signals.reachable.borrow_and_update() {
+        match until(std::future::pending::<()>(), signals, presenter, push).await {
+            Err(Ended::Stop) => return Err(Ended::Stop),
+            Err(Ended::Lost | Ended::Rebind) | Ok(()) => {}
+        }
+    }
+    Ok(())
+}
+
+/// Opens one progress subscription, waiting out the resubscribe delay and
+/// looping around when the endpoint declines. Returns the stream, or an
+/// [`Ended`] telling the loop to stop or loop around again.
+async fn subscribe(
+    snapshot: &GatewaySnapshot,
+    timing: Timing,
+    signals: &mut Signals<'_>,
+    presenter: &mut Presenter,
+    push: &Push,
+) -> Result<ProgressStream, Ended> {
+    match until(
+        snapshot.client().subscribe_progress(),
+        signals,
+        presenter,
+        push,
+    )
+    .await
+    {
+        Err(ended) => return Err(ended),
+        Ok(Ok(stream)) => return Ok(stream),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "gateway progress subscription failed");
+        }
+    }
+    // A declined subscription waits out the resubscribe delay, then loops
+    // around to try again.
+    match until(
+        tokio::time::sleep(timing.resubscribe_delay),
+        signals,
+        presenter,
+        push,
+    )
+    .await
+    {
+        Err(Ended::Stop) => Err(Ended::Stop),
+        Err(Ended::Lost | Ended::Rebind) | Ok(()) => Err(Ended::Lost),
+    }
+}
+
+/// Drives one subscription: every snapshot reaches the presenter, a
+/// malformed snapshot is skipped, and the stream's own end is reported.
+async fn drive_stream(
+    stream: ProgressStream,
+    signals: &mut Signals<'_>,
+    presenter: &mut Presenter,
+    push: &Push,
+) -> Ended {
+    tokio::pin!(stream);
+    loop {
+        match until(stream.next(), signals, presenter, push).await {
+            Err(ended) => break ended,
+            Ok(Some(Ok(snapshot))) => presenter.apply(snapshot, Instant::now(), push),
+            // One malformed snapshot or a terminal read failure; the
+            // stream itself decides which by continuing or ending.
+            Ok(Some(Err(error))) => {
+                tracing::warn!(%error, "gateway progress snapshot skipped");
+            }
+            Ok(None) => break Ended::Lost,
+        }
+    }
+}
+
+/// Handles a subscription's end: the bar rests because a subscription the
+/// workshop can no longer hear is stale, and - while still reachable - the
+/// loop waits out the resubscribe delay before subscribing again.
+async fn recover(
+    ended: Ended,
+    timing: Timing,
+    signals: &mut Signals<'_>,
+    presenter: &mut Presenter,
+    push: &Push,
+) -> Result<(), Ended> {
+    match ended {
+        Ended::Stop => return Err(Ended::Stop),
+        Ended::Rebind => {
+            presenter.detach(Instant::now(), push);
+            return Ok(());
+        }
+        Ended::Lost => presenter.detach(Instant::now(), push),
+    }
+    if *signals.reachable.borrow_and_update() {
+        match until(
+            tokio::time::sleep(timing.resubscribe_delay),
+            signals,
+            presenter,
             push,
         )
         .await
         {
-            Err(Ended::Stop) => return,
-            Err(Ended::Lost | Ended::Rebind) => continue,
-            Ok(Ok(stream)) => stream,
-            Ok(Err(error)) => {
-                tracing::warn!(%error, "gateway progress subscription failed");
-                match until(
-                    tokio::time::sleep(timing.resubscribe_delay),
-                    &mut signals,
-                    &mut presenter,
-                    push,
-                )
-                .await
-                {
-                    Err(Ended::Stop) => return,
-                    Err(Ended::Lost | Ended::Rebind) | Ok(()) => continue,
-                }
-            }
-        };
-        tokio::pin!(stream);
-        let ended = loop {
-            match until(stream.next(), &mut signals, &mut presenter, push).await {
-                Err(ended) => break ended,
-                Ok(Some(Ok(snapshot))) => presenter.apply(snapshot, Instant::now(), push),
-                // One malformed snapshot or a terminal read failure; the
-                // stream itself decides which by continuing or ending.
-                Ok(Some(Err(error))) => {
-                    tracing::warn!(%error, "gateway progress snapshot skipped");
-                }
-                Ok(None) => break Ended::Lost,
-            }
-        };
-        match ended {
-            Ended::Stop => return,
-            // The subscription is gone, so its progress is stale: the bar
-            // rests (after any minimum-visible hold) until the next
-            // subscription reports work.
-            Ended::Rebind => {
-                presenter.detach(Instant::now(), push);
-                continue;
-            }
-            Ended::Lost => presenter.detach(Instant::now(), push),
-        }
-        if *signals.reachable.borrow_and_update() {
-            match until(
-                tokio::time::sleep(timing.resubscribe_delay),
-                &mut signals,
-                &mut presenter,
-                push,
-            )
-            .await
-            {
-                Err(Ended::Stop) => return,
-                Err(Ended::Lost | Ended::Rebind) | Ok(()) => {}
-            }
+            Err(Ended::Stop) => return Err(Ended::Stop),
+            Err(Ended::Lost | Ended::Rebind) | Ok(()) => {}
         }
     }
+    Ok(())
 }
 
 /// Awaits `future` with the control signals and the presenter's next

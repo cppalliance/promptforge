@@ -1020,7 +1020,7 @@ Components, in dependency order:
 
 <step-23>
 
-### Step 23: Name the phases of the heartbeat and progress loops
+### Step 23: Name the phases of the heartbeat and progress loops [completed]
 
 - Component: Structural consolidation
 - Piece: split
