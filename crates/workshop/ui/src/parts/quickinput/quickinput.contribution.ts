@@ -24,7 +24,7 @@ import { appendMenuItem, MenuId } from "../../services/menu-registry";
 import { QuickAccessRegistry } from "../../services/quick-access-registry";
 import { getService } from "../../services/service-registry";
 import { createQuickAccessProviderDescriptors } from "./quick-access-providers";
-import { QUICK_INPUT_SERVICE, type QuickInputShowOptions } from "./quick-input";
+import { QUICK_INPUT_SERVICE, type QuickInputShowOptions } from "../../services/quick-input-service";
 
 /** Opens quick input at `value`; resolves the widget at call time. */
 function showQuickInput(value: string, options?: QuickInputShowOptions): void {

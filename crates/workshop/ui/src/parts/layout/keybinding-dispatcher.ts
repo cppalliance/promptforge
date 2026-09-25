@@ -26,7 +26,7 @@ import { CONTEXT_KEY_SERVICE, type ContextKey, type ContextKeyService } from "..
 import { chordFromKeyboardEvent, formatChord, formatKeybinding, type Chord } from "../../services/keybinding-parser";
 import { KeybindingsRegistry } from "../../services/keybinding-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 
 /** How long a chord prefix waits for its second key. */
 const CHORD_TIMEOUT_MS = 5000;

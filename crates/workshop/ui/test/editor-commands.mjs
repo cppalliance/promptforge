@@ -30,7 +30,8 @@ const bundle = await esbuild.build({
       import "./src/parts/editor/editor.contribution.ts";
       export * as editorCommands from "./src/parts/editor/editor-commands.ts";
       export * as editorLifecycle from "./src/parts/editor/editor-lifecycle.ts";
-      export { ClosedEditors, CLOSED_EDITORS } from "./src/parts/editor/closed-editors.ts";
+      export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
+      export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
       export { parseLineColumn, createGotoLineProvider } from "./src/parts/editor/goto-line.ts";
       export { EditorState, EditorSelection } from "@codemirror/state";
       export { EditorView } from "@codemirror/view";

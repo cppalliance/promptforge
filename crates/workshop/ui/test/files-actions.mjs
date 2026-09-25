@@ -42,10 +42,10 @@ const bundle = await esbuild.build({
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
       export { registerService } from "./src/services/service-registry.ts";
       export { DOCK } from "./src/services/panel-registry.ts";
-      export { QUICK_INPUT_SERVICE } from "./src/parts/quickinput/quick-input.ts";
+      export { QUICK_INPUT_SERVICE } from "./src/services/quick-input-service.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
-      export { STATUS_BAR } from "./src/parts/status/status-bar.ts";
+      export { STATUS_BAR } from "./src/services/status-bar.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

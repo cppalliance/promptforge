@@ -25,6 +25,10 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
+      // The dock lifecycle reads the closed-editor stack through its token;
+      // the implementation's module scope self-registers the empty default,
+      // so importing it here keeps close/empty-group handling working.
+      import "./src/parts/editor/closed-editors.ts";
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,

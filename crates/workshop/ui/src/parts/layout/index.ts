@@ -6,7 +6,7 @@ import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import { registerPanelFactory } from "../../services/panel-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { WorkshopTreePanel } from "./workshop-panel";
 
 /**

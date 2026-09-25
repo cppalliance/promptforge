@@ -58,7 +58,7 @@ import {
   EDITOR_SETTINGS_SERVICE,
   type EditorSettings,
   type EditorSettingsService,
-} from "./editor-settings-service";
+} from "../../services/editor-settings-service";
 
 /** A document handed to the surface: the path it came from and its text. */
 export interface EditorDocument {

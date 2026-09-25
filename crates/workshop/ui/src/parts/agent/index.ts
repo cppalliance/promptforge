@@ -7,7 +7,7 @@ import { MODEL_SERVICE } from "../../services/model-service";
 import { getServiceOrNull } from "../../services/service-registry";
 import { SPEECH_CAPTURE } from "../../services/speech-capture";
 import type { IDisposable } from "../../base/lifecycle";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { AgentPanel } from "./agent-panel";
 import { markdownReady } from "./markdown-render";
 

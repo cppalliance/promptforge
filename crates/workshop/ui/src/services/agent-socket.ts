@@ -40,16 +40,11 @@ import type {
   InputResponseFrame,
   LaunchFrame,
 } from "./protocol";
+import { ReconnectBackoff } from "./reconnect-backoff";
 
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/agents/ws`;
 }
-
-// Reconnect backoff, matching the workshop socket's: the first retry waits
-// a second, each failure doubles it, and the cap keeps a down server from
-// pushing the wait past 30 s.
-const RECONNECT_INITIAL_MS = 1000;
-const RECONNECT_MAX_MS = 30_000;
 
 /**
  * The loosely-typed inbound frame: exactly the fields routing reads,
@@ -78,8 +73,7 @@ interface AgentServerFrame {
  */
 export class AgentSocket extends Disposable {
   private socket: WebSocket | null = null;
-  private reconnectDelayMs = RECONNECT_INITIAL_MS;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly backoff = new ReconnectBackoff();
   /** The acknowledged session, retained so a reconnect reattaches. */
   private acknowledged: AgentSessionFrame | null = null;
   /** The next event-log index to deliver; everything below it already was. */
@@ -132,10 +126,7 @@ export class AgentSocket extends Disposable {
     // fan-out, no reconnect backoff.
     this._register(
       toDisposable(() => {
-        if (this.reconnectTimer !== null) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
+        this.backoff.cancel();
         const socket = this.socket;
         if (socket) {
           socket.onclose = null;
@@ -154,11 +145,7 @@ export class AgentSocket extends Disposable {
     const socket = new WebSocket(this.url);
     this.socket = socket;
     socket.onopen = () => {
-      if (this.reconnectTimer !== null) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-      this.reconnectDelayMs = RECONNECT_INITIAL_MS;
+      this.backoff.reset();
       // Sessions outlive sockets: a fresh connection reattaches to the
       // acknowledged session. The replay from index zero that follows is
       // deduplicated by the event cursor.
@@ -231,21 +218,9 @@ export class AgentSocket extends Disposable {
     }
   }
 
-  /**
-   * Schedules the next reconnect attempt with exponential backoff. One
-   * timer at a time: a close while an attempt is already waiting does not
-   * stack a second.
-   */
+  /** Schedules the next reconnect attempt with exponential backoff. */
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== null) {
-      return;
-    }
-    const delay = this.reconnectDelayMs;
-    this.reconnectDelayMs = Math.min(delay * 2, RECONNECT_MAX_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
+    this.backoff.schedule(() => this.connect());
   }
 
   private route(event: MessageEvent): void {

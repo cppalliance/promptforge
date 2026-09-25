@@ -27,8 +27,8 @@ import type { MenuItem, MenuItemsProvider } from "../../services/menu-registry";
 import { RECENT_FILES_STORE, type RecentFilesStore } from "../../services/recent-files-store";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
-import { STATUS_BAR } from "../status/status-bar";
-import type { QuickAccessProvider, QuickInputItem } from "../quickinput/quick-input";
+import { STATUS_BAR } from "../../services/status-bar";
+import type { QuickAccessProvider, QuickInputItem } from "../../services/quick-input-service";
 
 /** The stores the providers read; tests inject their own. */
 export interface RecentProviderDeps {

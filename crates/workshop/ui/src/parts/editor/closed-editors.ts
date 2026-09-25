@@ -20,20 +20,11 @@
 // from editor-lifecycle.ts, so main.ts can bind the token without pulling
 // the editor chunk into the initial bundle.
 
-import { createServiceToken, registerService } from "../../services/service-registry";
+import { CLOSED_EDITORS, type ClosedEditor, type ClosedEditorsSnapshot } from "../../services/closed-editors";
+import { registerService } from "../../services/service-registry";
 
 /** The most closed editors the stack retains; older entries drop. */
 const MAX_CLOSED_EDITORS = 50;
-
-/** One closed editor: a file to reopen by path, or an untitled buffer's text. */
-export type ClosedEditor =
-  | { readonly kind: "file"; readonly path: string }
-  | { readonly kind: "untitled"; readonly text: string };
-
-/** The persisted shape: file paths only, most recent first. */
-export interface ClosedEditorsSnapshot {
-  readonly paths: string[];
-}
 
 /** The writer the stack hands `{ paths: [...] }` to after a change. */
 export type ClosedEditorsWriter = (value: unknown) => void;
@@ -140,9 +131,6 @@ export class ClosedEditors {
     }
   }
 }
-
-/** The registry token for the closed-editor stack singleton. */
-export const CLOSED_EDITORS = createServiceToken<ClosedEditors>("workshop.closedEditors");
 
 // Self-registration with an empty stack and a no-op writer: a consumer
 // that resolves the token before the composition root re-registers it

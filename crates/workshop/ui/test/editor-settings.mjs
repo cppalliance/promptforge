@@ -25,11 +25,8 @@ const bundle = await esbuild.build({
     contents: `
       import "./src/parts/editor/editor.contribution.ts";
       export { CodeMirrorSurface } from "./src/parts/editor/editor-surface.ts";
-      export {
-        DEFAULT_EDITOR_SETTINGS,
-        EDITOR_SETTINGS_SERVICE,
-        EditorSettingsService,
-      } from "./src/parts/editor/editor-settings-service.ts";
+      export { EditorSettingsService } from "./src/parts/editor/editor-settings-service.ts";
+      export { DEFAULT_EDITOR_SETTINGS, EDITOR_SETTINGS_SERVICE } from "./src/services/editor-settings-service.ts";
       export { ContextKeyService } from "./src/services/context-key-service.ts";
       export { getService } from "./src/services/service-registry.ts";
       export { Commands } from "./src/services/command-registry.ts";

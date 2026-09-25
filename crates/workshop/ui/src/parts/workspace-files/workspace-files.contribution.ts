@@ -52,10 +52,10 @@ import {
   saveWorkspaceFileAs,
   type WorkspaceFileResponse,
 } from "../../services/workspace-file-client";
-import { CLOSED_EDITORS } from "../editor/closed-editors";
+import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { applyLayoutOrDefault } from "../layout/layout-boot";
 import { buildLayoutEnvelope } from "../layout/layout-persistence";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../workspace/workspace-drops";
 
 /** The Tauri event the desktop app listens for to re-apply window geometry. */

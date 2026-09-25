@@ -21,29 +21,7 @@ import "./quick-input.css";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { QuickAccessRegistry } from "../../services/quick-access-registry";
-import { createServiceToken, type ServiceToken } from "../../services/service-registry";
-
-/** One row in the quick input list. */
-export interface QuickInputItem {
-  /** The row's primary text. */
-  readonly label: string;
-  /** Secondary muted text, e.g. a path or a category. */
-  readonly description?: string;
-  /** The keybinding hint shown at the row's right edge. */
-  readonly keybinding?: string;
-  /** Runs the row's action. The panel has already closed. */
-  accept(): void;
-}
-
-/**
- * The provider shape the widget expects a descriptor's factory to
- * produce. The registry never calls the factory; this interface is the
- * widget's side of the contract.
- */
-export interface QuickAccessProvider {
-  /** The rows for `filter` (the input value minus the prefix). */
-  getItems(filter: string): readonly QuickInputItem[];
-}
+import { type QuickAccessProvider, type QuickInputItem, type QuickInputShowOptions } from "../../services/quick-input-service";
 
 /** Narrows a factory's unknown product to the provider shape. */
 function asProvider(value: unknown): QuickAccessProvider | undefined {
@@ -54,15 +32,6 @@ function asProvider(value: unknown): QuickAccessProvider | undefined {
     return undefined;
   }
   return value as QuickAccessProvider;
-}
-
-/** Options for one quick input showing. */
-export interface QuickInputShowOptions {
-  /**
-   * Render every provider's help entries above the active provider's
-   * rows while the input is empty - the modes list.
-   */
-  readonly includeHelp?: boolean;
 }
 
 /** Registry override; tests inject their own instance. */
@@ -303,6 +272,3 @@ export class QuickInputService extends Disposable {
   }
 }
 
-/** The service token the composition root registers the widget under. */
-export const QUICK_INPUT_SERVICE: ServiceToken<QuickInputService> =
-  createServiceToken<QuickInputService>("workshop.quickInput");

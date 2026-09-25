@@ -48,10 +48,11 @@ const bundle = await esbuild.build({
       export { registerService } from "./src/services/service-registry.ts";
       export { UI_STORAGE } from "./src/services/ui-storage.ts";
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
-      export { CLOSED_EDITORS, ClosedEditors } from "./src/parts/editor/closed-editors.ts";
+      export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
+      export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
       export { LAYOUT_SCHEMA_VERSION, startLayoutPersistence } from "./src/parts/layout/layout-persistence.ts";
-      export { STATUS_BAR } from "./src/parts/status/status-bar.ts";
+      export { STATUS_BAR } from "./src/services/status-bar.ts";
       export { WorkshopTreePanel } from "./src/parts/layout/workshop-panel.ts";
       export { WindowTitle } from "./src/parts/chrome/command-center.ts";
     `,

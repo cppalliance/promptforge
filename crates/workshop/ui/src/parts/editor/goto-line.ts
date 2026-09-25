@@ -5,7 +5,7 @@
 // VS Code's: a 1-based line number with an optional column after a
 // colon or comma (":12", ":12:5", ":12,5").
 
-import type { QuickAccessProvider, QuickInputItem } from "../quickinput/quick-input";
+import type { QuickAccessProvider, QuickInputItem } from "../../services/quick-input-service";
 
 /** A parsed go-to target: a 1-based line and an optional 1-based column. */
 export interface LineColumnTarget {

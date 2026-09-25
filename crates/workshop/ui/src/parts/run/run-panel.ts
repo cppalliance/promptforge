@@ -27,7 +27,7 @@ import { getServiceOrNull } from "../../services/service-registry";
 import { fetchFile } from "../../services/workspace-api";
 import { showPanelDialog } from "../editor/editor-dialog";
 import { setRunTabLoading } from "../layout/run-tab";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { grantPath, WORKSPACE_FILE_DROP_EVENT } from "../workspace/workspace-drops";
 import { renderContractRows } from "./run-rows";
 import "./run-panel.css";

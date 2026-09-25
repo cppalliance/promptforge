@@ -44,13 +44,18 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/workspace-files/workspace-files.contribution.ts";
+      // The contribution reads the closed-editor stack through its token; the
+      // implementation's module scope self-registers the empty default, so
+      // importing it here keeps the switch's state snapshot working without a
+      // live adapter.
+      import "./src/parts/editor/closed-editors.ts";
       export { register } from "./src/parts/workspace-files/index.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus } from "./src/services/menu-registry.ts";
       export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";
       export { registerService } from "./src/services/service-registry.ts";
       export { currentWorkspaceFile, putWindowState } from "./src/services/workspace-file-client.ts";
-      export { STATUS_BAR } from "./src/parts/status/status-bar.ts";
+      export { STATUS_BAR } from "./src/services/status-bar.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

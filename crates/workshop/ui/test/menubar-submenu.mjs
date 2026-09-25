@@ -36,7 +36,7 @@ const bundle = await esbuild.build({
       export { ContextKeyService } from "./src/services/context-key-service.ts";
       export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
       export { registerService } from "./src/services/service-registry.ts";
-      export { STATUS_BAR } from "./src/parts/status/status-bar.ts";
+      export { STATUS_BAR } from "./src/services/status-bar.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

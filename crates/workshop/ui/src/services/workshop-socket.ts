@@ -8,6 +8,7 @@
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
 import type { CatalogModel, SelectModelFrame, StatusFrame, WorkbenchFrame } from "./protocol";
+import { ReconnectBackoff } from "./reconnect-backoff";
 
 interface ServerFrame {
   type?: unknown;
@@ -17,11 +18,6 @@ interface ServerFrame {
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 }
-
-// Reconnect backoff: the first retry waits a second, each failure doubles
-// it, and the cap keeps a down server from pushing the wait past 30 s.
-const RECONNECT_INITIAL_MS = 1000;
-const RECONNECT_MAX_MS = 30_000;
 
 /**
  * Most pushes a boot queue will ever hold before `ready()` releases it.
@@ -47,8 +43,7 @@ type QueuedPush =
 export class WorkshopSocket extends Disposable {
   private socket: WebSocket | null = null;
   private opening: { socket: WebSocket; promise: Promise<void> } | null = null;
-  private reconnectDelayMs = RECONNECT_INITIAL_MS;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly backoff = new ReconnectBackoff();
   private isReady = false;
   private readonly bootQueue: QueuedPush[] = [];
 
@@ -75,10 +70,7 @@ export class WorkshopSocket extends Disposable {
     // fan-out, no reconnect backoff.
     this._register(
       toDisposable(() => {
-        if (this.reconnectTimer !== null) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
+        this.backoff.cancel();
         const socket = this.socket;
         if (socket) {
           socket.onclose = null;
@@ -127,11 +119,7 @@ export class WorkshopSocket extends Disposable {
     entry.promise = new Promise<void>((resolve, reject) => {
       socket.onopen = () => {
         if (this.opening === entry) this.opening = null;
-        if (this.reconnectTimer !== null) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
-        this.reconnectDelayMs = RECONNECT_INITIAL_MS;
+        this.backoff.reset();
         resolve();
       };
       // A failure while opening rejects the waiters; a failure on an
@@ -156,22 +144,12 @@ export class WorkshopSocket extends Disposable {
     return entry.promise;
   }
 
-  /**
-   * Schedules the next reconnect attempt with exponential backoff. One
-   * timer at a time: a close while an attempt is already waiting does not
-   * stack a second.
-   */
+  /** Schedules the next reconnect attempt with exponential backoff. */
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== null) {
-      return;
-    }
-    const delay = this.reconnectDelayMs;
-    this.reconnectDelayMs = Math.min(delay * 2, RECONNECT_MAX_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
+    this.backoff.schedule(() => {
       // A failed attempt ends in onclose, which schedules the next one.
       void this.ensureOpen().catch(() => {});
-    }, delay);
+    });
   }
 
   /**

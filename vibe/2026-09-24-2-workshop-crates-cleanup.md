@@ -1157,7 +1157,7 @@ Components, in dependency order:
 
 <step-32>
 
-### Step 32: Move the workshop UI's shared backoff and service tokens into services
+### Step 32: Move the workshop UI's shared backoff and service tokens into services [completed]
 
 - Component: Structural consolidation
 - Piece: workshop UI structure

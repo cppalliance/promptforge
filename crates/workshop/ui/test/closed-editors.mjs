@@ -24,7 +24,8 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { ClosedEditors, CLOSED_EDITORS } from "./src/parts/editor/closed-editors.ts";
+      export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
+      export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
       export { getService } from "./src/services/service-registry.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

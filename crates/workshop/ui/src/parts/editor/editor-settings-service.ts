@@ -24,29 +24,14 @@ import type { Event } from "../../base/event";
 import type { IDisposable } from "../../base/lifecycle";
 import { ContextKeyService, CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import type { ContextKey } from "../../services/context-key-service";
-import { createServiceToken, getServiceOrNull, registerService } from "../../services/service-registry";
-
-/** The four editor settings, one boolean per toggle action. */
-export interface EditorSettings {
-  readonly wordWrap: boolean;
-  readonly renderWhitespace: boolean;
-  readonly renderControlCharacters: boolean;
-  readonly columnSelection: boolean;
-}
-
-/** One setting's name. */
-export type EditorSettingName = keyof EditorSettings;
-
-/**
- * The stock values. Render Control Characters is on by default, as in
- * Cursor; the other three start off.
- */
-export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  wordWrap: false,
-  renderWhitespace: false,
-  renderControlCharacters: true,
-  columnSelection: false,
-};
+import {
+  DEFAULT_EDITOR_SETTINGS,
+  EDITOR_SETTING_CONTEXT_KEYS,
+  EDITOR_SETTINGS_SERVICE,
+  type EditorSettingName,
+  type EditorSettings,
+} from "../../services/editor-settings-service";
+import { getServiceOrNull, registerService } from "../../services/service-registry";
 
 /** The setting names, in declaration order. */
 const SETTING_NAMES = [
@@ -55,14 +40,6 @@ const SETTING_NAMES = [
   "renderControlCharacters",
   "columnSelection",
 ] as const satisfies readonly EditorSettingName[];
-
-/** The context key each setting publishes to (the menus' `toggled` sources). */
-export const EDITOR_SETTING_CONTEXT_KEYS: { readonly [K in EditorSettingName]: `config.editor.${K}` } = {
-  wordWrap: "config.editor.wordWrap",
-  renderWhitespace: "config.editor.renderWhitespace",
-  renderControlCharacters: "config.editor.renderControlCharacters",
-  columnSelection: "config.editor.columnSelection",
-};
 
 /** The writer the service hands each new settings object to. */
 export type EditorSettingsWriter = (value: unknown) => void;
@@ -160,9 +137,6 @@ export class EditorSettingsService implements IDisposable {
     this.changeEmitter.dispose();
   }
 }
-
-/** The registry token for the editor-settings singleton. */
-export const EDITOR_SETTINGS_SERVICE = createServiceToken<EditorSettingsService>("workshop.editorSettings");
 
 // Self-registration with the defaults and a no-op writer: a consumer that
 // resolves the token before the composition root re-registers it bound to

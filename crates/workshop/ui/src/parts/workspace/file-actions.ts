@@ -16,7 +16,7 @@ import { fetchTree } from "../../services/workspace-api";
 import { asEditor } from "../editor/editor-commands";
 import { focusWorkshopTree } from "../layout/workshop-panel";
 import { openInZone } from "../layout/zones";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { addFolderToWorkspace } from "./add-folder";
 import { grantPath, WORKSPACE_CHANGED_EVENT } from "./workspace-drops";
 

@@ -20,8 +20,8 @@ import { KeybindingsRegistry, KeybindingWeight } from "../../services/keybinding
 import { MenuId } from "../../services/menu-registry";
 import { QuickAccessRegistry } from "../../services/quick-access-registry";
 import { getService } from "../../services/service-registry";
-import { QUICK_INPUT_SERVICE } from "../quickinput/quick-input";
-import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "./editor-settings-service";
+import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
+import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "../../services/editor-settings-service";
 import { createGotoLineProvider } from "./goto-line";
 
 /** The editor-commands module as a type only; the runtime import stays lazy. */

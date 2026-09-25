@@ -35,7 +35,7 @@ const bundle = await esbuild.build({
       export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
       export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
       export { getService, registerService } from "./src/services/service-registry.ts";
-      export { STATUS_BAR } from "./src/parts/status/status-bar.ts";
+      export { STATUS_BAR } from "./src/services/status-bar.ts";
       export { Menu } from "./src/parts/menu/menu.ts";
       export { KeybindingDispatcher } from "./src/parts/layout/keybinding-dispatcher.ts";
       export { initZones } from "./src/parts/layout/zones.ts";

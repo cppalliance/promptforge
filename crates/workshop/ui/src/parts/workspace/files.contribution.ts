@@ -24,7 +24,7 @@ import { MenuId, Menus } from "../../services/menu-registry";
 import { QuickAccessRegistry } from "../../services/quick-access-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService } from "../../services/service-registry";
-import { QUICK_INPUT_SERVICE } from "../quickinput/quick-input";
+import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { createFileQuickAccessProvider, createRecentMenuProvider } from "./open-recent";
 
 /** The file-actions module as a type only; the runtime import stays lazy. */

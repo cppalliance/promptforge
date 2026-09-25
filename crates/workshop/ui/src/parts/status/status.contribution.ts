@@ -12,7 +12,7 @@ import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "../../services/menu-registry";
 import { getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "./status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 
 /** The Appearance flyout's id; the menubar contribution declares the submenu. */
 const APPEARANCE_MENU: MenuId = "menubar/view/appearance";

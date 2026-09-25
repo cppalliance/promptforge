@@ -14,6 +14,7 @@ mod lifecycle;
 mod recovery;
 mod signals;
 
+#[cfg(test)]
 pub(super) use launch::{
     launch_and_attach_cancellable_with, run_effect_if_active,
     wait_for_launched_file_cancellable_with,

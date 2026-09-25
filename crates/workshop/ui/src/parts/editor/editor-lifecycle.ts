@@ -17,7 +17,7 @@ import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import { getService } from "../../services/service-registry";
 import { openInZone } from "../layout/zones";
-import { CLOSED_EDITORS } from "./closed-editors";
+import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { asEditor } from "./editor-commands";
 import { onDidInitEditorPanel } from "./editor-panel";
 

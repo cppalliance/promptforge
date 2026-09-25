@@ -29,7 +29,7 @@ import { ContextKeyExpr } from "../../services/context-key-expr";
 import { KeybindingsRegistry } from "../../services/keybinding-registry";
 import { Menus, type MenuId, type MenuItem, type MenuRegistry, type MenuRow, type SubmenuItem } from "../../services/menu-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 
 /** Where the popover opens: below an element, or at a pointer position. */
 export type MenuAnchor = HTMLElement | { readonly x: number; readonly y: number };

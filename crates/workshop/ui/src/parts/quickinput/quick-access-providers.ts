@@ -27,9 +27,9 @@ import { KeybindingsRegistry } from "../../services/keybinding-registry";
 import { MenuId, Menus, type MenuRegistry } from "../../services/menu-registry";
 import { QuickAccessRegistry, type QuickAccessProviderDescriptor } from "../../services/quick-access-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { COMMANDS_HISTORY, type CommandsHistory } from "./commands-history";
-import { QUICK_INPUT_SERVICE, type QuickAccessProvider, type QuickInputItem } from "./quick-input";
+import { QUICK_INPUT_SERVICE, type QuickAccessProvider, type QuickInputItem } from "../../services/quick-input-service";
 
 /** The registries the palette provider reads; tests inject their own. */
 export interface CommandPaletteProviderDeps {

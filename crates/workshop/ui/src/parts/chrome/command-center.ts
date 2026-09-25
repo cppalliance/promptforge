@@ -27,7 +27,7 @@ import { CommandRegistry, Commands } from "../../services/command-registry";
 import { MenuId, Menus, type MenuItem, type MenuRegistry } from "../../services/menu-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
-import { STATUS_BAR } from "../status/status-bar";
+import { STATUS_BAR } from "../../services/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
 
 /** The title shown when no workspace folder is granted. */
