@@ -2,10 +2,11 @@
 // row at module scope, before any service exists. The run body opens a
 // fresh Run panel keyed by a random instance id - each invocation is its
 // own window in the main zone - seeded with the focused editor's file
-// when there is one. zones.ts is already in the entry bundle (main.ts
-// boots the dock through it), so the open call is direct; the editor
-// command layer pulls CodeMirror, so it is lazy-imported here, and the
-// run chunk itself still loads lazily through the panel registry.
+// when there is one. main.ts imports zones.ts eagerly (it boots the
+// dock through it), so the module is already loaded and the open call
+// is direct; the editor command layer pulls CodeMirror, so it is
+// lazy-imported here, and the run chunk itself still loads lazily
+// through the panel registry.
 //
 // The id is ours: no VS Code or Cursor row backs this window. One menu
 // item, no keybinding - F5 belongs to the full plan's Run Prompt

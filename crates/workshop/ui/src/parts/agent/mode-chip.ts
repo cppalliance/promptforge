@@ -2,7 +2,8 @@
 // mode's icon and label. Clicking opens a DropdownMenu of the four
 // modes; picking one updates the chip and fires "agent-mode-changed" on
 // document. UI-only by design - nothing here talks to the backend; the
-// event is the seam the later wiring step consumes.
+// event is the seam for wiring the mode to the backend, and nothing in
+// the app listens to it yet.
 
 import "./mode-chip.css";
 

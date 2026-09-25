@@ -2,9 +2,10 @@
 // Window row at module scope, before any service exists.
 // The run body opens a fresh agent panel keyed by a random instance id -
 // each invocation is its own panel, socket, and modal server session in
-// the right zone. zones.ts is already in the entry bundle (main.ts boots
-// the dock through it), so the call is direct; the agent chunk itself
-// still loads lazily through the panel registry.
+// the right zone. main.ts imports zones.ts eagerly (it boots the dock
+// through it), so the module is already loaded and the open call is
+// direct; the agent chunk itself still loads lazily through the panel
+// registry.
 //
 // The id is ours: Cursor ships a New Agents Window row but its command
 // id is not public.

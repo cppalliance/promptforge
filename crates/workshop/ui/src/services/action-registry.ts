@@ -1,11 +1,12 @@
 // The action registry: the single registration point every feature
 // contribution file calls (the VS Code registerAction2 pattern). One
-// action descriptor fans out into the three registries from steps 1-3:
-// the command registry gets the command with its metadata, the menu
-// registry gets one row per menu entry plus a CommandPalette row when
-// f1 is set, and the keybinding registry gets the keybinding rule with
-// the action's precondition ANDed into the rule's when, so a chord
-// never fires while the command's precondition fails.
+// action descriptor fans out into three registries, the command
+// registry, the menu registry, and the keybinding registry. The command
+// registry gets the command with its metadata, the menu registry gets
+// one row per menu entry plus a CommandPalette row when f1 is set, and
+// the keybinding registry gets the keybinding rule with the action's
+// precondition ANDed into the rule's when, so a chord never fires while
+// the command's precondition fails.
 //
 // Every when, precondition, toggled, and keybinding string is parsed
 // once at registration; a malformed string comes back as a ParseError

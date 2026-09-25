@@ -559,7 +559,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-2>
 
-### Step 2: Reword the stale UI comments and clarify the layout rule
+### Step 2: Reword the stale UI comments and clarify the layout rule [completed]
 
 - Component: Wording
 - Piece: one piece. All the edits are wording, and one set of text checks covers them.

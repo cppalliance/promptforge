@@ -1,7 +1,7 @@
 // The chrome contribution: the eager module registering the window-level
 // catalog rows at module scope, before any service exists.
-// Chrome is a light eager feature - main.ts already pulls window-chrome
-// and zoom into the entry bundle - so the run bodies are direct calls.
+// Chrome is a light eager feature - main.ts already loads window-chrome
+// and zoom eagerly - so the run bodies are direct calls.
 //
 // Placements follow the catalog: the zoom triple sits in Appearance's
 // 5_zoom group with ctrlcmd chords (Cmd on macOS), Full Screen and Close
