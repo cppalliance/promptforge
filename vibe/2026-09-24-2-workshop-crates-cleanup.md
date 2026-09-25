@@ -1116,7 +1116,7 @@ Components, in dependency order:
 
 <step-29>
 
-### Step 29: Move the /ws socket into a workshop_socket module
+### Step 29: Move the /ws socket into a workshop_socket module [completed]
 
 - Component: Structural consolidation
 - Piece: renames

@@ -56,6 +56,7 @@ mod csp;
 mod error;
 mod routes;
 mod serve;
+mod workshop_socket;
 
 /// The intent-named push facade over the registry's producer sink slots:
 /// business code reports what happened and never chooses a severity or

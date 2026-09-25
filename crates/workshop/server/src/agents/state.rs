@@ -18,7 +18,7 @@ use workshop_registry::{
 };
 use workshop_support::{RELAY_DEADLINE, with_deadline};
 
-use super::{AgentSessions, bindings, relay, session, socket};
+use super::{AgentSessions, bindings, relay, socket};
 
 /// The shared state of the sessions subsystem's routes: the subsystem
 /// registry every handle is read through, and the server's WebSocket
@@ -138,7 +138,7 @@ pub(crate) fn routes(state: SessionsState) -> Router {
         Router::new().route("/v1/models", get(relay::models)),
         RELAY_DEADLINE,
     )
-    .route("/ws", get(session::upgrade))
+    .route("/ws", get(crate::workshop_socket::upgrade))
     .route("/agents/ws", get(socket::upgrade))
     .with_state(state)
 }

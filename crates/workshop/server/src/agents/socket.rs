@@ -37,9 +37,9 @@ use workshop_protocol::{
 };
 
 use super::LaunchRefusal;
-use super::session::{cross_site_refusal, send_error, send_frame};
 use super::socket_frames::{delta_frame, drain_events, frame_entry, input_frame};
 use super::state::SessionsState;
+use crate::workshop_socket::{cross_site_refusal, send_error, send_frame};
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
 /// foreign `Origin` is refused with 403, as the workbench socket's

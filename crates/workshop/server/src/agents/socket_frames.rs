@@ -9,8 +9,8 @@ use harness_api::{Delta, DeltaKind, SessionEvent, WaitFrame};
 use promptforge::event::Event;
 use workshop_protocol::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, InputFrame};
 
-use super::session::send_frame;
 use super::socket::Attached;
+use crate::workshop_socket::send_frame;
 
 /// Renders a harness wait frame as the protocol's input frame: the one
 /// place the harness's wait vocabulary meets Workshop's wire shape.

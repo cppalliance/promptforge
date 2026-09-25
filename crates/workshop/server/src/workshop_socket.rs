@@ -20,7 +20,7 @@
 //! refusals when the frame included one. A frame that is not a
 //! well-formed menu event is answered with an `error` frame and the
 //! session continues. Chat itself is on the `/agents/ws` socket
-//! ([`super::socket`]).
+//! ([`crate::agents::socket`]).
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
@@ -37,7 +37,7 @@
 //! ([`SessionsState::registry`]), not named directly: an unregistered
 //! slot degrades the session to no status frames rather than failing it.
 
-#[path = "session-menu.rs"]
+#[path = "workshop_socket-menu.rs"]
 mod menu;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -50,7 +50,7 @@ use tokio::sync::broadcast;
 
 use workshop_protocol::{ErrorEnvelope, ErrorFrame};
 
-use super::state::SessionsState;
+use crate::agents::state::SessionsState;
 
 use self::menu::{select_model, start_switch};
 
