@@ -1,6 +1,6 @@
 // The layout contribution: the eager module registering the sidebar and
-// explorer catalog rows (plan step 19) at module scope, before any
-// service exists. Layout is a light feature - main.ts already pulls
+// explorer catalog rows at module scope, before any service exists.
+// Layout is a light feature - main.ts already pulls
 // zones into the entry bundle - so the run bodies are direct calls.
 //
 // Explorer shows and focuses the Workshop tree. Primary Side Bar toggles

@@ -1,5 +1,5 @@
-// The Open Recent menu provider and the "" quick-access file provider
-// (plan step 17). Both read the same two sources - the tree-state
+// The Open Recent menu provider and the "" quick-access file provider.
+// Both read the same two sources - the tree-state
 // service's fetched listings (the granted roots cache under ROOTS_KEY)
 // and the recent-files store - so File > Open Recent and Ctrl+P never
 // disagree, and both cover only what is already there: no server route,

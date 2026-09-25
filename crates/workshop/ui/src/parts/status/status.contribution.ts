@@ -1,7 +1,7 @@
 // The status contribution: the eager module registering the Status Bar
-// visibility row (plan step 19) at module scope, before any service
-// exists. The run body resolves the composition root's StatusBar at call
-// time and flips it; the bar itself mirrors the outcome into the
+// visibility row at module scope, before any service exists. The run
+// body resolves the composition root's StatusBar at call time and
+// flips it; the bar itself mirrors the outcome into the
 // statusBarVisible context key, which the Appearance row reads for its
 // checkbox. With no composition root (a standalone widget test) there is
 // no bar to flip and the row is inert.

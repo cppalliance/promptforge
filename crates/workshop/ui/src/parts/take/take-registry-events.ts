@@ -1,3 +1,12 @@
+// Server-event and failure handling for the take registry. A decoded
+// Realtime event reaches its take through the server's item id, which
+// binds when the server acknowledges a commit - commits are matched to
+// takes first in, first out - or, for a transcript under an unknown id,
+// only when exactly one take is unbound. A failed transcription keeps
+// the visible text; service errors and connection loss roll takes back.
+// Status labels are local wording: server error text never reaches the
+// status bar.
+
 import type { RealtimeEvent } from "../../services/realtime-event-decoder";
 import {
   activeTake,

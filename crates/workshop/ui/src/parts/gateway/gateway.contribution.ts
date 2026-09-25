@@ -1,5 +1,5 @@
 // The gateway contribution: the eager module registering the Settings
-// row (plan step 19) at module scope, before any service exists.
+// row at module scope, before any service exists.
 // Settings is the workshop's one settings surface - the Gateway Config
 // panel - so the row lives at File > Preferences > Settings with the
 // ctrlcmd+, chord (Cmd+, on macOS), where Cursor keeps its settings

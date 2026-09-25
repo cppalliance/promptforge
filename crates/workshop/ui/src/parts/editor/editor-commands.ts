@@ -5,7 +5,7 @@
 // through the service registry (the DOCK token, registered by
 // initZones) instead of capturing it.
 //
-// The CodeMirror-backed catalog rows (plan step 13): runInActiveEditor
+// The CodeMirror-backed catalog rows: runInActiveEditor
 // and withActiveEditor resolve the active editor through the dock, the
 // built-in CodeMirror commands are re-exported so the contribution file
 // has exactly one lazy import site, and the custom StateCommands

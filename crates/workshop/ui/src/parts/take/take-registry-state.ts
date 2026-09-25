@@ -1,3 +1,10 @@
+// Take registry state helpers, called on the writable clone inside one
+// reduction: cloning, lookup, item binding, and region edits.
+// replaceTake shifts every later region by the edit's length delta so
+// document offsets stay exact. removeTake leaves a tombstone for any
+// commit the server has not yet acknowledged and retires the take's item
+// id, so late server events for it change nothing.
+
 import type {
   MutableRegistry,
   PendingWireRequest,

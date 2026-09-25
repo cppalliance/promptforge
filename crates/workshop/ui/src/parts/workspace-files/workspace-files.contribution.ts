@@ -1,6 +1,6 @@
 // The workspace-files contribution: the eager module registering the
-// File menu's workspace-document rows (plan steps 10 and 11) at module
-// scope, before any service exists. Open Workspace from File..., Save
+// File menu's workspace-document rows at module scope, before any
+// service exists. Open Workspace from File..., Save
 // Workspace As..., and Duplicate Workspace... take over the stub table's
 // rows under the same command ids and labels (Duplicate gaining the
 // ellipsis its save picker warrants), so no menu, test, or keybinding
@@ -24,7 +24,7 @@
 // answer, not a switch that already committed, so the page then asks the
 // server where it stands and follows it (resyncAfterTimeout).
 //
-// The workspace-scoped UI state (plan step 13) follows the switch too. The
+// The workspace-scoped UI state follows the switch too. The
 // .pfwork file holds the dock layout, the tree's expanded folders, and
 // the closed-editor stack in its workspace bucket. Open pulls the file's
 // bucket through the UI-state adapter and applies all three to the live

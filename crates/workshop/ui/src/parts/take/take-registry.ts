@@ -1,3 +1,12 @@
+// The dictation take registry: a pure reducer over push-to-talk takes,
+// each one a transcript region in the target text. Every user, capture,
+// wire, server, or connection input yields the next state plus typed
+// effects; realtime-stt.ts performs the editor, capture, status, and
+// wire work those effects name. Only connection.ready advances the
+// Realtime connection generation, and advancing it drops the old
+// connection's wire, commit, and capture bookkeeping. Any other input
+// stamped with a different generation is ignored.
+
 import type { SttInsertionContext } from "../stt/stt";
 import {
   connectionLost,

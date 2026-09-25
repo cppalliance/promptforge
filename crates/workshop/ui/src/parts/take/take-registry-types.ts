@@ -1,3 +1,8 @@
+// The take registry's types: the immutable state, the inputs the reducer
+// accepts, and the typed effects it hands its owner. MutableRegistry and
+// Reduction live only inside one reduction; take-registry.ts re-exports
+// the public subset.
+
 import type { RealtimeEvent } from "../../services/realtime-event-decoder";
 import type { SttInsertionContext } from "../stt/stt";
 

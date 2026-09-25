@@ -1,9 +1,9 @@
 // The files contribution: the eager module registering the File menu's
-// picker and file-action rows (plan step 16) and the Open Recent and
-// quick-open file providers (plan step 17) at module scope, before any
-// service exists. Every run body lazy-imports file-actions, so this file
-// pulls no dockview or CodeMirror into the initial bundle; the type-only
-// import below is erased at compile time.
+// picker and file-action rows and the Open Recent and quick-open file
+// providers at module scope, before any service exists. Every run body
+// lazy-imports file-actions, so this file pulls no dockview or
+// CodeMirror into the initial bundle; the type-only import below is
+// erased at compile time.
 //
 // Placements follow the catalog: ctrl-based chords bind ctrlcmd so
 // macOS gets Cmd, Open File and Save As are desktop-only (precondition
@@ -115,7 +115,8 @@ addAction({
   run: runFileAction((actions) => actions.revertActiveEditor),
 });
 
-// The Open Recent rows and the "" quick-access provider (plan step 17).
+// Open Recent: the two path commands its dynamic rows and the ""
+// quick-access rows dispatch, then its More... and Clear rows.
 addAction({
   id: "vscode.open",
   title: "Open File",

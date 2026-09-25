@@ -1,7 +1,13 @@
-// Lazy-CSS entry-bundle contract: the lazy feature directories (agent,
-// editor, gateway, stt) import their stylesheets beside their TypeScript,
-// and esbuild hoists CSS reachable through dynamic imports into the
-// entry's app-*.css - no eager re-import in main.ts is needed or wanted.
+// Lazy-CSS entry-bundle contract. The entry bundle is the eagerly loaded
+// composition: `crates/workshop/ui/src/main.ts` and the
+// `*.contribution.ts` modules it imports. Lazy panels never import a
+// module inside it, directly or through another import. Everything else
+// that eager and lazy code both import, such as `services/`, `base/`,
+// and shared parts modules like `parts/layout/zones.ts`, is shared code.
+// The lazy feature directories (one marker below per directory) import
+// their stylesheets beside their TypeScript, and esbuild hoists CSS
+// reachable through dynamic imports into the entry's app-*.css - no
+// eager re-import in main.ts is needed or wanted.
 // This test builds for real and asserts over the build output: the entry
 // stylesheet must include one marker class per lazy directory, so a future
 // esbuild behavior change (or an accidental import-graph cut) that drops

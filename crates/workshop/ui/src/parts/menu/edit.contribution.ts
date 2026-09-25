@@ -1,5 +1,5 @@
 // The edit contribution: the six text-editing rows every text surface
-// shares (plan step 18), registered eagerly at module scope. Undo,
+// shares, registered eagerly at module scope. Undo,
 // redo, and select-all route through the text-control service - the
 // focused widget's adapter when it reports history depth, the native
 // execCommand fallback otherwise; cut, copy, and paste are always the

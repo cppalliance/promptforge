@@ -1,7 +1,7 @@
 // The Add Folder to Workspace flow, shared by the Workshop tree panel's
 // header button and empty-space context menu and by the File menu's
-// Open Folder and Add Folder to Workspace rows (plan step 16 - the
-// workshop is multi-root, so both rows run this one flow). In the
+// Open Folder and Add Folder to Workspace rows; the workshop is
+// multi-root, so both rows run this one flow. In the
 // desktop app the native folder picker answers with the chosen path and
 // a cancel answers nothing; in a plain browser, where no picker and no
 // OS paths exist, a dialog asks for the path as text. A granted folder

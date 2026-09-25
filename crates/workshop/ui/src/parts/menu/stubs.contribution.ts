@@ -1,4 +1,4 @@
-// The stub table (plan step 20): every menu row Cursor shows that the
+// The stub table: every menu row Cursor shows that the
 // workshop cannot back yet, registered eagerly at module scope under its
 // VS Code command id with precondition "false" and a no-op run, so the
 // row renders disabled with its final name and shortcut and implementing

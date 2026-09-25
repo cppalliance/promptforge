@@ -1,7 +1,7 @@
 // The editor contribution: the eager module registering the editor's
-// CodeMirror-backed catalog rows (plan step 13) at module scope, before
-// any service exists. Every run body lazy-imports editor-commands, so
-// this file pulls no CodeMirror or dockview into the initial bundle; the
+// CodeMirror-backed catalog rows at module scope, before any service
+// exists. Every run body lazy-imports editor-commands, so this file
+// pulls no CodeMirror or dockview into the initial bundle; the
 // type-only `typeof import` below is erased at compile time.
 //
 // Placements follow the catalog: ctrl-based chords bind ctrlcmd so
@@ -114,7 +114,7 @@ interface EditorToggleRow {
   readonly precondition?: string;
 }
 
-// The four editor settings toggles (plan step 14). Each declares its
+// The four editor settings toggles. Each declares its
 // `toggled` expression naming the config.editor.* key the settings
 // service publishes, and its run body flips the setting - the surfaces
 // follow through their compartments. The Appearance rows target the
@@ -147,7 +147,7 @@ for (const row of editorToggles) {
   });
 }
 
-// The lifecycle rows (plan step 15). New Text File and Reopen Closed
+// The lifecycle rows. New Text File and Reopen Closed
 // Editor bind no `when`: both must work with no editor open. Go to
 // Line keeps the editor-owned default - keybinding when
 // editorTextFocus, menu precondition activeEditor - and opens quick
@@ -183,7 +183,7 @@ addAction({
   },
 });
 
-// The workbench-level editor rows (plan step 20): Save, Close Editor,
+// The workbench-level editor rows: Save, Close Editor,
 // the four directional splits, and editor cycling. The menu-spec test
 // assembles the full tree, so these register here with the rest of the
 // editor's rows. Save, Close, and the splits follow the editor-owned

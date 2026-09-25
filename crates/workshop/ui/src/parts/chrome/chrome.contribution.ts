@@ -1,5 +1,5 @@
 // The chrome contribution: the eager module registering the window-level
-// catalog rows (plan step 19) at module scope, before any service exists.
+// catalog rows at module scope, before any service exists.
 // Chrome is a light eager feature - main.ts already pulls window-chrome
 // and zoom into the entry bundle - so the run bodies are direct calls.
 //
@@ -113,13 +113,12 @@ addAction({
   },
 });
 
-// File > Exit (plan step 20's menu assembly; the catalog's chrome row).
-// The run body invokes the desktop app's quit command - the same
-// gateway-shutdown-then-exit path the native menu's quit item runs -
-// which the desktop app step lands in promptforge/crates/workshop; until then
-// an activation rejects and surfaces on the status bar, never
-// plugin-process exit(0), which would strand the sidecar gateway.
-// Desktop-only: the !isWeb precondition disables the row in a browser.
+// File > Exit, the catalog's chrome row. The run body invokes the
+// desktop app's quit command - the same path the native menu's quit
+// item runs: stop the gateway supervisor, request the local gateway's
+// shutdown, then exit. Never call the process plugin's exit(0) here
+// instead; it would strand the sidecar gateway. Desktop-only: the
+// !isWeb precondition disables the row in a browser.
 addAction({
   id: "workbench.action.quit",
   title: "Exit",

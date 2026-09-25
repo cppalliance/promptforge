@@ -1,5 +1,5 @@
 // The agent contribution: the eager module registering the New Agents
-// Window row (plan step 19) at module scope, before any service exists.
+// Window row at module scope, before any service exists.
 // The run body opens a fresh agent panel keyed by a random instance id -
 // each invocation is its own panel, socket, and modal server session in
 // the right zone. zones.ts is already in the entry bundle (main.ts boots

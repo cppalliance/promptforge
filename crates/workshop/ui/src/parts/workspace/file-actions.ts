@@ -1,4 +1,4 @@
-// The File menu's picker and file-action run bodies (plan step 16),
+// The File menu's picker and file-action run bodies,
 // lazy-loaded by files.contribution.ts so the contribution module stays
 // out of the dockview and CodeMirror import graph. Open File and Save As
 // are desktop-only rows (precondition !isWeb): their pickers are the

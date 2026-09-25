@@ -14,7 +14,7 @@
 // asserted by test/workshop-wire-fixtures.mjs here and the workshop_frames
 // fixture test there.
 
-/** One observer status update, as sent by the server. */
+/** One status bar update, as sent by the server. */
 export interface StatusFrame {
   type: "status";
   label: string;

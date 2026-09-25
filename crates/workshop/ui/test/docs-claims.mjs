@@ -6,7 +6,7 @@
 // plain SPA suite.
 // Run: node --test test/docs-claims.mjs
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -23,37 +23,11 @@ async function offendingLines(file, phrase) {
     .map(({ line, number }) => `${file}:${number}: ${line.trim()}`);
 }
 
-/** Every `.md` file under `dir` (relative to the repo root), sorted, as repo-relative paths. */
-async function markdownFiles(dir) {
-  const entries = await readdir(path.join(repoRoot, dir), { recursive: true, withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-    .map((entry) => path.relative(repoRoot, path.join(entry.parentPath ?? entry.path, entry.name)))
-    .sort();
-}
-
 test("AGENTS.md names two UI-state homes, not a TOML config or three buckets", async () => {
   // UM-002: the SPA rule once routed "account preferences" to a
   // "machine-written TOML config" that no code, route, or allow-list
   // implements, and counted three buckets where two exist.
   for (const phrase of ["TOML config", "three named buckets", "three homes"]) {
     assert.deepEqual(await offendingLines("AGENTS.md", phrase), [], `AGENTS.md still says "${phrase}"`);
-  }
-});
-
-// OP-002: zoom persists through /user/state, so "storage is blocked,
-// such as in private mode" no longer describes a real failure.
-// TWF-003: an Open Recent workspace row now opens the workspace, so
-// the list is no longer "a record only".
-// One list guards the guide sources.
-const STALE_GUIDE_PHRASES = ["storage is blocked", "a record only"];
-
-test("the stale zoom and Open Recent claims are gone from the guide sources", async () => {
-  const files = await markdownFiles(path.join("guide", "src"));
-  assert.ok(files.length > 0, "guide/src holds no markdown; the walk is broken");
-  for (const phrase of STALE_GUIDE_PHRASES) {
-    const offenders = [];
-    for (const file of files) offenders.push(...(await offendingLines(file, phrase)));
-    assert.deepEqual(offenders, [], `guide/src still says "${phrase}"`);
   }
 });

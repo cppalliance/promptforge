@@ -1,5 +1,5 @@
 // Validated HTTP boundary for the workspace-file APIs: the workspace as
-// a document (plan step 10). GET current, POST open / save_as /
+// a document. GET current, POST open / save_as /
 // duplicate, and PUT window-state, every one same-origin. Every switch
 // answers with the workspace as it now stands, so the caller never needs
 // a second round trip to learn what it switched to. Responses arrive as

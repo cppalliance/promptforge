@@ -678,7 +678,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-18>
 
-### Step 18: Replace plan-step comments and fix the UI guard tests
+### Step 18: Replace plan-step comments and fix the UI guard tests [completed]
 
 - Component: Documentation
 

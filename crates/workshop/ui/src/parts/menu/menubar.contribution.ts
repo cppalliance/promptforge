@@ -1,4 +1,4 @@
-// The menubar contribution: the menu tree's skeleton (plan step 20),
+// The menubar contribution: the menu tree's skeleton,
 // registered eagerly at module scope, before any service exists. The
 // eight top-level rows on MenubarMainMenu - File, Edit, Selection,
 // View, Go, Run, Terminal, Help - plus the fourteen nested submenu
