@@ -390,7 +390,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-5>
 
-### Step 5: Run the jail's Windows tests in CI
+### Step 5: Run the jail's Windows tests in CI [completed]
 
 - Component: Workspace confinement
 

@@ -41,12 +41,50 @@ fn verbatim(path: &Path) -> PathBuf {
 
 #[cfg(windows)]
 fn unc(path: &Path) -> PathBuf {
+    admin_share(&simplified(path))
+}
+
+#[cfg(windows)]
+fn admin_share(path: &Path) -> PathBuf {
     // `\\localhost\C$\...` is the administrative-share spelling of a local
     // path; it canonicalizes to a UNC form that never matches a local grant.
-    let text = simplified(path).to_string_lossy().into_owned();
-    let drive = &text[..1];
-    let rest = &text[3..];
-    PathBuf::from(format!("\\\\localhost\\{drive}$\\{rest}"))
+    // A path without a drive has no such spelling, and a mangled one would
+    // pass the jail tests by failing to resolve, so it panics instead.
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    let drive = match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => Some(char::from(drive)),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(drive) = drive else {
+        panic!("{} has no local drive to respell", path.display());
+    };
+    let mut respelled = PathBuf::from(format!(r"\\localhost\{drive}$"));
+    respelled.extend(components);
+    respelled
+}
+
+#[cfg(windows)]
+#[test]
+fn the_unc_respelling_takes_the_drive_from_the_path_prefix() {
+    assert_eq!(
+        admin_share(Path::new(r"C:\Temp\a.txt")),
+        PathBuf::from(r"\\localhost\C$\Temp\a.txt")
+    );
+    assert_eq!(
+        admin_share(Path::new(r"\\?\D:\Temp\a.txt")),
+        PathBuf::from(r"\\localhost\D$\Temp\a.txt")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+#[should_panic(expected = "has no local drive")]
+fn the_unc_respelling_refuses_a_path_without_a_local_drive() {
+    admin_share(Path::new(r"\\server\share\a.txt"));
 }
 
 #[cfg(windows)]

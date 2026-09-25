@@ -188,6 +188,13 @@ jobs:
       - name: Test (workshop, concurrent via nextest)
         run: cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api
 
+      # The trio run above does not execute a dependency's own tests, so the
+      # workspace jail's Windows paths (verbatim, UNC, junctions, alternate
+      # data streams, symlinks) need their own invocation. It stays separate
+      # because the trio never takes --all-features.
+      - name: Test (workshop-workspace, Windows jail)
+        run: cargo nextest run --locked -p workshop-workspace --all-features
+
       # The headless feature swaps the webview asset layer for a no-op so
       # server-only integration tests run without the UI bundle. It is not
       # a default feature, so it needs its own invocation.
