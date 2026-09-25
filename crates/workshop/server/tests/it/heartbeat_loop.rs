@@ -46,17 +46,17 @@ type Guards = (
 /// plus the guards keeping the registrations alive.
 fn wired_push(status: &StatusBus, catalog: &CatalogBus, menu: &MenuBus) -> (Push, Guards) {
     let registry = Registry::new();
-    let (status_channel, status_sink, status_state) = workshop_status::register(&registry, status);
-    let (catalog_sink, menu_sink, menu_state) = workshop_menu::register(&registry, catalog, menu);
+    let status_regs = workshop_status::register(&registry, status);
+    let menu_regs = workshop_menu::register(&registry, catalog, menu);
     (
         registry.push(),
         (
-            status_channel,
-            status_sink,
-            status_state,
-            catalog_sink,
-            menu_sink,
-            menu_state,
+            status_regs.channel,
+            status_regs.sink,
+            status_regs.state,
+            menu_regs.catalog_sink,
+            menu_regs.menu_sink,
+            menu_regs.state,
         ),
     )
 }

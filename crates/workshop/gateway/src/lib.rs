@@ -36,6 +36,6 @@ pub use gateway::{
 pub use gateway_binding::{
     GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater,
 };
-pub use handles::{GatewayHandles, register, register_tasks};
+pub use handles::{GatewayHandles, GatewayTaskRegistrations, register, register_tasks};
 pub use heartbeat::{GatewayHealth, Heartbeat};
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};

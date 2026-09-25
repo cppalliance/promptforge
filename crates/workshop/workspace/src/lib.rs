@@ -39,7 +39,7 @@ pub use error::WorkspaceError;
 pub use handlers::routes;
 #[cfg(feature = "test-fixtures")]
 pub use handlers::routes_with_deadline;
-pub use handles::{register, register_tasks};
+pub use handles::{WorkspaceRegistrations, register, register_tasks};
 pub use workspace::{
     EntryKind, FileContents, GrantEntry, TreeEntry, TreeListing, Workspace, WorkspaceSummary,
 };

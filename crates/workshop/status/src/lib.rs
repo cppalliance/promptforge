@@ -23,5 +23,5 @@ pub mod status;
 
 pub mod handles;
 
-pub use handles::register;
+pub use handles::{StatusRegistrations, register};
 pub use status::StatusBus;

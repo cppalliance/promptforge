@@ -1143,7 +1143,7 @@ Components, in dependency order:
 
 <step-31>
 
-### Step 31: Return named registration structs from every subsystem
+### Step 31: Return named registration structs from every subsystem [completed]
 
 - Component: Structural consolidation
 - Piece: renames

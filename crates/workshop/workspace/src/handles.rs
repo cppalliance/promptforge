@@ -14,6 +14,20 @@ use workshop_registry::{
 use crate::handlers;
 use crate::workspace::Workspace;
 
+/// The workspace subsystem's registration guards: its routes, its state
+/// handle, and its granted-roots view. Dropping them deregisters the
+/// subsystem.
+#[derive(Debug)]
+#[must_use = "dropping the registrations deregisters the subsystem"]
+pub struct WorkspaceRegistrations {
+    /// The `/workspace/*` route registrar.
+    pub routes: Registration,
+    /// The workspace itself as its state handle.
+    pub state: Registration,
+    /// The granted-roots view same-tier subsystems read.
+    pub roots: Registration,
+}
+
 /// Registers the workspace subsystem into the registry: its
 /// `/workspace/*` routes (the confined filesystem and the
 /// `/workspace/file/*` document routes), merged into the server's API
@@ -21,10 +35,7 @@ use crate::workspace::Workspace;
 /// view, which same-tier subsystems read instead of naming this crate.
 /// The returned guards keep the registrations alive; the composition
 /// root holds them for the process lifetime.
-pub fn register(
-    registry: &Registry,
-    workspace: &Workspace,
-) -> (Registration, Registration, Registration) {
+pub fn register(registry: &Registry, workspace: &Workspace) -> WorkspaceRegistrations {
     let routes = registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
         let workspace = workspace.clone();
         move || handlers::routes(workspace.clone())
@@ -35,7 +46,11 @@ pub fn register(
             let workspace = workspace.clone();
             move || workspace.granted_roots()
         })));
-    (routes, state, roots)
+    WorkspaceRegistrations {
+        routes,
+        state,
+        roots,
+    }
 }
 
 /// Registers the subsystem's one background task: the shutdown lever

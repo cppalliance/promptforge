@@ -26,27 +26,10 @@
 
 mod error;
 mod handlers;
+mod handles;
 mod store;
-
-use std::sync::Arc;
-
-use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
 
 pub use error::UserStateError;
 pub use handlers::routes;
+pub use handles::{UserStateRegistrations, register};
 pub use store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
-
-/// Registers the user-state subsystem into the registry: its
-/// `/user/state` routes, merged into the server's API router, and the
-/// store as the subsystem's state handle, so the composition root
-/// fetches it by slot instead of holding it by name. The returned guards
-/// keep the registrations alive; the composition root holds them for the
-/// process lifetime.
-pub fn register(registry: &Registry, store: Arc<UserStateStore>) -> (Registration, Registration) {
-    let routes = registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
-        let store = Arc::clone(&store);
-        move || handlers::routes(Arc::clone(&store))
-    })));
-    let state = registry.register_state::<UserStateStore>(store);
-    (routes, state)
-}

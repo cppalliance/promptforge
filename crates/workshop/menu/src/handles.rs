@@ -41,17 +41,27 @@ impl MenuHandles {
     }
 }
 
+/// The menu subsystem's registration guards: the catalog sink, the
+/// workbench sink, and the menu's state handle. Dropping them
+/// deregisters the subsystem.
+#[derive(Debug)]
+#[must_use = "dropping the registrations deregisters the subsystem"]
+pub struct MenuRegistrations {
+    /// The catalog channel's receiving end.
+    pub catalog_sink: Registration,
+    /// The workbench mutators.
+    pub menu_sink: Registration,
+    /// The menu's state handle.
+    pub state: Registration,
+}
+
 /// Registers the menu subsystem into the registry: the catalog
 /// channel's receiving end and the workbench mutators, which same-tier
 /// subsystems (the gateway heartbeat's refreshes) drive through the
 /// registry's push facade, plus the subsystem's state handles. The
 /// returned guards keep the registrations alive; the composition root
 /// holds them for the process lifetime.
-pub fn register(
-    registry: &Registry,
-    catalog: &CatalogBus,
-    menu: &MenuBus,
-) -> (Registration, Registration, Registration) {
+pub fn register(registry: &Registry, catalog: &CatalogBus, menu: &MenuBus) -> MenuRegistrations {
     let catalog_guard =
         registry.register_sink::<dyn CatalogSink>(Arc::new(CatalogSinkAdapter::new({
             let catalog = catalog.clone();
@@ -77,5 +87,9 @@ pub fn register(
     )));
     let state = registry
         .register_state::<MenuHandles>(Arc::new(MenuHandles::new(catalog.clone(), menu.clone())));
-    (catalog_guard, menu_guard, state)
+    MenuRegistrations {
+        catalog_sink: catalog_guard,
+        menu_sink: menu_guard,
+        state,
+    }
 }

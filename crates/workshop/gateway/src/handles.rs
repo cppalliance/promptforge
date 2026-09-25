@@ -48,6 +48,18 @@ pub fn register(registry: &Registry, handles: GatewayHandles) -> Registration {
     registry.register_state::<GatewayHandles>(Arc::new(handles))
 }
 
+/// The gateway subsystem's background-task registration guards: the
+/// reachability heartbeat and the gateway progress subscriber. Dropping
+/// them deregisters the tasks.
+#[derive(Debug)]
+#[must_use = "dropping the registrations deregisters the tasks"]
+pub struct GatewayTaskRegistrations {
+    /// The reachability heartbeat.
+    pub heartbeat: Registration,
+    /// The gateway progress subscriber.
+    pub subscriber: Registration,
+}
+
 /// Registers the gateway subsystem's background tasks: the
 /// reachability heartbeat and the gateway progress subscriber, both
 /// reporting through the registry's push facade. The tasks spawn when
@@ -58,7 +70,7 @@ pub fn register_tasks(
     registry: &Registry,
     handles: &GatewayHandles,
     backoff: ReconnectBackoff,
-) -> (Registration, Registration) {
+) -> GatewayTaskRegistrations {
     let heartbeat = registry.register_task(Arc::new(BackgroundTaskAdapter::new({
         let registry = registry.clone();
         let binding = handles.binding().clone();
@@ -83,5 +95,8 @@ pub fn register_tasks(
             ShutdownHandle::new(move || task.shutdown())
         }
     })));
-    (heartbeat, subscriber)
+    GatewayTaskRegistrations {
+        heartbeat,
+        subscriber,
+    }
 }

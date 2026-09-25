@@ -90,10 +90,10 @@ fn register_status(
     omit: Option<Omit>,
 ) {
     if omit != Some(Omit::Status) {
-        let (channel, sink, state) = workshop_status::register(registry, status);
-        registrations.hold(channel);
-        registrations.hold(sink);
-        registrations.hold(state);
+        let regs = workshop_status::register(registry, status);
+        registrations.hold(regs.channel);
+        registrations.hold(regs.sink);
+        registrations.hold(regs.state);
     }
 }
 
@@ -107,11 +107,10 @@ fn register_menu(
     omit: Option<Omit>,
 ) {
     if omit != Some(Omit::Menu) {
-        let (catalog_sink, menu_sink, menu_state) =
-            workshop_menu::register(registry, catalog, menu);
-        registrations.hold(catalog_sink);
-        registrations.hold(menu_sink);
-        registrations.hold(menu_state);
+        let regs = workshop_menu::register(registry, catalog, menu);
+        registrations.hold(regs.catalog_sink);
+        registrations.hold(regs.menu_sink);
+        registrations.hold(regs.state);
     }
 }
 
@@ -147,10 +146,9 @@ fn register_gateway(
     // The background tasks register beside the state handles; the server
     // spawns them from the registry's task vector when it starts
     // serving.
-    let (heartbeat, subscriber) =
-        workshop_gateway::register_tasks(registry, &gateway_handles, backoff.clone());
-    registrations.hold(heartbeat);
-    registrations.hold(subscriber);
+    let tasks = workshop_gateway::register_tasks(registry, &gateway_handles, backoff.clone());
+    registrations.hold(tasks.heartbeat);
+    registrations.hold(tasks.subscriber);
     Ok(backoff)
 }
 
@@ -167,10 +165,10 @@ fn register_workspace(
     // runtime is up, since the reopen is async and composition is not.
     let workspace = Workspace::with_state_dir(state_dir);
     if omit != Some(Omit::Workspace) {
-        let (routes, state, roots) = workshop_workspace::register(registry, &workspace);
-        registrations.hold(routes);
-        registrations.hold(state);
-        registrations.hold(roots);
+        let regs = workshop_workspace::register(registry, &workspace);
+        registrations.hold(regs.routes);
+        registrations.hold(regs.state);
+        registrations.hold(regs.roots);
         // The shutdown lever that closes the workspace file inside the
         // graceful stop, so a quit leaves one complete file and no
         // sidecar.
@@ -189,9 +187,9 @@ fn register_user_state(
     // state directory; a bad or missing file costs the state, never
     // startup.
     let user_state = Arc::new(UserStateStore::new(state_dir));
-    let (routes, state) = workshop_user_state::register(registry, user_state);
-    registrations.hold(routes);
-    registrations.hold(state);
+    let regs = workshop_user_state::register(registry, user_state);
+    registrations.hold(regs.routes);
+    registrations.hold(regs.state);
 }
 
 /// The harness (agent-sessions) subsystem: the harness, the agent-session

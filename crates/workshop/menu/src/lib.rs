@@ -25,5 +25,5 @@ pub mod handles;
 pub mod menu;
 
 pub use catalog::{CatalogBus, ChatCatalog, is_chat_capable};
-pub use handles::{MenuHandles, register};
+pub use handles::{MenuHandles, MenuRegistrations, register};
 pub use menu::{MenuBus, MenuRefusal, SwitchOutcome};
