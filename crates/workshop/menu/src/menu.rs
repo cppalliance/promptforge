@@ -22,7 +22,7 @@
 mod memory;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::broadcast;
@@ -32,7 +32,7 @@ use workshop_support::RetainedBus;
 
 use crate::catalog::{CatalogBus, is_chat_capable};
 
-use self::memory::{PendingWrite, WORKSHOP_STATE_FILE, load_memory, store_pending};
+use self::memory::{MemoryWriter, PendingWrite, WORKSHOP_STATE_FILE, load_memory, store_pending};
 
 /// Ring capacity of the menu bus. Pushes follow user interactions and
 /// heartbeat transitions, so a handful of slots is generous.
@@ -69,8 +69,8 @@ struct MenuState {
     /// Remembered model selection per profile name, persisted to
     /// [`WORKSHOP_STATE_FILE`].
     last_selected: HashMap<String, String>,
-    /// Where the memory persists; `None` disables persistence.
-    memory_path: Option<PathBuf>,
+    /// The memory file's writer; `None` disables persistence.
+    memory: Option<MemoryWriter>,
 }
 
 /// What an in-flight switch selects: a named profile, or no profile at
@@ -130,12 +130,9 @@ impl MenuState {
     #[must_use]
     fn remember(&mut self, profile: String, id: String) -> Option<PendingWrite> {
         self.last_selected.insert(profile, id);
-        let path = self.memory_path.clone()?;
+        let memory = self.memory.as_mut()?;
         let payload = serde_json::json!({ "last_selected": &self.last_selected });
-        Some(PendingWrite {
-            path,
-            bytes: payload.to_string().into_bytes(),
-        })
+        Some(memory.pending(payload.to_string().into_bytes()))
     }
 }
 
@@ -192,7 +189,7 @@ impl MenuBus {
                 selected_model: None,
                 gateway_reachable: false,
                 last_selected,
-                memory_path,
+                memory: memory_path.map(MemoryWriter::new),
             })),
             catalog,
         }

@@ -512,7 +512,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-11>
 
-### Step 11: Make menu memory writes latest-wins
+### Step 11: Make menu memory writes latest-wins [completed]
 
 - Component: State propagation
 

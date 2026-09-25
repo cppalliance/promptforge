@@ -3,20 +3,64 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Name of the persisted server-state file, written in the server's
 /// state directory.
 pub(super) const WORKSHOP_STATE_FILE: &str = "workshop-state.json";
 
-/// One serialized memory snapshot awaiting its write: the bytes and path
-/// are captured under the state lock, and the write runs after the guard
-/// drops, off the async executor.
+/// The memory file's writer: where the memory persists, the sequence the
+/// next snapshot takes, and the write gate its pending writes share. It
+/// lives in the menu state, so snapshots take their sequences under the
+/// state lock, in the order their contents were captured.
+#[derive(Debug)]
+pub(super) struct MemoryWriter {
+    /// Where the memory persists.
+    path: PathBuf,
+    /// The sequence of the last snapshot taken; 0 before the first.
+    last_taken: u64,
+    /// Shared with every pending write; see [`PendingWrite`].
+    gate: Arc<Mutex<u64>>,
+}
+
+impl MemoryWriter {
+    /// A writer for the memory file at `path`, with nothing taken or
+    /// written yet.
+    pub(super) fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            last_taken: 0,
+            gate: Arc::default(),
+        }
+    }
+
+    /// Takes `bytes` as the newest snapshot awaiting its write.
+    pub(super) fn pending(&mut self, bytes: Vec<u8>) -> PendingWrite {
+        self.last_taken += 1;
+        PendingWrite {
+            path: self.path.clone(),
+            bytes,
+            sequence: self.last_taken,
+            gate: Arc::clone(&self.gate),
+        }
+    }
+}
+
+/// One serialized memory snapshot awaiting its write: the bytes, path,
+/// and sequence are captured under the state lock, and the write runs
+/// after the guard drops, off the async executor.
 #[derive(Debug)]
 pub(super) struct PendingWrite {
     /// Where the memory persists.
-    pub(super) path: PathBuf,
+    path: PathBuf,
     /// The serialized [`WORKSHOP_STATE_FILE`] contents.
-    pub(super) bytes: Vec<u8>,
+    bytes: Vec<u8>,
+    /// The snapshot's place in capture order, starting at 1.
+    sequence: u64,
+    /// The memory file's write gate: held across each write so writes
+    /// never interleave, it holds the sequence of the last snapshot
+    /// written, 0 before the first.
+    gate: Arc<Mutex<u64>>,
 }
 
 /// The persisted shape of [`WORKSHOP_STATE_FILE`]. Server state only:
@@ -74,14 +118,21 @@ pub(super) fn store_pending(pending: Option<PendingWrite>) {
 
 /// Writes one per-profile model-memory snapshot through the shared
 /// atomic-write helper, so a crash mid-write cannot leave a truncated
-/// [`WORKSHOP_STATE_FILE`]. A failed write costs the memory, not the
-/// process: logged and tolerated.
-fn store_memory(pending: &PendingWrite) {
-    if let Err(error) = workshop_support::write_atomic(&pending.path, &pending.bytes) {
-        tracing::warn!(
+/// [`WORKSHOP_STATE_FILE`]. Pending writes reach the blocking pool in
+/// no guaranteed order, so the gate serializes them and skips a snapshot
+/// no newer than the last one written: the newest snapshot wins. A
+/// failed write costs the memory, not the process: logged and tolerated.
+pub(super) fn store_memory(pending: &PendingWrite) {
+    let mut last_written = pending.gate.lock().unwrap_or_else(PoisonError::into_inner);
+    if pending.sequence <= *last_written {
+        return;
+    }
+    match workshop_support::write_atomic(&pending.path, &pending.bytes) {
+        Ok(()) => *last_written = pending.sequence,
+        Err(error) => tracing::warn!(
             %error,
             path = %pending.path.display(),
             "workshop state write failed; model memory not persisted"
-        );
+        ),
     }
 }

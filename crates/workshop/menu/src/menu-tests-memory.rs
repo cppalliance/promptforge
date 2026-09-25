@@ -1,8 +1,10 @@
 //! Per-profile model memory: remembered selections across switches, the
-//! state file's round trip and its tolerated failures, and the boot-time
-//! selection restore.
+//! state file's round trip and its tolerated failures, latest-wins
+//! writes, and the boot-time selection restore.
 
 use super::*;
+
+use super::super::memory::store_memory;
 
 #[test]
 fn a_selection_is_remembered_per_profile_across_switches() {
@@ -87,6 +89,22 @@ fn an_unreadable_state_file_means_no_memory_yet() {
         snapshot(&menu).selected_model.as_deref(),
         Some("model-a"),
         "unreadable memory degrades to no memory, never to a failure"
+    );
+}
+
+#[test]
+fn writes_landing_newest_first_leave_the_newest_snapshot_on_disk() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let path = dir.path().join(WORKSHOP_STATE_FILE);
+    let mut writer = MemoryWriter::new(path.clone());
+    let older = writer.pending(br#"{"last_selected":{"main":"model-a"}}"#.to_vec());
+    let newer = writer.pending(br#"{"last_selected":{"main":"model-b"}}"#.to_vec());
+    store_memory(&newer);
+    store_memory(&older);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the newer snapshot was written"),
+        r#"{"last_selected":{"main":"model-b"}}"#,
+        "an older snapshot landing last never overwrites the newest"
     );
 }
 
