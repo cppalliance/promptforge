@@ -1,6 +1,35 @@
-//! Catalog bus tests: publishing without subscribers, snapshot retention, and lagged receivers.
+//! Catalog bus tests: publishing without subscribers, snapshot retention, lagged receivers, and the chat-capable filter.
 
 use super::*;
+
+#[test]
+fn a_publish_keeps_only_chat_capable_models_and_non_chat_churn_keeps_the_generation() {
+    let bus = CatalogBus::new();
+    bus.publish(vec![
+        serde_json::json!({"id": "chat-model"}),
+        serde_json::json!({"id": "whisper-base", "kind": "transcription"}),
+    ]);
+    assert_eq!(
+        bus.latest().expect("the publish is retained").models,
+        [serde_json::json!({"id": "chat-model"})],
+        "the push holds only the chat-capable entries"
+    );
+    let generation = bus
+        .latest_chat()
+        .expect("a chat model was published")
+        .generation;
+    bus.publish(vec![
+        serde_json::json!({"id": "chat-model"}),
+        serde_json::json!({"id": "whisper-small", "kind": "transcription"}),
+    ]);
+    assert_eq!(
+        bus.latest_chat()
+            .expect("the chat model is still published")
+            .generation,
+        generation,
+        "transcription-only churn leaves the chat generation alone"
+    );
+}
 
 #[tokio::test]
 async fn publishing_with_no_subscribers_is_a_no_op() {

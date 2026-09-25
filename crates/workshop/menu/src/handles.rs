@@ -1,7 +1,8 @@
-//! The menu subsystem's registration: the catalog sink and the workbench
-//! sink the registry's push facade drives, and [`MenuHandles`] - the chat
-//! model catalog channel and the workbench bus - as its state handle set,
-//! which the composition root requires by type.
+//! The menu subsystem's registration and any handle types. It registers
+//! the catalog sink and the workbench sink the registry's push facade
+//! drives, and [`MenuHandles`] - the chat model catalog channel and the
+//! workbench bus - as its state handle set, which the composition root
+//! requires by type.
 
 use std::sync::Arc;
 

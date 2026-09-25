@@ -8,9 +8,6 @@ repository.workspace = true
 
 description = "Workshop menu subsystem: the server-owned Model menu workbench snapshot, its broadcast bus, the chat model catalog channel, and the per-profile model memory"
 
-[features]
-test-fixtures = []
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

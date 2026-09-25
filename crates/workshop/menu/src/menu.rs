@@ -19,7 +19,6 @@
 //! layout is view state and persists through the UI-state buckets
 //! (`workshop-user-state` and the workspace file).
 
-#[path = "menu-memory.rs"]
 mod memory;
 
 use std::collections::HashMap;
@@ -31,7 +30,7 @@ use tokio::sync::broadcast;
 use workshop_protocol::WorkbenchSnapshot;
 use workshop_support::RetainedBus;
 
-use crate::catalog::{CatalogBus, is_chat_capable};
+use crate::catalog::CatalogBus;
 
 use self::memory::{MemoryWriter, PendingWrite, WORKSHOP_STATE_FILE, load_memory, store_pending};
 
@@ -359,13 +358,6 @@ impl MenuBus {
         }
     }
 
-    /// Revalidates the selection after an integration fixture publishes
-    /// directly to the catalog bus.
-    #[cfg(feature = "test-fixtures")]
-    pub fn reconcile_catalog_for_test(&self) {
-        self.reconcile_catalog();
-    }
-
     /// The state guard, recovering a lock poisoned by a panicking peer
     /// rather than wedging the process.
     fn lock_state(&self) -> MutexGuard<'_, MenuState> {
@@ -378,7 +370,7 @@ impl MenuBus {
         let catalog_has_chat = self
             .catalog
             .latest()
-            .is_some_and(|push| push.models.iter().any(is_chat_capable));
+            .is_some_and(|push| !push.models.is_empty());
         WorkbenchSnapshot {
             profiles: state.profiles.clone(),
             active: state.active.clone(),
@@ -423,24 +415,20 @@ impl MenuBus {
 
 /// Whether the catalog `models` array holds an entry whose `id` is `id`.
 fn models_contain(models: &[serde_json::Value], id: &str) -> bool {
-    models.iter().any(|model| {
-        is_chat_capable(model) && model.get("id").and_then(serde_json::Value::as_str) == Some(id)
+    models
+        .iter()
+        .any(|model| model.get("id").and_then(serde_json::Value::as_str) == Some(id))
+}
+
+/// The `id` of the first catalog entry, when there is one.
+fn first_model_id(models: &[serde_json::Value]) -> Option<String> {
+    models.iter().find_map(|model| {
+        model
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
     })
 }
 
-/// The `id` of the first chat-capable catalog entry, when any does.
-fn first_model_id(models: &[serde_json::Value]) -> Option<String> {
-    models
-        .iter()
-        .filter(|model| is_chat_capable(model))
-        .find_map(|model| {
-            model
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
-}
-
 #[cfg(test)]
-#[path = "menu-tests.rs"]
 mod tests;

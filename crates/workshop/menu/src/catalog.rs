@@ -70,8 +70,12 @@ impl CatalogBus {
         self.chat.subscribe()
     }
 
-    /// Broadcasts one catalog. With no subscribers this is a no-op; a slow
-    /// subscriber skips ahead rather than applying backpressure.
+    /// Broadcasts one catalog, keeping only its chat-capable entries. With
+    /// no subscribers this is a no-op; a slow subscriber skips ahead
+    /// rather than applying backpressure.
+    ///
+    /// This is the catalog's only chat-capable filter: the chat
+    /// generation and the menu read the filtered push as is.
     pub fn publish(&self, models: Vec<serde_json::Value>) {
         let models = models.into_iter().filter(is_chat_capable).collect();
         let push = CatalogPush { models };

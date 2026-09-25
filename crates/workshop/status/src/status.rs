@@ -91,6 +91,11 @@ mod tests {
     async fn emitting_with_no_subscribers_is_a_no_op() {
         let bus = StatusBus::new();
         bus.emit(update("Ready", "idle"));
+        let mut late = bus.subscribe();
+        assert!(
+            matches!(late.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            "an emit with no subscribers queues nothing for a later one"
+        );
     }
 
     #[test]

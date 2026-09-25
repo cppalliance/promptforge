@@ -331,7 +331,7 @@ impl Workspace {
     /// complete and the `-wal` sidecar is gone. The in-memory grants
     /// stand; only their mirror is let go. Graceful shutdown runs this
     /// through the subsystem's registered task (see
-    /// [`crate::handles::register_tasks`]) so a quit leaves exactly one
+    /// [`crate::register_tasks`]) so a quit leaves exactly one
     /// file to copy or back up. An ephemeral workspace has nothing to
     /// close and returns at once.
     ///

@@ -1,9 +1,10 @@
-//! The workspace subsystem's registration: its `/workspace/*` routes,
-//! merged into the server's API router, the workspace itself as its
-//! state handle set, its granted-roots view and change signal, which the
-//! server's agent-session bindings read through the registry, and the
-//! shutdown lever that closes the workspace file inside the server's
-//! graceful stop.
+//! The workspace subsystem's registration and any handle types. It
+//! registers its `/workspace/*` routes, merged into the server's API
+//! router, the workspace itself as its state handle set, its
+//! granted-roots view and change signal, which the server's
+//! agent-session bindings read through the registry, and the shutdown
+//! lever that closes the workspace file inside the server's graceful
+//! stop.
 
 use std::sync::Arc;
 

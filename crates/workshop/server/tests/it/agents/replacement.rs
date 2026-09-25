@@ -27,7 +27,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
     state
         .catalog()
         .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-a")
@@ -65,7 +65,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
         "the accepted turn reads the still-selected model-a while retirement is deferred"
     );
 
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-b")
@@ -122,7 +122,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
     state
         .catalog()
         .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-a")
@@ -196,7 +196,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     state
         .catalog()
         .publish(vec![json!({ "id": "model-a", "object": "model" })]);
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-a")
@@ -226,7 +226,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
         .await
         .expect("the replacement generation is observed before the old request starts");
 
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-b")
@@ -273,7 +273,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     state
         .catalog()
         .publish(vec![json!({ "id": "model-c", "object": "model" })]);
-    state.menu().reconcile_catalog_for_test();
+    state.menu().reconcile_catalog();
     state
         .menu()
         .set_selected("model-c")

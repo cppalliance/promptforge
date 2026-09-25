@@ -1,7 +1,7 @@
-//! The user-state subsystem's registration: its `/user/state` routes,
-//! merged into the server's API router, and the store as the
-//! subsystem's state handle, so the composition root fetches it by slot
-//! instead of holding it by name.
+//! The user-state subsystem's registration and any handle types. It
+//! registers its `/user/state` routes, merged into the server's API
+//! router, and the store as the subsystem's state handle, so the
+//! composition root fetches it by slot instead of holding it by name.
 
 use std::sync::Arc;
 

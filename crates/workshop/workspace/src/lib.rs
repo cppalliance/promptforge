@@ -28,7 +28,7 @@
 mod blocking;
 mod error;
 mod handlers;
-pub mod handles;
+mod handles;
 mod workspace;
 mod workspace_file;
 #[cfg(feature = "test-fixtures")]

@@ -1,7 +1,8 @@
-//! The gateway subsystem's registration: the replaceable endpoint
-//! binding and the reachability flag as its state handle set, and its
-//! background tasks - the reachability heartbeat and the gateway
-//! progress subscriber.
+//! The gateway subsystem's registration and any handle types. It
+//! registers [`GatewayHandles`] - the replaceable endpoint binding and
+//! the reachability flag - as its state handle set, and its background
+//! tasks - the reachability heartbeat and the gateway progress
+//! subscriber.
 
 use std::sync::Arc;
 

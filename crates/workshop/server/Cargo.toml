@@ -51,7 +51,6 @@ headless = []
 test-fixtures = [
     "dep:tempfile",
     "workshop-gateway/test-fixtures",
-    "workshop-menu/test-fixtures",
     "workshop-support/test-fixtures",
     "workshop-workspace/test-fixtures",
 ]

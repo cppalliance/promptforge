@@ -21,7 +21,7 @@
 //!   logged and tolerated, never fatal.
 
 pub mod catalog;
-pub mod handles;
+mod handles;
 pub mod menu;
 
 pub use catalog::{CatalogBus, ChatCatalog, is_chat_capable};

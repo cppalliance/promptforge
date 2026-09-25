@@ -82,7 +82,7 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
         json!({"id": "whisper-small-en", "kind": "transcription", "object": "model"}),
         json!({"id": "realtime-transcribe", "kind": "transcription", "object": "model"}),
     ]);
-    server.state.menu().reconcile_catalog_for_test();
+    server.state.menu().reconcile_catalog();
     assert!(
         server.state.menu().set_selected("whisper-base-en").is_err(),
         "a transcription-only entry cannot become the selected chat binding"
@@ -103,7 +103,7 @@ async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
         json!({"id": "whisper-small-en", "kind": "transcription", "object": "model"}),
         json!({"id": "realtime-transcribe", "kind": "transcription", "object": "model"}),
     ]);
-    server.state.menu().reconcile_catalog_for_test();
+    server.state.menu().reconcile_catalog();
     server
         .state
         .menu()
@@ -211,7 +211,7 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
                 state
                     .catalog()
                     .publish(vec![json!({"id": "model-b", "object": "model"})]);
-                state.menu().reconcile_catalog_for_test();
+                state.menu().reconcile_catalog();
                 state
                     .menu()
                     .set_selected("model-b")

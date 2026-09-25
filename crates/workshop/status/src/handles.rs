@@ -1,7 +1,7 @@
-//! The status subsystem's registration: the consumer-side push channel
-//! every `/ws` session subscribes through, the producer-side sink
-//! same-tier subsystems emit through, and the bus itself as the
-//! subsystem's state handle.
+//! The status subsystem's registration and any handle types. It
+//! registers the consumer-side push channel every `/ws` session
+//! subscribes through, the producer-side sink same-tier subsystems emit
+//! through, and the bus itself as the subsystem's state handle.
 
 use std::sync::Arc;
 

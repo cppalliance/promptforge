@@ -127,7 +127,7 @@ async fn gate_selection_loss_leaves_the_runs_frozen_binding_untouched() {
             },
             move || {
                 state.catalog().publish(Vec::new());
-                state.menu().reconcile_catalog_for_test();
+                state.menu().reconcile_catalog();
             },
         )
         .expect("the launched session remains registered")

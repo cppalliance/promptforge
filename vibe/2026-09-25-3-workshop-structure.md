@@ -677,7 +677,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-7>
 
-### Step 7: Tidy the small crates
+### Step 7: Tidy the small crates [completed]
 
 - Component: Small crates
 - Component placement: fourth, after the gateway so every `handles.rs` follows one pattern, and before the workspace moves because nothing here touches a workspace file that moves.

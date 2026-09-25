@@ -1,10 +1,8 @@
-//! Chat-capable catalog filtering and generation tracking.
+//! Chat-capable catalog generation tracking.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::watch;
-
-use workshop_protocol::is_chat_capable;
 
 /// One immutable chat-capable catalog generation.
 #[derive(Debug, Clone, Default)]
@@ -46,21 +44,18 @@ impl ChatCatalogBus {
         self.generation.subscribe()
     }
 
-    /// Replaces the source snapshot, advancing only when its chat subset
-    /// changes. Transcription-only churn does not disturb chat runs.
+    /// Replaces the retained generation with `models`, which the catalog
+    /// bus has already filtered to chat-capable entries, advancing only
+    /// when they change. Transcription-only churn does not disturb chat
+    /// runs.
     pub(super) fn publish(&self, models: &[serde_json::Value]) {
-        let models: Vec<serde_json::Value> = models
-            .iter()
-            .filter(|model| is_chat_capable(model))
-            .cloned()
-            .collect();
         let changed = {
             let mut latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
             if latest.models == models {
                 None
             } else {
                 latest.generation = latest.generation.wrapping_add(1);
-                latest.models = models;
+                latest.models = models.to_vec();
                 Some(latest.generation)
             }
         };
