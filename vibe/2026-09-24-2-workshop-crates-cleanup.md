@@ -1129,7 +1129,7 @@ Components, in dependency order:
 
 <step-30>
 
-### Step 30: Rename the status relay, the gateway's SwitchOutcome, and the socket wording
+### Step 30: Rename the status relay, the gateway's SwitchOutcome, and the socket wording [completed]
 
 - Component: Structural consolidation
 - Piece: renames

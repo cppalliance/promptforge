@@ -31,7 +31,7 @@ pub mod test_gateway;
 
 pub use gateway::{
     CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, ProgressStream,
-    SsePayloadStream, SwitchOutcome, SwitchResponse,
+    SsePayloadStream, SwitchProfileBody, SwitchResponse,
 };
 pub use gateway_binding::{
     GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater,

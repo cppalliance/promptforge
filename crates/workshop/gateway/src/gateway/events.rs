@@ -115,7 +115,7 @@ pub enum CacheEvent {
 /// The gateway's answer to a profile selection, `POST /admin/switch-profile`.
 ///
 /// An accepted selection answers one JSON document decoding as
-/// [`SwitchOutcome`]: the gateway persisted the selection and reports
+/// [`SwitchProfileBody`]: the gateway persisted the selection and reports
 /// whether it must restart to load it. A refusal (bad auth, a malformed or
 /// undefined name) is buffered rather than reported as an error, matching
 /// the relay contract of the other client methods.
@@ -123,7 +123,7 @@ pub enum CacheEvent {
 #[non_exhaustive]
 pub enum SwitchResponse {
     /// The gateway accepted and persisted the selection.
-    Selected(SwitchOutcome),
+    Selected(SwitchProfileBody),
 
     /// A refusal, buffered: the gateway's error envelope.
     Buffered(GatewayResponse),
@@ -131,7 +131,7 @@ pub enum SwitchResponse {
 
 /// The body of an accepted profile selection.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct SwitchOutcome {
+pub struct SwitchProfileBody {
     /// The selection now persisted: a profile name, or `None` for no
     /// profile.
     #[serde(default)]

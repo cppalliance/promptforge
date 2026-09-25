@@ -16,8 +16,8 @@ mod sse;
 pub mod socket;
 
 pub use events::{
-    CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream, SwitchOutcome,
-    SwitchResponse,
+    CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream,
+    SwitchProfileBody, SwitchResponse,
 };
 pub use progress::ProgressStream;
 pub use socket::GatewayRealtimeSocket;
@@ -339,7 +339,7 @@ impl GatewayClient {
         if !answer.status.is_success() {
             return Ok(SwitchResponse::Buffered(answer));
         }
-        serde_json::from_slice::<SwitchOutcome>(&answer.body)
+        serde_json::from_slice::<SwitchProfileBody>(&answer.body)
             .map(SwitchResponse::Selected)
             .map_err(|source| GatewayError::Malformed {
                 message: "the switch-profile answer is not the outcome document".to_owned(),

@@ -42,7 +42,7 @@ use super::state::SessionsState;
 use crate::workshop_socket::{cross_site_refusal, send_error, send_frame};
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
-/// foreign `Origin` is refused with 403, as the workbench socket's
+/// foreign `Origin` is refused with 403, as the workshop socket's
 /// upgrade is.
 pub(crate) async fn upgrade(
     State(state): State<SessionsState>,

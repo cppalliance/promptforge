@@ -46,7 +46,7 @@ async fn a_named_selection_posts_the_name_and_decodes_the_outcome() {
     };
     assert_eq!(
         outcome,
-        SwitchOutcome {
+        SwitchProfileBody {
             profile: Some("beta".to_string()),
             restart_required: true,
         }
@@ -75,7 +75,7 @@ async fn the_no_profile_selection_posts_null_and_decodes_a_null_profile() {
     };
     assert_eq!(
         outcome,
-        SwitchOutcome {
+        SwitchProfileBody {
             profile: None,
             restart_required: false,
         }

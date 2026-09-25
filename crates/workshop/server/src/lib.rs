@@ -11,7 +11,7 @@
 //! The crate is the composition root of the workshop server
 //! decomposition: the feature subsystems (`workshop-user-state`,
 //! `workshop-workspace`, and the sessions subsystem in `agents`: the
-//! `/ws` workbench socket, the `/agents/ws` agent-session socket, and the
+//! `/ws` workshop socket, the `/agents/ws` agent-session socket, and the
 //! `/v1/models` catalog relay), the domain services (`workshop-gateway`,
 //! `workshop-status`, `workshop-menu`), and the vocabulary crates
 //! (`workshop-protocol`, `workshop-registry`, `workshop-support`) are
@@ -89,7 +89,7 @@ pub use harness_api::WaitError;
 pub use push::Push;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use workshop_gateway::gateway::{
-    GatewayClient, GatewayError, GatewayResponse, SwitchOutcome, SwitchResponse,
+    GatewayClient, GatewayError, GatewayResponse, SwitchProfileBody, SwitchResponse,
 };
 pub use workshop_gateway::gateway_binding::{GatewayPublicationError, GatewayUpdater};
 pub use workshop_gateway::resolve::{GatewaySource, ResolveError, ResolvedGateway};

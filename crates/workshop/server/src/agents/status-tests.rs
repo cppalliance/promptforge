@@ -24,7 +24,7 @@ fn wired_push() -> (
 }
 
 /// A session event holding one engine event under the fixed test
-/// coordinates, in the persisted shape the relay reads.
+/// coordinates, in the persisted shape the reporter reads.
 fn session_event(event: &Event) -> SessionEvent {
     SessionEvent {
         index: 0,
@@ -57,7 +57,7 @@ fn reply_event() -> Event {
 /// non-thinking status; the survived turns keep the boundary as their
 /// label because the agent is still running, and only a run that ended
 /// reads `Agent failed`. The label comes from the kind alone: the message
-/// is deliberately unlike the label, so a relay that read the sentence
+/// is deliberately unlike the label, so a reporter that read the sentence
 /// would mislabel every row.
 #[test]
 fn every_error_report_pushes_a_terminal_failure_status() {

@@ -1,8 +1,8 @@
-//! The server's status relay for one agent session: the status-bar frames
+//! The server's status reporter for one agent session: the status-bar frames
 //! and the backoff reset, derived in the server from the session's live
 //! events, deltas, and error reports.
 //!
-//! One relay task per session, spawned at launch. It holds only the
+//! One reporter task per session, spawned at launch. It holds only the
 //! session's broadcast receivers, never the session handle, so it ends by
 //! itself when the harness lets the session go and the last socket
 //! detaches: the channels close, and the loop returns.
@@ -14,19 +14,23 @@ use workshop_protocol::Activity;
 use workshop_registry::Push;
 use workshop_support::ReconnectBackoff;
 
-/// Spawns the relay for `session`, reporting through `push` and resetting
+/// Spawns the reporter for `session`, reporting through `push` and resetting
 /// `backoff` on completed replies.
-pub(super) fn spawn_relay(session: &harness_api::Session, push: Push, backoff: ReconnectBackoff) {
+pub(super) fn spawn_reporter(
+    session: &harness_api::Session,
+    push: Push,
+    backoff: ReconnectBackoff,
+) {
     let events = session.subscribe_events();
     let deltas = session.subscribe_deltas();
     let errors = session.subscribe_errors();
-    tokio::spawn(relay(events, deltas, errors, push, backoff));
+    tokio::spawn(report(events, deltas, errors, push, backoff));
 }
 
-/// Relays until the session's channels close. Deltas are drained ahead of
+/// Reports until the session's channels close. Deltas are drained ahead of
 /// events, so a round's activity pulses precede the idle its reply
 /// pushes when both sit queued.
-async fn relay(
+async fn report(
     mut events: broadcast::Receiver<SessionEvent>,
     mut deltas: broadcast::Receiver<Delta>,
     mut errors: broadcast::Receiver<SessionFailure>,

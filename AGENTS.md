@@ -26,7 +26,7 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - **server**: the build check's tier that holds only `workshop-server`.
 - **desk**: a UI's main frame.
 - **workbench**: the VS Code-style UI architecture, and the Model menu snapshot frame on the `/ws` socket.
-- **workshop socket**: the `/ws` socket.
+- **workshop socket**: the `/ws` socket, served by the server's `workshop_socket` module.
 - **page**: a routed screen behind a tab.
 - **view**: a DOM component.
 - **placeholder**: what a lazy panel shows while its code chunk loads.

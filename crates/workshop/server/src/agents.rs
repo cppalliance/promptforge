@@ -1,4 +1,4 @@
-//! The sessions subsystem of the server: the `/ws` workbench socket
+//! The sessions subsystem of the server: the `/ws` workshop socket
 //! (`session`), the `/agents/ws` agent-session socket (`socket`), the
 //! `/v1/models` catalog relay (`relay`), their shared route state
 //! (`state`), and [`AgentSessions`], the server's opener of agent sessions
@@ -12,7 +12,7 @@
 //! gateway endpoint and bearer, the chat-capable catalog, and the host
 //! snapshot (the menu's selection and the workspace's granted roots).
 //! Status-bar reporting stays in the server (`status`): a per-session
-//! relay derives it from the session's events, deltas, and error reports.
+//! reporter derives it from the session's events, deltas, and error reports.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
 //! attach and detach (`socket`), so the harness keeps the session table
@@ -62,7 +62,7 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
 
 /// The server's opener of agent sessions: discovery, launch, and lookup
 /// through the registered [`Harness`], plus the server-side work a launch
-/// wires up - the status relay.
+/// wires up - the status reporter.
 ///
 /// Typed and construction-phased: the registry and the server's backoff
 /// are captured when the composition root builds it, and the harness is
@@ -148,7 +148,7 @@ impl AgentSessions {
                 args: String::new(),
             })
             .await?;
-        status::spawn_relay(
+        status::spawn_reporter(
             &session,
             self.inner.registry.push(),
             self.inner.backoff.clone(),
