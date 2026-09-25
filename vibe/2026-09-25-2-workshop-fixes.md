@@ -216,7 +216,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
   - **Remove the second decode.** After axum's single decode, a surviving `%2e%2e` is a literal filename, not a path step, so the second decode protects nothing. It also makes names containing `%XX` unreadable.
   - **Revoke propagation reuses the existing watch-generation pattern.** That is how `bindings::forward` already wakes on the gateway binding and the chat catalog, so no new mechanism is added.
   - **Menu memory uses a sequence number, not a writer task.** It's the smallest change that makes the newest selection win, and it keeps the cache best-effort.
-  - **Define "entry bundle" once.** It is the eagerly loaded composition rooted at `crates/workshop/ui/src/main.ts`: `main.ts` and the modules it imports statically, excluding `services/` and `base/`, which are shared code that eager and lazy modules both import. Lazy panels never import a module inside it. Use this wording in root `AGENTS.md:33,74`, `.cursor/rules/workshop-spa.mdc:14`, `crates/workshop/ui/AGENTS.md:17`, and `crates/workshop/ui/build.mjs:51-52`.
+  - **Define "entry bundle" once.** It is the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code. An earlier wording counted every module `main.ts` imports statically, and Step 15 found it false: lazy panels import `parts/workspace/workspace-drops.ts`, `parts/layout/zones.ts`, and `parts/layout/workshop-panel.ts`, all of which `main.ts` reaches eagerly. The user chose this definition: "The entry bundle is main.ts plus the *.contribution.ts modules it imports; lazy panels never import those. Everything else both sides use (services/, base/, and shared parts such as zones.ts) is shared code. Verify first, and stop again if a lazy panel imports a contribution module." Use this wording in root `AGENTS.md:33,74`, `.cursor/rules/workshop-spa.mdc:14`, `crates/workshop/ui/AGENTS.md:17`, and `crates/workshop/ui/build.mjs:51-52`.
   - **Reword the `index.ts` rule to match the code.** A part that the panel registry loads lazily has an `index.ts` as its chunk entry (`crates/workshop/ui/src/services/panel-registry.ts:194-222`), and other parts need none. This replaces "every directory has an `index.ts`" (`.cursor/rules/workshop-spa.mdc:13`) and the `index.ts` clause of root `AGENTS.md:80`.
   - **The Windows CI line is a separate command with `--all-features`.** The existing Windows command for the three workshop packages never takes that flag.
   - **Keep the heartbeat convergence test's real-time quiet window.** `63ddccb5` replaced its paused-clock window, which could not drive real loopback probes and so proved nothing, with a real sleep of four test intervals. It now fails when retries continue, so this plan leaves it alone and doesn't add a counter seam.
@@ -584,12 +584,15 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-15>
 
-### Step 15: Rewrite the agent rules and markdown docs
+### Step 15: Rewrite the agent rules and markdown docs [completed]
 
 - Component: Documentation
 
 - Component order: eighth, after every code fix, so the docs describe the code as it ends up.
 - Piece: agent-facing markdown, first in the component. Sequential, because it fixes the entry-bundle and `index.ts` wording that the UI comment piece repeats.
+- Settled wording (copied verbatim from the Decision Record; use it exactly):
+  - Entry-bundle definition: "the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code."
+  - `index.ts` rule: "A part that the panel registry loads lazily has an `index.ts` as its chunk entry (`crates/workshop/ui/src/services/panel-registry.ts:194-222`), and other parts need none." It replaces "every directory has an `index.ts`" and the `index.ts` clause of root `AGENTS.md:80`.
 - Artifacts and edits (cited lines are at `ce10a8eb`; locate by content):
   - `.cursor/rules/workshop-architecture.mdc`:
     - `:12`: list the real crates per tier from `crates/build-xtask/src/tidy.rs:22-31`. There's no `workshop-sessions`, and `workshop-user-state` is a feature crate.
@@ -597,8 +600,8 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
     - `:19`: the composition root calls each subsystem's `register` by name and requires its concrete handle, and subsystems reach each other only through the registry.
   - `.cursor/rules/workshop-spa.mdc`:
     - `:12`: add the missing parts chatbox, quickinput, run, and workspace-files.
-    - `:13`: the `index.ts` rule from the Decision Record.
-    - `:14`: the entry-bundle definition from the Decision Record.
+    - `:13`: the `index.ts` rule above.
+    - `:14`: the entry-bundle definition above.
   - Root `AGENTS.md:33,74,80`: the entry-bundle definition and the `index.ts` clause.
   - `crates/workshop/ui/AGENTS.md`:
     - `:5`: admit the panel registry's deliberate dynamic imports of parts.
@@ -608,7 +611,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
   - `crates/workshop/ui/build.mjs:51-52`: the entry-bundle definition.
   - `crates/workshop/desktop/AGENTS.md:11`: the supervisor is `src/gateway/supervisor/`.
   - `README.md:107`: the guide's documentation sets. `tools/document.md:123`: the nonexistent sessions path.
-- Work: before writing the entry-bundle definition, confirm that no lazy panel imports a module inside the entry bundle as defined. If one does, stop and report instead of choosing another definition.
+- Work: before writing the entry-bundle definition, confirm from the esbuild import graph that no lazy chunk includes `main.ts` or any `*.contribution.ts` module, directly or through another import. If one does, stop and report instead of choosing another definition. Lazy panels importing shared parts modules such as `zones.ts`, `workspace-drops.ts`, or `workshop-panel.ts` is expected and allowed.
 - Tests: `rg -n "workshop-sessions" .cursor/rules` and `rg -n "supervisor\.rs" crates/workshop/desktop/AGENTS.md` find nothing; `npm run build` and `npm test` in `crates/workshop/ui` pass, including `docs-claims.mjs` and `lazy-css-entry-bundle.mjs`.
 - Commit: the rule and markdown rewrites.
 
@@ -683,7 +686,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 - Artifacts and edits:
   - Replace the "plan step N" comments under `crates/workshop/ui/src` (23 at `890ae2f6`, for example `workspace-files.contribution.ts:25`, `editor.contribution.ts:2`, and `add-folder.ts:3`) with plain statements of the constraint.
   - Add header comments to `index.ts`, `take-registry.ts`, `take-registry-events.ts`, `take-registry-state.ts`, and `take-registry-types.ts` in `crates/workshop/ui/src/parts/take/`.
-  - Fix the header of `crates/workshop/ui/test/lazy-css-entry-bundle.mjs:1-2` to the entry-bundle definition.
+  - Fix the header of `crates/workshop/ui/test/lazy-css-entry-bundle.mjs:1-2` to the entry-bundle definition: "the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code."
   - Retire the guide-phrase half of `crates/workshop/ui/test/docs-claims.mjs:43-59`: `STALE_GUIDE_PHRASES` and its test.
   - `crates/workshop/ui/src/services/protocol.ts:17`.
 - Tests: `rg -n -i "plan step" crates/workshop/ui/src` finds nothing; `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`.
@@ -734,7 +737,24 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 - Artifacts: an exit section in this plan's repository copy under `vibe/`, beside the Step 1 baseline.
 - Work:
   - Confirm that every work item from Steps 2 through 19 is done, or that an inferred item's non-reproduction is recorded.
-  - Run every command under Testing Plan > Exit criteria > Commands with the staged sidecar, and compare each with its Step 1 baseline. Each must be at least as green.
+  - Run each of these exit commands with the staged sidecar (copied verbatim from the Testing Plan exit criteria), and compare each with its Step 1 baseline. Each must be at least as green:
+    - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
+    - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`
+    - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
+    - `cargo nextest run --locked -p workshop-server --features headless`
+    - `cargo nextest run --locked -p workshop-workspace --all-features` (on Windows)
+    - `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`
+    - `cargo doc --locked --no-deps -p workshop-server --document-private-items` with `RUSTDOCFLAGS=-D warnings`
+    - `cargo test -p build-xtask`
+    - both clippy partitions with `-D warnings`: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`
+    - `cargo check -p gateway --no-default-features`
+    - `cargo fmt --all --check`
+    - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps`, each with `RUSTDOCFLAGS=-D warnings`
+    - `cargo +<pinned nightly> xtask api --check`, with the nightly named in `crates/build-xtask/src/api/toolchain.rs`
+    - `mdbook build guide`
+    - `cargo run -p build-user-guide`, changing no tracked file under `guide/`
+    - `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`
+    - `cargo workshop`
   - Run the retired-string checks, which must find nothing outside `vibe/`: `rg -n "workshop-sessions" .cursor/rules`, `rg -n "session_agents|decode_path_param|workbench\.toml" crates/workshop`, `rg -n "supervisor\.rs" crates/workshop/desktop/AGENTS.md`, and `rg -n "workshop-server\b" guide/src`.
   - Run `rg -n "open_browser" crates/workshop`, which must find only the two tests proving an old config with the key still loads.
   - Confirm that `crates/workshop/server/src/main.rs` and the `[[bin]]` table are gone and no tracked file names the `workshop-server` binary.

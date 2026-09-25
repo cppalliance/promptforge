@@ -8,15 +8,15 @@ alwaysApply: false
 
 ## Feature directories and lazy loading
 
-- The package at `crates/workshop/ui/` is a sibling of the `crates/workshop/server/` crate that builds and serves it. `src/` has three layers: `base/` (lifecycle, events, paths, the `WorkshopPart` base class), `services/` (DOM-free registries and services), and `parts/` (feature directories; every panel extends `base/workshop-part.ts`).
-- Feature-based directories under `parts/` (`parts/agent/`, `parts/editor/`, `parts/layout/`, `parts/menu/`, `parts/take/`, `parts/stt/`, `parts/chrome/`, `parts/status/`, `parts/workspace/`, `parts/gateway/`). Shared code lives in `services/` or `base/`; shared UI assets (boot-loaded icons) live in `parts/shared/`; design tokens live in `tokens/`.
-- Barrel exports: every directory has an `index.ts`. Lazy directories export `register()` installing commands, menu items, panel factories, and socket subscriptions.
-- The entry bundle (`main.ts`, `services/`, `base/`) loads immediately. Feature directories load via dynamic `import()` on first activation. Lazy-loaded panels never import the entry bundle.
+- The package at `crates/workshop/ui/` is a sibling of the `crates/workshop/server/` crate that builds and serves it. `src/` has three layers: `base/` (lifecycle, events, paths, the `WorkshopPart` base class), `services/` (registries and services; services own no views), and `parts/` (feature directories; every panel extends `base/workshop-part.ts`).
+- Feature-based directories under `parts/` (`parts/agent/`, `parts/chatbox/`, `parts/chrome/`, `parts/editor/`, `parts/gateway/`, `parts/layout/`, `parts/menu/`, `parts/quickinput/`, `parts/run/`, `parts/status/`, `parts/stt/`, `parts/take/`, `parts/workspace/`, `parts/workspace-files/`). Shared code is defined with the entry bundle below; shared UI assets (boot-loaded icons) live in `parts/shared/`; design tokens live in `tokens/`.
+- A part that the panel registry loads lazily has an `index.ts` as its chunk entry (`crates/workshop/ui/src/services/panel-registry.ts:194-222`), and other parts need none. Lazy directories export `register()` installing commands, menu items, panel factories, and socket subscriptions.
+- The entry bundle is the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code. Lazy panels load via dynamic `import()` on first activation.
 - Registration, not central wiring: panel types, menu items, services, socket handlers, keyboard shortcuts, and lifecycle disposal self-register through the panel, menu/command, and service registries.
 
 ## CSS colocation and tokens
 
-- CSS lives beside its TypeScript, imported as a side-effect. Never a separate `styles/` tree. Every feature directory is self-contained: `.ts`, `.css`, and `index.ts` together. A designer finds the styles for the agent chat at `parts/agent/agent-session.css`, not by grepping a flat directory.
+- CSS lives beside its TypeScript, imported as a side-effect. Never a separate `styles/` tree. Every feature directory is self-contained: its `.ts` and `.css` sit together, plus an `index.ts` when the panel registry loads it lazily. A designer finds the styles for the agent chat at `parts/agent/agent-session.css`, not by grepping a flat directory.
 - No raw color, size, or spacing values in component CSS. Use `--ws-*` tokens from `tokens/`. Primitives go in `tokens/base.css`, intent aliases in `tokens/semantic.css`, per-component overrides in `tokens/component.css`. A designer themes the app by editing `semantic.css`.
 - CSS classes use the `.ws-` project prefix (`.ws-agent-toolbar`). Design tokens use the `--ws-` prefix (`--ws-color-bg-surface`).
 - Directories and files are kebab-case (`agent-session-view.ts`, `agent-session.css`).

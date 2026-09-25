@@ -9,14 +9,14 @@ alwaysApply: false
 ## One-way dependency graph
 
 - Dependencies flow one way: server -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph.
-- Tiers: vocabulary (`workshop-protocol`, `workshop-support`, `workshop-registry`) <- services (`workshop-gateway`, `workshop-status`, `workshop-menu`) <- features (`workshop-sessions`, `workshop-workspace`) <- server (`workshop-server`).
-- Crates in the same tier never depend on each other. They meet through `workshop-protocol` wire types and `workshop-registry` proxy slots.
+- Tiers: vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`) <- services (`workshop-gateway`, `workshop-menu`, `workshop-status`) <- features (`workshop-user-state`, `workshop-workspace`) <- server (`workshop-server`). The sessions subsystem has no crate of its own; it lives inside `workshop-server`.
+- Crates in the same tier never depend on each other, with one exception: `workshop-registry` depends on `workshop-protocol`, because the status push-channel slot holds `workshop-protocol`'s `StatusBarUpdate`. Otherwise same-tier crates meet through `workshop-protocol` wire types and `workshop-registry` proxy slots.
 - Every `workshop-*` crate's `lib.rs` opens with a `//!` doc carrying a `## Invariants` marker that lists what the crate may depend on and what it may not. Read it before adding an import.
 - `lib.rs` is a facade only: crate docs, crate-level attributes, `mod` declarations, and `pub use` re-exports. No logic.
 
 ## Registry pattern
 
-- Subsystems self-register into `workshop-registry` proxy slots: routes, state handles, background tasks, push channels, and shutdown handles. The server composes the registry; it does not wire subsystems by name.
+- Subsystems self-register into `workshop-registry` proxy slots: routes, state handles, background tasks, push channels, and shutdown handles. The composition root (`crates/workshop/server/src/app/compose.rs`) calls each subsystem's `register` by name and requires its concrete handle, so a missing registration fails boot naming the type. Subsystems reach each other only through the registry.
 - Unregistered slots are graceful no-ops. Never add a hard dependency on an optional subsystem.
 - Registration handles are `#[must_use]`; registry traits are sealed so only workshop crates implement them.
 

@@ -48,12 +48,18 @@ const STATIC_FILES = [
 //
 // Code splitting is on: the panel registry's import thunks (the agent
 // session's Shiki/TipTap graph, the editor's CodeMirror) become lazily
-// loaded chunks under dist/chunks/, and the initial bundle holds only
-// the entry bundle, services, and chrome. Every bundle file is
-// content-hashed (the entry under bundle/, the chunks under chunks/), so
-// the server can mark them Cache-Control: immutable; dist/manifest.json
-// maps the logical names (app.js, app.css) to the hashed files, and the
-// dist copy of index.html is stamped with the hashed URLs.
+// loaded chunks under dist/chunks/, and the initial load holds the entry
+// bundle plus the shared code it reaches. The entry bundle is the eagerly
+// loaded composition: `crates/workshop/ui/src/main.ts` and the
+// `*.contribution.ts` modules it imports. Lazy panels never import a
+// module inside it, directly or through another import. Everything else
+// that eager and lazy code both import, such as `services/`, `base/`, and
+// shared parts modules like `parts/layout/zones.ts`, is shared code.
+// Every bundle file is content-hashed (the entry under bundle/, the chunks
+// under chunks/), so the server can mark them Cache-Control: immutable;
+// dist/manifest.json maps the logical names (app.js, app.css) to the
+// hashed files, and the dist copy of index.html is stamped with the hashed
+// URLs.
 const options = {
   entryPoints: [path.join(srcDir, "main.ts")],
   bundle: true,
