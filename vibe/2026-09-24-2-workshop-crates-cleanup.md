@@ -1033,7 +1033,7 @@ Components, in dependency order:
 
 <step-24>
 
-### Step 24: Serve /prompts/contract from the server
+### Step 24: Serve /prompts/contract from the server [completed]
 
 - Component: Structural consolidation
 - Piece: prompts-route

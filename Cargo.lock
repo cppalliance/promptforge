@@ -8662,7 +8662,6 @@ dependencies = [
  "dunce",
  "humantime",
  "percent-encoding",
- "promptforge",
  "serde",
  "serde_json",
  "shared-error-source",

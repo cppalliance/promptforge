@@ -19,8 +19,6 @@ axum.workspace = true
 dunce.workspace = true
 humantime.workspace = true
 percent-encoding.workspace = true
-# The engine's public API: the parser behind the `/prompts/contract` route.
-promptforge.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shared-error-source = { workspace = true, features = ["database", "json"] }

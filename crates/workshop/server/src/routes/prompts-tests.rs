@@ -5,26 +5,25 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
 
-use crate::handlers::routes;
-use crate::workspace::Workspace;
+use crate::app::fixtures::{body_bytes, state_for};
+use crate::app::router;
 
-/// Posts `body` to `/prompts/contract` on a fresh empty workspace and
+/// Posts `body` to `/prompts/contract` on the assembled server router and
 /// returns the status with the decoded JSON body.
 async fn post_contract(body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let (state, _state_dir) = state_for("http://127.0.0.1:1");
     let request = Request::builder()
         .method("POST")
         .uri("/prompts/contract")
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_string()))
         .expect("static request parts are valid");
-    let response = routes(Workspace::new())
+    let response = router(state)
         .oneshot(request)
         .await
         .expect("the router is infallible");
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("the body is in memory already");
+    let bytes = body_bytes(response).await;
     let json = serde_json::from_slice(&bytes).expect("the body is JSON");
     (status, json)
 }

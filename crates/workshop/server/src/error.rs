@@ -20,6 +20,7 @@ use std::fmt::Write as _;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+use promptforge::{ParseError, ParseErrorKind};
 use workshop_protocol::ErrorEnvelope;
 
 use crate::gateway::GatewayError;
@@ -62,15 +63,47 @@ pub(crate) enum AppError {
     /// An embedded UI asset is missing from the bundle.
     #[error("ui asset not found: {0}")]
     AssetMissing(String),
+
+    /// A posted prompt failed to parse; the code names the failure kind
+    /// and the message carries the parser's `line N: ` prefix.
+    #[error("{message}")]
+    PromptParse {
+        /// The pre-rendered message, including the `line N: ` prefix when
+        /// the parser located the failure.
+        message: String,
+        /// The wire code for the parse-failure kind.
+        code: &'static str,
+    },
 }
 
 impl AppError {
+    /// Builds the wire error for a prompt that failed to parse: the code
+    /// names the failure kind and the message carries the parser's
+    /// `line N: ` prefix when it located the failure.
+    pub(crate) fn prompt_parse(error: &ParseError) -> Self {
+        let code = match error.kind() {
+            ParseErrorKind::Frontmatter => "parse_frontmatter",
+            ParseErrorKind::Structure => "parse_structure",
+            ParseErrorKind::Fence => "parse_fence",
+            ParseErrorKind::List => "parse_list",
+            ParseErrorKind::Lua => "parse_lua",
+            // A kind added after this route predates its wire code.
+            _ => "parse_error",
+        };
+        let message = match error.line() {
+            Some(line) => format!("line {line}: {error}"),
+            None => error.to_string(),
+        };
+        Self::PromptParse { message, code }
+    }
+
     /// The one HTTP status this failure answers with.
     fn status(&self) -> StatusCode {
         match self {
             Self::Gateway(_) => StatusCode::BAD_GATEWAY,
             Self::CrossSite | Self::ForwardDenied => StatusCode::FORBIDDEN,
             Self::NotJson => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Self::PromptParse { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::AssetMissing(_) => StatusCode::NOT_FOUND,
         }
     }
@@ -83,6 +116,7 @@ impl AppError {
             Self::CrossSite => Some("cross_site"),
             Self::NotJson => Some("not_json"),
             Self::ForwardDenied => Some("forward_denied"),
+            Self::PromptParse { code, .. } => Some(code),
             Self::AssetMissing(_) => None,
         }
     }

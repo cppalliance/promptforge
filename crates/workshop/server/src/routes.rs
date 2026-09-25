@@ -7,4 +7,5 @@
 pub(crate) mod assets;
 pub(crate) mod gateway_config;
 pub(crate) mod health;
+pub(crate) mod prompts;
 pub(crate) mod realtime;

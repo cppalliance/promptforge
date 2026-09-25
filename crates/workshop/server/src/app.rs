@@ -347,7 +347,8 @@ pub fn router(state: AppState) -> Router {
     let registry = state.registry().clone();
     let mut api = Router::new()
         .merge(routes::realtime::routes(state.clone()))
-        .merge(routes::gateway_config::routes(state));
+        .merge(routes::gateway_config::routes(state))
+        .merge(with_deadline(routes::prompts::routes(), DEFAULT_DEADLINE));
     // The subsystems' routes merge in registration order; an empty
     // vector is a graceful no-op.
     for registrar in registry.routes() {

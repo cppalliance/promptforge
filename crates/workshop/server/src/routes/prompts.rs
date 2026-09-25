@@ -8,23 +8,22 @@
 //! `Serialize` structs built from [`Frontmatter`] accessors.
 
 use axum::Json;
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
+use promptforge::Prompt;
 use promptforge::prompt::{
     ArgDecl, ArgsDecl, CapabilityDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole, ToolSlot,
 };
-use promptforge::{ParseError, ParseErrorKind, Prompt};
-use workshop_protocol::ErrorEnvelope;
 
-use crate::workspace::Workspace;
+use crate::error::AppError;
 
-/// The prompt routes, merged into the subsystem's router by the parent
-/// module so they share its state type, deadline tier, and cross-site
-/// guard. The parse is pure.
-pub(super) fn routes() -> axum::Router<Workspace> {
+/// The `/prompts/contract` route. The parse is pure, so the router
+/// carries no state; the server mounts it under the default deadline and
+/// its cross-site guard.
+pub(crate) fn routes() -> axum::Router {
     axum::Router::new().route("/prompts/contract", post(contract))
 }
 
@@ -263,39 +262,10 @@ pub(crate) async fn contract(Json(body): Json<ContractRequest>) -> Response {
             Json(ContractResponse::from(prompt.frontmatter())),
         )
             .into_response(),
-        Err(error) => parse_failure(&error),
+        Err(error) => AppError::prompt_parse(&error).into_response(),
     }
 }
 
-/// Renders a parse failure as the standard error envelope: the machine
-/// code is `parse_<kind>`, and the message includes the `line N: ` prefix
-/// when the parser located the failure.
-fn parse_failure(error: &ParseError) -> Response {
-    let code = match error.kind() {
-        ParseErrorKind::Frontmatter => "parse_frontmatter",
-        ParseErrorKind::Structure => "parse_structure",
-        ParseErrorKind::Fence => "parse_fence",
-        ParseErrorKind::List => "parse_list",
-        ParseErrorKind::Lua => "parse_lua",
-        // A kind added after this route predates its wire code.
-        _ => "parse_error",
-    };
-    let message = match error.line() {
-        Some(line) => format!("line {line}: {error}"),
-        None => error.to_string(),
-    };
-    let envelope = ErrorEnvelope::new(message, code);
-    // Serializing the envelope cannot fail: two strings only.
-    let body =
-        serde_json::to_string(&envelope).unwrap_or_else(|_| "prompt parse failed".to_owned());
-    (
-        StatusCode::UNPROCESSABLE_ENTITY,
-        [(header::CONTENT_TYPE, "application/json")],
-        body,
-    )
-        .into_response()
-}
-
 #[cfg(test)]
-#[path = "handlers-prompts-tests.rs"]
+#[path = "prompts-tests.rs"]
 mod tests;
