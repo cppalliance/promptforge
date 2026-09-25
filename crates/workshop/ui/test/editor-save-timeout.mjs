@@ -3,13 +3,14 @@
 // unknown, and the next save reconciles with the file on disk instead of
 // re-sending a token that may now be stale. Covers six cases: the 408
 // marks the token unknown and sends no stale token; a disk match adopts
-// the fresh token and saves; a mismatch shows the conflict dialog; a
-// late write that lands after the re-read surfaces the conflict dialog,
-// not a raw error; an Overwrite 408 marks the token unknown the same way
-// a save 408 does; and an Overwrite entered with the token already
-// unknown, whose timed-out write landed, lets the next save adopt the
-// fresh token. Drives the real EditorPanel with a stubbed surface and
-// scripted reader/writer, the same way editor-save-race.mjs does.
+// the fresh token and saves; a mismatch shows the conflict dialog, worded
+// for an earlier timed-out save or an outside edit; a late write that
+// lands after the re-read surfaces the conflict dialog, not a raw error;
+// an Overwrite 408 marks the token unknown the same way a save 408 does;
+// and an Overwrite entered with the token already unknown, whose
+// timed-out write landed, lets the next save adopt the fresh token.
+// Drives the real EditorPanel with a stubbed surface and scripted
+// reader/writer, the same way editor-save-race.mjs does.
 // Run: node test/editor-save-timeout.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -142,6 +143,8 @@ const conflictError = () =>
 
 const errorBar = (panel) => panel.element.querySelector(".ws-editor-panel__error");
 const conflictOverlay = (panel) => panel.element.querySelector(".ws-editor-conflict-overlay");
+const conflictMessage = (panel) =>
+  panel.element.querySelector(".ws-editor-conflict__line")?.textContent ?? "";
 const overwriteButton = (panel) =>
   [...panel.element.querySelectorAll(".ws-editor-conflict__button")].find(
     (button) => button.textContent === "Overwrite",
@@ -242,6 +245,10 @@ await assertNoLeaks(lifecycle, async () => {
     disk = { text: "external edit", token: "t500" };
     await panel.save();
     check("a mismatched disk shows the conflict dialog", conflictOverlay(panel) !== null);
+    check(
+      "the mismatch dialog names an earlier timed-out save as well as an outside edit",
+      conflictMessage(panel).includes("timed-out save") && conflictMessage(panel).includes("outside edit"),
+    );
     check("a mismatch never writes with the stale token", puts.length === 1);
     panel.dispose();
   }

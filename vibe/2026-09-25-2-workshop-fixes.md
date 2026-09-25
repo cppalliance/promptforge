@@ -328,7 +328,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-2>
 
-### Step 2: Fix Save As onto an existing file and the reconcile wording
+### Step 2: Fix Save As onto an existing file and the reconcile wording [completed]
 
 - Component: Editor fixes
 

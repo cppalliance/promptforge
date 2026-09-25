@@ -16,6 +16,7 @@ import { baseName } from "../../base/paths";
 import { toDisposable } from "../../base/lifecycle";
 import { WorkshopPart } from "../../base/workshop-part";
 import { Commands } from "../../services/command-registry";
+import { errorText } from "../../services/error-catalog";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getServiceOrNull } from "../../services/service-registry";
 import { showPanelDialog } from "./editor-dialog";
@@ -54,6 +55,8 @@ function untitledSerialParam(params: Record<string, unknown>): number | null {
   const untitled = params.untitled;
   return typeof untitled === "number" && Number.isInteger(untitled) && untitled > 0 ? untitled : null;
 }
+
+const SAVE_TIMEOUT_MESSAGE = "The save timed out; the file may or may not have been written.";
 
 const didInitEmitter = new Emitter<EditorPanel>();
 
@@ -206,7 +209,9 @@ export class EditorPanel extends WorkshopPart {
         if (onDisk.text !== this.lastSentText) {
           // The write may not have landed, or the file changed again:
           // resolve through the conflict dialog instead of overwriting.
-          this.showConflictDialog();
+          this.showConflictDialog(
+            `${this.title} may hold an earlier timed-out save or an outside edit. Reload the on-disk text, or overwrite the file with your changes.`,
+          );
           return;
         }
         this.token = onDisk.token;
@@ -217,7 +222,7 @@ export class EditorPanel extends WorkshopPart {
     } catch (error: unknown) {
       if (isDeadlineElapsed(error)) {
         this.tokenUnknown = true;
-        this.showError("The save timed out; the file may or may not have been written.");
+        this.showError(SAVE_TIMEOUT_MESSAGE);
       } else if (isModifiedConflict(error)) {
         this.showConflictDialog();
       } else {
@@ -233,8 +238,9 @@ export class EditorPanel extends WorkshopPart {
    * onto it - the tab title, the conflict token, and the saved baseline
    * all move to the new file, and an untitled buffer becomes a file
    * editor. The picker and the parent-directory grant are the caller's
-   * job (the files contribution). Failures paint the error bar; a
-   * conflict offers the reload/overwrite dialog, same as save().
+   * job (the files contribution). Every failure, a 408 included, paints
+   * the error bar and leaves the panel on its old path; the conflict
+   * dialog never opens, because it acts on that old path.
    */
   async saveAs(path: string): Promise<void> {
     if (this.saving) {
@@ -245,7 +251,10 @@ export class EditorPanel extends WorkshopPart {
       // The text is captured once, as in save(): the write and the saved
       // baseline must agree.
       const text = this.surface.text();
-      const written = await this.writer()(path, text, null);
+      const written = await this.writeTarget(path, text);
+      if (written === null) {
+        return;
+      }
       this.path = path;
       this.untitled = false;
       this.title = baseName(path);
@@ -255,11 +264,7 @@ export class EditorPanel extends WorkshopPart {
       this.updateTitle();
       getServiceOrNull(RECENT_FILES_STORE)?.add(path);
     } catch (error: unknown) {
-      if (isModifiedConflict(error)) {
-        this.showConflictDialog();
-      } else {
-        this.showError(error);
-      }
+      this.showError(isDeadlineElapsed(error) ? SAVE_TIMEOUT_MESSAGE : error);
     } finally {
       this.saving = false;
     }
@@ -317,6 +322,40 @@ export class EditorPanel extends WorkshopPart {
   }
 
   /**
+   * Writes a Save As target. The picker's replace confirmation is the
+   * user's consent, so a 409 on an existing target re-reads its token and
+   * retries once. An unreadable target or a second conflict paints an
+   * error naming the target and returns null; a 408 or any other failure
+   * is rethrown. The writes bypass writeCurrent: a 408 here leaves the
+   * open file's token untouched.
+   */
+  private async writeTarget(path: string, text: string): Promise<WorkspaceFile | null> {
+    try {
+      return await this.writer()(path, text, null);
+    } catch (error: unknown) {
+      if (!isModifiedConflict(error)) {
+        throw error;
+      }
+    }
+    let target: WorkspaceFile;
+    try {
+      target = await this.reader()(path);
+    } catch (error: unknown) {
+      this.showError(`Save As could not replace ${path}: ${errorText(error)}`);
+      return null;
+    }
+    try {
+      return await this.writer()(path, text, target.token);
+    } catch (error: unknown) {
+      if (isModifiedConflict(error)) {
+        this.showError(`Save As could not replace ${path}: it changed on disk again before the write.`);
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Writes this panel's own file and records the outcome: the token, the
    * saved baseline, the text a timed-out write may have landed, the 408
    * message, and the 409 conflict dialog. Any other error is rethrown. A
@@ -333,7 +372,7 @@ export class EditorPanel extends WorkshopPart {
     } catch (error: unknown) {
       if (isDeadlineElapsed(error)) {
         this.tokenUnknown = true;
-        this.showError("The save timed out; the file may or may not have been written.");
+        this.showError(SAVE_TIMEOUT_MESSAGE);
       } else if (isModifiedConflict(error)) {
         this.showConflictDialog();
       } else {
@@ -371,13 +410,15 @@ export class EditorPanel extends WorkshopPart {
    * for the on-disk text; Overwrite re-reads the fresh token and writes
    * the editor's text over the file.
    */
-  private showConflictDialog(): void {
+  private showConflictDialog(
+    message = `${this.title} was modified outside the editor. Reload the on-disk text, or overwrite the file with your changes.`,
+  ): void {
     this._register(showPanelDialog({
       host: this.element,
       classPrefix: "ws-editor-conflict",
       titleId: "editor-conflict-title",
       title: "File changed on disk",
-      message: `${this.title} was modified outside the editor. Reload the on-disk text, or overwrite the file with your changes.`,
+      message,
       buttons: [
         {
           label: "Reload",
