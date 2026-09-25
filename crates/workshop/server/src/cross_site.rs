@@ -10,13 +10,15 @@
 //! the attacker's hostname in `Host` is the one signal rebinding cannot
 //! forge), and requires body-bearing requests to declare
 //! `application/json`, which forces a CORS preflight no cross-site page
-//! passes. WebSocket upgrades bypass Sec-Fetch in older browsers, so both
-//! upgrade handlers additionally check
-//! [`origin_allowed`]: an `Origin` header, when present, must be a
-//! loopback http(s) origin - which admits both the desktop app webview (it loads
-//! the workshop's own loopback URL) and a browser tab on the workshop's
-//! address, and refuses every foreign site. A request with no `Origin` is
-//! a native client, not a browser, and passes. `/health` and the UI
+//! passes. WebSocket upgrades bypass Sec-Fetch in older browsers, so all
+//! three upgrade handlers additionally check the `Origin`. The `/ws` and
+//! `/agents/ws` handlers use [`origin_allowed`]: an `Origin` header, when
+//! present, must be a loopback http(s) origin - which admits both the
+//! desktop app webview (it loads the workshop's own loopback URL) and a
+//! browser tab on the workshop's address, and refuses every foreign site.
+//! The `/v1/realtime` handler is stricter: a browser `Origin` must match
+//! the request's own authority, host and port. A request with no `Origin`
+//! is a native client, not a browser, and passes. `/health` and the UI
 //! assets stay outside the guard so the desktop app probe and heartbeat keep
 //! working.
 

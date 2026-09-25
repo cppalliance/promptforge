@@ -2,8 +2,9 @@
 //! `../ui/src/main.ts` (the sibling `crates/workshop/ui/` package) plus
 //! copies of the static assets, all written to `$OUT_DIR/ui-dist/` (never
 //! into the repository). The crate version is baked into the bundle as
-//! `__APP_VERSION__`. Requires Node.js 22 and one `npm ci` in `../ui/`
-//! per checkout; see the crate docs. Under the
+//! `__APP_VERSION__`. Requires Node.js 22 on `PATH` and one `npm ci` in
+//! `crates/workshop/ui/` per checkout (`npm ci --prefix
+//! crates/workshop/ui` from the repository root). Under the
 //! `headless` feature the UI build is skipped and the asset directory is
 //! left empty: the asset routes serve through the no-op implementation,
 //! so server-only integration tests need neither Node.js nor the bundle.

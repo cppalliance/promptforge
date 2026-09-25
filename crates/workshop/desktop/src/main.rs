@@ -287,7 +287,7 @@ fn window_capability(url: &url::Url) -> CapabilityBuilder {
 /// custom HTML title bar replaces the native frame, overlay-titled on
 /// macOS where the native traffic lights float over the custom bar's left
 /// edge (the bar hides its Windows-style control cluster there), decorated
-/// on Linux as today, restored to the open workspace file's saved
+/// on Linux, restored to the open workspace file's saved
 /// geometry, then shown. The saver that writes geometry back into the
 /// file is installed before the show, so the first layout pass is saved.
 fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {

@@ -1,6 +1,6 @@
 //! The `/ws` WebSocket endpoint: one persistent socket for the
 //! workshop's downstream JSON - unsolicited status updates from the
-//! observer, model catalog pushes, and workbench snapshots - plus the
+//! status bus, model catalog pushes, and workbench snapshots - plus the
 //! inbound Model-menu events.
 //!
 //! A client upgrades `GET /ws` once. The Model-menu events arrive on

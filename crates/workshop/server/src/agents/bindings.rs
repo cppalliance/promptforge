@@ -81,8 +81,9 @@ fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
 /// Keeps the harness's bindings current: pushes all three again whenever
 /// the gateway binding is replaced, the chat-capable catalog changes
 /// generation, the menu publishes a snapshot, or the workspace's granted
-/// roots change. Runs until every source has closed (the server's state
-/// is gone) or the harness is unregistered.
+/// roots change. Returns at once when no harness is registered; otherwise
+/// it reads the harness once and runs until every source has closed (the
+/// server's state is gone) or the graceful-shutdown handle aborts it.
 ///
 /// A fresh watch receiver treats the current value as seen, so a change
 /// landing between the composition root's push and these subscriptions

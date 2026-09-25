@@ -655,7 +655,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-17>
 
-### Step 17: Correct the server and desktop docs
+### Step 17: Correct the server and desktop docs [completed]
 
 - Component: Documentation
 

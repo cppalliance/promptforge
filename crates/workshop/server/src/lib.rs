@@ -44,8 +44,11 @@
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
-//! - The server's WebSocket origin policy is applied to every upgrade;
-//!   the cross-site guard stays the security boundary.
+//! - Every WebSocket upgrade checks its `Origin`: `/ws` and `/agents/ws`
+//!   admit any loopback origin through [`origin_allowed`], and
+//!   `/v1/realtime` applies a stricter same-origin check that requires a
+//!   browser `Origin` to match the request's own authority. The
+//!   cross-site guard stays the security boundary.
 //! - A dying input wait is an outcome, never silence: the harness's wait
 //!   registry pushes a cancelled frame for every unresolved wait it
 //!   drops, and the agent socket renders it as `input_cancelled`.
