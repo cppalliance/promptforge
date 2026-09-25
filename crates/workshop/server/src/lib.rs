@@ -10,12 +10,13 @@
 //!
 //! The crate is the composition root of the workshop server
 //! decomposition: the feature subsystems (`workshop-user-state`,
-//! `workshop-workspace`, and the sessions subsystem in `agents`: the
-//! `/ws` workshop socket, the `/agents/ws` agent-session socket, and the
-//! `/v1/models` catalog relay), the domain services (`workshop-gateway`,
-//! `workshop-status`, `workshop-menu`), and the vocabulary crates
-//! (`workshop-protocol`, `workshop-registry`, `workshop-support`) are
-//! assembled in `app.rs`, where every subsystem self-registers its
+//! `workshop-workspace`, and the sessions subsystem in `agents`, which
+//! serves the `/agents/ws` agent-session socket and the `/v1/models`
+//! catalog relay), the `/ws` workshop socket in `workshop_socket`, the
+//! domain services (`workshop-gateway`, `workshop-status`,
+//! `workshop-menu`), and the vocabulary crates (`workshop-protocol`,
+//! `workshop-registry`, `workshop-support`) are assembled in `app`
+//! (helpers in `app::compose`), where every subsystem self-registers its
 //! routes, state handles, and push channels into the registry - the
 //! harness among them.
 //!

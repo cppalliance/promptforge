@@ -199,6 +199,11 @@ jobs:
       - name: Doctests (workshop)
         run: cargo test --doc -p workshop -p workshop-server -p workshop-server-api
 
+      - name: Docs (workshop-server, private items)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps -p workshop-server --document-private-items
+
       - name: Test Gateway process ownership races
         shell: bash
         run: |

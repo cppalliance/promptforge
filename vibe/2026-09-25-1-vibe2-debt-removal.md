@@ -393,7 +393,7 @@ use super::*;
 
 <step-4>
 
-### Step 4: Link the workshop-server module inventories and check them in CI
+### Step 4: Link the workshop-server module inventories and check them in CI [completed]
 
 - Component: workshop-server
 - Piece: crate docs and CI docs gate. Built sequentially after Step 3. It runs the plan's exit checks, because they include the docs step it adds.

@@ -66,7 +66,7 @@ impl AssetManifest {
 
 /// The narrow asset-serving interface of the server's webview asset
 /// layer. The server wires one implementation into the asset routes:
-/// [`EmbeddedAssets`] in a normal build, [`NoopAssets`] under the
+/// [`EmbeddedAssets`] in a normal build, `NoopAssets` under the
 /// `headless` feature, which drops the UI build so server-only
 /// integration tests run without the webview bundle.
 pub(crate) trait AssetServer {

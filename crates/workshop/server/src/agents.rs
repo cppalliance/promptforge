@@ -1,14 +1,14 @@
-//! The sessions subsystem of the server: the `/ws` workshop socket
-//! (`session`), the `/agents/ws` agent-session socket (`socket`), the
-//! `/v1/models` catalog relay (`relay`), their shared route state
-//! (`state`), and [`AgentSessions`], the server's opener of agent sessions
-//! in the harness.
+//! The sessions subsystem of the server: the `/agents/ws` agent-session
+//! socket ([`socket`]), the `/v1/models` catalog relay ([`relay`]), their
+//! shared route state ([`state`]), and [`AgentSessions`], the server's
+//! opener of agent sessions in the harness. The `/ws` workshop socket is
+//! [`crate::workshop_socket`], outside this subsystem.
 //!
 //! Agent sessions run in the harness. The composition root constructs a
 //! [`Harness`] from `harness-api` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
 //! every session through it. Everything the harness knows about the server
-//! arrives as data pushed through its public API (`bindings`): the
+//! arrives as data pushed through its public API ([`bindings`]): the
 //! gateway endpoint and bearer, the chat-capable catalog, and the host
 //! snapshot (the menu's selection and the workspace's granted roots).
 //! Status-bar reporting stays in the server (`status`): a per-session
