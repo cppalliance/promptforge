@@ -728,7 +728,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-20>
 
-### Step 20: Run the exit gates
+### Step 20: Run the exit gates [completed]
 
 - Component: Exit
 
@@ -758,6 +758,36 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
   - Run the retired-string checks, which must find nothing outside `vibe/`: `rg -n "workshop-sessions" .cursor/rules`, `rg -n "session_agents|decode_path_param|workbench\.toml" crates/workshop`, `rg -n "supervisor\.rs" crates/workshop/desktop/AGENTS.md`, and `rg -n "workshop-server\b" guide/src`.
   - Run `rg -n "open_browser" crates/workshop`, which must find only the two tests proving an old config with the key still loads.
   - Confirm that `crates/workshop/server/src/main.rs` and the `[[bin]]` table are gone and no tracked file names the `workshop-server` binary.
+- Exit results (recorded 2026-09-25; every command is at least as green as its Step 1 baseline, with the one leaky-test correction to that baseline stated in the workspace nextest entry; no failing, flaky, or slow tests, and one leaky test):
+  - Branch head: `master` at `d3024c18` ("Add the Workshop crate map and seven vocabulary terms"); worktree clean before and after the run.
+  - Work items: Steps 2 through 19 each landed as a code or docs commit - `084fd26b`, `443635df`, `03a998f4`, `ac541270`, `7438072e`, `389461f3`, `e89cd6e1`, `d7f90f97`, `c6577ba0`, `754ffc1e`, `8aeaadb3`, `34ac4320`, `c8297aa6`, `c5e3ae51`, `c19d434c`, `bf0b8d79`, `0310ed02`, `d3024c18`, in step order. The three inferred items (Step 3 switch resync, Step 7 grant race, Step 12 revoke roots) each reproduced and shipped a fix, so no non-reproduction is recorded.
+  - Setup: same as the baseline - `npm ci` in both UI packages, `cargo workshop` first, then `cargo build --locked -p gateway --no-default-features` and the sidecar stage command: pass (sidecar left staged). Nextest and cargo test runs added `--no-fail-fast`, as in the baseline.
+  - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`: pass (3936 passed, 54 skipped; baseline 3926 passed). One test reports leaky: `build-workshop::interruption platform_interrupt_after_staging_kills_child_cleans_and_fails`. The Step 1 baseline record missed this leak: it says "no failing, flaky, leaky, or slow tests", but this test leaks there too. The leaky comparison therefore uses a re-run at the baseline commit `1fd5849a`, made during this step and not part of the Step 1 record, where the test leaked three times out of three on this machine. It leaks five times out of five at the exit head. No commit in this plan touches `crates/build-workshop`, `crates/workspace-hack`, or `.config/`, and the only `Cargo.lock` change drops three lines, so the leak is environmental and not a regression. Against the re-run, this command is exactly as green as the baseline.
+  - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`: pass
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass (252 passed, 4 skipped; baseline 247)
+  - `cargo nextest run --locked -p workshop-server --features headless`: pass (146 passed, 2 skipped; baseline 143)
+  - `cargo nextest run --locked -p workshop-workspace --all-features` (Windows): pass (150 passed, 0 skipped; baseline 142)
+  - `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`: pass
+  - `cargo doc --locked --no-deps -p workshop-server --document-private-items` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo test -p build-xtask`: pass (169 passed, 18 ignored)
+  - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`: pass
+  - `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`: pass
+  - `cargo check -p gateway --no-default-features`: pass
+  - `cargo fmt --all --check`: pass
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo doc -p promptforge --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo +nightly-2026-09-05 xtask api --check`: pass (0 violations; the listing matches public-api.txt)
+  - `mdbook build guide`: pass
+  - `cargo run -p build-user-guide`: pass (no tracked file under `guide/` changed)
+  - workshop UI `npm run build`, `npm test` (139 passed, 0 failed, including `editor-save-as.mjs` and `workspace-switch.mjs`), `npm run typecheck`: pass
+  - `cargo workshop`: pass
+  - Retired strings, each now finding nothing:
+    - `rg -n "workshop-sessions" .cursor/rules`: 0 hits (baseline 1)
+    - `rg -n "session_agents|decode_path_param|workbench\.toml" crates/workshop`: 0 hits (baseline 8)
+    - `rg -n "supervisor\.rs" crates/workshop/desktop/AGENTS.md`: 0 hits (baseline 1)
+    - `rg -n "workshop-server\b" guide/src`: 0 hits (baseline 1)
+  - Retired key: `rg -n "open_browser" crates/workshop`: 3 hits in the two old-config tests only - `desktop/src/config.rs:189` (the fixture in `a_discovered_file_keeps_its_gateway_and_paths_but_not_the_listener`) and `support/tests/it/config.rs:114,120` (`a_retired_open_browser_key_still_parses_and_is_ignored`). Baseline 20 hits in 10 files.
+  - Binary: `crates/workshop/server/src/main.rs` is gone, `crates/workshop/server/Cargo.toml` has no `[[bin]]` table and no `open` dependency, and outside `vibe/` no tracked file names a `workshop-server` binary or executable. The remaining `workshop-server` mentions are package names in cargo `-p` and `--exclude` arguments.
 - Tests: the exit commands and checks above.
 - Commit: the recorded exit results in the plan's repository copy.
 
