@@ -22,6 +22,12 @@ use crate::gateway::supervisor::{
     wait_for_launched_file_cancellable_with,
 };
 
+/// How long a test listens to prove the named fixture received no shutdown.
+/// The fixture reports only accepted shutdowns over its control socket, and
+/// the request a regression would add comes from a detached drop thread, so
+/// no later event is ordered after it; absence needs a wall-clock window.
+const NO_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestIdentity {
     file: GatewayDiscoveryFile,
@@ -179,10 +185,9 @@ fn reused_pid_and_file_metadata_still_publish_a_new_validated_process_boot() {
 }
 
 fn assert_bounded_supervisor_shutdown(supervisor: GatewaySupervisor, finished: &AtomicBool) {
-    let started = Instant::now();
-    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Joined);
-    assert!(
-        started.elapsed() < Duration::from_millis(250),
+    assert_eq!(
+        supervisor.shutdown(),
+        SupervisorShutdown::Joined,
         "Workshop exit joins the cancelled supervisor within its budget"
     );
     assert!(
@@ -228,7 +233,7 @@ fn explicit_candidate_shutdown_delivers_and_disarms_the_drop_signal() {
         "the explicit path signals the unpublished child"
     );
     assert!(
-        !gateway.received_shutdown(Duration::from_millis(100)),
+        !gateway.received_shutdown(NO_SHUTDOWN_TIMEOUT),
         "the disarmed drop sends no second signal"
     );
 }
@@ -309,6 +314,9 @@ fn dropping_a_candidate_signals_without_waiting_for_an_unresponsive_child() {
 
     let started = Instant::now();
     drop(candidate);
+    // The unresponsive child is a real socket, and a blocking drop would
+    // still return at the production late-child deadline, so only elapsed
+    // time separates it from a detached signal.
     assert!(
         started.elapsed() < Duration::from_millis(250),
         "drop signals on a detached thread instead of waiting out the late-child budget"
@@ -333,7 +341,7 @@ fn a_mismatched_spawned_pid_never_claims_or_cleans_the_validated_process() {
     drop(unowned);
 
     assert!(
-        !gateway.received_shutdown(Duration::from_millis(100)),
+        !gateway.received_shutdown(NO_SHUTDOWN_TIMEOUT),
         "an uncertain process never receives destructive cleanup"
     );
     assert!(
@@ -356,7 +364,7 @@ fn successful_publication_disarms_late_child_cleanup() {
     drop(candidate);
 
     assert!(
-        !gateway.received_shutdown(Duration::from_millis(100)),
+        !gateway.received_shutdown(NO_SHUTDOWN_TIMEOUT),
         "an authoritative published child remains running"
     );
 }

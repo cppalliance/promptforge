@@ -2,13 +2,24 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::validated_gateway;
 use crate::gateway::supervisor::{
-    GatewaySupervisor, SupervisedGatewayIdentity, SupervisionProbe, SupervisorShutdown,
-    run_supervision,
+    GatewaySupervisor, SUPERVISOR_SHUTDOWN_BUDGET, SupervisedGatewayIdentity, SupervisionProbe,
+    SupervisorShutdown, run_supervision,
 };
+
+/// How long a test waits for a teardown that must finish while its worker
+/// is still parked. Shorter than [`SUPERVISOR_SHUTDOWN_BUDGET`], so a
+/// shutdown that ignores its injected budget and waits out the production
+/// one fails instead of passing late.
+const TEARDOWN_DEADLINE: Duration = Duration::from_secs(2);
+const _: () = assert!(TEARDOWN_DEADLINE.as_millis() < SUPERVISOR_SHUTDOWN_BUDGET.as_millis());
+
+/// A shutdown budget longer than [`TEARDOWN_DEADLINE`], so a teardown that
+/// waits it out fails instead of passing late.
+const UNREACHED_BUDGET: Duration = Duration::from_secs(3600);
 
 /// A supervised identity reduced to its process boot.
 #[derive(Clone)]
@@ -18,6 +29,19 @@ impl SupervisedGatewayIdentity for Boot {
     fn same_boot(&self, other: &Self) -> bool {
         self.0 == other.0
     }
+}
+
+/// Runs `teardown` on its own thread while the caller keeps the worker
+/// parked. A teardown that waits for the worker cannot finish, so it
+/// reports a timeout instead of hanging the test.
+fn teardown_while_parked<T: Send + 'static>(
+    teardown: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, mpsc::RecvTimeoutError> {
+    let (finished, outcome) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = finished.send(teardown());
+    });
+    outcome.recv_timeout(TEARDOWN_DEADLINE)
 }
 
 #[test]
@@ -35,11 +59,10 @@ fn supervisor_shutdown_detaches_an_uncooperative_worker_at_one_deadline() {
         let _ = blocked.recv();
     })
     .expect("spawn test supervisor");
-    let started = Instant::now();
 
-    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Detached);
-    assert!(
-        started.elapsed() < Duration::from_millis(250),
+    assert_eq!(
+        teardown_while_parked(move || supervisor.shutdown()),
+        Ok(SupervisorShutdown::Detached),
         "an uncooperative worker cannot outlive the shutdown budget"
     );
     release.send(()).expect("release the detached test worker");
@@ -60,11 +83,10 @@ fn stop_signaling_never_waits_for_an_in_progress_effect_gate() {
     blocked
         .recv_timeout(Duration::from_secs(1))
         .expect("the worker enters the effect gate");
-    let started = Instant::now();
 
-    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Detached);
-    assert!(
-        started.elapsed() < Duration::from_millis(250),
+    assert_eq!(
+        teardown_while_parked(move || supervisor.shutdown()),
+        Ok(SupervisorShutdown::Detached),
         "the stop signal cannot join an admitted effect before the bounded completion wait"
     );
     release.send(()).expect("release the detached test worker");
@@ -72,33 +94,46 @@ fn stop_signaling_never_waits_for_an_in_progress_effect_gate() {
 
 #[test]
 fn a_spurious_completion_wake_cannot_trigger_a_blocking_join() {
+    let (release, blocked) = mpsc::channel();
     let supervisor = GatewaySupervisor::spawn_with_budget(Duration::from_millis(50), move |_| {
-        std::thread::sleep(Duration::from_millis(200));
+        let _ = blocked.recv();
     })
     .expect("spawn test supervisor");
-    supervisor.wake_completion_for_test();
-    let started = Instant::now();
+    let wake = supervisor.completion_waker_for_test();
+    let waking = Arc::new(AtomicBool::new(true));
+    let waker = std::thread::spawn({
+        let waking = Arc::clone(&waking);
+        move || {
+            while waking.load(Ordering::SeqCst) {
+                wake();
+                std::thread::yield_now();
+            }
+        }
+    });
 
-    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Detached);
-    assert!(
-        started.elapsed() < Duration::from_millis(150),
+    let outcome = teardown_while_parked(move || supervisor.shutdown());
+    waking.store(false, Ordering::SeqCst);
+    waker.join().expect("the waker thread stops");
+
+    assert_eq!(
+        outcome,
+        Ok(SupervisorShutdown::Detached),
         "a wake without completion must keep waiting only to the original deadline"
     );
+    release.send(()).expect("release the detached test worker");
 }
 
 #[test]
 fn dropping_a_supervisor_signals_and_detaches_without_waiting() {
     let (release, blocked) = mpsc::channel();
-    let supervisor = GatewaySupervisor::spawn_with_budget(Duration::from_secs(1), move |_| {
+    let supervisor = GatewaySupervisor::spawn_with_budget(UNREACHED_BUDGET, move |_| {
         let _ = blocked.recv();
     })
     .expect("spawn test supervisor");
-    let started = Instant::now();
 
-    drop(supervisor);
-
-    assert!(
-        started.elapsed() < Duration::from_millis(250),
+    assert_eq!(
+        teardown_while_parked(move || drop(supervisor)),
+        Ok(()),
         "Drop signals and detaches instead of waiting out the shutdown budget"
     );
     release.send(()).expect("release the detached test worker");

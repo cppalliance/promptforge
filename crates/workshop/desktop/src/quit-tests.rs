@@ -10,7 +10,10 @@ use super::{request_gateway_shutdown, stop_supervisor_then_request_shutdown};
 
 /// How long a test waits for the stubbed gateway to report the shutdown.
 const SHUTDOWN_OBSERVE_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a test waits to prove no shutdown was sent.
+/// How long a test waits to prove no shutdown was sent. The stub is a
+/// separate process that reports only accepted shutdowns over a real
+/// socket, after answering them, so no event marks the absence of one and
+/// the proof needs a wall-clock window.
 const NO_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[test]

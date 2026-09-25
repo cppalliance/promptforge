@@ -19,6 +19,8 @@ pub(super) use launch::{
     launch_and_attach_cancellable_with, run_effect_if_active,
     wait_for_launched_file_cancellable_with,
 };
+#[cfg(test)]
+pub(super) use lifecycle::SUPERVISOR_SHUTDOWN_BUDGET;
 pub(crate) use lifecycle::{GatewaySupervisor, SupervisorShutdown};
 pub(super) use recovery::RecoveryIdentity;
 pub(crate) use recovery::{RecoveryCandidate, RecoveryOwnership};

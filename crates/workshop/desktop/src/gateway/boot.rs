@@ -23,7 +23,7 @@ pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Delay between polls for the launched Gateway discovery file.
-const POLL_INTERVAL: Duration = Duration::from_millis(25);
+pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[cfg(windows)]
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -175,17 +175,22 @@ fn wait_for_launched_file(
     run_dir: &Path,
     timeout: Duration,
 ) -> anyhow::Result<GatewayDiscoveryFile> {
-    wait_for_launched_file_with(run_dir, timeout, gateway_api_discovery::resolve)
+    wait_for_launched_file_with(run_dir, timeout, gateway_api_discovery::resolve, || {
+        std::thread::sleep(POLL_INTERVAL);
+    })
 }
 
-/// Waits for readiness with resolution injected for deterministic tests.
-pub(super) fn wait_for_launched_file_with<Resolve>(
+/// Waits for readiness with resolution and the pause between polls
+/// injected for deterministic tests.
+pub(super) fn wait_for_launched_file_with<Resolve, Pause>(
     run_dir: &Path,
     timeout: Duration,
     mut resolve: Resolve,
+    mut pause: Pause,
 ) -> anyhow::Result<GatewayDiscoveryFile>
 where
     Resolve: FnMut(&Path) -> Result<Resolution, SidecarError>,
+    Pause: FnMut(),
 {
     let deadline = Instant::now() + timeout;
     loop {
@@ -203,7 +208,7 @@ where
                 "the launched gateway wrote no validated gateway discovery file within {timeout:?}"
             );
         }
-        std::thread::sleep(POLL_INTERVAL);
+        pause();
     }
 }
 

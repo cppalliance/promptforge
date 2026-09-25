@@ -570,7 +570,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-14>
 
-### Step 14: Make the desktop supervisor and quit tests deterministic
+### Step 14: Make the desktop supervisor and quit tests deterministic [completed]
 
 - Component: Test determinism
 

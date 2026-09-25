@@ -8,7 +8,7 @@ use gateway_api_discovery::CancellationToken;
 use super::signals::{Completion, StopSignal};
 
 /// Maximum designed supervisor shutdown latency.
-const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
+pub(crate) const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 
 /// The running local-sidecar supervisor.
 #[derive(Debug)]
@@ -140,8 +140,9 @@ impl GatewaySupervisor {
     }
 
     #[cfg(test)]
-    pub(crate) fn wake_completion_for_test(&self) {
-        self.completion.wake();
+    pub(crate) fn completion_waker_for_test(&self) -> impl Fn() + Send + 'static {
+        let completion = self.completion.clone();
+        move || completion.wake()
     }
 }
 
