@@ -155,16 +155,7 @@ async fn spawn_sidecar_server(
         None => state_with_gateway(&config, &resolved),
     }
     .expect("state builds in tests");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind the session test server");
-    let addr = listener.local_addr().expect("session test server address");
-    let served = state.clone();
-    tokio::spawn(async move {
-        axum::serve(listener, router(served))
-            .await
-            .expect("session test server serves");
-    });
+    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
     (format!("ws://{addr}/ws"), state_dir, state, gateway)
 }
 

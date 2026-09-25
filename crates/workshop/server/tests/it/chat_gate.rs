@@ -218,16 +218,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
             .set_selected(selected)
             .expect("the selected model is in the retained catalog");
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind the gate test server");
-    let addr = listener.local_addr().expect("gate test server address");
-    let served = state.clone();
-    tokio::spawn(async move {
-        axum::serve(listener, router(served))
-            .await
-            .expect("gate test server serves");
-    });
+    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
     GateServer {
         ws_base: format!("ws://{addr}"),
         state,

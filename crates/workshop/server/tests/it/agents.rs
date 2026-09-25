@@ -218,16 +218,7 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     state
         .catalog()
         .publish(vec![json!({ "id": "test-model", "object": "model" })]);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind the agent test server");
-    let addr = listener.local_addr().expect("agent test server address");
-    let served = state.clone();
-    tokio::spawn(async move {
-        axum::serve(listener, router(served))
-            .await
-            .expect("agent test server serves");
-    });
+    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
     (format!("ws://{addr}"), dir, state)
 }
 

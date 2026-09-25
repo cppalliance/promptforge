@@ -69,16 +69,7 @@ async fn spawn_session_server(base_url: &str) -> (String, tempfile::TempDir, App
     // Discovery is bypassed: a test never consults the real run directory.
     let gateway = ResolvedGateway::from_config(&config.gateway);
     let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind the session test server");
-    let addr = listener.local_addr().expect("session test server address");
-    let served = state.clone();
-    tokio::spawn(async move {
-        axum::serve(listener, router(served))
-            .await
-            .expect("session test server serves");
-    });
+    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
     (format!("ws://{addr}/ws"), state_dir, state)
 }
 

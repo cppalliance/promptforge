@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Workshop gateway subsystem: the bearer-authenticated gateway HTTP client, endpoint binding and discovery, heartbeat, and progress subscriber"
 
 [features]
-test-fixtures = ["dep:tempfile"]
+test-fixtures = ["dep:tempfile", "workshop-support/test-fixtures"]
 
 [dependencies]
 arc-swap.workspace = true
@@ -40,6 +40,10 @@ axum.workspace = true
 gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The gateway's tests call `workshop_support::fixtures::serve`; enabling the
+# feature here (not only through the crate's own `test-fixtures` feature)
+# keeps `cargo test -p workshop-gateway` compiling without `--all-features`.
+workshop-support = { workspace = true, features = ["test-fixtures"] }
 
 [lints]
 workspace = true

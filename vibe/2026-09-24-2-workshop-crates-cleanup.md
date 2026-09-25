@@ -1064,7 +1064,7 @@ Components, in dependency order:
 
 <step-26>
 
-### Step 26: Share the mock HTTP server test helper
+### Step 26: Share the mock HTTP server test helper [completed]
 
 - Component: Structural consolidation
 - Piece: helpers

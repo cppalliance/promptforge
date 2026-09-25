@@ -20,6 +20,8 @@ mod bus;
 mod config;
 mod deadline;
 mod error_message;
+#[cfg(feature = "test-fixtures")]
+pub mod fixtures;
 mod state_bucket;
 
 pub use atomic::{sweep_orphaned_temps, write_atomic};

@@ -26,15 +26,7 @@ async fn body_bytes(response: Response) -> axum::body::Bytes {
 /// Binds `app` as a mock gateway on a free loopback port and returns its
 /// base URL.
 async fn spawn_gateway(app: Router) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock gateway");
-    let addr = listener.local_addr().expect("mock gateway address");
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("mock gateway serves");
-    });
+    let (addr, _handle) = workshop_support::fixtures::serve(app).await;
     format!("http://{addr}")
 }
 
