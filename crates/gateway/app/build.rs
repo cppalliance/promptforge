@@ -4,11 +4,10 @@
 //! glyph. On every other host this script only declares its input and
 //! exits.
 //!
-//! The icon sits in `crates/workshop/icons/icon.ico`, outside this
-//! crate, because the workshop's Tauri bundle is the one source of the
-//! icon set. That path would break `cargo package`, which only sees the
-//! crate's own files, but the gateway is `publish = false`, so the
-//! out-of-crate path is accepted.
+//! The icon is a copy kept in `assets/icon.ico`, byte-identical to the
+//! workshop's master icon set. The gateway app embeds its own copy instead
+//! of reading across the crate boundary, so the icon travels with this
+//! crate's files.
 //!
 //! The manifest declares the common-controls v6 dependency. Workspace
 //! builds unify `muda`'s `common-controls-v6` feature on (the workshop's
@@ -20,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 /// The icon, relative to this crate's manifest directory.
-const ICON: &str = "../../workshop/shell/icons/icon.ico";
+const ICON: &str = "assets/icon.ico";
 
 /// The application manifest: the common-controls v6 dependency that
 /// `muda`'s `common-controls-v6` feature requires. The resource script

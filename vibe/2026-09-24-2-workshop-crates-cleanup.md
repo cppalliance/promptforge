@@ -838,7 +838,7 @@ Components, in dependency order:
 
 <step-12>
 
-### Step 12: Give the gateway app its own icon copies
+### Step 12: Give the gateway app its own icon copies [completed]
 
 - Component: Shell vocabulary
 - Piece: icon copies

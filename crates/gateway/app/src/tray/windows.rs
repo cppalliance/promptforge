@@ -46,10 +46,9 @@ const STATUS_INTERVAL_MS: u32 = 5_000;
 /// RGBA.
 const ICON_SIZE: u32 = 32;
 
-/// The brand icon as raw RGBA, derived from the workshop's `32x32.png`
-/// brand asset (PIL: `Image.open(...).convert("RGBA").tobytes()`;
-/// regenerate from `crates/workshop/shell/icons/32x32.png` when the brand
-/// changes).
+/// The brand icon as raw RGBA, derived from the `32x32.png` brand asset
+/// copy (PIL: `Image.open(...).convert("RGBA").tobytes()`; regenerate from
+/// `assets/32x32.png` when the brand changes).
 const BRAND_RGBA: &[u8] = include_bytes!("../../assets/tray-icon.rgba");
 
 // The asset is exactly one 32x32 RGBA image.

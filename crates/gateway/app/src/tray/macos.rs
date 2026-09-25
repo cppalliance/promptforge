@@ -60,10 +60,10 @@ const STATUS_INTERVAL: f64 = 5.0;
 /// RGBA, an 18pt template glyph at @2x.
 const ICON_SIZE: u32 = 36;
 
-/// The brand glyph as raw RGBA, derived from the workshop's `64x64.png`
-/// brand asset (PIL: `Image.open(...).convert("RGBA").resize((36, 36),
-/// Image.LANCZOS).tobytes()`; regenerate from
-/// `crates/workshop/shell/icons/64x64.png` when the brand changes).
+/// The brand glyph as raw RGBA, derived from the `64x64.png` brand asset
+/// copy (PIL: `Image.open(...).convert("RGBA").resize((36, 36),
+/// Image.LANCZOS).tobytes()`; regenerate from `assets/64x64.png` when the
+/// brand changes).
 const BRAND_RGBA: &[u8] = include_bytes!("../../assets/tray-icon-template.rgba");
 
 // The asset is exactly one 36x36 RGBA image.

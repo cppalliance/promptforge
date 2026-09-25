@@ -50,8 +50,8 @@ const STATUS_INTERVAL: Duration = Duration::from_secs(5);
 /// RGBA, the same brand asset the Windows backend draws on.
 const ICON_SIZE: i32 = 32;
 
-/// The brand icon as raw RGBA (regenerate from
-/// `crates/workshop/shell/icons/32x32.png` when the brand changes).
+/// The brand icon as raw RGBA (regenerate from `assets/32x32.png` when the
+/// brand changes).
 const BRAND_RGBA: &[u8] = include_bytes!("../../assets/tray-icon.rgba");
 
 // The asset is exactly one 32x32 RGBA image.

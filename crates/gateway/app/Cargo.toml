@@ -16,8 +16,9 @@ documentation = "https://cppalliance.github.io/promptforge/"
 name = "promptforge-gateway"
 path = "src/main.rs"
 
-# build.rs embeds the program icon (../../workshop/shell/icons/icon.ico) into the
-# Windows exe as an RT_GROUP_ICON resource. Host-gated: the table is
+# build.rs embeds the program icon (assets/icon.ico, a copy of the
+# workshop master) into the Windows exe as an RT_GROUP_ICON resource.
+# Host-gated: the table is
 # evaluated against the build host, and the script is a no-op elsewhere.
 [target.'cfg(windows)'.build-dependencies]
 embed-resource.workspace = true

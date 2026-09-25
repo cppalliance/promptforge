@@ -1,7 +1,7 @@
-//! The Windows exe icon: the crate's `build.rs` compiles
-//! `crates/workshop/icons/icon.ico` into `promptforge-gateway.exe` as an
-//! icon resource. An `RT_ICON` resource stores each image of the `.ico`
-//! byte for byte, so every image must appear verbatim in the built binary.
+//! The Windows exe icon: the crate's `build.rs` compiles the icon copy at
+//! `assets/icon.ico` into `promptforge-gateway.exe` as an icon resource.
+//! An `RT_ICON` resource stores each image of the `.ico` byte for byte, so
+//! every image must appear verbatim in the built binary.
 
 use std::path::Path;
 
@@ -38,8 +38,7 @@ fn ico_images(ico: &[u8]) -> Vec<&[u8]> {
 #[test]
 fn the_exe_embeds_every_image_of_the_program_icon() {
     let exe = std::fs::read(env!("CARGO_BIN_EXE_promptforge-gateway")).unwrap();
-    let ico_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../workshop/shell/icons/icon.ico");
+    let ico_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icon.ico");
     let ico = std::fs::read(&ico_path).unwrap();
 
     let images = ico_images(&ico);
