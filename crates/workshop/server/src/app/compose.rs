@@ -8,7 +8,12 @@ use std::sync::Arc;
 use harness_api::Harness;
 
 use workshop_gateway::GatewayHandles;
+use workshop_gateway::gateway_binding::GatewayBinding;
+use workshop_gateway::heartbeat::GatewayHealth;
+use workshop_gateway::resolve::ResolvedGateway;
 use workshop_menu::MenuHandles;
+use workshop_menu::catalog::CatalogBus;
+use workshop_menu::menu::MenuBus;
 use workshop_registry::{Push, Registry, WorkspaceRoots};
 use workshop_status::StatusBus;
 use workshop_support::{Config, ReconnectBackoff};
@@ -17,11 +22,6 @@ use workshop_workspace::Workspace;
 
 use super::{AppState, Omit, Registrations, StateError};
 use crate::agents::{self, AgentSessions, SessionsState};
-use crate::catalog::CatalogBus;
-use crate::gateway_binding::GatewayBinding;
-use crate::heartbeat::GatewayHealth;
-use crate::menu::MenuBus;
-use crate::resolve::ResolvedGateway;
 
 /// The composition root behind [`super::state_with_gateway`]; `omit`
 /// removes one subsystem's `register` call for the boot-failure test, and
@@ -128,7 +128,7 @@ fn register_gateway(
 ) -> Result<ReconnectBackoff, StateError> {
     // Startup phases are reported as they run; with no client connected
     // yet these land on an empty bus, ready for the first session.
-    crate::resolve::report(gateway, push);
+    workshop_gateway::resolve::report(gateway, push);
     let gateway_binding = GatewayBinding::new_with_identity(
         gateway.base_url(),
         gateway.api_key(),

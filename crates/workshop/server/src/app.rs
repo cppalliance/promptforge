@@ -21,21 +21,21 @@ use std::sync::Arc;
 use axum::Router;
 
 use workshop_gateway::GatewayHandles;
+use workshop_gateway::gateway::GatewayError;
+#[cfg(test)]
+use workshop_gateway::gateway_binding::GatewayBinding;
+use workshop_gateway::gateway_binding::{GatewaySnapshot, GatewayUpdater};
+use workshop_gateway::heartbeat::GatewayHealth;
+use workshop_gateway::resolve::ResolvedGateway;
 use workshop_menu::MenuHandles;
+use workshop_menu::catalog::CatalogBus;
+use workshop_menu::menu::MenuBus;
 use workshop_registry::{Push, Registration, Registry};
 use workshop_status::StatusBus;
 use workshop_support::{Config, DEFAULT_DEADLINE, ReconnectBackoff, with_deadline};
 use workshop_workspace::Workspace;
 
 use crate::agents::AgentSessions;
-use crate::catalog::CatalogBus;
-use crate::gateway::GatewayError;
-#[cfg(test)]
-use crate::gateway_binding::GatewayBinding;
-use crate::gateway_binding::{GatewaySnapshot, GatewayUpdater};
-use crate::heartbeat::GatewayHealth;
-use crate::menu::MenuBus;
-use crate::resolve::ResolvedGateway;
 use crate::routes;
 
 /// Address the server binds to when no override is given.
@@ -93,7 +93,8 @@ impl AppState {
     /// exists and the config has no explicit gateway, and
     /// [`StateError::Gateway`] if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
-        let gateway = crate::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?;
+        let gateway =
+            workshop_gateway::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?;
         state_with_gateway(config, &gateway)
     }
 
@@ -321,7 +322,7 @@ pub enum StateError {
     /// no explicit `[gateway]` config.
     #[non_exhaustive]
     #[error("resolve the gateway endpoint")]
-    Resolution(#[source] crate::resolve::ResolveError),
+    Resolution(#[source] workshop_gateway::resolve::ResolveError),
 
     /// A required subsystem contribution was never registered: the
     /// composition root itself is broken, so boot fails naming the

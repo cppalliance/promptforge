@@ -3,12 +3,12 @@
 #[cfg(feature = "test-fixtures")]
 pub use crate::app::state_with_gateway_and_restart_bound;
 pub use crate::app::{Omit, state_with_gateway, state_with_gateway_omitting};
-pub use crate::catalog::CatalogBus;
-pub use crate::heartbeat::{GatewayHealth, Heartbeat};
-pub use crate::menu::{MenuBus, MenuRefusal};
 pub use crate::push::Push;
-pub use crate::status::StatusBus;
+pub use workshop_gateway::heartbeat::{GatewayHealth, Heartbeat};
+pub use workshop_menu::catalog::CatalogBus;
+pub use workshop_menu::menu::{MenuBus, MenuRefusal};
 pub use workshop_protocol::{Activity, Severity, StatusBarUpdate};
+pub use workshop_status::status::StatusBus;
 pub use workshop_support::ReconnectBackoff;
 
 #[cfg(feature = "test-fixtures")]
@@ -61,8 +61,8 @@ pub fn spawn_heartbeat(
     interval: std::time::Duration,
     backoff: ReconnectBackoff,
 ) -> Heartbeat {
-    crate::heartbeat::spawn(
-        crate::gateway_binding::GatewayBinding::from_client(client),
+    workshop_gateway::heartbeat::spawn(
+        workshop_gateway::gateway_binding::GatewayBinding::from_client(client),
         push,
         health,
         interval,

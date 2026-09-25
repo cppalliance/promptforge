@@ -1102,7 +1102,7 @@ Components, in dependency order:
 
 <step-28>
 
-### Step 28: Remove the server's module aliases
+### Step 28: Remove the server's module aliases [completed]
 
 - Component: Structural consolidation
 - Piece: renames

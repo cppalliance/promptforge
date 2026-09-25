@@ -57,13 +57,6 @@ mod error;
 mod routes;
 mod serve;
 
-// The extracted subsystem crates, aliased at their pre-decomposition
-// module paths so the server's internals read as they did before the
-// split. The tier graph is enforced by `cargo test -p build-xtask`.
-pub use workshop_gateway::{gateway, gateway_binding, gateway_progress, heartbeat, resolve};
-pub use workshop_menu::{catalog, menu};
-pub use workshop_status::status;
-
 /// The intent-named push facade over the registry's producer sink slots:
 /// business code reports what happened and never chooses a severity or
 /// builds a bus payload.
@@ -88,15 +81,17 @@ pub mod fixtures;
 pub use agents::AgentSessions;
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
-pub use gateway::{GatewayClient, GatewayError, GatewayResponse, SwitchOutcome, SwitchResponse};
-pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
 /// The refusal an answered input wait returns when its token names no
 /// unresolved wait: the harness's own, named here so an embedding host
 /// keeps one import path.
 pub use harness_api::WaitError;
 pub use push::Push;
-pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
+pub use workshop_gateway::gateway::{
+    GatewayClient, GatewayError, GatewayResponse, SwitchOutcome, SwitchResponse,
+};
+pub use workshop_gateway::gateway_binding::{GatewayPublicationError, GatewayUpdater};
+pub use workshop_gateway::resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use workshop_protocol::{Activity, InputFrame, InputResponse};
 pub use workshop_support::{
     AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,

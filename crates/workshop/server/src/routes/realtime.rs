@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::Message as GatewayMessage;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as GatewayCloseFrame;
 
 use crate::app::AppState;
-use crate::gateway::GatewayRealtimeSocket;
+use workshop_gateway::gateway::GatewayRealtimeSocket;
 
 const RELAY_IO_DEADLINE: Duration = Duration::from_millis(500);
 
