@@ -4,11 +4,21 @@
 //! overlapping switches can open two handles to one file (and the second
 //! swap's close unlinks the WAL the survivor writes to), cross-apply
 //! another file's grants after the backing moved on, or install a
-//! backing after the shutdown close took the previous one.
+//! backing after the shutdown close took the previous one. A grant takes
+//! the same guard, so it cannot straddle a switch.
+
+use std::pin::{Pin, pin};
+use std::task::Poll;
+use std::time::Duration;
 
 use super::*;
 
 use crate::workspace_file::WorkspaceFile;
+
+/// Polls `future` exactly once from the calling task.
+async fn poll_once<F: Future>(mut future: Pin<&mut F>) -> Poll<F::Output> {
+    std::future::poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx))).await
+}
 
 /// The `-wal` sidecar the engine keeps beside `path`.
 fn wal_of(path: &Path) -> PathBuf {
@@ -136,6 +146,69 @@ async fn reloading_the_current_file_cannot_outlive_a_switch_to_another() {
         );
         workspace.close_backing().await;
     }
+}
+
+#[tokio::test]
+async fn a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    file_with_grants(&b, &[]).await;
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+
+    // Start the grant and wait for its root to reach memory, then run the
+    // open as far as the switch guard allows before the grant resumes: to
+    // completion when nothing holds the guard, not at all when the grant
+    // does. A grant that straddles the open has its root wiped from memory
+    // by the open and then mirrored into the file the open installed.
+    let mut grant = pin!(workspace.grant_and_persist(dir.path()));
+    let mut open = pin!(workspace.open_file(&b));
+    assert!(
+        poll_once(grant.as_mut()).await.is_pending(),
+        "the grant resolves its path on the blocking pool"
+    );
+    // A grant that fails on the blocking pool never inserts; polling it
+    // once at the deadline surfaces its error instead of spinning.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while workspace.granted_roots().is_empty() {
+        if tokio::time::Instant::now() >= deadline {
+            let outcome = poll_once(grant.as_mut()).await;
+            panic!("the grant never reached memory: {outcome:?}");
+        }
+        tokio::task::yield_now().await;
+    }
+    let open_ran_first = workspace.switches.try_lock().is_ok();
+    let granted = if open_ran_first {
+        open.as_mut().await.expect("b opens");
+        grant.await
+    } else {
+        let granted = grant.await;
+        open.await.expect("b opens");
+        granted
+    };
+    let root = granted.expect("the grant succeeds");
+
+    let in_memory = workspace.granted_roots().contains(&root);
+    workspace.close_backing().await;
+    let in_a = grants_on_disk(&a).await.contains(&root);
+    let in_b = grants_on_disk(&b).await.contains(&root);
+    if open_ran_first {
+        assert!(
+            in_memory && in_b,
+            "the grant answered success after b opened, but b holds it in memory: {in_memory}, on disk: {in_b}"
+        );
+    } else {
+        assert!(
+            in_a,
+            "the grant answered success while a was open, but a's file does not hold it"
+        );
+    }
+    assert_eq!(
+        in_memory, in_b,
+        "memory and b's file disagree about the grant"
+    );
 }
 
 #[tokio::test]

@@ -427,7 +427,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-7>
 
-### Step 7: Close the grant-during-open race
+### Step 7: Close the grant-during-open race [completed]
 
 - Component: Workspace confinement
 

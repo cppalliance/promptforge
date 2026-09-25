@@ -154,15 +154,15 @@ pub struct Workspace {
     /// Serializes ui-state puts so values reach the backing file's actor
     /// in the order they reached memory; see [`Workspace::put_ui_state`].
     ui_state_puts: Arc<tokio::sync::Mutex<()>>,
-    /// Serializes the switch operations: open, save-as, duplicate, and
-    /// the shutdown close. Each is two phases, open or create a handle
-    /// and then swap it in, with awaits between them, and the same-file
-    /// guard in [`Workspace::open_file`] reads state a concurrent switch
-    /// would change. One guard held across the whole switch keeps two
-    /// openers of one file from ever existing (turso shares one WAL
-    /// handle per file process-wide, so the second swap's close would
-    /// unlink the sidecar the survivor writes to) and keeps a reload of
-    /// the current file from landing after the backing moved on.
+    /// Serializes the switch operations (open, save-as, duplicate, and
+    /// the shutdown close) and grants. Each switch is two phases, open or
+    /// create a handle and then swap it in, with awaits between them, and
+    /// the same-file guard in [`Workspace::open_file`] reads state a
+    /// concurrent switch would change. One guard held across the whole
+    /// switch keeps two openers of one file from ever existing (turso
+    /// shares one WAL handle per file process-wide, so the second swap's
+    /// close would unlink the sidecar the survivor writes to) and keeps a
+    /// reload of the current file from landing after the backing moved on.
     switches: Arc<tokio::sync::Mutex<()>>,
     /// Set once by [`Workspace::close_backing`] and never cleared: after
     /// the shutdown close no switch may install a backing nobody would

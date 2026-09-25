@@ -47,9 +47,15 @@ impl Workspace {
     /// memory assigned; the file assigns its own stored position on
     /// insert, and the in-memory one is what a later save-as writes.
     ///
+    /// The grant holds the switch guard from the insert through the
+    /// mirror, so it lands whole in the workspace open when it completes:
+    /// a switch between the two would wipe the root from memory and then
+    /// mirror it into the file the switch installed.
+    ///
     /// # Errors
     /// The same as [`Workspace::grant`]; persistence never fails the call.
     pub async fn grant_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+        let _switch = self.switches.lock().await;
         // The grant canonicalizes and stats the path: blocking-pool work.
         let workspace = self.clone();
         let requested = path.to_path_buf();
