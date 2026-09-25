@@ -969,7 +969,7 @@ Components, in dependency order:
 
 <step-19>
 
-### Step 19: Move app.rs's children into an app directory
+### Step 19: Move app.rs's children into an app directory [completed]
 
 - Component: Structural consolidation
 - Piece: split
