@@ -176,10 +176,9 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn continue_teardown(
-    supervisor: Option<gateway::SupervisorShutdown>,
-    shutdown_server: impl FnOnce(),
-) {
+/// Reports a supervisor shutdown that did not join cleanly. `None` means
+/// there was no supervisor, or quit already stopped it.
+fn report_supervisor_shutdown(supervisor: Option<gateway::SupervisorShutdown>) {
     match supervisor {
         Some(gateway::SupervisorShutdown::Joined) | None => {}
         Some(gateway::SupervisorShutdown::Panicked) => {
@@ -189,6 +188,13 @@ fn continue_teardown(
             eprintln!("the gateway supervisor exceeded its shutdown budget and was detached");
         }
     }
+}
+
+fn continue_teardown(
+    supervisor: Option<gateway::SupervisorShutdown>,
+    shutdown_server: impl FnOnce(),
+) {
+    report_supervisor_shutdown(supervisor);
     shutdown_server();
 }
 

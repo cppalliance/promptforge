@@ -78,8 +78,8 @@ pub(crate) fn install(app: &tauri::App, has_sidecar: bool) -> tauri::Result<()> 
     Ok(())
 }
 
-/// Handles the quit item by running the shared shutdown-then-exit path
-/// (`quit::quit_everything`), the same path the SPA's File > Exit row
+/// Handles the quit item by running the shared stop-then-shutdown-then-exit
+/// path (`quit::quit_everything`), the same path the SPA's File > Exit row
 /// invokes through the `quit` command.
 pub(crate) fn handle_event(app: &AppHandle<Wry>, event: tauri::menu::MenuEvent) {
     let tauri::menu::MenuEvent { id } = event;

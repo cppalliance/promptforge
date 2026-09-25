@@ -1,11 +1,12 @@
-//! The shutdown-request half of quit, against a stubbed gateway: the
-//! sidecar snapshot receives the authenticated `/shutdown`, a configured
-//! gateway is left running (no shutdown authority), and a missing server
-//! is a no-op.
+//! The quit ordering, and the shutdown-request half of quit against a
+//! stubbed gateway: the sidecar snapshot receives the authenticated
+//! `/shutdown`, a configured gateway is left running (no shutdown
+//! authority), and a missing server is a no-op.
 
+use std::cell::RefCell;
 use std::time::Duration;
 
-use super::request_gateway_shutdown;
+use super::{request_gateway_shutdown, stop_supervisor_then_request_shutdown};
 
 /// How long a test waits for the stubbed gateway to report the shutdown.
 const SHUTDOWN_OBSERVE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,6 +48,22 @@ fn workshop_server(
     })
     .expect("spawn Workshop fixture");
     (state_dir, server)
+}
+
+#[test]
+fn quit_stops_the_supervisor_before_requesting_the_gateway_shutdown() {
+    let calls = RefCell::new(Vec::new());
+
+    stop_supervisor_then_request_shutdown(
+        || calls.borrow_mut().push("stop the supervisor"),
+        || calls.borrow_mut().push("request the gateway shutdown"),
+    );
+
+    assert_eq!(
+        calls.into_inner(),
+        ["stop the supervisor", "request the gateway shutdown"],
+        "a supervisor still running when the gateway stops would relaunch it"
+    );
 }
 
 #[test]

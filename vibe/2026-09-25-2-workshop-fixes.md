@@ -472,7 +472,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-9>
 
-### Step 9: Stop the supervisor before quitting the gateway
+### Step 9: Stop the supervisor before quitting the gateway [completed]
 
 - Component: Lifecycle ordering
 

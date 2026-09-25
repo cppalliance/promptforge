@@ -1,11 +1,24 @@
 //! Bounded Gateway supervisor and late-publication shutdown coverage.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use super::validated_gateway;
-use crate::gateway::supervisor::{GatewaySupervisor, SupervisorShutdown};
+use crate::gateway::supervisor::{
+    GatewaySupervisor, SupervisedGatewayIdentity, SupervisionProbe, SupervisorShutdown,
+    run_supervision,
+};
+
+/// A supervised identity reduced to its process boot.
+#[derive(Clone)]
+struct Boot(u64);
+
+impl SupervisedGatewayIdentity for Boot {
+    fn same_boot(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
 
 #[test]
 fn supervisor_shutdown_reports_a_worker_panic_without_unwinding_teardown() {
@@ -89,6 +102,49 @@ fn dropping_a_supervisor_signals_and_detaches_without_waiting() {
         "Drop signals and detaches instead of waiting out the shutdown budget"
     );
     release.send(()).expect("release the detached test worker");
+}
+
+#[test]
+fn a_shut_down_supervisor_launches_nothing_when_its_gateway_later_disappears() {
+    let (entered, healthy) = mpsc::channel();
+    let gone = Arc::new(AtomicBool::new(false));
+    let worker_gone = Arc::clone(&gone);
+    let launches = Arc::new(AtomicUsize::new(0));
+    let worker_launches = Arc::clone(&launches);
+    let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+        run_supervision(
+            Boot(1),
+            |current, _| {
+                if worker_gone.load(Ordering::SeqCst) {
+                    SupervisionProbe::Missing
+                } else {
+                    SupervisionProbe::Replacement(current.clone())
+                }
+            },
+            |_| -> anyhow::Result<Boot> {
+                worker_launches.fetch_add(1, Ordering::SeqCst);
+                Ok(Boot(2))
+            },
+            |_, _| Ok::<(), anyhow::Error>(()),
+            |delay, cancellation| {
+                let _ = entered.send(());
+                cancellation.wait_timeout(delay)
+            },
+            &cancellation,
+        );
+    })
+    .expect("spawn test supervisor");
+    healthy
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the supervisor observes the healthy gateway");
+    gone.store(true, Ordering::SeqCst);
+
+    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Joined);
+    assert_eq!(
+        launches.load(Ordering::SeqCst),
+        0,
+        "quit stops the gateway only after its supervisor, so nothing relaunches it"
+    );
 }
 
 #[test]
