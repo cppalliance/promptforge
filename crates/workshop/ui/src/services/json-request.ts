@@ -18,6 +18,9 @@ export function errorMessage(body: unknown, status: number, route: string): stri
   if (isRecord(body) && isRecord(body.error) && typeof body.error.message === "string") {
     return body.error.message;
   }
+  if (status === 408) {
+    return `${route} timed out`;
+  }
   return `${route} answered ${status}`;
 }
 
@@ -44,11 +47,19 @@ export async function request(url: string, route: string, init?: RequestInit): P
   }
 }
 
-/** Parses one response body; a non-JSON answer is a shape failure. */
+/**
+ * Parses one response body; a non-JSON answer is a shape failure. A 408
+ * timeout is the exception: its body may be empty or non-JSON, and reads
+ * as `null` so the caller's non-OK handler renders a readable timeout
+ * instead of a shape failure.
+ */
 export async function readJson(response: Response, route: string): Promise<unknown> {
   try {
     return await response.json();
   } catch (error) {
+    if (response.status === 408) {
+      return null;
+    }
     throw new CatalogError(ErrorCatalog.UnexpectedShape, `${route} returned a non-JSON answer`, {
       status: response.status,
       cause: error,

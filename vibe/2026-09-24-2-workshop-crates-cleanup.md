@@ -782,7 +782,7 @@ Components, in dependency order:
 
 <step-9>
 
-### Step 9: Render route timeouts readably in the UIs
+### Step 9: Render route timeouts readably in the UIs [completed]
 
 - Component: Behavior fixes
 - Piece: save-timeout
