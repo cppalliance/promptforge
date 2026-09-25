@@ -6,12 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "The desktop shell's view of the workshop server: re-exports only, so server internals never resolve in the shell"
+description = "The desktop app's view of the workshop server: re-exports only, so server internals never resolve in the desktop app"
 
 [features]
 default = []
-# Forwards the server's integration-test seams (`fixtures`) to the shell's
-# tests without the shell depending on `workshop-server` itself.
+# Forwards the server's integration-test seams (`fixtures`) to the desktop app's
+# tests without the desktop app depending on `workshop-server` itself.
 test-fixtures = ["workshop-server/test-fixtures"]
 
 [dependencies]

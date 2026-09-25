@@ -1,6 +1,6 @@
 //! The `/workspace/file/*` route handlers: the workspace as a document.
 //! What is open, opening another file, saving as, duplicating, and the
-//! window geometry the shell keeps in it. Every mutation answers with
+//! window geometry the desktop app keeps in it. Every mutation answers with
 //! the workspace as it stands afterwards, so the client never needs a
 //! second round trip to learn what it switched to.
 //!
@@ -115,7 +115,7 @@ pub(crate) async fn duplicate_file(
     after_switch(&workspace, result).await
 }
 
-/// Saves the shell's window geometry into the open workspace file. An
+/// Saves the desktop app's window geometry into the open workspace file. An
 /// ephemeral workspace answers success with `saved: false` and writes
 /// nothing.
 pub(crate) async fn put_window_state(

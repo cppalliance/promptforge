@@ -1,7 +1,7 @@
 //! The `workshop-server` binary: loads `workshop.toml` and serves the
 //! workshop HTTP API.
 //!
-//! Thin shell around [`workshop_server`]: load the config, spawn the
+//! Thin entry point around [`workshop_server`]: load the config, spawn the
 //! server in-process, optionally open the system browser at its address (the
 //! browser-tab frame, for when no desktop window is driving), and wait.
 

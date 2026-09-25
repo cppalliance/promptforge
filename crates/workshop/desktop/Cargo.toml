@@ -15,12 +15,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 # The in-process workshop server, seen only through its re-export facade:
-# the shell spawns it on an OS-assigned loopback port and points the
+# the desktop app spawns it on an OS-assigned loopback port and points the
 # window at it. Never depend on `workshop-server` directly: the facade is
-# the shell's sole view of the server.
+# the desktop app's sole view of the server.
 workshop-server-api.workspace = true
 # Window geometry lives in the workspace file (src/window_state.rs): the
-# shell reads and writes it over the server's loopback HTTP API with the
+# desktop app reads and writes it over the server's loopback HTTP API with the
 # workspace's reqwest feature set (json, rustls), the same set the
 # gateway builds with, so cargo deny and the static-CRT Windows build see
 # nothing new.

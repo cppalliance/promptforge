@@ -49,7 +49,7 @@ pub(crate) const META_VERSION: &str = "version";
 pub(crate) const META_NAME: &str = "name";
 /// Meta key holding the RFC 3339 creation time.
 pub(crate) const META_CREATED_AT: &str = "created_at";
-/// The kv key holding the shell's saved geometry as JSON; the other kv
+/// The kv key holding the desktop app's saved geometry as JSON; the other kv
 /// keys are the opaque ui-state values in [`UI_STATE_KEYS`].
 pub(crate) const KV_WINDOW: &str = "window";
 
@@ -144,7 +144,7 @@ pub(crate) struct GrantRow {
     pub(crate) added_at: String,
 }
 
-/// The kv 'window' value: the shell's saved geometry.
+/// The kv 'window' value: the desktop app's saved geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowState {
     /// Logical width.

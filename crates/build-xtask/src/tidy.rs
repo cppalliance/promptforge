@@ -10,7 +10,7 @@
 //! enforces the architecture; `cargo xtask tidy` prints the same report
 //! on demand. The file ceiling and lint inheritance checks bind every
 //! `workshop-*` and `harness-*` crate (plus `harness-api`, minus the
-//! `workshop` shell) by package name, every other crate whose crate
+//! `workshop` desktop app) by package name, every other crate whose crate
 //! docs have the `## Invariants` marker, and every crate directory whose
 //! manifest the shared walk could not read, parse, or find a package name
 //! in - a crate with no readable name cannot be shown exempt. Those read
@@ -24,11 +24,11 @@ const VOCABULARY: &[&str] = &["workshop-protocol", "workshop-registry", "worksho
 /// Tier 1: domain services. Depend on vocabulary crates only.
 const SERVICES: &[&str] = &["workshop-gateway", "workshop-menu", "workshop-status"];
 /// Tier 2: features. Depend on vocabulary and service crates. The
-/// sessions subsystem sits inside the shell since Workshop moved onto the
+/// sessions subsystem sits inside the server since Workshop moved onto the
 /// harness, so it has no crate here.
 const FEATURES: &[&str] = &["workshop-user-state", "workshop-workspace"];
-/// Tier 3: the shell. May depend on every lower tier.
-const SHELL: &[&str] = &["workshop-server"];
+/// Tier 3: the server. May depend on every lower tier.
+const SERVER: &[&str] = &["workshop-server"];
 
 /// File-line ceiling from the `AGENTS.md` structural rules.
 const MAX_FILE_LINES: usize = 500;
@@ -72,7 +72,7 @@ fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
         VOCABULARY.to_vec()
     } else if FEATURES.contains(&name) {
         [VOCABULARY, SERVICES].concat()
-    } else if SHELL.contains(&name) {
+    } else if SERVER.contains(&name) {
         [VOCABULARY, SERVICES, FEATURES].concat()
     } else {
         return None;
@@ -94,7 +94,7 @@ fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
 #[must_use]
 pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
-    for name in [VOCABULARY, SERVICES, FEATURES, SHELL].concat() {
+    for name in [VOCABULARY, SERVICES, FEATURES, SERVER].concat() {
         let Some(allowed) = allowed_dependencies(name) else {
             continue;
         };
@@ -249,7 +249,7 @@ pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
 
 /// Whether a package name places the crate in a family that must have the
 /// marker: `workshop-*` and `harness-*` (which covers `harness-api`). The
-/// Tauri shell (the `workshop` package) is exempt.
+/// Tauri desktop app (the `workshop` package) is exempt.
 fn family_requires_marker(name: &str) -> bool {
     name != "workshop" && (name.starts_with("workshop-") || name.starts_with("harness-"))
 }

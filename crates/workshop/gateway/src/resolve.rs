@@ -238,7 +238,7 @@ fn validate_resolved(
     ValidatedConnection::validate(file)
 }
 
-/// Reports the resolution outcome where the shell surfaces startup state:
+/// Reports the resolution outcome where the server surfaces startup state:
 /// a removed file's reason and the winning source on the status bus,
 /// the same facts in the log.
 pub fn report(gateway: &ResolvedGateway, push: &Push) {

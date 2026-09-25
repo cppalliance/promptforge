@@ -41,7 +41,7 @@ pub fn replace_gateway(
 
 /// Starts the sessions subsystem's bindings forwarder over fixture state:
 /// the registered background task that pushes every gateway, catalog,
-/// and menu replacement through the harness's public API. The shell
+/// and menu replacement through the harness's public API. The server
 /// spawns it with serving; a test that binds the router directly has no
 /// serving loop, so it spawns the forwarder here. The task ends with the
 /// state.

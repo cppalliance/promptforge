@@ -25,7 +25,7 @@
 //!   sessions and is never consulted on a request path. A persist that
 //!   fails is logged degradation; the in-memory state stands.
 //! - The crate maps its own [`WorkspaceError`] to the wire envelope at
-//!   its route boundary; no shell error type appears here.
+//!   its route boundary; no server error type appears here.
 
 mod blocking;
 mod error;

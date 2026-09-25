@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop shell"
+description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop app"
 
 [[bin]]
 name = "workshop-server"
@@ -17,7 +17,7 @@ anyhow.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 # The harness public API: agent sessions run in the harness, which the
-# composition root constructs, registers, and pushes the shell's gateway
+# composition root constructs, registers, and pushes the server's gateway
 # binding, chat catalog, and host snapshot into as data.
 harness-api.workspace = true
 open.workspace = true

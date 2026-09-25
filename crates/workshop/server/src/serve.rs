@@ -2,7 +2,7 @@
 //!
 //! [`spawn`] builds the shared state, binds the listener, and serves on its
 //! own thread with its own tokio runtime, so an embedding binary (the
-//! desktop shell, or the server binary itself) keeps its main thread. The
+//! desktop app, or the server binary itself) keeps its main thread. The
 //! call blocks until the listener is bound - that bind is the readiness
 //! signal - and the returned [`ServerHandle`] holds the base URL and a
 //! graceful-shutdown switch. The stop side is bounded: a watchdog gives

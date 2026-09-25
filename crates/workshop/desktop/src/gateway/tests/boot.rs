@@ -212,7 +212,7 @@ fn a_resolve_error_still_launches_the_sibling_exe() {
 }
 
 #[test]
-fn the_sibling_probe_finds_only_the_gateway_exe_beside_the_shell() {
+fn the_sibling_probe_finds_only_the_gateway_exe_beside_the_desktop_app() {
     let (_dir, with) = exe_dir(true);
     assert_eq!(
         sibling_gateway(&with),

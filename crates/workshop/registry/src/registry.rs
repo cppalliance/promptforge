@@ -103,7 +103,7 @@ impl Registry {
         Self::default()
     }
 
-    /// Registers a route contribution; the shell merges every
+    /// Registers a route contribution; the server merges every
     /// registrant into its API router in registration order. The
     /// returned guard keeps the contribution alive: dropping it removes
     /// the registrant.
@@ -118,7 +118,7 @@ impl Registry {
         })
     }
 
-    /// Registers a background task; the shell spawns every registrant
+    /// Registers a background task; the server spawns every registrant
     /// with serving and stops each through its [`ShutdownHandle`](crate::ShutdownHandle)
     /// in the graceful-shutdown closure.
     pub fn register_task(&self, task: Arc<dyn BackgroundTask>) -> Registration {

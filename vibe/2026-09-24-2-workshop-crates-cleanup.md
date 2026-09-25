@@ -874,7 +874,7 @@ Components, in dependency order:
 
 <step-14>
 
-### Step 14: Retire "shell" in the Rust crates, the build check, and the workflows
+### Step 14: Retire "shell" in the Rust crates, the build check, and the workflows [completed]
 
 - Component: Shell vocabulary
 - Piece: Rust and workflow names

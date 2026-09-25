@@ -1,6 +1,6 @@
 //! The opaque wire error every HTTP failure answers with.
 //!
-//! [`AppError`] is the boundary between the shell's failures and the HTTP
+//! [`AppError`] is the boundary between the server's failures and the HTTP
 //! response: one variant per wire failure that exists today, each mapped
 //! to one status code by the central [`IntoResponse`] impl, so the same
 //! failure is built in one place no matter which handler hits it.
@@ -8,7 +8,7 @@
 //! no `#[from]` derive exists on this side of the boundary. The extracted
 //! feature crates map their own error types at their own route boundaries
 //! (`workshop_workspace::WorkspaceError`, the sessions relay's gateway
-//! envelope); this shell type covers the shell's own routes.
+//! envelope); this server type covers the server's own routes.
 //! Internal failure detail (the source chain) reaches the response body in
 //! debug builds only; production bodies stay at each variant's own message,
 //! close to the status text. Rich construction-time errors sit elsewhere

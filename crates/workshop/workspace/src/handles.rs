@@ -1,8 +1,8 @@
 //! The workspace subsystem's registration: its `/workspace/*` routes,
-//! merged into the shell's API router, the workspace itself as its
+//! merged into the server's API router, the workspace itself as its
 //! state handle set, its granted-roots view, which same-tier
 //! subsystems read instead of naming this crate, and the shutdown lever
-//! that closes the workspace file inside the shell's graceful stop.
+//! that closes the workspace file inside the server's graceful stop.
 
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ use crate::workspace::Workspace;
 
 /// Registers the workspace subsystem into the registry: its
 /// `/workspace/*` routes (the confined filesystem and the
-/// `/workspace/file/*` document routes), merged into the shell's API
+/// `/workspace/file/*` document routes), merged into the server's API
 /// router, the workspace itself as its state handle set, and its granted-roots
 /// view, which same-tier subsystems read instead of naming this crate.
 /// The returned guards keep the registrations alive; the composition
@@ -42,10 +42,10 @@ pub fn register(
 /// that closes the workspace file. The workspace-file actor already
 /// runs from the moment a file is opened, so the task's `spawn` spawns
 /// nothing; the adapter exists only to hand the registry a
-/// [`ShutdownHandle`] the shell awaits inside its graceful-shutdown
+/// [`ShutdownHandle`] the server awaits inside its graceful-shutdown
 /// closure, where [`Workspace::close_backing`] folds the WAL into the
 /// file and removes the sidecar before the runtime tears down. The
-/// shell's grace window bounds the whole drain and is the close's only
+/// server's grace window bounds the whole drain and is the close's only
 /// timeout. The returned guard keeps the registration alive; the
 /// composition root holds it for the process lifetime.
 pub fn register_tasks(registry: &Registry, workspace: &Workspace) -> Registration {

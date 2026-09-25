@@ -51,7 +51,7 @@ pub fn register(registry: &Registry, handles: GatewayHandles) -> Registration {
 /// Registers the gateway subsystem's background tasks: the
 /// reachability heartbeat and the gateway progress subscriber, both
 /// reporting through the registry's push facade. The tasks spawn when
-/// the shell starts serving and stop inside the graceful-shutdown
+/// the server starts serving and stop inside the graceful-shutdown
 /// signal. The returned guards keep the registrations alive; the
 /// composition root holds them for the process lifetime.
 pub fn register_tasks(

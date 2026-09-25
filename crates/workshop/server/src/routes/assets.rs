@@ -8,7 +8,7 @@ use axum::routing::get;
 use crate::assets::{self, AssetServer, CachePolicy};
 use crate::error::AppError;
 
-/// The asset layer the shell wires into these routes: the embedded UI
+/// The asset layer the server wires into these routes: the embedded UI
 /// bundle, or the no-op implementation under the `headless` feature,
 /// which drops the UI build so server-only integration tests run without
 /// the webview assets.

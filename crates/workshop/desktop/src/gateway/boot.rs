@@ -12,10 +12,10 @@ use workshop_server_api::Config;
 use super::identity::GatewayAttachment;
 use super::supervisor::{RecoveryCandidate, RecoveryOwnership};
 
-/// The sibling executable the shell launches, beside its own.
+/// The sibling executable the desktop app launches, beside its own.
 #[cfg(windows)]
 pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway.exe";
-/// The sibling executable the shell launches, beside its own.
+/// The sibling executable the desktop app launches, beside its own.
 #[cfg(not(windows))]
 pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
 
@@ -231,7 +231,7 @@ fn detached_command(exe: &Path) -> std::process::Command {
     command
 }
 
-/// Spawns the Gateway detached from the shell lifetime.
+/// Spawns the Gateway detached from the desktop app's lifetime.
 pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
     #[cfg(windows)]
     let mut child = spawn_detached_windows_with(|flags| {

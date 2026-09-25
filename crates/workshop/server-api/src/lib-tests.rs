@@ -1,4 +1,4 @@
-//! Shell-facing surface tests: every re-export is named and the fixtures feature forwards the seams.
+//! Desktop-app-facing surface tests: every re-export is named and the fixtures feature forwards the seams.
 
 use super::*;
 
@@ -15,7 +15,7 @@ fn spawn_signature(start: fn(Config) -> Result<ServerHandle, SpawnError>) {
 }
 
 #[test]
-fn the_shell_facing_surface_names_every_re_export() {
+fn the_desktop_app_facing_surface_names_every_re_export() {
     // Configuration.
     assert_eq!(short_name::<AgentsConfig>(), "AgentsConfig");
     assert_eq!(short_name::<Config>(), "Config");

@@ -414,7 +414,7 @@ async fn read_grants(conn: &turso::Connection) -> Result<Vec<GrantRow>, Workspac
 }
 
 /// Reads the saved window geometry; `None` when never saved. A value
-/// that no longer parses is treated as absent: the shell falls back to
+/// that no longer parses is treated as absent: the desktop app falls back to
 /// its default geometry rather than refusing the whole file.
 async fn read_window(conn: &turso::Connection) -> Result<Option<WindowState>, WorkspaceFileError> {
     let mut rows = conn

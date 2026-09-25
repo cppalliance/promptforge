@@ -1,5 +1,5 @@
-//! The shell's status relay for one agent session: the status-bar frames
-//! and the backoff reset, derived in the shell from the session's live
+//! The server's status relay for one agent session: the status-bar frames
+//! and the backoff reset, derived in the server from the session's live
 //! events, deltas, and error reports.
 //!
 //! One relay task per session, spawned at launch. It holds only the
@@ -73,7 +73,7 @@ fn on_delta(delta: &Delta, push: &Push) {
     push.push_activity("Streaming response...", "an agent response chunk", activity);
 }
 
-/// The side effects the shell wires to a completed reply: the backoff
+/// The side effects the server wires to a completed reply: the backoff
 /// reset (an agent reply is useful gateway work) and the idle status
 /// that releases the turn-dispatch Thinking push.
 fn on_event(event: &SessionEvent, push: &Push, backoff: &ReconnectBackoff) {
@@ -95,7 +95,7 @@ const RUN_FAILED_LABEL: &str = "Agent failed";
 /// The operator-facing failure status for one of the session's failure
 /// reports. The session reports the kind - a failed model turn or tool
 /// call the program survived, a run that ended in error, or the synthetic
-/// terminal of an interrupt - and the shell labels it; the report's
+/// terminal of an interrupt - and the server labels it; the report's
 /// message passes through as the description, the same text the socket's
 /// error frame reports. Each kind is terminal for its turn and never
 /// reaches a reply, so this status is the one frame that releases the

@@ -5,7 +5,7 @@
 //! gateway's `/shutdown` through the server's current validated Gateway
 //! snapshot, so one gesture stops the window, the in-process server, and
 //! the Gateway. Attached to a LAN Gateway through explicit config, the
-//! snapshot grants no shutdown authority, so the gesture stops the shell
+//! snapshot grants no shutdown authority, so the gesture stops the desktop app
 //! only.
 
 use std::sync::PoisonError;
@@ -25,13 +25,13 @@ pub(crate) fn request_gateway_shutdown(gateway: Option<GatewayUpdater>) {
         && let Err(error) = gateway.request_shutdown()
     {
         eprintln!(
-            "the gateway did not accept the shutdown request; quitting the shell anyway: {error}"
+            "the gateway did not accept the shutdown request; quitting the desktop app anyway: {error}"
         );
     }
 }
 
 /// The shared shutdown-then-exit path: request the local Gateway's
-/// shutdown, then exit the shell (the `RunEvent::Exit` handler stops the
+/// shutdown, then exit the desktop app (the `RunEvent::Exit` handler stops the
 /// in-process server).
 pub(crate) fn quit_everything(app: &AppHandle<Wry>) {
     let gateway = app.try_state::<ServerSlot>().and_then(|slot| {

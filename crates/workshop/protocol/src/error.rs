@@ -38,7 +38,7 @@ impl ErrorFrame {
 /// The opaque wire error envelope every HTTP failure answers with:
 /// `{"error":{"message":"...","code":"..."}}`.
 ///
-/// The shell maps its per-crate error types onto status codes and renders
+/// The server maps its per-crate error types onto status codes and renders
 /// this envelope; the shape is pinned here so the wire contract sits in
 /// one place. Failures rendered as plain text (the asset 404) never take
 /// this shape.

@@ -113,6 +113,6 @@ async fn a_refused_put_answers_the_envelope_through_the_full_router() {
     let json: serde_json::Value = response.json().await.expect("the body is JSON");
     assert_eq!(
         json["error"]["code"], "user_state_key",
-        "the crate's own envelope reaches the wire through the shell's router"
+        "the crate's own envelope reaches the wire through the server's router"
     );
 }

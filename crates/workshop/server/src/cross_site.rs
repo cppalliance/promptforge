@@ -13,11 +13,11 @@
 //! passes. WebSocket upgrades bypass Sec-Fetch in older browsers, so both
 //! upgrade handlers additionally check
 //! [`origin_allowed`]: an `Origin` header, when present, must be a
-//! loopback http(s) origin - which admits both the shell webview (it loads
+//! loopback http(s) origin - which admits both the desktop app webview (it loads
 //! the workshop's own loopback URL) and a browser tab on the workshop's
 //! address, and refuses every foreign site. A request with no `Origin` is
 //! a native client, not a browser, and passes. `/health` and the UI
-//! assets stay outside the guard so the shell probe and heartbeat keep
+//! assets stay outside the guard so the desktop app probe and heartbeat keep
 //! working.
 
 use axum::extract::Request;
@@ -84,7 +84,7 @@ fn declares_json(headers: &HeaderMap) -> bool {
 }
 
 /// Whether a WebSocket upgrade's `Origin` is acceptable: absent (a native
-/// client), or a loopback http(s) origin - the shell webview and the
+/// client), or a loopback http(s) origin - the desktop app webview and the
 /// workshop's own browser-tab origin are both loopback.
 pub fn origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else {
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(
             response.status(),
             StatusCode::OK,
-            "/health stays exempt for the shell probe and heartbeat"
+            "/health stays exempt for the desktop app probe and heartbeat"
         );
     }
 
@@ -320,7 +320,7 @@ mod tests {
                 .expect("a native client with no Origin upgrades");
             ws_connect(&url, path, Some(&url))
                 .await
-                .expect("the workshop's own loopback origin (the shell webview) upgrades");
+                .expect("the workshop's own loopback origin (the desktop app webview) upgrades");
             let error = ws_connect(&url, path, Some("https://evil.example"))
                 .await
                 .expect_err("a cross-site origin must be refused");

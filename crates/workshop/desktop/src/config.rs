@@ -1,11 +1,11 @@
-//! The shell's workshop-server configuration: `workshop.toml` discovery
+//! The desktop app's workshop-server configuration: `workshop.toml` discovery
 //! and the forced ephemeral loopback bind.
 //!
-//! The shell hosts the workshop server in-process, so the listener
-//! settings are the shell's own: the bind is always `127.0.0.1:0` (an
+//! The desktop app hosts the workshop server in-process, so the listener
+//! settings are the desktop app's own: the bind is always `127.0.0.1:0` (an
 //! OS-assigned port - a fixed port is a conflict class the
 //! single-instance handoff cannot close) and `open_browser` stays off
-//! (the shell drives its own window). A discovered `workshop.toml` still
+//! (the desktop app drives its own window). A discovered `workshop.toml` still
 //! owns the `[gateway]` connection settings and the state and
 //! agent-program paths; the gateway endpoint itself resolves inside the
 //! server, gateway discovery file first, explicit config second.
@@ -18,16 +18,16 @@ use workshop_server_api::Config;
 /// Canonical file name searched for at each candidate location.
 const CONFIG_FILE_NAME: &str = "workshop.toml";
 
-/// The shell's listener bind: loopback on an OS-assigned port, reported
+/// The desktop app's listener bind: loopback on an OS-assigned port, reported
 /// back through the server handle once bound.
-const SHELL_BIND: &str = "127.0.0.1:0";
+const DESKTOP_BIND: &str = "127.0.0.1:0";
 
-/// Loads the shell's workshop-server configuration.
+/// Loads the desktop app's workshop-server configuration.
 ///
 /// A `workshop.toml` found in the search order - beside the executable,
 /// then the current directory, then the user profile's `.promptforge`
 /// directory - supplies the `[gateway]` connection and the path
-/// settings; the listener settings are forced to the shell's own. With
+/// settings; the listener settings are forced to the desktop app's own. With
 /// no file, the default config anchors its state in the profile's
 /// `.promptforge` directory and leaves the gateway to endpoint
 /// resolution, which attaches through the gateway discovery
@@ -58,7 +58,7 @@ fn load_in(exe_dir: &Path, cwd: &Path, home: Option<&Path>) -> anyhow::Result<Co
         Some(path) => {
             let mut config =
                 Config::load(&path).with_context(|| format!("load {}", path.display()))?;
-            shape_for_shell(&mut config);
+            shape_for_desktop(&mut config);
             Ok(config)
         }
         None => Ok(default_config(home)),
@@ -85,10 +85,10 @@ fn profile_dir(home: &Path) -> PathBuf {
     home.join(".promptforge")
 }
 
-/// Forces the listener settings the shell owns onto a loaded config: the
+/// Forces the listener settings the desktop app owns onto a loaded config: the
 /// ephemeral loopback bind and no browser opening.
-fn shape_for_shell(config: &mut Config) {
-    config.server.bind = SHELL_BIND.to_string();
+fn shape_for_desktop(config: &mut Config) {
+    config.server.bind = DESKTOP_BIND.to_string();
     config.server.open_browser = false;
 }
 
@@ -102,7 +102,7 @@ fn default_config(home: Option<&Path>) -> Config {
             api_key: String::new(),
         },
         server: workshop_server_api::ServerConfig {
-            bind: SHELL_BIND.to_string(),
+            bind: DESKTOP_BIND.to_string(),
             open_browser: false,
             state_dir: PathBuf::new(),
         },
@@ -195,12 +195,12 @@ mod tests {
         let config = load_in(&exe, &cwd, Some(&home)).expect("loads");
         assert_eq!(config.gateway.base_url, "http://gateway.lan:9999");
         assert_eq!(
-            config.server.bind, SHELL_BIND,
-            "the shell owns the listener: an OS-assigned loopback port"
+            config.server.bind, DESKTOP_BIND,
+            "the desktop app owns the listener: an OS-assigned loopback port"
         );
         assert!(
             !config.server.open_browser,
-            "the shell drives its own window"
+            "the desktop app drives its own window"
         );
         assert_eq!(
             config.server.state_dir,
@@ -217,7 +217,7 @@ mod tests {
             config.gateway.base_url, "",
             "an empty base_url is the not-explicit signal resolution reads"
         );
-        assert_eq!(config.server.bind, SHELL_BIND);
+        assert_eq!(config.server.bind, DESKTOP_BIND);
         assert!(!config.server.open_browser);
         assert_eq!(config.server.state_dir, profile_dir(&home));
         assert_eq!(config.agents.path, profile_dir(&home).join("agents"));

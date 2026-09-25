@@ -179,7 +179,7 @@ jobs:
       - name: Stage Gateway sidecar
         run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe
 
-      # workshop-server-api is the shell's re-export view of workshop-server,
+      # workshop-server-api is the desktop app's re-export view of workshop-server,
       # so it runs in this partition with the crates it fronts and stays
       # out of the workspace-wide jobs like them.
       - name: Clippy (workshop)

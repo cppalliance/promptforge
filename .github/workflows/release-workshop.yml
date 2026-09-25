@@ -292,7 +292,7 @@ jobs:
             Select-Object -First 1
           if (-not $exe) { throw "promptforge-workshop.exe not found after install" }
           # The gateway ships as an externalBin sidecar; a default (all
-          # components checked) silent install must lay it beside the shell.
+          # components checked) silent install must lay it beside the desktop app.
           $gateway = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
             ForEach-Object { Get-ChildItem $_ -Recurse -Filter promptforge-gateway.exe -ErrorAction SilentlyContinue } |
             Select-Object -First 1
@@ -304,7 +304,7 @@ jobs:
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
           New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-          # A default install lays the gateway beside the shell, so boot
+          # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
@@ -360,7 +360,7 @@ jobs:
           cp -R "/Volumes/PromptForge/PromptForge.app" /tmp/PromptForge.app
           hdiutil detach "/Volumes/PromptForge" -quiet
           # The bundle holds two executables (the gateway ships via
-          # externalBin beside the main binary); pick the shell by name.
+          # externalBin beside the main binary); pick the desktop app by name.
           bin="/tmp/PromptForge.app/Contents/MacOS/promptforge-workshop"
           [ -x "$bin" ] || { echo "promptforge-workshop not in the bundle"; exit 1; }
           version="${{ needs.prepare.outputs.version }}"
@@ -368,7 +368,7 @@ jobs:
           expected="promptforge-workshop $version"
           [ "$output" = "$expected" ] || { echo "--version printed '$output', expected '$expected'"; exit 1; }
           mkdir -p "$HOME/.promptforge"
-          # A default install lays the gateway beside the shell, so boot
+          # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
@@ -407,7 +407,7 @@ jobs:
           package=$(dpkg-deb -f "$deb" Package)
           # The deb holds two executables (the gateway ships via
           # externalBin into /usr/bin beside the main binary); pick the
-          # shell by name.
+          # desktop app by name.
           bin=$(dpkg -L "$package" | grep -E '/usr/bin/promptforge-workshop$' | head -1)
           [ -n "$bin" ] || { echo "no promptforge-workshop in the deb"; exit 1; }
           version="${{ needs.prepare.outputs.version }}"
@@ -421,7 +421,7 @@ jobs:
           output=$("$appimage" --version)
           [ "$output" = "$expected" ] || { echo "AppImage --version printed '$output', expected '$expected'"; exit 1; }
           mkdir -p "$HOME/.promptforge"
-          # A default install lays the gateway beside the shell, so boot
+          # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no

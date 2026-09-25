@@ -88,7 +88,7 @@ pub enum GatewayError {
 }
 
 impl GatewayError {
-    /// A transport failure manufactured by a test, for the shell's
+    /// A transport failure manufactured by a test, for the server's
     /// error-mapping fixtures.
     #[cfg(feature = "test-fixtures")]
     #[must_use]

@@ -1,4 +1,4 @@
-//! The bindings the shell pushes through the harness's public API as
+//! The bindings the server pushes through the harness's public API as
 //! data: the gateway endpoint and bearer, the chat-capable model
 //! catalog, and the host snapshot a run's `ui()` and model resolution
 //! read (the menu's selected model and the workspace's granted roots).
@@ -19,7 +19,7 @@ use workshop_menu::{CatalogBus, MenuHandles};
 use workshop_protocol::WorkbenchSnapshot;
 use workshop_registry::{Registry, WorkspaceRoots};
 
-/// Pushes the shell's current host snapshot, chat catalog, and gateway
+/// Pushes the server's current host snapshot, chat catalog, and gateway
 /// binding into `harness`, each read through `registry` at this moment.
 /// An unregistered subsystem leaves its binding at whatever the harness
 /// last saw (the host snapshot's absent parts read as `null`).
@@ -68,7 +68,7 @@ fn catalog_binding(catalog: &CatalogBus) -> CatalogBinding {
 }
 
 /// The gateway binding for one published generation: its base URL, its
-/// bearer, and the generation the shell assigned before publishing it.
+/// bearer, and the generation the server assigned before publishing it.
 fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
     GatewayBinding {
         base_url: snapshot.base_url().to_owned(),
@@ -80,7 +80,7 @@ fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
 /// Keeps the harness's bindings current: pushes all three again whenever
 /// the gateway binding is replaced, the chat-capable catalog changes
 /// generation, or the menu publishes a snapshot. Runs until every source
-/// has closed (the shell's state is gone) or the harness is unregistered.
+/// has closed (the server's state is gone) or the harness is unregistered.
 ///
 /// A fresh watch receiver treats the current value as seen, so a change
 /// landing between the composition root's push and these subscriptions

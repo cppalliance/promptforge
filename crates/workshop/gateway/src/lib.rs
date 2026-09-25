@@ -11,7 +11,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - No axum type appears in this crate's public API: the domain code
-//!   speaks `reqwest` statuses and raw bodies, and the shell maps them
+//!   speaks `reqwest` statuses and raw bodies, and the server maps them
 //!   to HTTP responses.
 //! - A bearer key is never written to logs or `Debug` output.
 //! - User-visible reporting flows through the registry's push facade, so

@@ -53,7 +53,7 @@ fn a_tiered_crate_whose_manifest_is_missing_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(root.path().join("crates")).expect("the crates directory creates");
     let violations = tier_dependency_violations(root.path());
-    let tiered = [VOCABULARY, SERVICES, FEATURES, SHELL].concat();
+    let tiered = [VOCABULARY, SERVICES, FEATURES, SERVER].concat();
     assert_eq!(
         violations.len(),
         tiered.len(),
@@ -216,7 +216,7 @@ fn the_tidy_checks_and_the_product_checks_enumerate_the_same_crates() {
 }
 
 #[test]
-fn the_workshop_shell_without_the_marker_passes_and_stays_outside_the_ceiling() {
+fn the_workshop_desktop_app_without_the_marker_passes_and_stays_outside_the_ceiling() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -227,11 +227,11 @@ fn the_workshop_shell_without_the_marker_passes_and_stays_outside_the_ceiling() 
     );
     assert!(
         marker_violations(root.path()).is_empty(),
-        "the shell is exempt from the marker"
+        "the desktop app is exempt from the marker"
     );
     assert!(
         file_ceiling_violations(root.path()).is_empty(),
-        "the unmarked shell does not participate in the ceiling"
+        "the unmarked desktop app does not participate in the ceiling"
     );
 }
 

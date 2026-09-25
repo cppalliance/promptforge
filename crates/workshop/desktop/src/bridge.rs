@@ -21,7 +21,7 @@
 //!
 //! The same subscription pass installs the `PermissionRequested` handler
 //! that grants the microphone (and nothing else), replacing wry's
-//! `with_permission_handler` from the tao/wry shell.
+//! `with_permission_handler` from the tao/wry runtime.
 
 use std::path::PathBuf;
 use std::sync::mpsc;

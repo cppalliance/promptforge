@@ -469,11 +469,11 @@ Function FinishPageShow
  SetCtlColors $mui.FinishPage.Run "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
  System::Call 'UXTHEME::SetWindowTheme(p$mui.FinishPage.ShowReadme,w" ",w" ")'
  SetCtlColors $mui.FinishPage.ShowReadme "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
- ; The Run checkbox follows the components: the Workshop shell when
+ ; The Run checkbox follows the components: the Workshop desktop app when
  ; installed; on a Gateway-only install it becomes the first-run browser
  ; handoff to the gateway's Settings page; hidden when neither landed.
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
- ; Default label and target: run the shell.
+ ; Default label and target: run the desktop app.
  ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
  SendMessage $mui.FinishPage.Run ${WM_SETTEXT} 0 "STR:Open PromptForge Gateway settings in your browser"
  ${Else}
@@ -482,7 +482,7 @@ Function FinishPageShow
 FunctionEnd
 
 Function RunMainBinary
- ; The finish-page Run checkbox follows the components: the Workshop shell
+ ; The finish-page Run checkbox follows the components: the Workshop desktop app
  ; when installed; on a Gateway-only install it launches the gateway with
  ; --browser, so the first boot opens the Settings page in the
  ; default browser.

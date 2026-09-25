@@ -22,7 +22,7 @@
 //!   logged and tolerated; a refused put is a value returned to the
 //!   caller and writes nothing.
 //! - The crate maps its own [`UserStateError`] to the wire envelope at
-//!   its route boundary; no shell error type appears here.
+//!   its route boundary; no server error type appears here.
 
 mod error;
 mod handlers;
@@ -37,7 +37,7 @@ pub use handlers::routes;
 pub use store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
 
 /// Registers the user-state subsystem into the registry: its
-/// `/user/state` routes, merged into the shell's API router, and the
+/// `/user/state` routes, merged into the server's API router, and the
 /// store as the subsystem's state handle, so the composition root
 /// fetches it by slot instead of holding it by name. The returned guards
 /// keep the registrations alive; the composition root holds them for the

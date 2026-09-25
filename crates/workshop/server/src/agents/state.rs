@@ -21,15 +21,15 @@ use workshop_support::{RELAY_DEADLINE, with_deadline};
 use super::{AgentSessions, bindings, relay, session, socket};
 
 /// The shared state of the sessions subsystem's routes: the subsystem
-/// registry every handle is read through, and the shell's WebSocket
+/// registry every handle is read through, and the server's WebSocket
 /// origin policy. The agent-session opener, the gateway endpoint binding
 /// and reachability flag, and the catalog and menu buses are read
 /// through the registry's type-keyed state collection at the point of
 /// use, each an `Option` whose `None` degrades the feature the way the
 /// status channel's absence always has.
 ///
-/// The origin policy is injected by the shell as a plain function: the
-/// cross-site guard is the shell's security boundary (its `cross_site`
+/// The origin policy is injected by the server as a plain function: the
+/// cross-site guard is the server's security boundary (its `cross_site`
 /// module), and the subsystem applies it to every upgrade without owning
 /// the policy.
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ pub(crate) const DEFAULT_RESTART_BOUND: Duration = Duration::from_secs(90);
 
 impl SessionsState {
     /// Builds the route state over the subsystem registry and the
-    /// shell's origin policy, with the default restart bound.
+    /// server's origin policy, with the default restart bound.
     #[must_use]
     pub(crate) fn new(registry: Registry, origin_allowed: fn(&HeaderMap) -> bool) -> Self {
         Self {
@@ -124,7 +124,7 @@ impl SessionsState {
         self.registry.push()
     }
 
-    /// The shell's WebSocket origin policy, applied to every upgrade.
+    /// The server's WebSocket origin policy, applied to every upgrade.
     pub(crate) fn origin_allowed(&self, headers: &HeaderMap) -> bool {
         (self.origin_allowed)(headers)
     }
@@ -144,7 +144,7 @@ pub(crate) fn routes(state: SessionsState) -> Router {
 }
 
 /// Registers the sessions subsystem into the registry: its routes, merged
-/// into the shell's API router, the harness every agent session runs in,
+/// into the server's API router, the harness every agent session runs in,
 /// and the agent-session opener, both as state handles. The returned
 /// guards keep the registrations alive; the composition root holds them
 /// for the process lifetime.
@@ -164,9 +164,9 @@ pub(crate) fn register(
 }
 
 /// Registers the sessions subsystem's background task: the bindings
-/// forwarder that pushes the shell's gateway binding, chat catalog, and
+/// forwarder that pushes the server's gateway binding, chat catalog, and
 /// host snapshot into the registered harness again on every replacement.
-/// The task spawns when the shell starts serving and stops inside the
+/// The task spawns when the server starts serving and stops inside the
 /// graceful-shutdown signal. The returned guard keeps the registration
 /// alive; the composition root holds it for the process lifetime.
 pub(crate) fn register_tasks(registry: &Registry) -> Registration {

@@ -70,7 +70,7 @@ impl Drop for SessionLog {
 }
 
 /// The 403 refusal every WebSocket upgrade answers a foreign `Origin`
-/// with: the same `cross_site` envelope the shell's guard middleware
+/// with: the same `cross_site` envelope the server's guard middleware
 /// renders for plain HTTP requests.
 pub(crate) fn cross_site_refusal() -> Response {
     let envelope = ErrorEnvelope::new("cross-site request refused", "cross_site");
@@ -87,7 +87,7 @@ pub(crate) fn cross_site_refusal() -> Response {
 
 /// Upgrades a `GET /ws` request to a WebSocket session. A foreign
 /// `Origin` is refused with 403: WS upgrades bypass Sec-Fetch in older
-/// browsers, so the shell's loopback origin policy guards the upgrade
+/// browsers, so the server's loopback origin policy guards the upgrade
 /// itself.
 pub(crate) async fn upgrade(
     State(state): State<SessionsState>,

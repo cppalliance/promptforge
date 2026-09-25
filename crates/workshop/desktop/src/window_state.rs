@@ -1,4 +1,4 @@
-//! Window geometry through the workspace file. The shell restores the
+//! Window geometry through the workspace file. The desktop app restores the
 //! saved size, position, and maximized flag from
 //! `GET /workspace/file/current` before the window shows, writes them
 //! back through `PUT /workspace/file/window-state` - debounced while the
@@ -35,7 +35,7 @@ pub(crate) const CLOSE_SAVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// server: loopback, so generous.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// The Tauri event the SPA emits after switching the workspace file, so
-/// the shell can apply the file's geometry to the live window.
+/// the desktop app can apply the file's geometry to the live window.
 const WORKSPACE_OPENED_EVENT: &str = "promptforge:workspace-opened";
 /// How far inside the saved top-left corner the monitor probe looks: a
 /// window whose first title-bar pixels are on a monitor can be grabbed.
@@ -58,7 +58,7 @@ pub(crate) struct WindowState {
     pub(crate) maximized: bool,
 }
 
-/// The part of the `GET /workspace/file/current` answer the shell reads.
+/// The part of the `GET /workspace/file/current` answer the desktop app reads.
 /// The path, name, and grants belong to the SPA and are ignored here.
 #[derive(Debug, Deserialize)]
 pub(crate) struct CurrentResponse {
@@ -74,7 +74,7 @@ pub(crate) struct SavedResponse {
     pub(crate) saved: bool,
 }
 
-/// The shell's minimal client for the in-process server's workspace-file
+/// The desktop app's minimal client for the in-process server's workspace-file
 /// routes. The server admits it as a native client: no `Origin`, a
 /// loopback `Host`, and `application/json` on the body it sends.
 #[derive(Debug, Clone)]

@@ -5,7 +5,7 @@
 //! extracted subsystem owns its state behind a narrow handle registered
 //! there, and consumers fetch the handles through the registry's
 //! type-keyed state collection. The harness every agent session runs in
-//! is registered the same way. What remains here is the shell's own
+//! is registered the same way. What remains here is the server's own
 //! runtime infrastructure - the shared reconnect backoff - plus the
 //! registration guards keeping every self-registration alive.
 
@@ -43,7 +43,7 @@ use crate::routes;
 /// Address the server binds to when no override is given.
 pub use workshop_support::DEFAULT_ADDR;
 
-/// Shared handler state: the subsystem registry, the shell's runtime
+/// Shared handler state: the subsystem registry, the server's runtime
 /// infrastructure, and the registration guards. Subsystem handles - the
 /// gateway binding and health flag, the status, catalog, and menu buses,
 /// the agent-session registry - are fetched through the registry's state
@@ -366,7 +366,7 @@ fn compose(
             gateway_handles.clone(),
         ));
     }
-    // The background tasks register beside the state handles; the shell
+    // The background tasks register beside the state handles; the server
     // spawns them from the registry's task vector when it starts
     // serving.
     let (heartbeat, subscriber) =
@@ -396,7 +396,7 @@ fn compose(
     registrations.hold(state);
     // Agent sessions run in the harness, the engine's production host,
     // built here like every other subsystem and reached through the
-    // registry; `agents` pushes the shell's state through its public API.
+    // registry; `agents` pushes the server's state through its public API.
     let harness = agents::harness_for(config, &registry);
     let agents = AgentSessions::new(registry.clone(), backoff.clone());
     let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
@@ -455,13 +455,13 @@ pub enum StateError {
 }
 
 /// Returns the workshop server router with every route mounted: the
-/// shell's own feature routers from `crate::routes`, plus the extracted
+/// server's own feature routers from `crate::routes`, plus the extracted
 /// subsystems' routers merged from the registry's route vector in
 /// registration order - an empty vector is a graceful no-op. The API
 /// routes sit behind the
 /// `crate::cross_site` guard; `/health` and the UI assets stay outside it
-/// so the shell probe, heartbeat, and initial navigation keep working.
-/// Every response includes the `crate::csp` policy: the shell's webview
+/// so the desktop app probe, heartbeat, and initial navigation keep working.
+/// Every response includes the `crate::csp` policy: the desktop app's webview
 /// loads the UI as an External origin, so the server sets the page's
 /// Content-Security-Policy. Each subsystem applies its own deadline tier:
 /// the default on the workspace routes, the relay tier on `/v1/models`,
@@ -482,7 +482,7 @@ pub fn router(state: AppState) -> Router {
         .merge(with_deadline(routes::health::routes(), DEFAULT_DEADLINE))
         .merge(api)
         // The outermost layer on the server's own routes: every response
-        // is stamped with the CSP, error envelopes included, so the shell's
+        // is stamped with the CSP, error envelopes included, so the desktop app's
         // External-origin webview runs under the policy no matter which
         // route answered.
         .layer(axum::middleware::from_fn(crate::csp::header))

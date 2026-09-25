@@ -7,11 +7,11 @@ use super::supervisor::RecoveryCandidate;
 /// How boot connected the Gateway.
 #[derive(Debug)]
 pub(crate) enum GatewayAttachment {
-    /// A local sidecar Gateway the shell attached to.
+    /// A local sidecar Gateway the desktop app attached to.
     Sidecar(ValidatedConnection),
     /// A child launched by this boot that has not yet entered server state.
     Launched(RecoveryCandidate),
-    /// An explicit-config Gateway that the shell does not own.
+    /// An explicit-config Gateway that the desktop app does not own.
     Config,
 }
 
@@ -25,7 +25,7 @@ impl GatewayAttachment {
         }
     }
 
-    /// Reconciles the shell's candidate with the identity the server actually
+    /// Reconciles the desktop app's candidate with the identity the server actually
     /// published, disarming launched-child cleanup only for an exact match.
     pub(crate) fn reconcile_publication(self, published: Option<ValidatedConnection>) -> Self {
         match (self, published) {

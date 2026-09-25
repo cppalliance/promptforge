@@ -4,7 +4,7 @@
 //! containing the HTTP client, base URL, bearer, and generation.
 //! A local-sidecar replacement builds the complete next snapshot before one
 //! atomic store, then notifies long-lived tasks to reconnect. Explicitly
-//! configured endpoints never receive an updater from the desktop shell.
+//! configured endpoints never receive an updater from the desktop app.
 
 mod publication;
 mod shutdown;

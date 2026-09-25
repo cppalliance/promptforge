@@ -1,5 +1,5 @@
 //! The embedded workshop UI assets, the narrow [`AssetServer`] interface
-//! the shell wires into the asset routes, and the file-serving helper; the
+//! the server wires into the asset routes, and the file-serving helper; the
 //! routes that expose them sit in [`crate::routes::assets`].
 
 use axum::http::header;
@@ -65,7 +65,7 @@ impl AssetManifest {
 }
 
 /// The narrow asset-serving interface of the server's webview asset
-/// layer. The shell wires one implementation into the asset routes:
+/// layer. The server wires one implementation into the asset routes:
 /// [`EmbeddedAssets`] in a normal build, [`NoopAssets`] under the
 /// `headless` feature, which drops the UI build so server-only
 /// integration tests run without the webview bundle.

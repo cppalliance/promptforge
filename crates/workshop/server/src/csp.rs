@@ -1,6 +1,6 @@
 //! The Content-Security-Policy stamped on every server response.
 //!
-//! The desktop shell loads the UI as an External-origin Tauri webview, so
+//! The desktop app loads the UI as an External-origin Tauri webview, so
 //! the page's policy is the server's to set: there is no `tauri.conf.json`
 //! CSP for a remote document. The policy keeps the SPA self-contained -
 //! scripts and workers from this origin only - while `connect-src` admits
@@ -9,7 +9,7 @@
 //! and the loopback WebSocket spellings. WebKit does not treat
 //! `connect-src 'self'` as covering WebSockets, so the `ws://` sources
 //! are spelled out for WebKitGTK and WKWebView; the port wildcard covers
-//! the shell's OS-assigned bind.
+//! the desktop app's OS-assigned bind.
 
 use axum::extract::Request;
 use axum::http::{HeaderValue, header};
@@ -36,7 +36,7 @@ const POLICY: &str = "default-src 'self'; script-src 'self'; \
 /// only: the Gateway Config panel iframes `/gateway/config/` from the
 /// workshop window, and `frame-ancestors 'none'` makes Chromium refuse
 /// the frame outright ("refused to connect"). `'self'` admits the
-/// same-origin shell and still forbids every foreign framer.
+/// same-origin desktop app and still forbids every foreign framer.
 const POLICY_FRAMEABLE: &str = "default-src 'self'; script-src 'self'; \
                       style-src 'self' 'unsafe-inline'; \
                       connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:* \
@@ -123,7 +123,7 @@ mod tests {
             .expect("the policy header is present")
             .to_str()
             .expect("the policy is ASCII");
-        // The break this pins: drop the IPC sources and the shell webview's
+        // The break this pins: drop the IPC sources and the desktop app webview's
         // Tauri calls fail closed from the External origin.
         assert!(
             policy.contains("connect-src 'self' ipc: http://ipc.localhost"),

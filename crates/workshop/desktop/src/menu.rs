@@ -1,13 +1,13 @@
 //! The window menu: the quit-everything affordance.
 //!
-//! The shell's only menu item quits the app through the shared
+//! The desktop app's only menu item quits the app through the shared
 //! shutdown-then-exit path in `quit.rs`, which the SPA's File > Exit row
 //! (the `quit` command) also runs: when boot attached to or launched a
 //! local sidecar gateway, the item first posts the gateway's `/shutdown`
 //! through the server's current validated Gateway snapshot, so one
 //! gesture stops the window, the in-process server, and the Gateway.
 //! Attached to a LAN Gateway through explicit config, the snapshot grants
-//! no shutdown authority, so the item stops the shell only and says so.
+//! no shutdown authority, so the item stops the desktop app only and says so.
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Wry};
@@ -16,7 +16,7 @@ use tauri::{AppHandle, Wry};
 pub(crate) const QUIT_MENU_ID: &str = "quit-promptforge";
 
 /// Builds and installs the app menu. A local sidecar makes the quit item
-/// stop both products; a configured LAN Gateway makes it stop only the shell.
+/// stop both products; a configured LAN Gateway makes it stop only the desktop app.
 ///
 /// # Errors
 /// Returns an error when the menu cannot be built or installed.

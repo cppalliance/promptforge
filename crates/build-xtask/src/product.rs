@@ -27,7 +27,7 @@
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
 //!   with `gateway-stt` as its public member - the one crate inside the
 //!   family outside the subsystem may name.
-//! - Shell boundary: the `workshop` shell depends on `workshop-server-api`
+//! - Desktop-app boundary: the `workshop` desktop app depends on `workshop-server-api`
 //!   and never on `workshop-server`.
 
 use std::fs;
@@ -117,9 +117,9 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
     violations
 }
 
-/// The Tauri shell crate, bound by the shell-boundary rule.
-const SHELL: &str = "workshop";
-/// The server crate the shell must never name directly.
+/// The Tauri desktop app crate, bound by the desktop-app boundary rule.
+const DESKTOP: &str = "workshop";
+/// The server crate the desktop app must never name directly.
 const SERVER: &str = "workshop-server";
 /// The promptforge-family crates outside crates may depend on directly.
 const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
@@ -134,9 +134,9 @@ const PUBLIC_HARNESS: &str = "harness-api";
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
 fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
-    if package.package == SHELL && dep.package == SERVER {
+    if package.package == DESKTOP && dep.package == SERVER {
         return Some(
-            "the workshop shell depends on workshop-server-api, never on workshop-server"
+            "the workshop desktop app depends on workshop-server-api, never on workshop-server"
                 .to_owned(),
         );
     }

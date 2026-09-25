@@ -1,22 +1,22 @@
-//! The sessions subsystem of the shell: the `/ws` workbench socket
+//! The sessions subsystem of the server: the `/ws` workbench socket
 //! (`session`), the `/agents/ws` agent-session socket (`socket`), the
 //! `/v1/models` catalog relay (`relay`), their shared route state
-//! (`state`), and [`AgentSessions`], the shell's opener of agent sessions
+//! (`state`), and [`AgentSessions`], the server's opener of agent sessions
 //! in the harness.
 //!
 //! Agent sessions run in the harness. The composition root constructs a
 //! [`Harness`] from `harness-api` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
-//! every session through it. Everything the harness knows about the shell
+//! every session through it. Everything the harness knows about the server
 //! arrives as data pushed through its public API (`bindings`): the
 //! gateway endpoint and bearer, the chat-capable catalog, and the host
 //! snapshot (the menu's selection and the workspace's granted roots).
-//! Status-bar reporting stays in the shell (`status`): a per-session
+//! Status-bar reporting stays in the server (`status`): a per-session
 //! relay derives it from the session's events, deltas, and error reports.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
 //! attach and detach (`socket`), so the harness keeps the session table
-//! the shell's socket rule otherwise forbids. The rule governed
+//! the server's socket rule otherwise forbids. The rule governed
 //! per-request relay work, where every held resource belonged to one
 //! socket; an agent session is longer-lived than any socket on purpose.
 
@@ -44,12 +44,12 @@ pub(crate) use state::{SessionsState, register, register_tasks};
 const HARNESS_STATE_DIR: &str = "harness";
 
 /// The harness every agent session runs in, built for `config` with the
-/// shell's current state already pushed through its public API: the
+/// server's current state already pushed through its public API: the
 /// gateway endpoint and bearer, the chat catalog, and the host snapshot,
 /// each read through `registry` from the subsystems registered before it.
 /// The composition root registers the returned handle and the forwarder
 /// task ([`register_tasks`]) that keeps the bindings current from the
-/// buses once the shell serves. Nothing touches the filesystem here: the
+/// buses once the server serves. Nothing touches the filesystem here: the
 /// run log opens under the state directory on the first launch.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
     let harness = Arc::new(Harness::new(HarnessConfig {
@@ -60,11 +60,11 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
     harness
 }
 
-/// The shell's opener of agent sessions: discovery, launch, and lookup
-/// through the registered [`Harness`], plus the shell-side work a launch
+/// The server's opener of agent sessions: discovery, launch, and lookup
+/// through the registered [`Harness`], plus the server-side work a launch
 /// wires up - the status relay.
 ///
-/// Typed and construction-phased: the registry and the shell's backoff
+/// Typed and construction-phased: the registry and the server's backoff
 /// are captured when the composition root builds it, and the harness is
 /// read through the registry at the point of use, so this handle never
 /// holds another subsystem's handle.
@@ -91,7 +91,7 @@ impl fmt::Debug for AgentSessions {
 }
 
 impl AgentSessions {
-    /// Builds the opener over the subsystem registry and the shell's
+    /// Builds the opener over the subsystem registry and the server's
     /// reconnect backoff. Nothing is spawned here; the composition root
     /// runs outside the runtime.
     #[must_use]
@@ -117,7 +117,7 @@ impl AgentSessions {
             .map_or_else(Vec::new, |harness| harness.discover())
     }
 
-    /// Pushes the shell's current gateway, catalog, and host state into
+    /// Pushes the server's current gateway, catalog, and host state into
     /// the harness, so the next run the harness prepares reads them.
     pub(crate) fn sync_bindings(&self) {
         if let Some(harness) = self.harness() {
@@ -130,7 +130,7 @@ impl AgentSessions {
     /// [`close`](Self::close) ends it; turn-cancel relaunches the program
     /// over the retained transcript without ending the session.
     ///
-    /// The shell's bindings are pushed first, so the launch reads the
+    /// The server's bindings are pushed first, so the launch reads the
     /// current selection and roots even when the forwarder task has not
     /// caught up with the latest replacement.
     ///

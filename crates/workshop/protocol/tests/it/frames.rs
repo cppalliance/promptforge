@@ -422,6 +422,6 @@ fn an_error_envelope_serializes_as_message_and_code_under_error() {
     assert_eq!(
         serde_json::to_value(&envelope).expect("the envelope serializes"),
         serde_json::json!({"error": {"message": "file cannot be read", "code": "read_file"}}),
-        "the wire shape matches the envelope the shell has always answered with"
+        "the wire shape matches the envelope the server has always answered with"
     );
 }

@@ -138,7 +138,7 @@ pub struct ServerConfig {
     /// Address the workshop server binds to.
     pub bind: String,
     /// When true, the server binary opens the system browser at its address
-    /// once it is serving. The desktop shell sets up its own window and
+    /// once it is serving. The desktop app sets up its own window and
     /// ignores this flag; it exists for the browser-tab frame.
     pub open_browser: bool,
     /// Directory holding the server's persistent state: agent session

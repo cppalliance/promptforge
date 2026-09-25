@@ -1,7 +1,7 @@
 //! PromptForge Workshop HTTP server.
 //!
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
-//! and the axum router so `src/main.rs` stays a thin shell. Start at
+//! and the axum router so `src/main.rs` stays a thin entry point. Start at
 //! [`Config::load`] for configuration, [`AgentSessions`] for the
 //! agent-session opener behind `/agents/ws` (every session runs in the
 //! harness, reached through `harness-api`), and [`router`] for the HTTP
@@ -21,7 +21,7 @@
 //!
 //! ## Invariants
 //!
-//! - Tier: shell; may depend on: the vocabulary crates
+//! - Tier: server; may depend on: the vocabulary crates
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-user-state`,
@@ -34,15 +34,15 @@
 //!   frames and writes every outbound frame itself - no outbox channel,
 //!   no writer task. Agent sessions are the documented carve-out: they
 //!   outlive sockets on purpose, and the harness keeps their table.
-//! - The harness reads the shell's state as data pushed through its
+//! - The harness reads the server's state as data pushed through its
 //!   public API (the gateway binding, the chat catalog, the host
-//!   snapshot); the shell never hands it a bus, a registry, or a
+//!   snapshot); the server never hands it a bus, a registry, or a
 //!   callback into itself. Status-bar reporting for a session is derived
-//!   in the shell from the session's events, deltas, and error reports.
+//!   in the server from the session's events, deltas, and error reports.
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
-//! - The shell's WebSocket origin policy is applied to every upgrade;
+//! - The server's WebSocket origin policy is applied to every upgrade;
 //!   the cross-site guard stays the security boundary.
 //! - A dying input wait is an outcome, never silence: the harness's wait
 //!   registry pushes a cancelled frame for every unresolved wait it
@@ -58,7 +58,7 @@ mod routes;
 mod serve;
 
 // The extracted subsystem crates, aliased at their pre-decomposition
-// module paths so the shell's internals read as they did before the
+// module paths so the server's internals read as they did before the
 // split. The tier graph is enforced by `cargo test -p build-xtask`.
 pub use workshop_gateway::{gateway, gateway_binding, gateway_progress, heartbeat, resolve};
 pub use workshop_menu::{catalog, menu};

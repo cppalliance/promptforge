@@ -26,7 +26,7 @@ mod sealed {
 use sealed::Sealed;
 
 /// Route registration: a subsystem contributes its HTTP routes, merged
-/// into the shell's API router at composition time.
+/// into the server's API router at composition time.
 pub trait RouteRegistrar: Sealed + Send + Sync {
     /// The subsystem's routes, with their state already applied.
     fn routes(&self) -> Router;
@@ -35,7 +35,7 @@ pub trait RouteRegistrar: Sealed + Send + Sync {
 /// Background task spawning: a subsystem starts one long-lived task, so
 /// the composition root holds no `tokio::spawn` calls of its own.
 pub trait BackgroundTask: Sealed + Send + Sync {
-    /// Spawns the task; the returned handle is the shell's shutdown
+    /// Spawns the task; the returned handle is the server's shutdown
     /// lever.
     fn spawn(&self) -> ShutdownHandle;
 }
@@ -48,7 +48,7 @@ type Stop = Box<dyn FnOnce() -> StopFuture + Send>;
 
 /// The shutdown lever of one spawned background task: a concrete type,
 /// never a trait with an `async fn` method, which would not be
-/// dyn-compatible. Signaling and awaiting are one call, so the shell's
+/// dyn-compatible. Signaling and awaiting are one call, so the server's
 /// graceful-shutdown closure cannot fire a stop it forgets to await.
 pub struct ShutdownHandle {
     stop: Option<Stop>,

@@ -1,4 +1,4 @@
-//! Attach-or-launch lifecycle for the desktop shell's Gateway sidecar.
+//! Attach-or-launch lifecycle for the desktop app's Gateway sidecar.
 //!
 //! Boot planning and one-shot launch, validated identity, and continuous
 //! supervision are private sibling modules with one-way dependencies.

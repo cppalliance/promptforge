@@ -28,7 +28,7 @@ use crate::store::{UserStateStore, check_text_cap, user_state_key};
 
 /// The user-state routes, narrowed to the [`UserStateStore`] - the only
 /// state their handlers use - under the default deadline tier. The
-/// subsystem registers this constructor into the registry; the shell
+/// subsystem registers this constructor into the registry; the server
 /// merges its result into the API router.
 pub fn routes(store: Arc<UserStateStore>) -> axum::Router {
     with_deadline(

@@ -69,7 +69,7 @@ fn lib_rs(name: &str) -> String {
          //!\n\
          //! ## Invariants\n\
          //!\n\
-         //! - Tier: TODO (vocabulary | services | features | shell); may depend\n\
+         //! - Tier: TODO (vocabulary | services | features | server); may depend\n\
          //!   on: TODO. Read `AGENTS.md` before adding an import.\n\
          //! - Every file in this crate stays under 500 lines; split first, then\n\
          //!   edit.\n"

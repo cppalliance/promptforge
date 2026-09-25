@@ -2,7 +2,7 @@
 //! to close and says so quietly, a file-backed one folds its WAL into
 //! the file and drops the sidecar, leaving exactly one file behind with
 //! every grant in it while the in-memory grants stand, and the
-//! registered background task hands the shell that close as its
+//! registered background task hands the server that close as its
 //! shutdown lever.
 
 use super::*;
@@ -111,7 +111,7 @@ async fn the_registered_task_closes_the_backing_on_shutdown() {
 
     let tasks = registry.tasks();
     assert_eq!(tasks.len(), 1, "the subsystem registers one shutdown lever");
-    // The shell's sequence: spawn with serving, stop inside the graceful
+    // The server's sequence: spawn with serving, stop inside the graceful
     // shutdown. The spawn starts nothing (the actor already runs); the
     // stop is what closes the file.
     let handle = tasks[0].spawn();

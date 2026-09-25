@@ -20,7 +20,7 @@
 //! answered and the frames that follow are the relaunch's own.
 //!
 //! One task owns the socket: a single `select!` loop reads and writes
-//! the same handle, per the shell's socket rule; the session table
+//! the same handle, per the server's socket rule; the session table
 //! behind it is the harness's, [`super`]'s documented carve-out.
 
 use axum::extract::State;
@@ -296,7 +296,7 @@ async fn handle_frame(
                 // Cancellation is a stop reason: no reply frame of any
                 // kind. Pending waits announce their own deaths and the
                 // relaunched run re-asks. The relaunch reads the host
-                // snapshot, so the shell's current state is pushed first.
+                // snapshot, so the server's current state is pushed first.
                 if let Some(agents) = state.agents() {
                     agents.sync_bindings();
                 }

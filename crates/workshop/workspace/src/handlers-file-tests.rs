@@ -58,7 +58,7 @@ fn simplified(path: &Path) -> PathBuf {
     dunce::simplified(&path.canonicalize().expect("canonical")).to_path_buf()
 }
 
-/// A window geometry distinguished by `width`, as the shell would send it.
+/// A window geometry distinguished by `width`, as the desktop app would send it.
 fn window_body(width: u32) -> String {
     serde_json::json!({
         "width": width,

@@ -1,5 +1,5 @@
 //! Family-matrix fixtures: the dependency rules between product families,
-//! the shell boundary, and the classification itself. Container-privacy
+//! the desktop-app boundary, and the classification itself. Container-privacy
 //! fixtures sit in `product-container-tests.rs`.
 
 use super::test_support::{workspace_root, write_crate};
@@ -19,25 +19,25 @@ fn workspace_respects_the_product_boundary() {
 fn workshop_depends_on_workshop_server_api_only() {
     let walk = workspace_crates(&workspace_root());
     assert!(walk.violations.is_empty(), "{:?}", walk.violations);
-    let shell = walk
+    let desktop = walk
         .crates
         .iter()
         .find(|krate| krate.package == "workshop")
-        .expect("the workshop shell crate is a workspace member");
+        .expect("the workshop desktop app crate is a workspace member");
     assert!(
-        shell.deps.iter().any(|dep| dep == "workshop-server-api"),
-        "the shell reaches the server through the api crate: {:?}",
-        shell.deps
+        desktop.deps.iter().any(|dep| dep == "workshop-server-api"),
+        "the desktop app reaches the server through the api crate: {:?}",
+        desktop.deps
     );
     assert!(
-        !shell.deps.iter().any(|dep| dep == "workshop-server"),
-        "the shell never depends on workshop-server directly: {:?}",
-        shell.deps
+        !desktop.deps.iter().any(|dep| dep == "workshop-server"),
+        "the desktop app never depends on workshop-server directly: {:?}",
+        desktop.deps
     );
 }
 
 #[test]
-fn the_shell_re_adding_workshop_server_is_reported() {
+fn the_desktop_app_re_adding_workshop_server_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -58,7 +58,7 @@ fn the_shell_re_adding_workshop_server_is_reported() {
     assert!(
         violations[0].starts_with("workshop depends on workshop-server:")
             && violations[0].contains("workshop-server-api"),
-        "the violation names the shell, the forbidden dep, and the facade: {violations:?}"
+        "the violation names the desktop app, the forbidden dep, and the facade: {violations:?}"
     );
 }
 
@@ -75,7 +75,7 @@ fn other_workshop_crates_may_depend_on_workshop_server() {
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the rule binds only the shell crate: {violations:?}"
+        "the rule binds only the desktop app crate: {violations:?}"
     );
 }
 
