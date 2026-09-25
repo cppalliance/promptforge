@@ -946,7 +946,7 @@ Components, in dependency order:
 
 <step-18>
 
-### Step 18: Retire "shell" in the docs and record the vocabulary
+### Step 18: Retire "shell" in the docs and record the vocabulary [completed]
 
 - Component: Shell vocabulary
 - Piece: docs

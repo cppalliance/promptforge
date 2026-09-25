@@ -1,12 +1,12 @@
 # workshop
 
-This crate owns the desktop shell and its product lifecycle.
+This crate owns the desktop app and its product lifecycle.
 
 - Unsafe is confined to the Windows bridge (`src/bridge.rs`): dense working COM with documented failure modes and the crate's only unsafe code; its module-level `#[expect(unsafe_code)]` is deliberate, and every unsafe block has a `// SAFETY:` comment on the immediately preceding line. Do not restructure it casually, and never edit it without running its tests. No other module contains unsafe code.
 - Discovery, server-spawn, health-wait, window, and webview boot failures surface loudly with their full error chain.
 - The running event loop degrades and reports recoverable bridge failures instead of crashing the window.
-- Gateway launch is detached from the shell through the gateway-api-discovery launch contract. The shell never hosts the Gateway in-process.
-- The shell does not read Gateway configuration, own the Gateway discovery file, or kill the Gateway as part of ordinary shell teardown.
+- Gateway launch is detached from the desktop app through the gateway-api-discovery launch contract. The desktop app never hosts the Gateway in-process.
+- The desktop app does not read Gateway configuration, own the Gateway discovery file, or kill the Gateway as part of ordinary teardown.
 - Quit requests authenticated shutdown only for a sidecar-attached Gateway. A LAN-configured Gateway remains running.
 - The gateway supervisor (`src/gateway/supervisor.rs`) stays in this crate. Porting it to a shared crate defers to the headless agent mode plan, which shapes the shared API.
 - Build the window capability programmatically for the exact bound port. Do not replace it with a wildcard-port capability file.

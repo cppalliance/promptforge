@@ -11,7 +11,7 @@ alwaysApply: false
 - The package at `crates/workshop/ui/` is a sibling of the `crates/workshop/server/` crate that builds and serves it. `src/` has three layers: `base/` (lifecycle, events, paths, the `WorkshopPart` base class), `services/` (DOM-free registries and services), and `parts/` (feature directories; every panel extends `base/workshop-part.ts`).
 - Feature-based directories under `parts/` (`parts/agent/`, `parts/editor/`, `parts/layout/`, `parts/menu/`, `parts/take/`, `parts/stt/`, `parts/chrome/`, `parts/status/`, `parts/workspace/`, `parts/gateway/`). Shared code lives in `services/` or `base/`; shared UI assets (boot-loaded icons) live in `parts/shared/`; design tokens live in `tokens/`.
 - Barrel exports: every directory has an `index.ts`. Lazy directories export `register()` installing commands, menu items, panel factories, and socket subscriptions.
-- The boot shell (`main.ts`, `services/`, `base/`) loads immediately. Feature directories load via dynamic `import()` on first activation. Lazy-loaded panels never import the boot shell.
+- The entry bundle (`main.ts`, `services/`, `base/`) loads immediately. Feature directories load via dynamic `import()` on first activation. Lazy-loaded panels never import the entry bundle.
 - Registration, not central wiring: panel types, menu items, services, socket handlers, keyboard shortcuts, and lifecycle disposal self-register through the panel, menu/command, and service registries.
 
 ## CSS colocation and tokens
