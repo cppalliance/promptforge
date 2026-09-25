@@ -40,7 +40,7 @@ impl GatewayBinding {
                 Ok(false)
             };
         }
-        let snapshot = build_snapshot(base_url, api_key, 0, Some(identity))?;
+        let snapshot = build_snapshot(base_url, api_key, Some(identity))?;
         cancellation
             .run_if_active(|| {
                 let mut publication = loop {
@@ -57,16 +57,7 @@ impl GatewayBinding {
                 if cancellation.is_cancelled() {
                     return Ok(false);
                 }
-                if publication.closed {
-                    return Err(GatewayPublicationError::PublicationClosed);
-                }
-                let generation = publication.next_generation;
-                publication.next_generation = publication.next_generation.saturating_add(1);
-                let mut snapshot = snapshot;
-                snapshot.generation = generation;
-                self.current.store(std::sync::Arc::new(snapshot));
-                self.changed.send_replace(generation);
-                Ok(true)
+                self.commit(&mut publication, snapshot).map(|()| true)
             })
             .unwrap_or_else(|| {
                 if self.publication_closed() {

@@ -4,11 +4,9 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
 use super::{GatewayClient, GatewayError};
 
-type GatewaySocket =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
-
 /// An authenticated WebSocket connection to the gateway's Realtime transcription.
-pub type GatewayRealtimeSocket = GatewaySocket;
+pub type GatewayRealtimeSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 impl GatewayClient {
     /// Opens the gateway's authenticated Realtime transcription socket.
@@ -20,33 +18,7 @@ impl GatewayClient {
     /// Returns [`GatewayError::Transport`] if the socket cannot be
     /// connected (the header bound elapsing included).
     pub async fn connect_realtime(&self) -> Result<GatewayRealtimeSocket, GatewayError> {
-        self.connect_socket().await
-    }
-
-    async fn connect_socket(&self) -> Result<GatewaySocket, GatewayError> {
-        let mut url = url::Url::parse(&self.base_url)
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
-        let scheme = match url.scheme() {
-            "http" => "ws",
-            "https" => "wss",
-            scheme => {
-                return Err(GatewayError::Transport(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!("gateway URL scheme {scheme:?} cannot be upgraded to a WebSocket"),
-                ))));
-            }
-        };
-        url.set_scheme(scheme).map_err(|()| {
-            GatewayError::Transport(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "gateway URL scheme cannot be converted to WebSocket",
-            )))
-        })?;
-        let path = format!("{}/v1/realtime", url.path().trim_end_matches('/'));
-        url.set_path(&path);
-        url.set_query(Some("intent=transcription"));
-        url.set_fragment(None);
-        let mut request = url
+        let mut request = realtime_url(&self.base_url)?
             .as_str()
             .into_client_request()
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -70,4 +42,32 @@ impl GatewayClient {
             Err(elapsed) => Err(GatewayError::Transport(Box::new(elapsed))),
         }
     }
+}
+
+/// The Realtime transcription URL under `base_url`, upgraded to its
+/// WebSocket scheme: http to ws and https to wss.
+pub(super) fn realtime_url(base_url: &str) -> Result<url::Url, GatewayError> {
+    let mut url =
+        url::Url::parse(base_url).map_err(|source| GatewayError::Transport(Box::new(source)))?;
+    let scheme = match url.scheme() {
+        "http" => "ws",
+        "https" => "wss",
+        scheme => {
+            return Err(GatewayError::Transport(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("gateway URL scheme {scheme:?} cannot be upgraded to a WebSocket"),
+            ))));
+        }
+    };
+    url.set_scheme(scheme).map_err(|()| {
+        GatewayError::Transport(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "gateway URL scheme cannot be converted to WebSocket",
+        )))
+    })?;
+    let path = format!("{}/v1/realtime", url.path().trim_end_matches('/'));
+    url.set_path(&path);
+    url.set_query(Some("intent=transcription"));
+    url.set_fragment(None);
+    Ok(url)
 }

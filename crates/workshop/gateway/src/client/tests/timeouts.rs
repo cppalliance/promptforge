@@ -3,23 +3,7 @@
 
 use super::*;
 
-/// Binds a stub that completes TCP handshakes and then never answers,
-/// modeling a gateway that is up but wedged.
-async fn spawn_stalled_gateway() -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind stalled stub");
-    let addr = listener.local_addr().expect("stalled stub address");
-    tokio::spawn(async move {
-        // Sockets are held open and never answered until the test's
-        // runtime tears the task down.
-        let mut held = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
-            held.push(socket);
-        }
-    });
-    format!("http://{addr}")
-}
+use crate::test_gateway::stalled_gateway;
 
 /// A client against `base_url` whose bounds are tight enough to trip
 /// inside a test.
@@ -31,7 +15,7 @@ fn impatient_client(base_url: &str) -> GatewayClient {
 
 #[tokio::test]
 async fn a_stalled_gateway_trips_the_request_timeout() {
-    let base_url = spawn_stalled_gateway().await;
+    let (base_url, _accepted) = stalled_gateway().await;
     let error = impatient_client(&base_url)
         .list_models()
         .await
@@ -44,7 +28,7 @@ async fn a_stalled_gateway_trips_the_request_timeout() {
 
 #[tokio::test]
 async fn a_stalled_gateway_trips_the_stream_header_bound() {
-    let base_url = spawn_stalled_gateway().await;
+    let (base_url, _accepted) = stalled_gateway().await;
     let Err(error) = impatient_client(&base_url).subscribe_progress().await else {
         panic!("a gateway that never sends headers must trip the header bound");
     };
@@ -56,7 +40,7 @@ async fn a_stalled_gateway_trips_the_stream_header_bound() {
 
 #[tokio::test]
 async fn a_stalled_gateway_probe_reads_unreachable() {
-    let base_url = spawn_stalled_gateway().await;
+    let (base_url, _accepted) = stalled_gateway().await;
     assert!(
         !impatient_client(&base_url).health().await,
         "a gateway that accepts but never answers must read unreachable"

@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::client::GatewayClient;
+use crate::test_gateway::stalled_gateway;
 
 use std::sync::Arc;
 
@@ -27,25 +28,6 @@ fn retained(label: &str) -> StatusBarUpdate {
 async fn serve(app: axum::Router) -> String {
     let (addr, _handle) = workshop_support::fixtures::serve(app).await;
     format!("http://{addr}")
-}
-
-/// Binds a stub that completes TCP handshakes and never answers, and
-/// notifies `accepted` as it takes each connection.
-async fn stalled_stub() -> (String, Arc<Notify>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind stalled stub");
-    let addr = listener.local_addr().expect("stalled stub address");
-    let accepted = Arc::new(Notify::new());
-    let notify = Arc::clone(&accepted);
-    tokio::spawn(async move {
-        let mut held = Vec::new();
-        while let Ok((socket, _)) = listener.accept().await {
-            held.push(socket);
-            notify.notify_one();
-        }
-    });
-    (format!("http://{addr}"), accepted)
 }
 
 /// A recording status sink standing in for the status bus: the push the
@@ -167,7 +149,7 @@ async fn a_wait_with_no_reachability_watch_runs_its_future_to_completion() {
 async fn a_stalled_gateway_reads_unreachable_within_the_probe_bound() {
     // Without a bounded probe, the first probe would hang forever and the
     // heartbeat would never report at all.
-    let (stalled, _accepted) = stalled_stub().await;
+    let (stalled, _accepted) = stalled_gateway().await;
     let client = GatewayClient::new(&stalled, "")
         .expect("client builds in tests")
         .with_timeouts_for_test(Duration::from_millis(100), Duration::from_millis(100));
@@ -189,7 +171,7 @@ async fn a_stalled_gateway_reads_unreachable_within_the_probe_bound() {
 
 #[tokio::test]
 async fn a_binding_replacement_interrupts_a_stalled_probe() {
-    let (stalled, accepted) = stalled_stub().await;
+    let (stalled, accepted) = stalled_gateway().await;
     let healthy =
         serve(axum::Router::new().route("/health", get(|| async { StatusCode::OK }))).await;
     // A probe bound far past the test deadline: only the rebind can end

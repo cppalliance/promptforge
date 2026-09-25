@@ -1,4 +1,6 @@
-//! Named local gateway process shared by capability and supervision tests.
+//! Gateway test fixtures: the named local gateway process shared by
+//! capability and supervision tests, and a stalled TCP stub for the
+//! timeout tests.
 
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
@@ -242,6 +244,29 @@ impl Drop for ValidatedGateway {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+/// Binds a loopback stub that completes TCP handshakes and never answers,
+/// modeling a gateway that is up but wedged. Returns its base URL and a
+/// handle notified as the stub takes each connection.
+#[cfg(test)]
+pub(crate) async fn stalled_gateway() -> (String, std::sync::Arc<tokio::sync::Notify>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind stalled stub");
+    let addr = listener.local_addr().expect("stalled stub address");
+    let accepted = std::sync::Arc::new(tokio::sync::Notify::new());
+    let notify = std::sync::Arc::clone(&accepted);
+    tokio::spawn(async move {
+        // Sockets are held open and never answered until the test's
+        // runtime tears the task down.
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = listener.accept().await {
+            held.push(socket);
+            notify.notify_one();
+        }
+    });
+    (format!("http://{addr}"), accepted)
 }
 
 #[cfg(test)]

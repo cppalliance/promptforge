@@ -22,13 +22,9 @@ use crate::client::{GatewayClient, GatewayError};
 /// One immutable generation of every gateway client credential.
 pub struct GatewaySnapshot {
     /// The one client, serving HTTP requests and the Realtime socket alike,
-    /// used by workshop routes and the heartbeat.
+    /// used by workshop routes and the heartbeat. It holds this
+    /// generation's normalized base URL and bearer.
     client: GatewayClient,
-    /// Normalized gateway base URL paired with `client`.
-    base_url: String,
-    /// Bearer paired with `client`, exposed for consumers that authenticate
-    /// outside the HTTP client.
-    api_key: String,
     /// Monotonic generation assigned before this snapshot is published.
     generation: u64,
     /// Proven local gateway boot, absent for an explicitly configured endpoint.
@@ -40,8 +36,6 @@ impl fmt::Debug for GatewaySnapshot {
         formatter
             .debug_struct("GatewaySnapshot")
             .field("client", &self.client)
-            .field("base_url", &self.base_url)
-            .field("api_key", &"<redacted>")
             .field("generation", &self.generation)
             .field("identity", &self.identity)
             .finish_non_exhaustive()
@@ -59,13 +53,14 @@ impl GatewaySnapshot {
     /// The gateway base URL in this generation.
     #[must_use]
     pub fn base_url(&self) -> &str {
-        &self.base_url
+        self.client.base_url()
     }
 
-    /// The gateway bearer in this generation.
+    /// The gateway bearer in this generation, for consumers that
+    /// authenticate outside the HTTP client.
     #[must_use]
     pub fn api_key(&self) -> &str {
-        &self.api_key
+        &self.client.api_key
     }
 
     /// This snapshot's monotonic generation.
@@ -130,32 +125,27 @@ impl GatewayBinding {
         api_key: &str,
         identity: Option<gateway_api_discovery::ValidatedConnection>,
     ) -> Result<Self, GatewayError> {
-        let snapshot = Arc::new(build_snapshot(base_url, api_key, 0, identity)?);
-        Ok(Self {
-            current: Arc::new(ArcSwap::from(snapshot)),
-            changed: watch::channel(0).0,
-            publication: Arc::new(Mutex::new(PublicationState {
-                next_generation: 1,
-                closed: false,
-            })),
-        })
+        Ok(Self::from_snapshot(build_snapshot(
+            base_url, api_key, identity,
+        )?))
     }
 
     /// Builds a binding around a client with test-specific timeouts.
     #[cfg(any(test, feature = "test-fixtures"))]
     #[must_use]
     pub fn from_client(client: GatewayClient) -> Self {
-        let base_url = client.base_url.clone();
-        let api_key = client.api_key.clone();
-        let snapshot = Arc::new(GatewaySnapshot {
+        Self::from_snapshot(GatewaySnapshot {
             client,
-            base_url,
-            api_key,
             generation: 0,
             identity: None,
-        });
+        })
+    }
+
+    /// Publishes `snapshot` as generation zero, with replacement
+    /// publication open from generation one.
+    fn from_snapshot(snapshot: GatewaySnapshot) -> Self {
         Self {
-            current: Arc::new(ArcSwap::from(snapshot)),
+            current: Arc::new(ArcSwap::from_pointee(snapshot)),
             changed: watch::channel(0).0,
             publication: Arc::new(Mutex::new(PublicationState {
                 next_generation: 1,
@@ -201,24 +191,31 @@ impl GatewayBinding {
         api_key: &str,
         identity: Option<gateway_api_discovery::ValidatedConnection>,
     ) -> Result<(), GatewayPublicationError> {
-        let snapshot = build_snapshot(base_url, api_key, 0, identity)?;
+        let snapshot = build_snapshot(base_url, api_key, identity)?;
         self.publish_snapshot(snapshot)
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
-    fn publish_snapshot(
-        &self,
-        mut snapshot: GatewaySnapshot,
-    ) -> Result<(), GatewayPublicationError> {
+    fn publish_snapshot(&self, snapshot: GatewaySnapshot) -> Result<(), GatewayPublicationError> {
         let mut publication = self
             .publication
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        self.commit(&mut publication, snapshot)
+    }
+
+    /// Stores `snapshot` as the next generation under the held publication
+    /// lock, then wakes consumers, unless teardown closed publication.
+    fn commit(
+        &self,
+        publication: &mut PublicationState,
+        mut snapshot: GatewaySnapshot,
+    ) -> Result<(), GatewayPublicationError> {
         if publication.closed {
             return Err(GatewayPublicationError::PublicationClosed);
         }
         let generation = publication.next_generation;
-        publication.next_generation = publication.next_generation.saturating_add(1);
+        publication.next_generation = generation.saturating_add(1);
         snapshot.generation = generation;
         self.current.store(Arc::new(snapshot));
         self.changed.send_replace(generation);
@@ -329,19 +326,15 @@ impl GatewayUpdater {
 }
 
 /// Builds all clients before publication so URL and bearer never tear.
+/// Publication assigns the generation.
 fn build_snapshot(
     base_url: &str,
     api_key: &str,
-    generation: u64,
     identity: Option<gateway_api_discovery::ValidatedConnection>,
 ) -> Result<GatewaySnapshot, GatewayError> {
-    let client = GatewayClient::new(base_url, api_key)?;
-    let base_url = client.base_url().to_owned();
     Ok(GatewaySnapshot {
-        client,
-        base_url,
-        api_key: api_key.to_owned(),
-        generation,
+        client: GatewayClient::new(base_url, api_key)?,
+        generation: 0,
         identity,
     })
 }

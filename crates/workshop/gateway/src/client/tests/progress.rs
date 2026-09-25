@@ -53,6 +53,24 @@ fn mock_progress(body: String) -> axum::Router {
     )
 }
 
+/// A mock `GET /admin/progress` that answers with each of `chunks` as its
+/// own body chunk, so a test controls where the SSE payload splits.
+fn mock_progress_chunks(chunks: Vec<String>) -> axum::Router {
+    axum::Router::new().route(
+        "/admin/progress",
+        axum::routing::get(move || {
+            let chunks: Vec<Result<String, std::convert::Infallible>> =
+                chunks.iter().cloned().map(Ok).collect();
+            async move {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    axum::body::Body::from_stream(futures_util::stream::iter(chunks)),
+                )
+            }
+        }),
+    )
+}
+
 /// Subscribes against `app` and collects the whole event stream.
 async fn collect_events(app: axum::Router) -> Vec<Result<Progress, GatewayError>> {
     let base_url = serve(app).await;
@@ -155,27 +173,31 @@ async fn subscribe_progress_reassembles_an_event_split_across_chunks() {
     let begun = snapshot_json(true, "Loading profile");
     let wire = format!("data: {begun}\n\n");
     let (head, tail) = wire.split_at(wire.len() / 2);
-    let (head, tail) = (head.to_owned(), tail.to_owned());
-    let app = axum::Router::new().route(
-        "/admin/progress",
-        axum::routing::get(move || {
-            let chunks = vec![
-                Ok::<_, std::convert::Infallible>(head.clone()),
-                Ok::<_, std::convert::Infallible>(tail.clone()),
-            ];
-            async move {
-                (
-                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
-                    axum::body::Body::from_stream(futures_util::stream::iter(chunks)),
-                )
-            }
-        }),
-    );
+    let app = mock_progress_chunks(vec![head.to_owned(), tail.to_owned()]);
 
     let events = collect_events(app).await;
 
     assert_eq!(events.len(), 1, "the split block decodes as one event");
     assert!(events[0].is_ok(), "the reassembled event decodes");
+}
+
+#[tokio::test]
+async fn subscribe_progress_skips_the_orphaned_lf_of_a_crlf_split_across_chunks() {
+    // The first chunk ends on the blank line's CR, so its block dispatches
+    // at once, and the LF that opens the next chunk is an empty line.
+    let begun = snapshot_json(true, "Loading profile");
+    let finished = snapshot_json(false, "");
+    let head = format!("data: {begun}\r\n\r");
+    let tail = format!("\ndata: {finished}\r\n\r\n");
+
+    let events = collect_events(mock_progress_chunks(vec![head, tail])).await;
+
+    let snapshots: Vec<(bool, String)> = events.iter().map(decoded).collect();
+    assert_eq!(
+        snapshots,
+        vec![(true, "Loading profile".to_owned()), (false, String::new())],
+        "both events decode and the orphaned LF yields nothing"
+    );
 }
 
 #[tokio::test]
@@ -255,6 +277,52 @@ async fn subscribe_progress_decodes_crlf_terminated_blocks() {
     assert_eq!(
         snapshots,
         vec![(true, "Loading profile".to_owned()), (false, String::new())]
+    );
+}
+
+#[tokio::test]
+async fn subscribe_progress_decodes_cr_terminated_blocks() {
+    // A peer that terminates its lines with a bare CR still dispatches,
+    // and a comment line ended by CR alone stays apart from its data line.
+    let begun = snapshot_json(true, "Loading profile");
+    let finished = snapshot_json(false, "");
+    let body = format!("data: {begun}\r\r: heartbeat\rdata: {finished}\r\r");
+
+    let events = collect_events(mock_progress(body)).await;
+
+    let snapshots: Vec<(bool, String)> = events.iter().map(decoded).collect();
+    assert_eq!(
+        snapshots,
+        vec![(true, "Loading profile".to_owned()), (false, String::new())]
+    );
+}
+
+#[tokio::test]
+async fn subscribe_progress_decodes_blocks_with_mixed_line_terminators() {
+    // Each blank line pairs two different terminators, and one block
+    // ends its comment line with CR and its data line with CRLF.
+    let downloading = snapshot_json(true, "Downloading");
+    let loading = snapshot_json(true, "Loading");
+    let warming = snapshot_json(true, "Warming");
+    let idle = snapshot_json(false, "");
+    let body = format!(
+        "data: {downloading}\n\r\n\
+         data: {loading}\r\n\n\
+         : heartbeat\rdata: {warming}\r\n\r\
+         data: {idle}\n\r"
+    );
+
+    let events = collect_events(mock_progress(body)).await;
+
+    let snapshots: Vec<(bool, String)> = events.iter().map(decoded).collect();
+    assert_eq!(
+        snapshots,
+        vec![
+            (true, "Downloading".to_owned()),
+            (true, "Loading".to_owned()),
+            (true, "Warming".to_owned()),
+            (false, String::new()),
+        ]
     );
 }
 

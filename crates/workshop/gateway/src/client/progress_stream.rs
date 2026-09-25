@@ -87,8 +87,8 @@ async fn error_body(mut response: reqwest::Response) -> Result<String, GatewayEr
 }
 
 /// Decodes an SSE body into a snapshot stream: chunks are buffered
-/// until a blank line terminates an event block (LF or CRLF line endings
-/// alike), comment-only blocks (heartbeats) are skipped, and an
+/// until a blank line terminates an event block (CRLF, LF, or CR line
+/// endings alike), comment-only blocks (heartbeats) are skipped, and an
 /// undecodable block becomes one error item rather than killing the
 /// stream. A mid-stream read failure likewise surfaces as one error
 /// item, after which the stream ends. A block that grows past
@@ -150,17 +150,36 @@ fn next_buffered_event(buffer: &mut Vec<u8>) -> Option<Result<Progress, GatewayE
 }
 
 /// The end (terminator included) of the first complete event block: a
-/// blank line, whether the peer terminates its lines with LF or CRLF.
+/// blank line, whether the peer terminates its lines with CRLF, LF, CR,
+/// or a mix.
+///
+/// A CR that ends the buffer counts as a whole terminator, so a CR-only
+/// peer dispatches without waiting for its next chunk. When that CR was
+/// half of a split CRLF, the orphaned LF opens the next block as an empty
+/// line, which carries no payload and is skipped.
 fn block_end(buffer: &[u8]) -> Option<usize> {
-    let lf = buffer
-        .windows(2)
-        .position(|pair| pair == b"\n\n")
-        .map(|at| at + 2);
-    let crlf = buffer
-        .windows(4)
-        .position(|quad| quad == b"\r\n\r\n")
-        .map(|at| at + 4);
-    [lf, crlf].into_iter().flatten().min()
+    let mut start = 0;
+    loop {
+        let (length, next) = first_line(buffer.get(start..)?)?;
+        if length == 0 {
+            return Some(start + next);
+        }
+        start += next;
+    }
+}
+
+/// The length of the first line in `bytes` and the offset just past its
+/// CRLF, LF, or CR terminator, or `None` when no terminator is buffered.
+fn first_line(bytes: &[u8]) -> Option<(usize, usize)> {
+    let length = bytes
+        .iter()
+        .position(|byte| matches!(byte, b'\r' | b'\n'))?;
+    let terminator = if bytes[length..].starts_with(b"\r\n") {
+        2
+    } else {
+        1
+    };
+    Some((length, length + terminator))
 }
 
 /// Decodes one SSE event block: `data:` lines join into the payload,
@@ -168,8 +187,10 @@ fn block_end(buffer: &[u8]) -> Option<usize> {
 /// no payload (a heartbeat) yields `None`.
 fn parse_event_block(block: &[u8]) -> Option<Result<Progress, GatewayError>> {
     let mut data: Vec<u8> = Vec::new();
-    for line in block.split(|byte| *byte == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let mut unread = block;
+    while let Some((length, next)) = first_line(unread) {
+        let line = &unread[..length];
+        unread = &unread[next..];
         if let Some(rest) = line.strip_prefix(b"data:") {
             if !data.is_empty() {
                 data.push(b'\n');

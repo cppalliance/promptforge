@@ -259,13 +259,7 @@ impl GatewayClient {
     /// completed and [`GatewayError::ReadBody`] if the response body cannot
     /// be read.
     pub async fn list_models(&self) -> Result<GatewayResponse, GatewayError> {
-        let response = self
-            .authorize(self.http.get(format!("{}/v1/models", self.base_url)))
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
-        read(response).await
+        self.get_json("/v1/models").await
     }
 
     /// Fetches the gateway's profile list from `GET /admin/profiles`.
@@ -277,13 +271,7 @@ impl GatewayClient {
     /// completed and [`GatewayError::ReadBody`] if the response body cannot
     /// be read.
     pub async fn list_profiles(&self) -> Result<GatewayResponse, GatewayError> {
-        let response = self
-            .authorize(self.http.get(format!("{}/admin/profiles", self.base_url)))
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
-        read(response).await
+        self.get_json("/admin/profiles").await
     }
 
     /// Fetches the gateway's live status from `GET /admin/status`, which
@@ -296,8 +284,14 @@ impl GatewayClient {
     /// completed and [`GatewayError::ReadBody`] if the response body cannot
     /// be read.
     pub async fn profile_status(&self) -> Result<GatewayResponse, GatewayError> {
+        self.get_json("/admin/status").await
+    }
+
+    /// Sends an authorized `GET` for `path` under the whole-request bound
+    /// and buffers the answer, non-success status included.
+    async fn get_json(&self, path: &str) -> Result<GatewayResponse, GatewayError> {
         let response = self
-            .authorize(self.http.get(format!("{}/admin/status", self.base_url)))
+            .authorize(self.http.get(format!("{}{path}", self.base_url)))
             .timeout(self.request_timeout)
             .send()
             .await

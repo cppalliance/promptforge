@@ -653,7 +653,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-6>
 
-### Step 6: Deduplicate the binding and the client, and close the gateway test gaps
+### Step 6: Deduplicate the binding and the client, and close the gateway test gaps [completed]
 
 - Component: Gateway
 - Artifacts:
