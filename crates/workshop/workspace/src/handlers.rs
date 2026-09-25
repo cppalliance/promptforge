@@ -17,9 +17,7 @@ use crate::blocking::try_blocking;
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
 
-#[path = "handlers-file.rs"]
 mod file;
-#[path = "handlers-file-state.rs"]
 mod file_state;
 
 /// The workspace routes, narrowed to the [`Workspace`] service - the only
@@ -213,5 +211,4 @@ fn respond<T: Serialize>(result: Result<T, WorkspaceError>) -> Response {
 }
 
 #[cfg(test)]
-#[path = "handlers-tests.rs"]
 mod tests;

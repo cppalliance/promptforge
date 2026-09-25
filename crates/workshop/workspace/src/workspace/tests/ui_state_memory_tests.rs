@@ -271,7 +271,7 @@ async fn an_over_cap_value_is_refused_without_touching_memory_or_file() {
     let path = home.path().join("cap.pfwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
-    let cap = crate::workspace_file::ui_state::UI_STATE_VALUE_CAP;
+    let cap = crate::workspace_file::ui_state_kv::UI_STATE_VALUE_CAP;
 
     let oversized = string_of_serialized_len(cap + 1);
     assert_eq!(oversized.to_string().len(), cap + 1);

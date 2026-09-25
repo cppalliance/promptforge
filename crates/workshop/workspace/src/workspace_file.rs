@@ -9,7 +9,7 @@
 //!
 //! Schema v1 holds three tables: `meta`, `grants`, and `kv`. The `kv`
 //! table holds the window geometry and the opaque ui-state values the
-//! SPA owns ([`ui_state`]). These table names are reserved for
+//! SPA owns ([`ui_state_kv`]). These table names are reserved for
 //! follow-on projects and unused in v1: `agent_windows`, `run_presets`,
 //! `runs`, `run_events`, `agents`, `documents`.
 
@@ -26,17 +26,14 @@ use serde::{Deserialize, Serialize};
 use shared_error_source::DatabaseSource;
 use tokio::sync::{mpsc, oneshot};
 
-#[path = "workspace_file-actor.rs"]
 mod actor;
-#[path = "workspace_file-siblings.rs"]
 mod siblings;
-#[path = "workspace_file-ui-state.rs"]
-pub(crate) mod ui_state;
+pub(crate) mod ui_state_kv;
 
 pub(crate) use actor::now_rfc3339;
 use actor::{COMMAND_QUEUE_DEPTH, Command, SCHEMA_V1};
 use siblings::{already_taken, copy_siblings_or_clean_up, plan_siblings};
-pub(crate) use ui_state::{UI_STATE_KEYS, check_ui_state_cap, empty_ui_state, ui_state_key};
+pub(crate) use ui_state_kv::{UI_STATE_KEYS, check_ui_state_cap, empty_ui_state, ui_state_key};
 
 use crate::blocking::{blocking, try_blocking};
 
@@ -490,5 +487,4 @@ pub(crate) fn stem_of(path: &Path) -> String {
 }
 
 #[cfg(test)]
-#[path = "workspace-file-tests.rs"]
 mod tests;

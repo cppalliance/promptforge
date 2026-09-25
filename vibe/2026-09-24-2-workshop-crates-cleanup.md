@@ -1078,7 +1078,7 @@ Components, in dependency order:
 
 <step-27>
 
-### Step 27: Move the hyphenated groups into directories
+### Step 27: Move the hyphenated groups into directories [completed]
 
 - Component: Structural consolidation
 - Piece: layout

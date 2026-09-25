@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use tokio::sync::{mpsc, oneshot};
 
-use super::ui_state::{put_ui_state_row, read_ui_state_rows};
+use super::ui_state_kv::{put_ui_state_row, read_ui_state_rows};
 use super::{
     FORMAT_NAME, GrantRow, KV_WINDOW, META_CREATED_AT, META_FORMAT, META_NAME, META_VERSION,
     SUPPORTED_VERSION, WindowState, WorkspaceContents, WorkspaceFileError, io_failure,

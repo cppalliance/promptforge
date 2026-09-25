@@ -25,13 +25,9 @@ use serde::Serialize;
 use crate::error::WorkspaceError;
 use crate::workspace_file::{WindowState, now_rfc3339};
 
-#[path = "workspace-backing.rs"]
 mod backing;
-#[path = "workspace-confine.rs"]
 mod confine;
-#[path = "workspace-pointer.rs"]
 mod pointer;
-#[path = "workspace-token.rs"]
 mod token;
 
 use backing::Backing;
@@ -486,14 +482,10 @@ impl Workspace {
 }
 
 #[cfg(test)]
-#[path = "workspace-tests.rs"]
 mod tests;
 #[cfg(test)]
-#[path = "workspace-tests-close.rs"]
 mod tests_close;
 #[cfg(test)]
-#[path = "workspace-tests-reopen.rs"]
 mod tests_reopen;
 #[cfg(test)]
-#[path = "workspace-tests-switch.rs"]
 mod tests_switch;

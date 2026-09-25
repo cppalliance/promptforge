@@ -11,7 +11,7 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
 
 use crate::handlers::routes;
-use crate::workspace_file::ui_state::UI_STATE_VALUE_CAP;
+use crate::workspace_file::ui_state_kv::UI_STATE_VALUE_CAP;
 
 /// Collects a response body already buffered in memory and parses it.
 async fn json_body(response: Response) -> serde_json::Value {

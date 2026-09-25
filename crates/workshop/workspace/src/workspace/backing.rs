@@ -21,8 +21,7 @@ use crate::workspace_file::{
 use super::confine::names_same_file;
 use super::{GrantEntry, GrantMeta, Workspace, WorkspaceSummary};
 
-#[path = "workspace-ui-state.rs"]
-mod ui_state;
+mod ui_state_memory;
 
 /// The display name of a workspace that has no file yet.
 pub(crate) const EPHEMERAL_NAME: &str = "Untitled";

@@ -2,7 +2,7 @@
 //! grants, and the CI-aware helper that turns a silent symlink skip into
 //! a CI failure.
 //!
-//! The confinement pipeline in `workspace-confine.rs` rejects `..` and
+//! The confinement pipeline in `workspace/confine.rs` rejects `..` and
 //! Windows alternate-data-stream colons lexically, canonicalizes the rest
 //! (resolving symlinks, junctions, case, and verbatim `\\?\` prefixes), and
 //! prefix-matches the canonical path against the canonical grants. These

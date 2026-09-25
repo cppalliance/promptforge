@@ -21,7 +21,7 @@ use axum::routing::{get, put};
 
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
-use crate::workspace_file::ui_state::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
+use crate::workspace_file::ui_state_kv::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
 
 use super::file::SavedResponse;
 use super::respond;
@@ -67,5 +67,4 @@ async fn store(
 }
 
 #[cfg(test)]
-#[path = "handlers-file-state-tests.rs"]
 mod tests;

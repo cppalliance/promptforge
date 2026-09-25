@@ -142,5 +142,4 @@ async fn after_switch(workspace: &Workspace, result: Result<(), WorkspaceError>)
 }
 
 #[cfg(test)]
-#[path = "handlers-file-tests.rs"]
 mod tests;

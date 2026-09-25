@@ -8,7 +8,7 @@ use serde_json::json;
 use super::*;
 use crate::Workspace;
 use crate::error::WorkspaceError;
-use crate::workspace_file::ui_state::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
+use crate::workspace_file::ui_state_kv::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
 
 /// A contents value with no grants, no window, and no ui state.
 fn bare_contents(name: &str) -> WorkspaceContents {

@@ -6,10 +6,8 @@ use std::path::PathBuf;
 use super::actor::SCHEMA_V1;
 use super::*;
 
-#[path = "workspace-file-tests-mutations.rs"]
 mod mutations;
-#[path = "workspace-file-tests-ui-state.rs"]
-mod ui_state;
+mod ui_state_kv_tests;
 
 #[test]
 fn the_database_variant_reaches_the_engine_error_through_the_shared_wrapper() {

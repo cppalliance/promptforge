@@ -2,16 +2,11 @@
 
 use super::*;
 
-#[path = "workspace-tests-backing.rs"]
 mod backing;
-#[path = "workspace-tests-grants.rs"]
 mod grants;
-#[path = "workspace-tests-jail.rs"]
 mod jail;
-#[path = "workspace-tests-pointer.rs"]
 mod pointer;
-#[path = "workspace-tests-ui-state.rs"]
-mod ui_state;
+mod ui_state_memory_tests;
 
 /// A workspace with one granted tempdir, returned alongside so the
 /// directory outlives the test.

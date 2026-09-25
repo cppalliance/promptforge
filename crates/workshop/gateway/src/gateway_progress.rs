@@ -17,7 +17,6 @@
 //! appeared still waits out its minimum visible time first, so a
 //! dropped stream cannot flash it.
 
-#[path = "gateway_progress-presenter.rs"]
 mod presenter;
 
 use std::future::Future;
@@ -313,5 +312,4 @@ async fn wake_at(at: Option<Instant>) {
 }
 
 #[cfg(test)]
-#[path = "gateway_progress-tests.rs"]
 mod tests;
