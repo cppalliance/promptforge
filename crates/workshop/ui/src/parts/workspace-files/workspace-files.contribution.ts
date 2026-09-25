@@ -20,7 +20,9 @@
 // and records the file in the recent-files store. Failures paint the
 // status bar, exactly as the other file actions do; success is silent,
 // the refreshed tree being its own confirmation; a cancelled picker is
-// a no-op.
+// a no-op. A 408 paints too, but the route deadline abandons only the
+// answer, not a switch that already committed, so the page then asks the
+// server where it stands and follows it (resyncAfterTimeout).
 //
 // The workspace-scoped UI state (plan step 13) follows the switch too. The
 // .pfwork file holds the dock layout, the tree's expanded folders, and
@@ -37,7 +39,7 @@
 import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { registerAction, type ActionDescriptor } from "../../services/action-registry";
 import type { ParseError } from "../../services/context-key-expr";
-import { errorText, type Result } from "../../services/error-catalog";
+import { errorText, isCatalogError, type Result } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
 import { MenuId } from "../../services/menu-registry";
 import { DOCK } from "../../services/panel-registry";
@@ -123,6 +125,36 @@ async function announceSwitched(path: string): Promise<void> {
   getService(RECENT_FILES_STORE).add(path);
 }
 
+/** Whether a switch failed on the server's route deadline (a 408). */
+function timedOut(error: unknown): boolean {
+  return isCatalogError(error) && error.status === 408;
+}
+
+/**
+ * The page's follow-up to a switch that answered 408, after the error is
+ * painted. The server may have committed the switch before its deadline
+ * abandoned the answer, so the workspace as it stands decides: when it is
+ * `target`, `finish` runs the page's side exactly as a success would;
+ * otherwise a plain workspace-changed event makes the tree and the title
+ * re-list whatever grants the server holds. A failed re-read is logged
+ * and leaves the page as it was; the painted error already says the
+ * outcome is unknown.
+ */
+async function resyncAfterTimeout(target: string, finish: () => Promise<void>): Promise<void> {
+  let current: WorkspaceFileResponse;
+  try {
+    current = await currentWorkspaceFile();
+  } catch (error) {
+    console.warn(`workspace resync after a timed-out switch: ${errorText(error)}`);
+    return;
+  }
+  if (current.path === target) {
+    await finish();
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+}
+
 /** The string entries of `value[key]` when it is an array; empty otherwise. */
 function stringsUnder(value: unknown, key: string): string[] {
   if (!isRecord(value)) {
@@ -205,21 +237,27 @@ async function pickWorkspaceFile(): Promise<string | null> {
  * Recent row or a Ctrl+P hit) the picker is skipped and the argument is
  * the file; otherwise the native picker filtered to .pfwork supplies it.
  * A cancelled picker is a no-op; a refusal reports and changes nothing
- * on the page.
+ * on the page; a timeout reports and then resyncs.
  */
 async function openWorkspaceFromFile(path?: unknown): Promise<void> {
   const target = typeof path === "string" ? path : await pickWorkspaceFile();
   if (target === null) {
     return;
   }
+  const finish = async (): Promise<void> => {
+    await applyOpenedWorkspaceState();
+    await announceSwitched(target);
+  };
   try {
     await openWorkspaceFile(target);
   } catch (error) {
     reportError(`Could not open ${target}: ${errorText(error)}`);
+    if (timedOut(error)) {
+      await resyncAfterTimeout(target, finish);
+    }
     return;
   }
-  await applyOpenedWorkspaceState();
-  await announceSwitched(target);
+  await finish();
 }
 
 /**
@@ -251,7 +289,8 @@ async function currentWorkspaceName(): Promise<string> {
  * save dialog seeded with the current name, the extension normalized,
  * the switch posted, `afterSwitch` run against the new file, then the
  * page's announcement. A cancelled picker answers null and is a no-op;
- * a refusal reports and changes nothing.
+ * a refusal reports and changes nothing; a timeout reports and then
+ * resyncs.
  */
 async function switchThroughSavePicker(
   title: string,
@@ -270,14 +309,20 @@ async function switchThroughSavePicker(
     return;
   }
   const target = withWorkspaceExtension(picked);
+  const finish = async (): Promise<void> => {
+    afterSwitch();
+    await announceSwitched(target);
+  };
   try {
     await post(target);
   } catch (error) {
     reportError(`Could not ${verb} ${target}: ${errorText(error)}`);
+    if (timedOut(error)) {
+      await resyncAfterTimeout(target, finish);
+    }
     return;
   }
-  afterSwitch();
-  await announceSwitched(target);
+  await finish();
 }
 
 /**

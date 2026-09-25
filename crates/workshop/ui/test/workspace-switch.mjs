@@ -25,7 +25,11 @@
 // is the real thing (UM-001, OP-001): once /workspace/file/open has
 // resolved the tree never renders the previous workspace's roots, and
 // the panel and the title together fetch GET /workspace/tree exactly
-// once for the switch.
+// once for the switch. A 408 from Open, Save As, or Duplicate paints the
+// error and re-reads GET /workspace/file/current: when the server reports
+// the target, the switch landed late and the page finishes it as a
+// success does (the tree shows the opened workspace's roots); otherwise
+// the tree re-lists the roots once and nothing is applied or written.
 // Run: node --test test/workspace-switch.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -529,6 +533,170 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
   check("a successful duplicate posts to /workspace/file/duplicate", fetches.at(-1)?.url === "/workspace/file/duplicate");
   check("a successful duplicate writes no workspace state", storage.sets.length === setsBefore);
   check("a successful duplicate applies no layout", dock.fromJSONCalls.length === fromJsonBefore && reloads === reloadsBefore);
+}
+
+// --- A 408 switch: the server may have committed it anyway ----------------------------
+
+// The route deadline abandons the answer, not a switch that already
+// committed (the server swaps the backing, then awaits the old file's
+// close), so after a 408 only GET /workspace/file/current says where the
+// server stands.
+const TIMED_OUT = {
+  status: 408,
+  body: {
+    error: {
+      code: "deadline_elapsed",
+      message: "the request did not finish within its 10s deadline; the operation may still complete",
+    },
+  },
+};
+const DELTA_PATH = "C:\\work\\Delta.pfwork";
+const DELTA_ROOTS = { path: null, entries: [dir("delta", "C:\\delta")] };
+const DELTA_EXPANDED = ["C:\\delta"];
+const DELTA_CURRENT = { ...CURRENT, path: DELTA_PATH, name: "Delta", grants: [{ path: "C:\\delta", exists: true }] };
+const trafficSince = (start) => fetches.slice(start).map((entry) => `${entry.method} ${entry.url}`).join(",");
+
+{
+  const fetchesBefore = fetches.length;
+  const reloadsBefore = reloads;
+  const fromJsonBefore = dock.fromJSONCalls.length;
+  fileState = { layout: FILE_LAYOUT, tree: { expanded: DELTA_EXPANDED }, closed_editors: { paths: [] } };
+  // The open committed before the deadline answered: the server lists the
+  // file's roots from here on.
+  rootsListing = DELTA_ROOTS;
+  window.__TAURI_DIALOG__.answer = DELTA_PATH;
+  answerQueue.push(TIMED_OUT, { status: 200, body: DELTA_CURRENT });
+  await Commands.execute("workbench.action.openWorkspace");
+  await flush();
+  check(
+    "a timed-out open paints the deadline error",
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("deadline") === true,
+  );
+  check("a timed-out open re-reads GET /workspace/file/current", trafficSince(fetchesBefore) === "POST /workspace/file/open,GET /workspace/file/current");
+  check("after a timed-out open that landed, the tree shows the opened workspace's roots", rootsOnScreen().join(",") === "C:\\delta");
+  check("after a timed-out open that landed, the title follows the opened workspace", window.document.title === "delta");
+  check(
+    "a timed-out open that landed applies the file's state as a success does",
+    reloads === reloadsBefore + 1 && dock.fromJSONCalls.length === fromJsonBefore + 1 && isDeepStrictEqual([...tree.expandedPaths], DELTA_EXPANDED),
+  );
+  check("a timed-out open that landed announces the opened file", window.__TAURI_EVENTS__.emitted.at(-1)?.payload?.path === DELTA_PATH);
+}
+
+{
+  const fetchesBefore = fetches.length;
+  const reloadsBefore = reloads;
+  const fromJsonBefore = dock.fromJSONCalls.length;
+  const rootsFetchesBefore = rootsFetches;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Epsilon.pfwork";
+  answerQueue.push(TIMED_OUT, { status: 200, body: DELTA_CURRENT });
+  await Commands.execute("workbench.action.openWorkspace");
+  await flush();
+  check("a timed-out open that never landed re-reads GET /workspace/file/current", trafficSince(fetchesBefore) === "POST /workspace/file/open,GET /workspace/file/current");
+  check("a timed-out open that never landed re-lists the roots once", rootsFetches === rootsFetchesBefore + 1 && rootsOnScreen().join(",") === "C:\\delta");
+  check(
+    "a timed-out open that never landed applies nothing",
+    reloads === reloadsBefore && dock.fromJSONCalls.length === fromJsonBefore && window.__TAURI_EVENTS__.emitted.length === emittedBefore,
+  );
+}
+
+const ZETA_PATH = "C:\\work\\Zeta.pfwork";
+{
+  const fetchesBefore = fetches.length;
+  const setsBefore = storage.sets.length;
+  window.__TAURI_DIALOG__.answer = ZETA_PATH;
+  answerQueue.push(
+    { status: 200, body: DELTA_CURRENT },
+    TIMED_OUT,
+    { status: 200, body: { ...DELTA_CURRENT, path: ZETA_PATH, name: "Zeta" } },
+  );
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  check("a timed-out save-as paints the deadline error", statusMessages.at(-1)?.label.includes("deadline") === true);
+  check(
+    "a timed-out save-as re-reads GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save_as,GET /workspace/file/current",
+  );
+  const sets = storage.sets.slice(setsBefore);
+  check(
+    "a timed-out save-as that landed writes the live state into the new file once each",
+    sets.length === 3 && [...new Set(sets.map((entry) => entry.key))].sort().join(",") === "closed_editors,layout,tree",
+  );
+  check("a timed-out save-as that landed announces the new file", window.__TAURI_EVENTS__.emitted.at(-1)?.payload?.path === ZETA_PATH);
+  check("after a timed-out save-as the tree keeps the workspace's roots", rootsOnScreen().join(",") === "C:\\delta");
+}
+
+{
+  const fetchesBefore = fetches.length;
+  const setsBefore = storage.sets.length;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Eta.pfwork";
+  answerQueue.push(
+    { status: 200, body: { ...DELTA_CURRENT, path: ZETA_PATH, name: "Zeta" } },
+    TIMED_OUT,
+    { status: 200, body: { ...DELTA_CURRENT, path: ZETA_PATH, name: "Zeta" } },
+  );
+  await Commands.execute("workbench.action.saveWorkspaceAs");
+  await flush();
+  check(
+    "a timed-out save-as that never landed re-reads GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/save_as,GET /workspace/file/current",
+  );
+  check("a timed-out save-as that never landed writes nothing", storage.sets.length === setsBefore);
+  check("a timed-out save-as that never landed announces nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
+}
+
+// Duplicate shares the save-picker switch, and the server's duplicate
+// route the same deadline tier, so a late commit resyncs there too.
+const ZETA_COPY_PATH = "C:\\work\\Zeta copy.pfwork";
+const ZETA_COPY_CURRENT = { ...DELTA_CURRENT, path: ZETA_COPY_PATH, name: "Zeta copy" };
+{
+  const fetchesBefore = fetches.length;
+  const setsBefore = storage.sets.length;
+  const reloadsBefore = reloads;
+  const fromJsonBefore = dock.fromJSONCalls.length;
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Zeta copy";
+  answerQueue.push(
+    { status: 200, body: { ...DELTA_CURRENT, path: ZETA_PATH, name: "Zeta" } },
+    TIMED_OUT,
+    { status: 200, body: ZETA_COPY_CURRENT },
+  );
+  await Commands.execute("workbench.action.duplicateWorkspace");
+  await flush();
+  check("a timed-out duplicate paints the deadline error", statusMessages.at(-1)?.label.includes("deadline") === true);
+  check(
+    "a timed-out duplicate re-reads GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/duplicate,GET /workspace/file/current",
+  );
+  check("a timed-out duplicate that landed announces the copy", window.__TAURI_EVENTS__.emitted.at(-1)?.payload?.path === ZETA_COPY_PATH);
+  check("a timed-out duplicate that landed writes no workspace state", storage.sets.length === setsBefore);
+  check("a timed-out duplicate that landed applies no layout", reloads === reloadsBefore && dock.fromJSONCalls.length === fromJsonBefore);
+  check("after a timed-out duplicate the tree keeps the workspace's roots", rootsOnScreen().join(",") === "C:\\delta");
+}
+
+{
+  const fetchesBefore = fetches.length;
+  const setsBefore = storage.sets.length;
+  const reloadsBefore = reloads;
+  const fromJsonBefore = dock.fromJSONCalls.length;
+  const rootsFetchesBefore = rootsFetches;
+  const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Theta.pfwork";
+  answerQueue.push({ status: 200, body: ZETA_COPY_CURRENT }, TIMED_OUT, { status: 200, body: ZETA_COPY_CURRENT });
+  await Commands.execute("workbench.action.duplicateWorkspace");
+  await flush();
+  check(
+    "a timed-out duplicate that never landed re-reads GET /workspace/file/current",
+    trafficSince(fetchesBefore) === "GET /workspace/file/current,POST /workspace/file/duplicate,GET /workspace/file/current",
+  );
+  check("a timed-out duplicate that never landed re-lists the roots once", rootsFetches === rootsFetchesBefore + 1 && rootsOnScreen().join(",") === "C:\\delta");
+  check(
+    "a timed-out duplicate that never landed writes, applies, and announces nothing",
+    storage.sets.length === setsBefore &&
+      reloads === reloadsBefore &&
+      dock.fromJSONCalls.length === fromJsonBefore &&
+      window.__TAURI_EVENTS__.emitted.length === emittedBefore,
+  );
 }
 
 check("every queued server answer was consumed", answerQueue.length === 0);

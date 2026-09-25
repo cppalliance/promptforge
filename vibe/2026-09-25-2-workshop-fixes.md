@@ -353,7 +353,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-3>
 
-### Step 3: Resync the tree after a workspace-switch timeout
+### Step 3: Resync the tree after a workspace-switch timeout [completed]
 
 - Component: Editor fixes
 
