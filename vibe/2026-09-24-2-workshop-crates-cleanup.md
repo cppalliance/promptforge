@@ -1007,7 +1007,7 @@ Components, in dependency order:
 
 <step-22>
 
-### Step 22: Split the desktop supervisor
+### Step 22: Split the desktop supervisor [completed]
 
 - Component: Structural consolidation
 - Piece: split
