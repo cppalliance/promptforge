@@ -136,7 +136,7 @@ const BOOKS: &[(&str, &[(&str, &str)])] = &[
 ```
 
   - `cargo run -p build-user-guide` (no arguments): runs the `[workshop.stt]` check over every set in `BOOKS` and writes the per-set single-file exports `guide/promptforge-<set>-guide.md`, now including `promptforge-workshop-guide.md`. It no longer writes a shared SUMMARY and no longer requires `guide/src/introduction.md`.
-  - `cargo run -p build-user-guide -- stage <out>`: `<out>` must be absolute, and a relative path is rejected. For each book, it copies `guide/books/<book>/book.toml`, `guide/chrome/back-link.js`, and the book's set folders into `<out>/<book>/`. It then renders each set's `index.md` and the book's `SUMMARY.md` there and runs the SUMMARY link check per book. It never writes to the checked-in tree.
+  - `cargo run -p build-user-guide -- stage <out>`: `<out>` must be absolute, and a relative path is rejected. For each book, it copies `guide/books/<book>/book.toml` and `guide/chrome/back-link.js` to `<out>/<book>/`, and each of the book's set folders to `<out>/<book>/src/<set>/`, matching `src = "src"` in every `book.toml`. It then renders each set's `index.md` in its staged set folder and the book's `SUMMARY.md` at `<out>/<book>/src/SUMMARY.md`, and runs the SUMMARY link check per book. It never writes to the checked-in tree.
   - `cargo xtask site [--books-only]`, run in this order:
     1. Clear `target/site/` and `target/site-books/`.
     2. Run `cargo run -p build-user-guide -- stage <root>/target/site-books` as a subprocess, so `build-xtask` still depends on no workspace crates. Every path the xtask passes to a child process is absolute, built from the workspace root.
@@ -438,7 +438,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-2>
 
-### Step 2: Harness API doc stub and rustdoc banner
+### Step 2: Harness API doc stub and rustdoc banner [completed]
 
 - Component: Doc scaffolding
 - Piece: rustdoc scaffolding. Independent of Step 1; it follows Step 1 only because steps land one at a time.

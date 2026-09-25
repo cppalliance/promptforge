@@ -1,0 +1,37 @@
+<!-- The rustdoc "All docs" bar, injected through html-before-content. rustdoc lays out body as a flex row, so the bar stays hidden until the script moves it to the top of main. The rustdoc-vars meta tag's data-root-path is the relative path to the doc root, and the landing page sits one folder above that. The link names index.html rather than the folder so it also opens the page under file://. -->
+<div id="pf-all-docs" hidden style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color);">
+<a title="All PromptForge documentation" aria-label="All PromptForge documentation">All docs</a>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  var bar = document.getElementById("pf-all-docs");
+  var vars = document.querySelector('meta[name="rustdoc-vars"]');
+  var rootPath = vars && vars.getAttribute("data-root-path");
+  if (rootPath === null) {
+    console.warn(
+      "banner.html: no rustdoc-vars meta tag with data-root-path, " +
+        "so the \"All docs\" bar was not added"
+    );
+    bar.remove();
+    return;
+  }
+  bar.querySelector("a").href = rootPath + "../index.html";
+
+  function place() {
+    var main = document.querySelector("main");
+    if (!main) {
+      console.warn(
+        "banner.html: no main element, so the \"All docs\" bar was not added"
+      );
+      bar.remove();
+      return;
+    }
+    main.insertBefore(bar, main.firstChild);
+    bar.hidden = false;
+  }
+
+  document.addEventListener("DOMContentLoaded", place);
+})();
+</script>

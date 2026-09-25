@@ -1,3 +1,4 @@
+#![doc = include_str!("lib.md")]
 //! harness-api - the public API of the PromptForge harness family: the
 //! harness configuration, the gateway binding a client pushes at startup
 //! and on every gateway replacement, the session, event, and delta
