@@ -1,11 +1,23 @@
+/* mdBook's navy theme, its default dark theme, so the landing page matches the books. */
+:root {
+  color-scheme: dark;
+  --bg: hsl(226, 23%, 11%);
+  --fg: #bcbdd0;
+  --muted: #b7b9cc;
+  --links: #2b79a2;
+  --border: hsl(226, 15%, 22%);
+  --slot-bg: hsl(226, 15%, 17%);
+  --slot-fg: #737480;
+}
+
 body {
   max-width: 1000px;
   margin: 0 auto;
   padding: 2rem 1.5rem;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.6;
-  color: #222;
-  background: #fff;
+  color: var(--fg);
+  background: var(--bg);
 }
 
 h1 {
@@ -15,7 +27,7 @@ h1 {
 .tagline {
   margin-top: 0;
   font-size: 1.2rem;
-  color: #555;
+  color: var(--muted);
 }
 
 .products {
@@ -27,7 +39,7 @@ h1 {
 .products td {
   padding: 1.25rem 1rem;
   vertical-align: top;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--border);
 }
 
 .products td.product-text {
@@ -43,8 +55,8 @@ h1 {
   font-size: 1.25rem;
 }
 
-.links a {
-  color: #0b5cad;
+a {
+  color: var(--links);
 }
 
 .image-slot {
@@ -55,8 +67,9 @@ h1 {
   width: 320px;
   height: 200px;
   max-width: 100%;
-  border: 2px dashed #999;
-  color: #777;
+  border: 2px dashed var(--slot-fg);
+  color: var(--slot-fg);
+  background: var(--slot-bg);
 }
 
 @media (max-width: 800px) {
