@@ -17,7 +17,7 @@ export interface PanelContext {
   route: string;
 }
 
-/** The actions the shell announces to the workshop's status bar. */
+/** The actions the desk announces to the workshop's status bar. */
 export type PanelAction = "apply" | "revert";
 
 /** The window surface the bridge needs; tests hand in a jsdom window. */
@@ -55,7 +55,7 @@ interface PendingCall {
 /**
  * Parses the iframe URL's `bridge` parameter into a pinned http(s)
  * origin, or null when it is absent, malformed, or not a loopback host -
- * the shell then stays in its inert bridge-pending state. The bridge
+ * the desk then stays in its inert bridge-pending state. The bridge
  * origin selects the postMessage targetOrigin for every gateway call, so
  * it must be the loopback workshop and never a foreign origin: a crafted
  * `?bridge=https://evil.example` in a framed copy of this loopback-served
@@ -122,7 +122,7 @@ export class PanelBridge {
     this.post({ type: "pf-bridge-ready" });
   }
 
-  /** Announces one shell action for the workshop's status bar. */
+  /** Announces one desk action for the workshop's status bar. */
   notifyAction(action: PanelAction): void {
     this.post({ type: "pf-action", action });
   }

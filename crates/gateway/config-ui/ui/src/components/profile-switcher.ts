@@ -212,7 +212,7 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
 
   deps.store.subscribe(() => {
     // An empty name means "no profile runs" only once status has loaded;
-    // before that the shell's own status probe owns the value.
+    // before that the desk's own status probe owns the value.
     if (deps.store.loaded && deps.store.loadError === null) {
       running = deps.store.activeProfile;
     }

@@ -40,7 +40,7 @@ test("the bundled stylesheet defines the design tokens and layer order", async (
   );
 });
 
-test("the shell page links the bundled stylesheet", async () => {
+test("the desk page links the bundled stylesheet", async () => {
   const html = await readFile(path.join(distDir, "index.html"), "utf8");
   assert.match(
     html,

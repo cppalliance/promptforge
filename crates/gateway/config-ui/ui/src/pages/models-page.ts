@@ -49,7 +49,7 @@ type Filter = (typeof FILTERS)[number];
 type Sort = "name" | "size" | "kind";
 
 /** Construction dependencies for the view. */
-export interface ModelsViewDeps {
+export interface ModelsPageDeps {
   /** The config store: catalog, edits, save path. */
   store: ConfigStore;
   /** The admin API, for model-info, reveal, and cache deletes. */
@@ -61,13 +61,13 @@ export interface ModelsViewDeps {
 }
 
 /** The mounted view handle the router calls. */
-export interface ModelsView {
+export interface ModelsPage {
   /** Renders the view into `main`, selecting `selected` when given. */
   mount(main: HTMLElement, selected?: string): void;
 }
 
 /** Builds the Models view (state survives route re-mounts). */
-export function createModelsView(deps: ModelsViewDeps): ModelsView {
+export function createModelsPage(deps: ModelsPageDeps): ModelsPage {
   const { store, api, toasts } = deps;
 
   let search = "";
@@ -81,7 +81,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   const customTemplateModes = new Set<string>();
   let main: HTMLElement | null = null;
   /** The last-rendered split root; a re-render is legal only while it owns `main`. */
-  let viewRoot: HTMLElement | null = null;
+  let pageRoot: HTMLElement | null = null;
   let selected: string | undefined;
   let listBox: HTMLElement | null = null;
   let detailBox: HTMLElement | null = null;
@@ -91,7 +91,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     // Guard on this view's own root, not just `main`: `main` is shared
     // with every other view, so a store notification arriving while
     // another view owns it must not let this one repaint the pane.
-    if (main?.isConnected && viewRoot?.isConnected) {
+    if (main?.isConnected && pageRoot?.isConnected) {
       render();
     }
   });
@@ -124,7 +124,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
     renderList();
     renderDetail();
-    viewRoot = split;
+    pageRoot = split;
     main.replaceChildren(title, split);
   };
 
@@ -422,7 +422,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
   const emptyState = (): HTMLElement => {
     const empty = document.createElement("div");
-    empty.className = "view-empty empty-state";
+    empty.className = "page-empty empty-state";
     const message = document.createElement("p");
     message.textContent =
       deps.scope === "local" ? "No local models configured" : "No remote models configured";
@@ -521,7 +521,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     }
     if (!selected) {
       const hint = document.createElement("p");
-      hint.className = "view-empty";
+      hint.className = "page-empty";
       hint.textContent = "Select a model to edit its settings.";
       detailBox.replaceChildren(hint);
       return;
@@ -529,7 +529,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     const entry = store.findByName(selected);
     if (!entry) {
       const missing = document.createElement("p");
-      missing.className = "view-empty";
+      missing.className = "page-empty";
       missing.textContent = `No model named ${selected}.`;
       detailBox.replaceChildren(missing);
       return;

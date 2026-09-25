@@ -1,5 +1,5 @@
 // Boots the bundled config UI (dist/index.html + dist/app.js) in jsdom
-// and asserts the live shell's first paint: standalone with no stored
+// and asserts the live desk's first paint: standalone with no stored
 // key, the auto-boot on #app must land on the key prompt - medallion,
 // title, labeled password input, and submit button - without touching
 // the network. Run after `npm run build` (a debug `cargo build` also
@@ -49,6 +49,6 @@ test("booting the bundle without a stored key renders the key prompt", async () 
   assert.equal(
     doc.querySelector("#app header.tab-bar"),
     null,
-    "the shell stays unmounted until a key verifies",
+    "the desk stays unmounted until a key verifies",
   );
 });

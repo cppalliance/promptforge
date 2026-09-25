@@ -1,11 +1,11 @@
 // Composition root for the gateway config SPA. Boot detects the mode:
-// the workshop panel (`?mode=panel`) mounts the shell without medallion
+// the workshop panel (`?mode=panel`) mounts the desk without medallion
 // or key prompt - its API access goes through the postMessage bridge to the
 // workshop, which forwards calls with the bearer key attached, so the
 // key never enters this frame - while standalone mounts the key prompt
-// first (when no key is stored) and then the live shell: tab bar,
+// first (when no key is stored) and then the live desk: tab bar,
 // profile switcher, hash router, and the progress subscription. In
-// panel mode the workshop owns all progress display, so the shell never
+// panel mode the workshop owns all progress display, so the desk never
 // subscribes to the progress stream and instead announces apply and
 // revert actions to the parent.
 
@@ -32,12 +32,12 @@ import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
 import { SheetStore } from "./services/sheet-store";
-import { createDiscoverView } from "./pages/discover-page";
-import { createCloudModelsView } from "./pages/cloud-models-page";
-import { createModelsView } from "./pages/models-page";
-import { createProfilesView } from "./pages/profiles-page";
-import { createSecretsView } from "./pages/secrets-page";
-import { createSettingsView } from "./pages/settings-page";
+import { createDiscoverPage } from "./pages/discover-page";
+import { createCloudModelsPage } from "./pages/cloud-models-page";
+import { createModelsPage } from "./pages/models-page";
+import { createProfilesPage } from "./pages/profiles-page";
+import { createSecretsPage } from "./pages/secrets-page";
+import { createSettingsPage } from "./pages/settings-page";
 
 export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
 export { SheetStore } from "./services/sheet-store";
@@ -62,7 +62,7 @@ export interface BootWindow {
   sessionStorage: Storage;
   /** Event registration for `hashchange`. */
   addEventListener(type: string, listener: () => void): void;
-  /** Event removal, so a torn-down shell leaves no listener behind. */
+  /** Event removal, so a torn-down desk leaves no listener behind. */
   removeEventListener(type: string, listener: () => void): void;
 }
 
@@ -92,29 +92,29 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   }
 
   const api = new GatewayApi({ fetchFn, storage: win.sessionStorage });
-  // Each remount (401 -> prompt -> shell) first tears the old screen's
+  // Each remount (401 -> prompt -> desk) first tears the old screen's
   // router and progress subscription down, so cycles never stack them.
   let dispose: () => void = () => undefined;
   const showPrompt = () => {
     dispose();
     dispose = () => undefined;
-    mountKeyPrompt(root, { api, onSuccess: showShell });
+    mountKeyPrompt(root, { api, onSuccess: showDesk });
   };
-  const showShell = () => {
+  const showDesk = () => {
     dispose();
-    dispose = mountLiveShell(root, win, api, null, options);
+    dispose = mountLiveDesk(root, win, api, null, options);
   };
   // Any 401 clears the stored key and returns to the prompt.
   api.onUnauthorized = showPrompt;
   if (api.hasKey()) {
-    showShell();
+    showDesk();
   } else {
     // The `/auth` handoff lands here with an HttpOnly cookie and no
-    // stored key: probe once, mounting the shell when the cookie
+    // stored key: probe once, mounting the desk when the cookie
     // authenticates and the key prompt otherwise.
     void api.hasAmbientAuth().then((authenticated) => {
       if (authenticated) {
-        showShell();
+        showDesk();
       } else {
         showPrompt();
       }
@@ -124,10 +124,10 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
 
 /**
  * Boots panel mode. Without a usable `bridge` origin parameter the
- * shell stays inert (the bridge-pending banner, no network calls at
+ * desk stays inert (the bridge-pending banner, no network calls at
  * all). With one, the bridge announces itself to the pinned workshop
  * origin, waits for the context message, and then mounts the live
- * shell whose transport is the bridge - no sessionStorage key and no
+ * desk whose transport is the bridge - no sessionStorage key and no
  * direct gateway fetch exist in this frame.
  */
 function mountPanelMode(
@@ -148,13 +148,13 @@ function mountPanelMode(
     timeoutMs: options.bridgeTimeoutMs,
   });
   // Whether the iframe URL itself included a route, read before the
-  // pending shell's router normalizes an empty hash to #/local: an
+  // pending desk's router normalizes an empty hash to #/local: an
   // explicit hash outranks the workshop's initial-route context.
   const hadInitialHash = win.location.hash !== "";
   const disposePending = mountPanelPending(root, win);
   let mounted = false;
   bridge.onContext = (context) => {
-    // Theme context: the shell's CSS keys off the attribute, and any
+    // Theme context: the desk's CSS keys off the attribute, and any
     // later context message keeps it fresh without remounting.
     root.setAttribute("data-theme", context.theme);
     if (mounted) {
@@ -166,7 +166,7 @@ function mountPanelMode(
       win.location.hash = context.route;
     }
     const api = new GatewayApi({ fetchFn: bridge.fetchLike, storage: memoryStorage(), base: "" });
-    mountLiveShell(root, win, api, bridge, options);
+    mountLiveDesk(root, win, api, bridge, options);
   };
   bridge.start();
 }
@@ -194,14 +194,14 @@ function memoryStorage(): Storage {
 }
 
 /**
- * Mounts the live shell and starts its data flows, in either mode:
+ * Mounts the live desk and starts its data flows, in either mode:
  * standalone (`bridge` null - medallion, progress subscription, the
  * bottom status bar) or workshop panel (`bridge` set - no medallion, no
  * progress subscription, no status bar because the workshop owns
  * progress and status display, and apply/revert are announced to the
  * parent). Returns the teardown that stops the router and subscriptions.
  */
-function mountLiveShell(
+function mountLiveDesk(
   root: HTMLElement,
   win: BootWindow,
   api: GatewayApi,
@@ -222,7 +222,7 @@ function mountLiveShell(
     },
   });
   const store = new ConfigStore(api);
-  // The cloud sheet loads on shell mount; the Cloud tab (and any other
+  // The cloud sheet loads on desk mount; the Cloud tab (and any other
   // subscriber) re-renders in place when it lands.
   const sheets = new SheetStore(api, options.sheetPollMs);
   sheets.start();
@@ -339,7 +339,7 @@ function mountLiveShell(
   });
 
   // Pending-changes banner [INVENTED]: raised only when shadows already
-  // exist when the shell loads (a previous session's saves), cleared
+  // exist when the desk loads (a previous session's saves), cleared
   // once they are applied or reverted.
   const banner = document.createElement("div");
   banner.className = "banner banner-pending";
@@ -400,18 +400,18 @@ function mountLiveShell(
   statusBar?.start();
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
-  const localView = createModelsView({ store, api, toasts, scope: "local" });
-  const remoteView = createModelsView({ store, api, toasts, scope: "remote" });
-  const settingsView = createSettingsView({ store, api, toasts });
-  const discoverView = createDiscoverView({
+  const localView = createModelsPage({ store, api, toasts, scope: "local" });
+  const remoteView = createModelsPage({ store, api, toasts, scope: "remote" });
+  const settingsView = createSettingsPage({ store, api, toasts });
+  const discoverView = createDiscoverPage({
     api,
     hf: new HfApi(api),
     store,
     toasts,
   });
-  const secretsView = createSecretsView({ store, api, toasts, sheets });
-  const cloudView = createCloudModelsView({ store, sheets, api, toasts });
-  const profilesView = createProfilesView({
+  const secretsView = createSecretsPage({ store, api, toasts, sheets });
+  const cloudView = createCloudModelsPage({ store, sheets, api, toasts });
+  const profilesView = createProfilesPage({
     store,
     toasts,
     onRestartRequired: raiseRestartBanner,
@@ -419,7 +419,7 @@ function mountLiveShell(
   const stopRouter = startRouter({
     win,
     main,
-    onRoute: (view) => tabBar.setActiveView(view),
+    onRoute: (view) => tabBar.setActivePage(view),
     views: {
       local: (target, match) => localView.mount(target, match.detail),
       remote: (target, match) => remoteView.mount(target, match.detail),
@@ -447,7 +447,7 @@ function mountLiveShell(
   // suffices because the boot load runs once per process and an Apply
   // queues behind it, so during an Apply the text the overlay shows is
   // the Apply's own (or the boot load it waits behind). Subscribing at
-  // boot keeps the shell an independent subscriber whether or not the
+  // boot keeps the desk an independent subscriber whether or not the
   // workshop is connected. Panel mode never subscribes: the workshop
   // already consumes the same stream and owns all progress display.
   const stopProgress =
@@ -472,12 +472,12 @@ function mountLiveShell(
 }
 
 /**
- * Mounts the inert panel-mode shell: the same chrome minus the
+ * Mounts the inert panel-mode desk: the same chrome minus the
  * medallion and key prompt, with no network calls at all. It shows
  * until the workshop's context message arrives (and for good when the
  * iframe URL's bridge origin is missing or unusable); the profile
  * switcher is an inert placeholder and a banner says so. Returns the
- * teardown that stops its router, so the live shell can replace it
+ * teardown that stops its router, so the live desk can replace it
  * cleanly.
  */
 function mountPanelPending(root: HTMLElement, win: BootWindow): () => void {
@@ -494,7 +494,7 @@ function mountPanelPending(root: HTMLElement, win: BootWindow): () => void {
   note.textContent = "Workshop bridge pending: gateway data is unavailable in panel mode.";
 
   const main = mountChrome(root, tabBar.element, [], note);
-  return startRouter({ win, main, onRoute: (view) => tabBar.setActiveView(view) });
+  return startRouter({ win, main, onRoute: (view) => tabBar.setActivePage(view) });
 }
 
 /**
@@ -510,7 +510,7 @@ function mountChrome(
 ): HTMLElement {
   const main = document.createElement("main");
   main.id = "main";
-  main.className = "shell";
+  main.className = "desk";
   // Focusable only programmatically, as the skip link's landing spot.
   main.tabIndex = -1;
 

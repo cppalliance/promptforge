@@ -1,4 +1,4 @@
-﻿// Shared jsdom harness for the live-shell tests. The bundle is imported
+// Shared jsdom harness for the live-desk tests. The bundle is imported
 // once per test process (node --test runs each file in its own
 // process); it reads the DOM globals at call time, so every test swaps
 // in a fresh jsdom window and calls the exported `boot` with injected

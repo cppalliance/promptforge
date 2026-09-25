@@ -63,7 +63,7 @@ const VENDORS: ReadonlyArray<readonly [pattern: RegExp, label: string, color: st
 ];
 
 /** Construction dependencies for the view. */
-export interface SettingsViewDeps {
+export interface SettingsPageDeps {
   /** The config store: pending view, payload builders, save paths. */
   store: ConfigStore;
   /** The admin API, for the system poll. */
@@ -73,7 +73,7 @@ export interface SettingsViewDeps {
 }
 
 /** The mounted view handle the router calls. */
-export interface SettingsView {
+export interface SettingsPage {
   /** Renders the view into `main`, opening `section` (default system). */
   mount(main: HTMLElement, section?: string): () => void;
 }
@@ -189,12 +189,12 @@ function webSearchDefaults(): EntryData {
 }
 
 /** Builds the Settings view (state survives route re-mounts). */
-export function createSettingsView(deps: SettingsViewDeps): SettingsView {
+export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
   const { store, api, toasts } = deps;
 
   let main: HTMLElement | null = null;
   /** The last-rendered panel root; a re-render is legal only while it owns `main`. */
-  let viewRoot: HTMLElement | null = null;
+  let pageRoot: HTMLElement | null = null;
   let section: SectionId = "system";
   /** Unsaved edits: card key -> field path -> value. */
   const edits = new Map<string, Map<string, unknown>>();
@@ -231,7 +231,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     // Guard on this view's own root, not just `main`: `main` is shared
     // with every other view, so a store notification arriving while
     // another view owns it must not let this one repaint the pane.
-    if (main?.isConnected && viewRoot?.isConnected) {
+    if (main?.isConnected && pageRoot?.isConnected) {
       render();
     }
   });
@@ -292,7 +292,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     const split = document.createElement("div");
     split.className = "settings-split";
     split.append(buildNav(), buildPanel());
-    viewRoot = split;
+    pageRoot = split;
     main.replaceChildren(title, split);
   };
 
@@ -375,7 +375,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   return {
     mount(target: HTMLElement, sectionId?: string): () => void {
       main = target;
-      viewRoot = null;
+      pageRoot = null;
       section = (SECTIONS.some((item) => item.id === sectionId)
         ? sectionId
         : "system") as SectionId;
@@ -388,7 +388,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       return () => {
         stopPolling();
         main = null;
-        viewRoot = null;
+        pageRoot = null;
         liveBox = null;
       };
     },
@@ -980,7 +980,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     if ((pending === null || pending === undefined) && !draft) {
       const { card, body } = settingsCard("Speech");
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent =
         "Speech pipeline tuning is optional. Model files and roles remain in the global STT model catalog.";
       const enable = document.createElement("button");
@@ -1507,7 +1507,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     if ((webSearch === null || webSearch === undefined) && !draft) {
       const { card, body } = settingsCard("Web Search");
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent = "Web search not configured.";
       const enable = document.createElement("button");
       enable.type = "button";

@@ -29,7 +29,7 @@ import type {
 export const VRAM_WARN_FRACTION = 0.8;
 
 /** Construction dependencies for the profile checklist view. */
-export interface ProfilesViewDeps {
+export interface ProfilesPageDeps {
   /** Pending catalog and profile state. */
   store: ConfigStore;
   /** Save and validation outcomes. */
@@ -42,7 +42,7 @@ export interface ProfilesViewDeps {
 const NO_PROFILE_LABEL = "No profile";
 
 /** The mounted Profiles view. */
-export interface ProfilesView {
+export interface ProfilesPage {
   /** Renders the profile editor into `main`. */
   mount(main: HTMLElement): () => void;
 }
@@ -64,10 +64,10 @@ export function profileNameError(name: string): string | null {
 }
 
 /** Builds the Profiles view. */
-export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
+export function createProfilesPage(deps: ProfilesPageDeps): ProfilesPage {
   const { store, toasts, onRestartRequired } = deps;
   let main: HTMLElement | null = null;
-  let viewRoot: HTMLElement | null = null;
+  let pageRoot: HTMLElement | null = null;
   let selectedProfile = "";
   let availableQuery = "";
   let chosenQuery = "";
@@ -103,7 +103,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
   };
 
   store.subscribe(() => {
-    if (main?.isConnected && viewRoot?.isConnected) {
+    if (main?.isConnected && pageRoot?.isConnected) {
       render();
     }
   });
@@ -277,7 +277,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
       root.append(split);
     }
     root.append(live);
-    viewRoot = root;
+    pageRoot = root;
     main.replaceChildren(root);
   };
 
@@ -388,7 +388,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     const profile = currentProfile();
     if (!profile) {
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent = "Create a profile to choose models.";
       pane.append(empty);
       return pane;
@@ -479,7 +479,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     entries.forEach((entry, index) => list.append(option(entry, pane, index, entries)));
     if (entries.length === 0) {
       const empty = document.createElement("li");
-      empty.className = "view-empty shuttle-empty";
+      empty.className = "page-empty shuttle-empty";
       empty.textContent = "No matching models.";
       list.append(empty);
     }
@@ -807,7 +807,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
   return {
     mount(target: HTMLElement): () => void {
       main = target;
-      viewRoot = null;
+      pageRoot = null;
       render();
       return () => {
         for (const pane of ["available", "chosen"] as const) {
@@ -818,7 +818,7 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
           }
         }
         main = null;
-        viewRoot = null;
+        pageRoot = null;
       };
     },
   };

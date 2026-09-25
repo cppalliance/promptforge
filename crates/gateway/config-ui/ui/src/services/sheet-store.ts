@@ -17,7 +17,7 @@ export type SheetStatus = "loading" | "loaded" | "error";
 /** The default poll interval while the gateway downloads the sheet. */
 const DEFAULT_POLL_MS = 1_000;
 
-/** The subscribable cloud sheet store; one per shell mount. */
+/** The subscribable cloud sheet store; one per desk mount. */
 export class SheetStore {
   /** The current lifecycle state. */
   status: SheetStatus = "loading";
@@ -87,7 +87,7 @@ export class SheetStore {
     }
   }
 
-  /** Stops polling; the shell's teardown calls this. */
+  /** Stops polling; the desk's teardown calls this. */
   dispose(): void {
     this.generation += 1;
     if (this.timer !== null) {

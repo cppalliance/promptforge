@@ -60,7 +60,7 @@ const SORTS: ReadonlyArray<readonly [HfSort, string]> = [
 ];
 
 /** Construction dependencies for the view. */
-export interface DiscoverViewDeps {
+export interface DiscoverPageDeps {
   /** The admin API, for the system snapshot. */
   api: GatewayApi;
   /** The typed HF proxy client. */
@@ -72,7 +72,7 @@ export interface DiscoverViewDeps {
 }
 
 /** The mounted view handle the router calls. */
-export interface DiscoverView {
+export interface DiscoverPage {
   /** Renders the view into `main`. */
   mount(main: HTMLElement): () => void;
 }
@@ -121,7 +121,7 @@ function recommendedQuant(quants: HfQuant[], system: SystemSnapshot): string | n
 }
 
 /** Builds the Discover view (state survives route re-mounts). */
-export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
+export function createDiscoverPage(deps: DiscoverPageDeps): DiscoverPage {
   const { api, hf, store, toasts } = deps;
 
   let query = "";
@@ -142,7 +142,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   const staging = new Set<string>();
 
   let main: HTMLElement | null = null;
-  let viewRoot: HTMLElement | null = null;
+  let pageRoot: HTMLElement | null = null;
   let listBox: HTMLElement | null = null;
   let detailBox: HTMLElement | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -280,7 +280,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   };
 
   const render = (): void => {
-    if (!main || (viewRoot !== null && !viewRoot.isConnected)) {
+    if (!main || (pageRoot !== null && !pageRoot.isConnected)) {
       return;
     }
     const title = document.createElement("h1");
@@ -303,7 +303,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
 
     renderList();
     renderDetail();
-    viewRoot = split;
+    pageRoot = split;
     main.replaceChildren(...parts);
   };
 
@@ -334,7 +334,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       parts.push(errorBanner(searchError));
     } else if (rows.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent = tokenMissing
         ? "Hugging Face search is unavailable without a token."
         : "No models match the search.";
@@ -533,14 +533,14 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     }
     if (detailError !== null) {
       const failed = document.createElement("p");
-      failed.className = "view-empty";
+      failed.className = "page-empty";
       failed.textContent = `Could not load the model: ${detailError}`;
       detailBox.replaceChildren(failed);
       return;
     }
     if (detail === null) {
       const hint = document.createElement("p");
-      hint.className = "view-empty";
+      hint.className = "page-empty";
       hint.textContent = "Select a model to see its details.";
       detailBox.replaceChildren(hint);
       return;
@@ -613,7 +613,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     wrap.className = "quant-picker";
     if (model.quants.length === 0) {
       const none = document.createElement("p");
-      none.className = "view-empty";
+      none.className = "page-empty";
       none.textContent = "This repository has no GGUF files.";
       wrap.append(none);
       return wrap;
@@ -790,7 +790,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     section.append(heading);
     if (readmeHtml === null) {
       const none = document.createElement("p");
-      none.className = "view-empty";
+      none.className = "page-empty";
       none.textContent = "No README available.";
       section.append(none);
       return section;
@@ -805,7 +805,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   return {
     mount(target: HTMLElement): () => void {
       main = target;
-      viewRoot = null;
+      pageRoot = null;
       render();
       if (system === null) {
         systemController?.abort();
@@ -844,7 +844,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
         searching = false;
         detailLoading = false;
         main = null;
-        viewRoot = null;
+        pageRoot = null;
         listBox = null;
         detailBox = null;
       };

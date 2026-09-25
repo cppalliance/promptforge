@@ -1,9 +1,9 @@
-/* Shell layout: tab bar, master-detail split, banners, toasts,
+/* Desk layout: tab bar, master-detail split, banners, toasts,
    modal scaffolding, and metric tiles. Written
    mobile-first; min-width queries widen the split and the tile grid. */
 
 @layer components {
-	/* Skip link: the shell's first focusable element, parked above the
+	/* Skip link: the desk's first focusable element, parked above the
 	   viewport until keyboard focus reveals it as a pill over the tab
 	   bar. Near-black label on the accent, same 5.2:1 pair as
 	   .button-primary. */
@@ -68,7 +68,7 @@
 	}
 
 	/* View content below the tab bar. */
-	.shell {
+	.desk {
 		padding: 1rem;
 	}
 
@@ -200,7 +200,7 @@
 	}
 }
 
-/* Live-shell chrome: the key prompt screen, tab bar cluster details,
+/* Live-desk chrome: the key prompt screen, tab bar cluster details,
    the profile switcher's anchored menu, and the apply overlay's stage
    list. */
 @layer components {
@@ -234,7 +234,7 @@
 	}
 
 	/* Inline field error: the lightened danger companion passes AA on
-	   every shell surface. */
+	   every desk surface. */
 	.field-error {
 		color: var(--danger-text);
 	}
@@ -335,7 +335,7 @@
 	}
 
 	/* Stub view empty state. */
-	.view-empty {
+	.page-empty {
 		margin-block-start: 0.5rem;
 		color: var(--text-secondary);
 	}
@@ -1433,13 +1433,13 @@
 		inset-inline: 0;
 		z-index: 40;
 	}
-	/* The fixed strip overlays the shell's tail; the component toggles
+	/* The fixed strip overlays the desk's tail; the component toggles
 	   this body class so the last content line stays clear of it. */
-	.has-status-bar .shell {
+	.has-status-bar .desk {
 		padding-block-end: calc(var(--status-bar-height) + 1rem);
 	}
 
-	/* Endpoint LEDs in the shell's indicators group: green ready, amber
+	/* Endpoint LEDs in the desk's indicators group: green ready, amber
 	   provisioning, gray unconfigured. The fills match the connection
 	   dot's 3:1 floor on the bar surface. */
 	.status-leds {

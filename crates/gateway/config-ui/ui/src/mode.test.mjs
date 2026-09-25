@@ -1,7 +1,7 @@
-// Pins mode detection at boot: ?mode=panel mounts the shell without
+// Pins mode detection at boot: ?mode=panel mounts the desk without
 // the key prompt or the medallion (and calls no gateway API until the
 // workshop bridge exists), while standalone shows the medallion and the
-// skip link once a stored key admits the shell.
+// skip link once a stored key admits the desk.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -25,7 +25,7 @@ test("?mode=panel skips the key prompt and the medallion", async () => {
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
     /bridge pending/i,
-    "the shell notes the workshop bridge is pending",
+    "the desk notes the workshop bridge is pending",
   );
   assert.equal(root.querySelector("main h1.view-title")?.textContent, "Local");
   assert.equal(stub.calls.length, 0, "panel mode calls no gateway API before the bridge");

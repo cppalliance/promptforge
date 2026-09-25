@@ -30,7 +30,7 @@ import type { SheetStore } from "../services/sheet-store";
 import type { ToastStack } from "shared-ui/toast";
 
 /** Construction dependencies for the Secrets view. */
-export interface SecretsViewDeps {
+export interface SecretsPageDeps {
   /** The config store, for the dirty refresh after a save. */
   store: ConfigStore;
   /** The admin API: env read/stage and the HF connectivity probe. */
@@ -42,7 +42,7 @@ export interface SecretsViewDeps {
 }
 
 /** The mounted view. */
-export interface SecretsView {
+export interface SecretsPage {
   /** Renders the view into `main`. */
   mount(main: HTMLElement): () => void;
 }
@@ -60,7 +60,7 @@ const HF_KEY = "HF_TOKEN";
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Builds the Secrets view (fetches fresh env state on every mount). */
-export function createSecretsView(deps: SecretsViewDeps): SecretsView {
+export function createSecretsPage(deps: SecretsPageDeps): SecretsPage {
   const { store, api, sheets, toasts } = deps;
 
   /** Working rows per scope, rebuilt from the gateway on each mount. */
@@ -314,7 +314,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     }
     if (listed.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent = "No variables.";
       body.append(empty);
     }
@@ -469,7 +469,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
         section.replaceChildren(heading, sectionBody("global", render));
       } else {
         const empty = document.createElement("p");
-        empty.className = "view-empty";
+        empty.className = "page-empty";
         empty.textContent = "No global environment file is configured.";
         section.replaceChildren(heading, empty);
       }
@@ -509,7 +509,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       title.className = "view-title";
       title.textContent = "Secrets";
       const loading = document.createElement("p");
-      loading.className = "view-empty";
+      loading.className = "page-empty";
       loading.textContent = "Loading\u2026";
       target.replaceChildren(title, loading);
       void load(controller.signal)
@@ -525,7 +525,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
             return;
           }
           const failed = document.createElement("p");
-          failed.className = "view-empty";
+          failed.className = "page-empty";
           failed.textContent =
             error instanceof Error ? error.message : "The env files could not be read.";
           target.replaceChildren(title, failed);

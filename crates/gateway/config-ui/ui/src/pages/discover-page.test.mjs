@@ -291,7 +291,7 @@ test("a hub 401 (no HF_TOKEN) shows the Secrets banner instead of the key prompt
   assert.equal(banner.querySelector("a")?.getAttribute("href"), "#/secrets");
   assert.ok(
     root.querySelector(".tab-bar"),
-    "the shell stays mounted: a hub 401 must not clear the gateway key",
+    "the desk stays mounted: a hub 401 must not clear the gateway key",
   );
 });
 

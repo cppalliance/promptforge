@@ -1,7 +1,7 @@
 // The first-load API key screen [Adapted: Unsloth] (standalone only):
 // a centered card with the cold medallion, the product title, and a
 // labeled password input. A verified key lands in sessionStorage and
-// the shell mounts; a rejected key shows the inline error.
+// the desk mounts; a rejected key shows the inline error.
 
 import type { GatewayApi } from "../services/gateway-api";
 import { programIcon } from "./program-icon";
@@ -10,7 +10,7 @@ import { programIcon } from "./program-icon";
 export interface KeyPromptDeps {
   /** The admin API client; `verifyKey` probes and stores the key. */
   api: GatewayApi;
-  /** Called once a key verifies; the caller mounts the shell. */
+  /** Called once a key verifies; the caller mounts the desk. */
   onSuccess: () => void;
 }
 

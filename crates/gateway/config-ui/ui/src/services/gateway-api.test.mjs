@@ -1,7 +1,7 @@
 // Pins the refusal threading every route shares: a refusal from a
 // route other than config-apply throws a GatewayHttpError that includes the
 // envelope's `error.code` alongside its message, so callers can branch
-// on the code (the way the shell words the apply_cancelled toast).
+// on the code (the way the desk words the apply_cancelled toast).
 import assert from "node:assert/strict";
 import test from "node:test";
 

@@ -16,7 +16,7 @@ import {
 } from "lucide";
 import type { IconNode } from "lucide";
 
-import type { ViewId } from "../router";
+import type { PageId } from "../router";
 import { programIcon } from "./program-icon";
 
 // The crate version, substituted by the esbuild define in build.mjs; a
@@ -26,7 +26,7 @@ declare const __APP_VERSION__: string | undefined;
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 /** One tab: destination view, label, lucide icon, and hash target. */
-const TABS: ReadonlyArray<readonly [view: ViewId, label: string, icon: IconNode, href: string]> = [
+const TABS: ReadonlyArray<readonly [view: PageId, label: string, icon: IconNode, href: string]> = [
   ["settings", "Settings", Settings, "#/settings"],
   ["discover", "Discover", Search, "#/discover"],
   ["local", "Local", Cpu, "#/local"],
@@ -53,7 +53,7 @@ export interface TabBar {
   /** The `<header class="tab-bar">` element. */
   element: HTMLElement;
   /** Moves `aria-current` (and the accent underline) to `view`. */
-  setActiveView(view: ViewId | null): void;
+  setActivePage(view: PageId | null): void;
   /** Recolors the connection dot from the latest API outcome. */
   setConnected(ok: boolean): void;
   /**
@@ -80,7 +80,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
   const nav = document.createElement("nav");
   nav.setAttribute("aria-label", "Primary");
   nav.className = "tab-list";
-  const tabByView = new Map<ViewId, HTMLAnchorElement>();
+  const tabByPage = new Map<PageId, HTMLAnchorElement>();
   for (const [view, label, icon, href] of TABS) {
     const tab = document.createElement("a");
     tab.className = "tab";
@@ -90,7 +90,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
     text.textContent = label;
     tab.append(svg, text);
     nav.append(tab);
-    tabByView.set(view, tab);
+    tabByPage.set(view, tab);
   }
   element.append(nav);
 
@@ -131,8 +131,8 @@ export function createTabBar(options: TabBarOptions): TabBar {
       revert.addEventListener("click", () => options.onRevertAll?.());
       pending.replaceChildren(apply, revert);
     },
-    setActiveView(view: ViewId | null): void {
-      for (const [tabView, tab] of tabByView) {
+    setActivePage(view: PageId | null): void {
+      for (const [tabView, tab] of tabByPage) {
         if (tabView === view) {
           tab.setAttribute("aria-current", "page");
         } else {

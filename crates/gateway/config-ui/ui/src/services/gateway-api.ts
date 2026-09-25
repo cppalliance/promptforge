@@ -196,7 +196,7 @@ export interface SwitchOutcome {
 }
 
 /** The `GET /admin/config-pending` envelope this UI consumes. */
-export interface PendingView {
+export interface PendingPage {
   /** The shadow-preferred global config, secrets redacted. */
   config: Record<string, unknown>;
   /**
@@ -371,7 +371,7 @@ export interface GatewayApiOptions {
   base?: string;
 }
 
-/** Typed client for the admin endpoints the shell uses. */
+/** Typed client for the admin endpoints the desk uses. */
 export class GatewayApi {
   /** Fired after any 401: the stored key is gone and auth must restart. */
   onUnauthorized: (() => void) | null = null;
@@ -528,7 +528,7 @@ export class GatewayApi {
    * it is split out here because it is not a configuration key and must
    * never be sent back in a `PUT /admin/config` body.
    */
-  async getConfigPending(): Promise<PendingView> {
+  async getConfigPending(): Promise<PendingPage> {
     const data = requireRecord(await this.getJson("/admin/config-pending"), "pending config");
     if (data["profile"] === undefined) {
       return { config: {}, activeProfile: null };
@@ -575,7 +575,7 @@ export class GatewayApi {
     const response = await this.send("/admin/config-apply", { method: "POST" });
     if (!response.ok) {
       // The code distinguishes a cancelled apply (pending changes still
-      // staged) from a failed one, so the shell can word its toast.
+      // staged) from a failed one, so the desk can word its toast.
       throw await refusalError(response);
     }
     const data = requireRecord(await response.json(), "apply outcome");

@@ -132,7 +132,7 @@ export interface DiffRow {
 }
 
 /**
- * The store. Constructed once per shell mount; views subscribe and read,
+ * The store. Constructed once per desk mount; views subscribe and read,
  * the composition root drives load/apply/revert.
  */
 export class ConfigStore {

@@ -38,7 +38,7 @@ export function openReviewDiff(host: HTMLElement, rows: DiffRow[]): void {
     // leave no visible row (secrets arrive redacted on both sides), so
     // an empty table must not claim the views match.
     const empty = document.createElement("p");
-    empty.className = "view-empty";
+    empty.className = "page-empty";
     empty.textContent = "No visible value changes.";
     card.append(empty);
   } else {

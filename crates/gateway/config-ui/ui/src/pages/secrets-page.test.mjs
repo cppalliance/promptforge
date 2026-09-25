@@ -46,7 +46,7 @@ function secretsSheetFixture() {
   return sheet;
 }
 
-/** Boots the shell with the env and sheet stubbed and lands on Secrets. */
+/** Boots the desk with the env and sheet stubbed and lands on Secrets. */
 async function openSecrets(stubOptions = {}) {
   const stub = gatewayStub({
     key: "k",

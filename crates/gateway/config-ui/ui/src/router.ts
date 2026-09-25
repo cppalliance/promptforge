@@ -1,7 +1,7 @@
-// Hash router [Adapted: llama.cpp] for both shell modes.
+// Hash router [Adapted: llama.cpp] for both desk modes.
 
 /** The seven top-level destinations. */
-export type ViewId =
+export type PageId =
   | "settings"
   | "discover"
   | "local"
@@ -13,13 +13,13 @@ export type ViewId =
 /** A parsed route: the view plus its optional detail segment. */
 export interface RouteMatch {
   /** The destination view. */
-  view: ViewId;
+  view: PageId;
   /** The model name or settings section, when the route includes one. */
   detail?: string;
 }
 
 /** Display titles for the stub views. */
-const VIEW_TITLES: Readonly<Record<ViewId, string>> = {
+const VIEW_TITLES: Readonly<Record<PageId, string>> = {
   settings: "Settings",
   discover: "Discover",
   local: "Local",
@@ -99,18 +99,18 @@ export interface RouterOptions {
   /** The `<main>` region the views mount into. */
   main: HTMLElement;
   /** Fired after every render so the tab bar can follow the route. */
-  onRoute: (view: ViewId) => void;
+  onRoute: (view: PageId) => void;
   /** Real view mounts by destination; unlisted views render the stub. */
-  views?: Partial<Record<ViewId, ViewMount>>;
+  views?: Partial<Record<PageId, ViewMount>>;
 }
 
 /**
  * Renders the current route now and again on every hash change.
  * Returns the stop function that detaches the hashchange listener, so
- * a shell remount never stacks routers.
+ * a desk remount never stacks routers.
  */
 export function startRouter(options: RouterOptions): () => void {
-  let disposeView: () => void = () => undefined;
+  let disposePage: () => void = () => undefined;
   let currentRoute = "";
   const render = () => {
     let match = matchRoute(options.win.location.hash);
@@ -125,13 +125,13 @@ export function startRouter(options: RouterOptions): () => void {
       return;
     }
     currentRoute = routeKey;
-    disposeView();
-    disposeView = () => undefined;
+    disposePage();
+    disposePage = () => undefined;
     const mount = options.views?.[match.view];
     if (mount) {
       const cleanup = mount(options.main, match);
       if (cleanup) {
-        disposeView = cleanup;
+        disposePage = cleanup;
       }
     } else {
       mountStubView(options.main, match);
@@ -141,7 +141,7 @@ export function startRouter(options: RouterOptions): () => void {
   options.win.addEventListener("hashchange", render);
   render();
   return () => {
-    disposeView();
+    disposePage();
     options.win.removeEventListener("hashchange", render);
   };
 }
@@ -152,7 +152,7 @@ function mountStubView(main: HTMLElement, match: RouteMatch): void {
   title.className = "view-title";
   title.textContent = VIEW_TITLES[match.view];
   const empty = document.createElement("p");
-  empty.className = "view-empty";
+  empty.className = "page-empty";
   empty.textContent = "Nothing to show here yet.";
   main.replaceChildren(title, empty);
 }

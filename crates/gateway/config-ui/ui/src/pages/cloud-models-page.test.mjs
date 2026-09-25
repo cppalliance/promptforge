@@ -17,7 +17,7 @@ import {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Boots the shell with the sheet stubbed and lands on the Cloud tab. */
+/** Boots the desk with the sheet stubbed and lands on the Cloud tab. */
 async function openCloud(stubOptions = {}) {
   const stub = gatewayStub({ key: "k", config: modelsFixture(), ...stubOptions });
   const { dom, root } = await bootApp({ key: "k", stub, options: { sheetPollMs: 10 } });

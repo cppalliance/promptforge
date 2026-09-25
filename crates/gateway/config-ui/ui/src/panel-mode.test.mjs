@@ -1,6 +1,6 @@
 // Pins the workshop-panel bridge client: with a pinned bridge origin in
 // the URL, boot announces itself, waits for the workshop's context
-// message, and mounts the live shell whose every gateway call goes through
+// message, and mounts the live desk whose every gateway call goes through
 // postMessage - no direct gateway fetch, no sessionStorage key, and no
 // progress SSE subscription exist in the frame (the workshop owns
 // progress display). Apply and Revert All are announced to the parent;
@@ -194,7 +194,7 @@ test("a context message from a foreign origin is ignored", async () => {
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
     /bridge pending/i,
-    "a foreign context never mounts the live shell",
+    "a foreign context never mounts the live desk",
   );
 });
 
@@ -218,7 +218,7 @@ test("a non-loopback bridge origin stays inert and posts nothing", async () => {
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
     /bridge pending/i,
-    "a non-loopback bridge origin never mounts the live shell",
+    "a non-loopback bridge origin never mounts the live desk",
   );
 });
 

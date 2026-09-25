@@ -38,7 +38,7 @@ const KINDS: ReadonlyArray<readonly [kind: string, label: string]> = [
 ];
 
 /** Construction dependencies for the Cloud view. */
-export interface CloudModelsViewDeps {
+export interface CloudModelsPageDeps {
   /** The config store: the payload base and the staging write path. */
   store: ConfigStore;
   /** The cloud sheet store driving the loading/loaded/error states. */
@@ -50,13 +50,13 @@ export interface CloudModelsViewDeps {
 }
 
 /** The mounted view. */
-export interface CloudModelsView {
+export interface CloudModelsPage {
   /** Renders the view into `main`; returns the unmount cleanup. */
   mount(main: HTMLElement): () => void;
 }
 
 /** Builds the Cloud view. */
-export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsView {
+export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPage {
   const { store, sheets, toasts } = deps;
 
   let kind = "chat";
@@ -65,7 +65,7 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
   /** Canonical entry ids whose snapshot rows are expanded. */
   const expanded = new Set<string>();
   let main: HTMLElement | null = null;
-  let viewRoot: HTMLElement | null = null;
+  let pageRoot: HTMLElement | null = null;
 
   /** The currently selected provider option, when one is selected. */
   const selectedProvider = (): CloudProviderOption | null => {
@@ -96,11 +96,11 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
 
     const root = document.createElement("div");
     root.className = "cloud-view";
-    viewRoot = root;
+    pageRoot = root;
 
     if (sheets.status === "error" && sheets.sheet === null) {
       const failed = document.createElement("p");
-      failed.className = "view-empty";
+      failed.className = "page-empty";
       failed.textContent = sheets.error ?? "The cloud model sheet is unreachable.";
       const retry = document.createElement("button");
       retry.type = "button";
@@ -113,7 +113,7 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
     }
     if (sheets.sheet === null) {
       const loading = document.createElement("p");
-      loading.className = "view-empty";
+      loading.className = "page-empty";
       loading.textContent = "Loading the cloud model sheet…";
       root.append(loading);
       main.replaceChildren(title, root);
@@ -367,7 +367,7 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
     wrap.append(table);
     if (!selected || tbody.childElementCount === 0) {
       const empty = document.createElement("p");
-      empty.className = "view-empty";
+      empty.className = "page-empty";
       empty.textContent = "No models of this kind.";
       wrap.append(empty);
     }
@@ -511,7 +511,7 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
     mount(target: HTMLElement): () => void {
       main = target;
       const unsubscribe = sheets.subscribe(() => {
-        if (main?.isConnected && viewRoot?.isConnected) {
+        if (main?.isConnected && pageRoot?.isConnected) {
           render();
         }
       });
@@ -519,7 +519,7 @@ export function createCloudModelsView(deps: CloudModelsViewDeps): CloudModelsVie
       return () => {
         unsubscribe();
         main = null;
-        viewRoot = null;
+        pageRoot = null;
       };
     },
   };

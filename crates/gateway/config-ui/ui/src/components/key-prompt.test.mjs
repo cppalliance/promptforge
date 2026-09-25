@@ -1,5 +1,5 @@
 // Pins the key prompt flow: a verified key lands in sessionStorage and
-// mounts the shell, a rejected key shows the inline error without
+// mounts the desk, a rejected key shows the inline error without
 // storing anything, and a 401 from any later API call clears the key
 // and returns to the prompt.
 import assert from "node:assert/strict";
@@ -23,7 +23,7 @@ function submitKey(dom, root, value) {
   form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
 }
 
-test("a verified key is stored in sessionStorage and the shell mounts", async () => {
+test("a verified key is stored in sessionStorage and the desk mounts", async () => {
   const app = await loadApp();
   const stub = gatewayStub({ key: "sesame" });
   const { dom, root } = await bootApp({ stub });
@@ -39,18 +39,18 @@ test("a verified key is stored in sessionStorage and the shell mounts", async ()
     "sesame",
     "the verified key is stored for the session",
   );
-  assert.ok(root.querySelector("header.tab-bar"), "the shell mounted after verification");
+  assert.ok(root.querySelector("header.tab-bar"), "the desk mounted after verification");
   assert.equal(root.querySelector("#gateway-api-key"), null, "the prompt is gone");
 });
 
-test("an ambient handoff cookie mounts the shell without a stored key", async () => {
+test("an ambient handoff cookie mounts the desk without a stored key", async () => {
   // No key in the stub: the gateway's /auth cookie authenticates every
   // call, so boot's ambient probe answers 200 and the prompt never shows.
   const app = await loadApp();
   const stub = gatewayStub();
   const { dom, root } = await bootApp({ stub });
 
-  assert.ok(root.querySelector("header.tab-bar"), "the shell mounted on the ambient cookie");
+  assert.ok(root.querySelector("header.tab-bar"), "the desk mounted on the ambient cookie");
   assert.equal(root.querySelector("#gateway-api-key"), null, "no key prompt is shown");
   assert.equal(dom.window.sessionStorage.getItem(app.API_KEY_STORAGE_KEY), null, "no key is stored");
 });
@@ -70,7 +70,7 @@ test("a rejected key shows the inline invalid-key error and stores nothing", asy
   assert.equal(input.getAttribute("aria-invalid"), "true");
   assert.equal(input.getAttribute("aria-describedby"), "gateway-api-key-error");
   assert.equal(dom.window.sessionStorage.getItem(app.API_KEY_STORAGE_KEY), null);
-  assert.equal(root.querySelector("header.tab-bar"), null, "the shell did not mount");
+  assert.equal(root.querySelector("header.tab-bar"), null, "the desk did not mount");
 });
 
 test("a 401 from any later API call clears the key and returns to the prompt", async () => {
@@ -84,7 +84,7 @@ test("a 401 from any later API call clears the key and returns to the prompt", a
         : Promise.resolve(jsonResponse({ error: "unauthorized" }, 401)),
   };
   const { dom, root } = await bootApp({ key: "k", stub });
-  assert.ok(root.querySelector("header.tab-bar"), "the shell mounted with the stored key");
+  assert.ok(root.querySelector("header.tab-bar"), "the desk mounted with the stored key");
 
   authorized = false;
   root.querySelector(".profile-switcher button").click();
@@ -95,7 +95,7 @@ test("a 401 from any later API call clears the key and returns to the prompt", a
   await settle();
 
   assert.ok(root.querySelector("#gateway-api-key"), "the key prompt is back");
-  assert.equal(root.querySelector("header.tab-bar"), null, "the shell is gone");
+  assert.equal(root.querySelector("header.tab-bar"), null, "the desk is gone");
   assert.equal(
     dom.window.sessionStorage.getItem(app.API_KEY_STORAGE_KEY),
     null,
@@ -138,7 +138,7 @@ test("a 401 remount cycle tears down the old router and progress stream", async 
   dom.window.document.body.append(root);
   app.boot(root, { win, fetchFn });
   await settle();
-  assert.ok(root.querySelector("header.tab-bar"), "the shell mounted with the stored key");
+  assert.ok(root.querySelector("header.tab-bar"), "the desk mounted with the stored key");
 
   authorized = false;
   root.querySelector(".profile-switcher button").click();
@@ -156,13 +156,13 @@ test("a 401 remount cycle tears down the old router and progress stream", async 
     .querySelector("form")
     .dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
   await settle();
-  assert.ok(root.querySelector("header.tab-bar"), "the shell remounted after re-auth");
+  assert.ok(root.querySelector("header.tab-bar"), "the desk remounted after re-auth");
 
   assert.equal(added - removed, 1, "exactly one live hashchange listener remains");
   const progressCalls = gateway.calls.filter((call) => call.url.endsWith("/admin/progress"));
-  assert.equal(progressCalls.length, 2, "each shell mount opened one progress stream");
+  assert.equal(progressCalls.length, 2, "each desk mount opened one progress stream");
   assert.ok(
     progressCalls[0].init.signal.aborted,
-    "the first shell's progress stream was aborted on teardown",
+    "the first desk's progress stream was aborted on teardown",
   );
 });

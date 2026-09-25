@@ -27,7 +27,7 @@ function snapshot(busy, text) {
 }
 
 /**
- * Boots a dirty shell whose progress stream is pushable and whose
+ * Boots a dirty desk whose progress stream is pushable and whose
  * config-apply reply waits until the test settles it, so the overlay
  * stays open while events and clicks arrive. `cancelReply`, when given,
  * answers `POST /admin/queue/cancel` instead of the stub.

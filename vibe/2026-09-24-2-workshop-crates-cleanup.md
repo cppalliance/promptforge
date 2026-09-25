@@ -929,7 +929,7 @@ Components, in dependency order:
 
 <step-17>
 
-### Step 17: Rename config-ui's page identifiers and its frame to desk
+### Step 17: Rename config-ui's page identifiers and its frame to desk [completed]
 
 - Component: Shell vocabulary
 - Piece: config-ui
