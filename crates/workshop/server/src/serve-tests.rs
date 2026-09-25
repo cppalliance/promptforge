@@ -2,7 +2,7 @@
 
 use super::*;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use workshop_support::{AgentsConfig, GatewayConfig, ServerConfig};
 fn test_config(bind: &str, state_dir: &Path) -> Config {
@@ -69,27 +69,42 @@ async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
     server.shutdown().expect("graceful shutdown succeeds");
 }
 
+/// The `-wal` sidecar the workspace file's engine keeps beside `path`
+/// while the file is open.
+fn wal_of(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+/// Authors a workspace file at `file` granting `root` in a previous
+/// "run", lets go of it, and points `state_dir`'s `last-workspace` at
+/// it. Returns the granted path.
+async fn point_at_authored_workspace(state_dir: &Path, file: &Path, root: &Path) -> PathBuf {
+    let author = workshop_workspace::Workspace::new();
+    let granted = author.grant(root).expect("grant the root");
+    author.save_as(file).await.expect("save as creates");
+    author.close_backing_for_test().await;
+    std::fs::write(
+        state_dir.join("last-workspace"),
+        file.to_string_lossy().as_bytes(),
+    )
+    .expect("the pointer writes");
+    granted
+}
+
 /// The boot wiring itself, not a re-implementation of it: `serve_thread`
-/// must follow the `last-workspace` pointer before it binds, so the first
-/// request over the real listener already sees the reopened file and its
-/// grants. Deleting the `reopen_last_workspace` call in `serve_thread`
-/// fails this test and nothing else.
+/// must follow the `last-workspace` pointer before it signals readiness,
+/// so the first request over the real listener already sees the reopened
+/// file and its grants. Deleting the `reopen_last_workspace` call in
+/// `serve_thread` fails this test and nothing else.
 #[tokio::test]
 async fn spawn_reopens_the_pointed_workspace_before_readiness() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
     let file = home.path().join("mine.pfwork");
-    // Author the file in a previous "run", then let go of it.
-    let author = workshop_workspace::Workspace::new();
-    let granted = author.grant(root.path()).expect("grant the root");
-    author.save_as(&file).await.expect("save as creates");
-    author.close_backing_for_test().await;
-    std::fs::write(
-        state_dir.path().join("last-workspace"),
-        file.to_string_lossy().as_bytes(),
-    )
-    .expect("the pointer writes");
+    let granted = point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
 
     let server = spawn_with_grace(test_config("127.0.0.1:0", state_dir.path()), SHUTDOWN_GRACE)
         .expect("server spawns");
@@ -320,6 +335,62 @@ fn a_bind_conflict_fails_spawn_with_io_error() {
     assert!(
         matches!(error, SpawnError::Io(_)),
         "expected Io, got {error:?}"
+    );
+}
+
+/// The listener binds before the pointed workspace reopens, so a taken
+/// port fails boot without ever opening the file: nothing is left
+/// holding it, and no `-wal` sidecar is stranded beside it.
+#[tokio::test]
+async fn a_bind_conflict_leaves_the_pointed_workspace_unopened() {
+    let blocker = std::net::TcpListener::bind("127.0.0.1:0").expect("bind blocker");
+    let address = blocker.local_addr().expect("blocker address");
+    let state_dir = tempfile::TempDir::new().expect("tempdir");
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let file = home.path().join("mine.pfwork");
+    point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
+
+    let config = test_config(&address.to_string(), state_dir.path());
+    let error = spawn_with_grace(config, SHUTDOWN_GRACE).expect_err("a taken port must fail spawn");
+    assert!(
+        matches!(error, SpawnError::Io(_)),
+        "expected Io, got {error:?}"
+    );
+    assert!(
+        !wal_of(&file).exists(),
+        "a failed bind opened the pointed workspace and stranded its wal sidecar"
+    );
+}
+
+/// `spawn` refuses a non-loopback bind address before the server thread
+/// starts: no state is composed, so the boot temp sweep never runs and
+/// the pointed workspace file is never opened.
+#[tokio::test]
+async fn a_non_loopback_bind_fails_spawn_before_state_is_composed() {
+    let state_dir = tempfile::TempDir::new().expect("tempdir");
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let file = home.path().join("mine.pfwork");
+    point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
+    // Residue the boot sweep would remove if state were composed.
+    let orphan = state_dir.path().join("workshop-state.json.42-7.pf-tmp");
+    std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
+
+    let config = test_config("0.0.0.0:0", state_dir.path());
+    let error =
+        spawn_with_grace(config, SHUTDOWN_GRACE).expect_err("a non-loopback bind must fail spawn");
+    assert!(
+        matches!(&error, SpawnError::Io(io) if io.kind() == std::io::ErrorKind::InvalidInput),
+        "expected an InvalidInput Io error, got {error:?}"
+    );
+    assert!(
+        orphan.exists(),
+        "the boot temp sweep ran before the loopback check"
+    );
+    assert!(
+        !wal_of(&file).exists(),
+        "the pointed workspace was opened before the loopback check"
     );
 }
 

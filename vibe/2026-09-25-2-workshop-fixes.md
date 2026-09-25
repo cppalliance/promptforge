@@ -493,7 +493,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-10>
 
-### Step 10: Validate loopback first and bind before reopening the workspace
+### Step 10: Validate loopback first and bind before reopening the workspace [completed]
 
 - Component: Lifecycle ordering
 

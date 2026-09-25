@@ -144,8 +144,9 @@ pub enum SpawnError {
     #[error("build shared state")]
     State(#[from] StateError),
 
-    /// An I/O failure: the listener bind failed, the bound address could
-    /// not be read, or the server thread could not be spawned.
+    /// An I/O failure: the bind address is not loopback, the listener
+    /// bind failed, the bound address could not be read, or the server
+    /// thread could not be spawned.
     #[non_exhaustive]
     #[error("start workshop server")]
     Io(#[from] std::io::Error),
@@ -161,7 +162,8 @@ pub enum SpawnError {
 /// Returns [`SpawnError::State`] if the gateway endpoint cannot be
 /// resolved (no live gateway discovery file and no explicit `[gateway]` config)
 /// or the shared state cannot be built, and [`SpawnError::Io`] if the
-/// bind fails or the server thread cannot be spawned.
+/// bind address is not loopback, the bind fails, or the server thread
+/// cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
     spawn_inner(config, None, SHUTDOWN_GRACE)
 }
@@ -186,6 +188,9 @@ fn spawn_inner(
     gateway: Option<ResolvedGateway>,
     grace: Duration,
 ) -> Result<ServerHandle, SpawnError> {
+    // Composing state sweeps the state directory and reopening follows
+    // the workspace pointer, so a refused address must fail before either.
+    loopback_address(&config.server.bind)?;
     // Discovery runs before the server thread starts: a resolution
     // failure is the plain no-gateway error, never a bind-then-fail.
     let gateway = match gateway {
@@ -223,10 +228,11 @@ fn spawn_inner(
     }
 }
 
-/// The server thread's body: build a runtime, build state, bind, signal
-/// readiness through `ready`, then serve until `shutdown` resolves. When it
-/// does, a watchdog bounds the graceful drain at `grace` before tearing the
-/// runtime down anyway, and `stopped` reports which of the two endings ran.
+/// The server thread's body: build a runtime, build state, bind, reopen
+/// the last workspace, signal readiness through `ready`, then serve until
+/// `shutdown` resolves. When it does, a watchdog bounds the graceful drain
+/// at `grace` before tearing the runtime down anyway, and `stopped` reports
+/// which of the two endings ran.
 ///
 /// Startup failures are reported through `ready`; only serving failures
 /// become the thread's return value.
@@ -256,11 +262,6 @@ fn serve_thread(
                 return (Termination::Graceful, Ok(()));
             }
         };
-        // The last-used workspace is restored before the listener binds,
-        // so readiness means the grants are already in place; a pointer
-        // that cannot be followed starts ephemeral and never fails boot.
-        state.reopen_last_workspace().await;
-        let app = router(state.clone());
         let listener = match reuse_bind(&config.server.bind) {
             Ok(listener) => listener,
             Err(error) => {
@@ -272,6 +273,12 @@ fn serve_thread(
             Ok(address) => address,
             Err(error) => return (Termination::Graceful, Err(error)),
         };
+        // The last-used workspace is restored after the bind, so a failed
+        // bind never opens its file, and before readiness, so readiness
+        // means the grants are already in place; a pointer that cannot be
+        // followed starts ephemeral and never fails boot.
+        state.reopen_last_workspace().await;
+        let app = router(state.clone());
         let _ = ready.send(Ok((format!("http://{address}"), state.gateway_updater())));
         // The subsystems' registered background tasks start with serving
         // and stop inside the same graceful-shutdown signal, so they
@@ -324,9 +331,9 @@ fn serve_thread(
     result
 }
 
-/// Binds a TCP listener with `SO_REUSEADDR` so a restart doesn't fail on
-/// TIME_WAIT sockets from the previous instance.
-fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
+/// Parses `address` as a socket address and refuses any that is not
+/// loopback, with [`std::io::ErrorKind::InvalidInput`] either way.
+fn loopback_address(address: &str) -> std::io::Result<std::net::SocketAddr> {
     let addr: std::net::SocketAddr = address
         .parse()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -336,6 +343,15 @@ fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
             format!("refusing to bind {addr}: the workshop server binds only to loopback"),
         ));
     }
+    Ok(addr)
+}
+
+/// Binds a TCP listener with `SO_REUSEADDR` so a restart doesn't fail on
+/// TIME_WAIT sockets from the previous instance.
+fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
+    // A second line of defense behind `spawn_inner`'s check: the socket
+    // itself never binds a non-loopback address.
+    let addr = loopback_address(address)?;
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::STREAM,

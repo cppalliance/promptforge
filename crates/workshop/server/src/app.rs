@@ -220,7 +220,7 @@ impl AppState {
 
     /// Reopens the workspace file that was open when the server last
     /// ran, and returns whether one was reopened. Boot awaits this after
-    /// composing state and before the listener serves, so the first
+    /// binding the listener and before it serves, so the first
     /// request already sees the restored grants. It never fails: a
     /// missing or corrupt pointer, a vanished target, or a refused file
     /// logs and leaves the workspace ephemeral.
