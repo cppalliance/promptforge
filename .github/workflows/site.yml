@@ -1,0 +1,72 @@
+name: Deploy docs site to Pages
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - guide/**
+      - crates/build-user-guide/**
+      - crates/build-xtask/src/site.rs
+      - .github/workflows/site.yml
+permissions:
+  contents: read
+# Deploys share the `pages` group and never cancel one another. PR runs get
+# their own group, so they never queue behind a deploy, and a new push to a
+# PR cancels its stale run.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('site-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # Forks have no Pages site for these docs; skip both jobs there.
+  build:
+    if: github.repository == 'cppalliance/promptforge'
+    runs-on: ubuntu-latest
+    env:
+      MDBOOK_VERSION: 0.4.44
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install mdBook
+        run: |
+          wget -q "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar xzf "mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+
+      # The ci.yml docs job already builds both facade rustdocs on every PR,
+      # so PR runs build only the books and the landing page.
+      - name: Build books
+        if: github.event_name == 'pull_request'
+        run: MDBOOK="$PWD/mdbook" cargo xtask site --books-only
+
+      - name: Build site
+        if: github.event_name != 'pull_request'
+        run: MDBOOK="$PWD/mdbook" cargo xtask site
+
+      - name: Upload artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/site
+  deploy:
+    if: github.repository == 'cppalliance/promptforge' && github.event_name != 'pull_request'
+    needs: build
+    # The Pages permissions live only on this job, which never runs on PRs.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

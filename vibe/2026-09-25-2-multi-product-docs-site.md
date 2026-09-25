@@ -529,7 +529,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-7>
 
-### Step 7: Pages workflow cutover
+### Step 7: Pages workflow cutover [completed]
 
 - Component: Pages deployment
 - Piece: workflow. Built before housekeeping, because `guide.yml` still reads the old book config until this step replaces it.
