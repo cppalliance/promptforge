@@ -453,7 +453,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-3>
 
-### Step 3: Book table and checks-and-exports default mode
+### Step 3: Book table and checks-and-exports default mode [completed]
 
 - Component: Book assembler
 - Piece: book table. Built before staging, because `stage` iterates the table.

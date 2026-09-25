@@ -1,11 +1,10 @@
-//! Assembles the PromptForge guide: walks `guide/src/<set>/`, synthesizes a
-//! landing page per part, regenerates `guide/src/SUMMARY.md`, writes the
-//! per-set single-file exports, and fails on any link that does not resolve.
+//! Assembles the PromptForge guide: checks every set's chapters under
+//! `guide/src/<set>/` and writes the per-set single-file exports,
+//! `guide/promptforge-<set>-guide.md`.
 //!
 //! Chapter files have a numeric prefix (`01-frontmatter.md`) so a name sort
-//! is the reading order. The generator owns the chapters and the
-//! introduction; this crate owns `SUMMARY.md` and the per-part `index.md`
-//! files. Neither owned file is hand-edited.
+//! is the reading order. The generator owns the chapters; this crate owns the
+//! exports, which are never hand-edited.
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -13,12 +12,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-/// The three documentation sets, in audience order, with their part titles.
-const SETS: &[(&str, &str)] = &[
-    ("gateway", "The Gateway"),
-    ("language", "The Prompt Language"),
-    ("agent", "Agent Programs"),
+/// The books in audience order, each with its sets and their part titles.
+/// This is the only list of books; nothing else names them.
+const BOOKS: &[(&str, &[(&str, &str)])] = &[
+    ("gateway", &[("gateway", "The Gateway")]),
+    ("workshop", &[("workshop", "The Workshop")]),
+    (
+        "language",
+        &[
+            ("language", "The Prompt Language"),
+            ("agent", "Agent Programs"),
+        ],
+    ),
 ];
+
+/// Every set in `BOOKS`, in audience order, with its part title.
+fn sets() -> impl Iterator<Item = &'static (&'static str, &'static str)> {
+    BOOKS.iter().flat_map(|(_, sets)| sets.iter())
+}
 
 /// One chapter file inside a set directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,33 +61,19 @@ fn main() {
     }
 }
 
-/// Runs the full assembly over `guide/`: landing pages, SUMMARY.md, exports,
-/// and the link check.
+/// Runs the default mode over `guide/`: the `[workshop.stt]` and H1 checks
+/// on every set, then the per-set exports. Nothing is written until every
+/// set passes.
 fn assemble(guide: &Path) -> Result<(), AssembleError> {
     let src = guide.join("src");
-    let intro = src.join("introduction.md");
-    if !intro.is_file() {
-        return Err(AssembleError(format!(
-            "introduction is missing: {}",
-            intro.display()
-        )));
-    }
     check_removed_workshop_stt_claims(&src)?;
 
-    let mut parts: Vec<(&str, &str, Vec<Chapter>)> = Vec::new();
-    for (set, part_title) in SETS {
+    let mut exports = Vec::new();
+    for (set, part_title) in sets() {
         let chapters = read_chapters(&src.join(set))?;
-        let index = render_index(part_title, &chapters);
-        write_file(&src.join(set).join("index.md"), &index)?;
-        parts.push((set, part_title, chapters));
+        exports.push((set, render_export(part_title, &chapters, &src.join(set))?));
     }
-
-    let summary = render_summary(&parts);
-    check_links(&summary, &src)?;
-    write_file(&src.join("SUMMARY.md"), &summary)?;
-
-    for (set, part_title, chapters) in &parts {
-        let export = render_export(part_title, chapters, &src.join(set))?;
+    for (set, export) in exports {
         write_file(&guide.join(format!("promptforge-{set}-guide.md")), &export)?;
     }
     Ok(())
@@ -84,7 +81,7 @@ fn assemble(guide: &Path) -> Result<(), AssembleError> {
 
 /// Rejects guide text that presents the removed legacy STT section as usable.
 fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
-    for (set, _) in SETS {
+    for (set, _) in sets() {
         let set_dir = src.join(set);
         for chapter in read_chapters(&set_dir)? {
             let path = set_dir.join(chapter.file_name);
@@ -153,6 +150,13 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
 }
 
 /// Renders a part landing page: the part title and its chapter list.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "exercised by tests until the stage mode renders books"
+    )
+)]
 fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     let mut out = format!("# {part_title}\n");
     for chapter in chapters {
@@ -164,6 +168,13 @@ fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
 
 /// Renders SUMMARY.md: the introduction, then the parts in audience order
 /// with every chapter linked.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "exercised by tests until the stage mode renders books"
+    )
+)]
 fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
     let mut out = String::from("# Summary\n\n- [Introduction](introduction.md)\n");
     for (set, part_title, chapters) in parts {
@@ -196,6 +207,13 @@ fn render_export(
 
 /// Verifies that every relative link target in SUMMARY.md resolves to a file
 /// under `src/`.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "exercised by tests until the stage mode renders books"
+    )
+)]
 fn check_links(summary: &str, src: &Path) -> Result<(), AssembleError> {
     for line in summary.lines() {
         let Some(start) = line.find("](") else {
@@ -243,14 +261,13 @@ fn workspace_root() -> PathBuf {
 mod tests {
     use super::*;
 
-    /// Builds a fake guide tree with two sets and returns its root.
+    /// Builds a fake guide tree with every set in `BOOKS` and returns its root.
     fn fake_guide() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let src = dir.path().join("src");
-        fs::create_dir_all(src.join("workshop")).expect("mkdir workshop");
-        fs::create_dir_all(src.join("gateway")).expect("mkdir gateway");
-        fs::create_dir_all(src.join("language")).expect("mkdir language");
-        fs::create_dir_all(src.join("agent")).expect("mkdir agent");
+        for (set, _) in sets() {
+            fs::create_dir_all(src.join(set)).expect("mkdir set");
+        }
         fs::write(src.join("introduction.md"), "# PromptForge\n").expect("intro");
         fs::write(
             src.join("workshop").join("01-the-window.md"),
@@ -262,10 +279,20 @@ mod tests {
             "# The Editor\n\nBody.\n",
         )
         .expect("chapter 2");
-        for set in ["gateway", "language", "agent"] {
+        for (set, _) in sets().filter(|(set, _)| *set != "workshop") {
             fs::write(src.join(set).join("01-start.md"), "# Start\n\nBody.\n").expect("chapter");
         }
         dir
+    }
+
+    /// Reads every set's export from `guide`, in `BOOKS` order.
+    fn read_exports(guide: &Path) -> Vec<String> {
+        sets()
+            .map(|(set, _)| {
+                fs::read_to_string(guide.join(format!("promptforge-{set}-guide.md")))
+                    .expect("export")
+            })
+            .collect()
     }
 
     #[test]
@@ -295,8 +322,7 @@ mod tests {
     fn summary_has_parts_in_audience_order() {
         let dir = fake_guide();
         let src = dir.path().join("src");
-        let parts: Vec<(&str, &str, Vec<Chapter>)> = SETS
-            .iter()
+        let parts: Vec<(&str, &str, Vec<Chapter>)> = sets()
             .map(|(set, title)| {
                 (
                     *set,
@@ -343,17 +369,61 @@ mod tests {
     }
 
     #[test]
+    fn stt_check_covers_every_set() {
+        for (set, _) in sets() {
+            let dir = fake_guide();
+            fs::write(
+                dir.path().join("src").join(set).join("09-stale.md"),
+                "# Stale\n\nLegacy `[workshop.stt]` input is accepted.\n",
+            )
+            .expect("stale chapter");
+            let error = assemble(dir.path()).expect_err(set);
+            assert!(error.to_string().contains("09-stale.md"), "{set}: {error}");
+        }
+    }
+
+    #[test]
+    fn default_mode_writes_an_export_for_every_set() {
+        let dir = fake_guide();
+        assemble(dir.path()).expect("assemble");
+        let workshop =
+            fs::read_to_string(dir.path().join("promptforge-workshop-guide.md")).expect("export");
+        assert!(workshop.starts_with("# The Workshop\n"));
+        assert!(workshop.contains("# The Window"));
+        for ((set, title), export) in sets().zip(read_exports(dir.path())) {
+            assert!(
+                export.starts_with(&format!("# {title}\n")),
+                "{set}: {export}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_mode_writes_no_summary_or_index() {
+        let dir = fake_guide();
+        let src = dir.path().join("src");
+        assemble(dir.path()).expect("assemble");
+        assert!(!src.join("SUMMARY.md").exists());
+        for (set, _) in sets() {
+            assert!(!src.join(set).join("index.md").exists(), "{set}/index.md");
+        }
+    }
+
+    #[test]
+    fn default_mode_runs_without_an_introduction() {
+        let dir = fake_guide();
+        fs::remove_file(dir.path().join("src").join("introduction.md")).expect("remove intro");
+        assemble(dir.path()).expect("assemble without introduction");
+    }
+
+    #[test]
     fn assembly_is_deterministic() {
         let dir = fake_guide();
         assemble(dir.path()).expect("first run");
-        let first = fs::read_to_string(dir.path().join("src").join("SUMMARY.md")).expect("summary");
+        let first = read_exports(dir.path());
         assemble(dir.path()).expect("second run");
-        let second =
-            fs::read_to_string(dir.path().join("src").join("SUMMARY.md")).expect("summary");
-        assert_eq!(first, second);
-        let export =
-            fs::read_to_string(dir.path().join("promptforge-gateway-guide.md")).expect("export");
-        assert!(export.contains("# The Gateway"));
-        assert!(export.contains("# Start"));
+        assert_eq!(first, read_exports(dir.path()));
+        assert!(first[0].contains("# The Gateway"));
+        assert!(first[0].contains("# Start"));
     }
 }
