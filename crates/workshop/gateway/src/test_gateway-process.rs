@@ -1,4 +1,4 @@
-//! Child-process protocol for the named local Gateway fixture.
+//! Child-process protocol for the named local gateway fixture.
 
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};

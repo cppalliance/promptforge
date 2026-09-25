@@ -184,9 +184,9 @@ fn server_to_client_agent_frames_match_the_shared_fixture() {
 #[test]
 fn client_to_server_agent_frames_match_the_shared_fixture() {
     // `input_response` parses through its typed body; `launch`,
-    // `attach`, and `cancel` are routed from raw JSON in
-    // `session_agents::socket`, so the fixture pins exactly the fields
-    // that routing reads.
+    // `attach`, and `cancel` are routed from raw JSON in the server's
+    // `agents::socket`, so the fixture pins exactly the fields that
+    // routing reads.
     let fixture = agent_fixture();
     let response: InputResponse = serde_json::from_value(fixture["input_response"].clone())
         .expect("the fixture input_response parses");

@@ -6,12 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop support vocabulary: atomic writes, reconnect backoff, route deadlines, workshop.toml configuration, and the retained broadcast bus"
+description = "Workshop support vocabulary: atomic writes, reconnect backoff, route deadlines, workshop.toml configuration, the retained broadcast bus, error-message rendering, and the JSON state-bucket validator"
 
 [features]
 default = []
-# Exposes test seams (`ReconnectBackoff::is_escalated_for_test`) to the
-# dependent crates' integration tests.
+# Exposes test seams (`ReconnectBackoff::is_escalated_for_test` and the
+# `fixtures::serve` mock HTTP server) to the dependent crates' tests.
 test-fixtures = []
 
 [dependencies]

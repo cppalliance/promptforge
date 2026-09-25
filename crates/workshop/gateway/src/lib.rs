@@ -14,8 +14,10 @@
 //!   speaks `reqwest` statuses and raw bodies, and the server maps them
 //!   to HTTP responses.
 //! - A bearer key is never written to logs or `Debug` output.
-//! - User-visible reporting flows through the registry's push facade, so
-//!   this crate never names another subsystem's bus.
+//! - User-visible reporting flows through the registry's push facade, and
+//!   the gateway drives the menu through its
+//!   [`MenuPush`](workshop_registry::MenuPush) face, so this crate never
+//!   names another subsystem's bus.
 //! - The gateway's progress reaches this crate as the public wire type
 //!   `gateway_api_types::Progress` alone: no progress machinery is
 //!   shared with the gateway family.

@@ -1,6 +1,6 @@
-//! Atomically replaceable Gateway endpoint and credential state.
+//! Atomically replaceable gateway endpoint and credential state.
 //!
-//! Every Gateway-dependent Workshop path loads one immutable snapshot
+//! Every gateway-dependent workshop path loads one immutable snapshot
 //! containing the HTTP client, base URL, bearer, and generation.
 //! A local-sidecar replacement builds the complete next snapshot before one
 //! atomic store, then notifies long-lived tasks to reconnect. Explicitly
@@ -17,18 +17,19 @@ use tokio::sync::watch;
 
 use crate::gateway::{GatewayClient, GatewayError};
 
-/// One immutable generation of every Gateway client credential.
+/// One immutable generation of every gateway client credential.
 pub struct GatewaySnapshot {
-    /// HTTP and Realtime client used by Workshop routes and the heartbeat.
+    /// The one client, serving HTTP requests and the Realtime socket alike,
+    /// used by workshop routes and the heartbeat.
     client: GatewayClient,
-    /// Normalized Gateway base URL paired with both clients.
+    /// Normalized gateway base URL paired with `client`.
     base_url: String,
     /// Bearer paired with `client`, exposed for consumers that authenticate
     /// outside the HTTP client.
     api_key: String,
     /// Monotonic generation assigned before this snapshot is published.
     generation: u64,
-    /// Proven local Gateway boot, absent for an explicitly configured endpoint.
+    /// Proven local gateway boot, absent for an explicitly configured endpoint.
     identity: Option<gateway_api_discovery::ValidatedConnection>,
 }
 
@@ -46,19 +47,20 @@ impl fmt::Debug for GatewaySnapshot {
 }
 
 impl GatewaySnapshot {
-    /// The HTTP and Realtime client in this generation.
+    /// The gateway client in this generation, for HTTP requests and the
+    /// Realtime socket alike.
     #[must_use]
     pub fn client(&self) -> &GatewayClient {
         &self.client
     }
 
-    /// The Gateway base URL in this generation.
+    /// The gateway base URL in this generation.
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
-    /// The Gateway bearer in this generation.
+    /// The gateway bearer in this generation.
     #[must_use]
     pub fn api_key(&self) -> &str {
         &self.api_key
@@ -71,7 +73,7 @@ impl GatewaySnapshot {
     }
 }
 
-/// Shared atomic Gateway snapshot and replacement notification.
+/// Shared atomic gateway snapshot and replacement notification.
 #[derive(Clone)]
 pub struct GatewayBinding {
     current: Arc<ArcSwap<GatewaySnapshot>>,
@@ -85,11 +87,11 @@ struct PublicationState {
     closed: bool,
 }
 
-/// A failure to publish a replacement Gateway generation.
+/// A failure to publish a replacement gateway generation.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GatewayPublicationError {
-    /// The replacement clients could not be built.
+    /// The replacement client could not be built.
     #[error(transparent)]
     #[non_exhaustive]
     Build(#[from] GatewayError),
@@ -232,7 +234,7 @@ impl GatewayBinding {
             .closed
     }
 
-    /// Creates the restricted handle the desktop host uses for sidecar updates.
+    /// Creates the restricted handle the desktop app uses for sidecar updates.
     #[must_use]
     pub fn updater(&self) -> GatewayUpdater {
         GatewayUpdater {
@@ -241,10 +243,10 @@ impl GatewayBinding {
     }
 }
 
-/// Restricted local-Gateway authority for an embedding desktop host.
+/// Restricted local-gateway authority for the embedding desktop app.
 ///
 /// Replacements accept only validated capabilities, and shutdown reads the
-/// same current immutable snapshot as every Workshop consumer. Raw connection
+/// same current immutable snapshot as every workshop consumer. Raw connection
 /// files cannot cross the publication boundary:
 ///
 /// ```compile_fail
@@ -271,8 +273,8 @@ impl fmt::Debug for GatewayUpdater {
 }
 
 impl GatewayUpdater {
-    /// Atomically replaces the local Gateway port and bearer, waking every
-    /// long-lived Workshop consumer only after the complete snapshot is live.
+    /// Atomically replaces the local gateway port and bearer, waking every
+    /// long-lived workshop consumer only after the complete snapshot is live.
     ///
     /// # Errors
     /// Returns [`GatewayPublicationError::Build`] if the replacement HTTP
@@ -290,7 +292,7 @@ impl GatewayUpdater {
         )
     }
 
-    /// Replaces the configured Gateway in the crate's integration fixtures
+    /// Replaces the configured gateway in the crate's integration fixtures
     /// without manufacturing a production sidecar capability.
     ///
     /// # Errors

@@ -6,11 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop workspace subsystem: the jailed filesystem behind /workspace/* - directory trees, file reads, and file writes confined to granted roots"
+description = "Workshop workspace subsystem: the jailed filesystem behind /workspace/* - directory trees, file reads, and file writes confined to granted roots - and the /workspace/file/* routes over the .pfwork workspace file"
 
 [features]
 default = []
 # Exposes test seams (`Workspace::close_backing_for_test`,
+# `Workspace::stall_next_write_for_test`, `routes_with_deadline`, and
 # `create_alien_database_for_test`) to the dependent crates' tests.
 test-fixtures = []
 

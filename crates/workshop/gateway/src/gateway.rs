@@ -3,9 +3,10 @@
 //! [`GatewayClient`] wraps `reqwest` with bearer authentication and returns
 //! responses as raw bytes so the workshop routes can relay them to the
 //! caller byte-for-byte. A non-success status from the gateway is *not* an
-//! error here: it is part of the relayed response. Streaming responses
-//! (cache downloads, progress) are decoded from SSE into a
-//! [`SsePayloadStream`] of `data:` payloads.
+//! error here: it is part of the relayed response. A cache download is
+//! decoded from SSE into a [`SsePayloadStream`] of `data:` payloads, and
+//! the progress subscription into a [`ProgressStream`] of decoded
+//! snapshots.
 
 use std::time::Duration;
 

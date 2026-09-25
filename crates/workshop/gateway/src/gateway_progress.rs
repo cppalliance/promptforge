@@ -279,8 +279,9 @@ async fn recover(
 /// deadline armed beside it. A control signal ends the wait early with
 /// its [`Ended`]; a presenter deadline ticks the presenter and keeps
 /// waiting, so a minimum-visible hold lapses on time even while the loop
-/// is between subscriptions. Both watch senders sit in `AppState` for
-/// the process lifetime, so a closed watch means shutdown.
+/// is between subscriptions. Both watch senders live in the registry's
+/// [`GatewayHandles`](crate::GatewayHandles) for the process lifetime, so
+/// a closed watch means shutdown.
 async fn until<F: Future>(
     future: F,
     signals: &mut Signals<'_>,

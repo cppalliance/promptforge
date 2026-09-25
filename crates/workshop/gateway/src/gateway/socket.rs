@@ -1,4 +1,4 @@
-//! Authenticated WebSocket connections from Workshop to Gateway.
+//! Authenticated WebSocket connections from the workshop to the gateway.
 
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
@@ -7,7 +7,7 @@ use super::{GatewayClient, GatewayError};
 type GatewaySocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// An authenticated WebSocket connection to Gateway Realtime transcription.
+/// An authenticated WebSocket connection to the gateway's Realtime transcription.
 pub type GatewayRealtimeSocket = GatewaySocket;
 
 impl GatewayClient {

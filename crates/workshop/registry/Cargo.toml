@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop subsystem registry: sealed proxy slots subsystems self-register into, so the composition root meets them through subsystem-named traits instead of concrete types"
+description = "Workshop subsystem registry: collections subsystems self-register into (routes and tasks as ordered vectors, state handles and push sinks keyed by type), reached through sealed subsystem-named traits for push sinks and shared views, while the composition root requires the concrete handle types"
 
 [dependencies]
 axum.workspace = true

@@ -22,11 +22,14 @@
 //! - Every subsystem trait is sealed (a private empty supertrait), so
 //!   only this crate implements them: registrants plug in through the
 //!   adapters provided here, never by implementing a trait downstream.
-//! - Subsystem names live only in the sealed traits ([`MenuSink`],
-//!   [`CatalogSink`], [`StatusSink`], [`WorkspaceRoots`], [`MenuPush`]):
-//!   a new subsystem adds its trait and adapter here and changes nothing
-//!   else; the collections stay keyed by type, never by a per-subsystem
-//!   field or accessor.
+//! - Subsystem names live in the sealed traits ([`MenuSink`],
+//!   [`CatalogSink`], [`StatusChannel`], [`StatusSink`],
+//!   [`WorkspaceRoots`]) and in the [`MenuPush`] struct behind
+//!   [`Push::menu`], the facade's one per-subsystem accessor; the
+//!   collections stay keyed by type, never by a per-subsystem field. A
+//!   new subsystem adds its trait and adapter here, a compose helper in
+//!   the server's composition root, and a [`Registry::require`] there
+//!   for its handle set.
 //! - An unregistered contribution is a graceful no-op, never an error:
 //!   consumers branch on `None` and continue degraded, and the [`Push`]
 //!   facade drops intents whose sink is unregistered. The composition

@@ -1,4 +1,4 @@
-//! The observer: a broadcast bus for status bar updates from every
+//! The status bus: a broadcast bus for status bar updates from every
 //! subsystem to every connected `/ws` session.
 //!
 //! Anything with user-visible latency - startup phases, gateway round

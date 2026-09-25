@@ -13,7 +13,7 @@
 //! gateway that flaps without delivering keeps escalating. When the
 //! backoff's total-delay budget exhausts, the loop reports the give-up
 //! on the status bus and stops probing for the life of the process.
-//! The observer hears about transitions only - the first probe reports
+//! Status subscribers hear about transitions only - the first probe reports
 //! the initial state ("Connected to gateway" or "Gateway unreachable"),
 //! and after that a status update fires when the answer changes, so a
 //! steady state never spams the status bar. Every transition also feeds
@@ -118,8 +118,8 @@ impl GatewayHealth {
 
     /// Subscribes to reachability changes. The current value is visible
     /// immediately through the receiver; each later publish that flips the
-    /// flag notifies. The provisioning task waits on this to run its cache
-    /// calls only while the gateway answers.
+    /// flag notifies. The progress subscriber waits on this to hold its
+    /// subscription only while the gateway answers.
     #[must_use]
     pub fn subscribe(&self) -> watch::Receiver<bool> {
         self.reachable.subscribe()
@@ -194,15 +194,8 @@ pub fn spawn(
     }
 }
 
-/// The probe loop: a status update per transition, with the stop signal
-/// winning over the wait, an in-flight probe, an in-flight profile
-/// refresh, and an in-flight catalog refresh. The wait before each probe
-/// is `interval` while the gateway answered last time (measured from the
-/// previous probe's completion, so a slow probe never bunches into a
-/// catch-up burst) and the backoff's next delay while it did not; a
-/// successful probe deliberately never resets the backoff - only useful
-/// work does, elsewhere - and an exhausted budget ends the loop with a
-/// give-up report.
+/// Which menu sources have converged since the gateway last became
+/// reachable, and whether the selection restore has run.
 #[derive(Default)]
 struct RefreshState {
     profiles_ready: bool,
@@ -298,8 +291,10 @@ async fn run(
 }
 
 /// The wait before a probe: skipped on the first, `interval` while the
-/// gateway answered last time, and the backoff's next delay while it did
-/// not, ending the loop when the backoff's budget exhausts.
+/// gateway answered last time (measured from the previous probe's
+/// completion, so a slow probe never bunches into a catch-up burst), and
+/// the backoff's next delay while it did not, ending the loop when the
+/// backoff's budget exhausts.
 async fn await_probe_interval(
     last: Option<bool>,
     interval: Duration,
@@ -415,7 +410,7 @@ async fn refresh_sources(
     }
 }
 
-/// Refreshes only the Gateway-owned menu sources that have not converged.
+/// Refreshes only the gateway-owned menu sources that have not converged.
 async fn refresh_incomplete_sources(
     snapshot: &GatewaySnapshot,
     push: &Push,

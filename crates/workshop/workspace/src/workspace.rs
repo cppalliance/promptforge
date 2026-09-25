@@ -1,7 +1,8 @@
 //! Confined workspace filesystem access: directory trees, file reads, and
-//! file writes jailed to roots explicitly granted through drag and drop.
+//! file writes jailed to roots the user explicitly granted (drag and drop,
+//! the folder picker, or a reopened workspace file).
 //!
-//! A dropped folder becomes a granted root; a dropped file grants its parent
+//! A granted folder becomes a root; a granted file grants its parent
 //! directory. The in-memory grant set is the confinement source of truth;
 //! an optional workspace file (the `backing` module) mirrors it between
 //! sessions and is never consulted on a request path. Every request path is

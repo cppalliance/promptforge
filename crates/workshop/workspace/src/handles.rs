@@ -1,7 +1,7 @@
 //! The workspace subsystem's registration: its `/workspace/*` routes,
 //! merged into the server's API router, the workspace itself as its
-//! state handle set, its granted-roots view and change signal, which
-//! same-tier subsystems read instead of naming this crate, and the
+//! state handle set, its granted-roots view and change signal, which the
+//! server's agent-session bindings read through the registry, and the
 //! shutdown lever that closes the workspace file inside the server's
 //! graceful stop.
 
@@ -25,17 +25,18 @@ pub struct WorkspaceRegistrations {
     pub routes: Registration,
     /// The workspace itself as its state handle.
     pub state: Registration,
-    /// The granted-roots view same-tier subsystems read.
+    /// The granted-roots view the server's agent-session bindings read.
     pub roots: Registration,
 }
 
 /// Registers the workspace subsystem into the registry: its
 /// `/workspace/*` routes (the confined filesystem and the
 /// `/workspace/file/*` document routes), merged into the server's API
-/// router, the workspace itself as its state handle set, and its granted-roots
-/// view, which same-tier subsystems read instead of naming this crate.
-/// The returned guards keep the registrations alive; the composition
-/// root holds them for the process lifetime.
+/// router, the workspace itself as its state handle set, and its
+/// granted-roots view and change signal, which the server's agent-session
+/// bindings read through the registry. The returned guards keep the
+/// registrations alive; the composition root holds them for the process
+/// lifetime.
 pub fn register(registry: &Registry, workspace: &Workspace) -> WorkspaceRegistrations {
     let routes = registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
         let workspace = workspace.clone();

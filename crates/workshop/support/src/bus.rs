@@ -10,9 +10,9 @@
 //! the resend-on-reconnect snapshot: a session that connects later reads
 //! it directly instead of waiting for the next publish.
 //!
-//! The three hand-rolled copies of this pattern (status, catalog, menu)
-//! are thin wrappers over this one type; each wrapper owns its ring
-//! capacity and its intent-named helper methods.
+//! The status, catalog, and menu buses are thin wrappers over this one
+//! type; each wrapper owns its ring capacity and its intent-named helper
+//! methods.
 
 use std::sync::{Arc, Mutex, PoisonError};
 

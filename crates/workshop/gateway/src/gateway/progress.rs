@@ -2,12 +2,13 @@
 //! [`Progress`] snapshots, decoded block-by-block under a hard size
 //! bound.
 //!
-//! Unlike the switch and cache streams, a progress subscription never
-//! terminates on its own and yields snapshots the workshop renders
-//! verbatim, so the decode keeps the stricter posture the subscriber
-//! always had: only blank-line-terminated blocks dispatch (an incomplete
-//! trailing block is discarded), and a block that grows past
-//! `MAX_EVENT_BLOCK` without its terminator is refused rather than
+//! Unlike a profile switch, which answers a single JSON document, and a
+//! cache download, whose stream ends in a terminal event, a progress
+//! subscription never terminates on its own and yields snapshots the
+//! workshop renders verbatim, so the decode keeps the stricter posture
+//! the subscriber always had: only blank-line-terminated blocks dispatch
+//! (an incomplete trailing block is discarded), and a block that grows
+//! past `MAX_EVENT_BLOCK` without its terminator is refused rather than
 //! buffered unbounded.
 
 use std::pin::Pin;

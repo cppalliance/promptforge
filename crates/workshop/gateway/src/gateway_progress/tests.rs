@@ -41,7 +41,7 @@ async fn spawn_gateway(app: axum::Router) -> String {
     format!("http://{addr}")
 }
 
-/// A replaceable binding for one mock Gateway.
+/// A replaceable binding for one mock gateway.
 fn binding(base_url: &str) -> GatewayBinding {
     GatewayBinding::new(base_url, "").expect("the test binding builds")
 }

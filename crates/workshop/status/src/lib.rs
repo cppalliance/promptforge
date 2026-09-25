@@ -15,9 +15,9 @@
 //! - The bus retains the newest update, so a session that connects later
 //!   sends the current status immediately - the delivery contract's
 //!   resend-on-reconnect for ephemeral frames.
-//! - The public API is infallible (sends are no-ops on lag or empty
-//!   rings, never errors), so the crate has no thiserror error type -
-//!   the same exemption `workshop-registry` takes.
+//! - The public API is infallible (a send with no subscribers only moves
+//!   the snapshot, and a lagging subscriber skips ahead; neither is an
+//!   error), so the crate has no error type.
 
 pub mod status;
 

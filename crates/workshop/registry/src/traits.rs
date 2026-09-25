@@ -26,7 +26,9 @@ mod sealed {
 use sealed::Sealed;
 
 /// Route registration: a subsystem contributes its HTTP routes, merged
-/// into the server's API router at composition time.
+/// into the server's API router at composition time. Registered by the
+/// `handles.rs` of `workshop-workspace` and `workshop-user-state`, and by
+/// the server's sessions subsystem.
 pub trait RouteRegistrar: Sealed + Send + Sync {
     /// The subsystem's routes, with their state already applied.
     fn routes(&self) -> Router;
@@ -34,6 +36,8 @@ pub trait RouteRegistrar: Sealed + Send + Sync {
 
 /// Background task spawning: a subsystem starts one long-lived task, so
 /// the composition root holds no `tokio::spawn` calls of its own.
+/// Registered by the `handles.rs` of `workshop-gateway` and
+/// `workshop-workspace`, and by the server's sessions subsystem.
 pub trait BackgroundTask: Sealed + Send + Sync {
     /// Spawns the task; the returned handle is the server's shutdown
     /// lever.
@@ -82,7 +86,8 @@ impl fmt::Debug for ShutdownHandle {
 }
 
 /// The status-bar push channel: the retained snapshot plus live
-/// subscription every `/ws` session forwards.
+/// subscription every `/ws` session forwards. Registered by
+/// `workshop-status`'s `handles.rs`.
 pub trait StatusChannel: Sealed + Send + Sync {
     /// Subscribes to every update sent from this call onward.
     fn subscribe(&self) -> broadcast::Receiver<StatusBarUpdate>;
@@ -95,7 +100,7 @@ pub trait StatusChannel: Sealed + Send + Sync {
 /// [`StatusBarUpdate`]s emitted by subsystems in other crates. The
 /// [`Push`](crate::Push) facade builds the frames; the sink only
 /// accepts them, so a producer in a same-tier crate never names the
-/// status bus's type.
+/// status bus's type. Registered by `workshop-status`'s `handles.rs`.
 pub trait StatusSink: Sealed + Send + Sync {
     /// Emits one update onto the status bus.
     fn emit(&self, update: StatusBarUpdate);
@@ -103,6 +108,7 @@ pub trait StatusSink: Sealed + Send + Sync {
 
 /// The catalog producer sink: the menu subsystem's receiving end for
 /// refreshed model catalogs published by the gateway subsystem.
+/// Registered by `workshop-menu`'s `handles.rs`.
 pub trait CatalogSink: Sealed + Send + Sync {
     /// Publishes one complete model catalog snapshot.
     fn publish(&self, models: Vec<serde_json::Value>);
@@ -110,7 +116,8 @@ pub trait CatalogSink: Sealed + Send + Sync {
 
 /// The menu producer sink: the menu subsystem's receiving end for the
 /// workbench mutators the gateway subsystem drives - reachability
-/// verdicts, profile state, and selection restores.
+/// verdicts, profile state, and selection restores. Registered by
+/// `workshop-menu`'s `handles.rs`.
 pub trait MenuSink: Sealed + Send + Sync {
     /// Records the heartbeat's verdict on gateway reachability.
     fn set_gateway_reachable(&self, reachable: bool);
@@ -241,9 +248,8 @@ impl<P> fmt::Debug for CatalogSinkAdapter<P> {
 }
 
 /// The workspace subsystem's granted-root view: the narrow state handle
-/// same-tier subsystems (the agent session's `ui()` snapshot) consume
-/// through the registry instead of naming the workspace crate, which the
-/// one-way tier graph forbids.
+/// the server's agent-session bindings read through the registry.
+/// Registered by `workshop-workspace`'s `handles.rs`.
 pub trait WorkspaceRoots: Sealed + Send + Sync {
     /// The granted workspace roots in stable sorted order.
     fn granted_roots(&self) -> Vec<PathBuf>;

@@ -1,4 +1,4 @@
-//! Named local Gateway process shared by capability and supervision tests.
+//! Named local gateway process shared by capability and supervision tests.
 
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
@@ -19,7 +19,7 @@ const CONTROL_ADDRESS_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_CONTROL_ADDRESS";
 const EXPECTED_KEY_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_EXPECTED_KEY";
 const INSTANCE_LEASE_RUN_DIR_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_INSTANCE_LEASE_RUN_DIR";
 
-/// A named child Gateway that passes production process-image validation.
+/// A named child gateway that passes production process-image validation.
 #[derive(Debug)]
 pub struct ValidatedGateway {
     child: Child,

@@ -52,7 +52,7 @@ impl ResolvedGateway {
         }
     }
 
-    /// The endpoint a validated local Gateway boot published, for a host
+    /// The endpoint a validated local gateway boot published, for a host
     /// holding its own validated identity (a test fixture).
     #[cfg(feature = "test-fixtures")]
     #[must_use]
@@ -91,7 +91,7 @@ impl ResolvedGateway {
         &self.api_key
     }
 
-    /// The validated local Gateway boot, when discovery won.
+    /// The validated local gateway boot, when discovery won.
     #[must_use]
     pub fn identity(&self) -> Option<&ValidatedConnection> {
         self.identity.as_ref()
@@ -231,7 +231,7 @@ fn resolve_with(
 }
 
 /// Reifies the shared resolver's live result as the capability stored in
-/// Workshop's immutable Gateway snapshot.
+/// the workshop's immutable gateway snapshot.
 fn validate_resolved(
     file: gateway_api_discovery::GatewayDiscoveryFile,
 ) -> Result<ValidatedConnection, StaleReason> {

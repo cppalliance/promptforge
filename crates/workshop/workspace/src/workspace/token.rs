@@ -1,7 +1,6 @@
 //! The conflict token a file read hands the client and a file write must
 //! echo back: modified time plus length when the filesystem reports a
-//! usable mtime, a content hash otherwise. Split from `workspace.rs` to
-//! keep that file under the line ceiling.
+//! usable mtime, a content hash otherwise.
 
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};

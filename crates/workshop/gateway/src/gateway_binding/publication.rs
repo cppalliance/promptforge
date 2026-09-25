@@ -1,4 +1,4 @@
-//! Cancellation-aware publication of validated Gateway replacements.
+//! Cancellation-aware publication of validated gateway replacements.
 
 use std::sync::TryLockError;
 use std::time::Duration;
@@ -79,7 +79,7 @@ impl GatewayBinding {
 }
 
 impl GatewayUpdater {
-    /// Atomically replaces the local Gateway unless caller cancellation wins.
+    /// Atomically replaces the local gateway unless caller cancellation wins.
     ///
     /// Returns `Ok(false)` without publication when cancellation wins while
     /// another publisher owns the replacement lock.

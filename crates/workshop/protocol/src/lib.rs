@@ -84,9 +84,8 @@
 //! lost to a dead socket is repaired by the resent set - a live wait
 //! reappears, and a stale prompt is dropped because its token is absent.
 //! Cancellation is an explicit outcome: every path out of an unresolved
-//! wait pushes `input_cancelled` for its token. The session loops that
-//! route these frames arrive with agent sessions; the shapes and
-//! classification are pinned here first.
+//! wait pushes `input_cancelled` for its token. The server's agent socket
+//! routes these frames; this crate pins their shapes and classification.
 //!
 //! # Delivery contract
 //!

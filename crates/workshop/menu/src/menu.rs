@@ -16,7 +16,8 @@
 //! runs) is a value returned to the caller, and a missing, unreadable,
 //! or corrupt memory file means "no memory yet" - logged and tolerated,
 //! never fatal. The memory file holds server state only; the UI's panel
-//! layout is view state and stays in the webview's localStorage.
+//! layout is view state and persists through the UI-state buckets
+//! (`workshop-user-state` and the workspace file).
 
 #[path = "menu-memory.rs"]
 mod memory;
