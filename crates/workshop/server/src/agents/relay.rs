@@ -11,11 +11,6 @@ use workshop_registry::Push;
 
 use super::state::SessionsState;
 
-/// Whether wire bodies include internal failure detail. Debug builds append
-/// the source chain to the envelope message; production bodies stay at
-/// the failure's own message.
-const LEAK_DETAIL: bool = cfg!(debug_assertions);
-
 /// Relays the gateway's model catalog to the caller verbatim.
 ///
 /// While the heartbeat reports the gateway down, the route
@@ -86,7 +81,7 @@ pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
 fn gateway_message(error: &GatewayError) -> String {
     use std::fmt::Write as _;
     let mut message = error.to_string();
-    if LEAK_DETAIL {
+    if workshop_support::LEAK_DETAIL {
         let mut source = std::error::Error::source(error);
         while let Some(cause) = source {
             // fmt::Write to a String cannot fail; the Result is a trait

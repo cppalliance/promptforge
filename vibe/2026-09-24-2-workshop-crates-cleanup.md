@@ -1051,7 +1051,7 @@ Components, in dependency order:
 
 <step-25>
 
-### Step 25: Share the error rendering and the state-bucket validator
+### Step 25: Share the error rendering and the state-bucket validator [completed]
 
 - Component: Structural consolidation
 - Piece: helpers

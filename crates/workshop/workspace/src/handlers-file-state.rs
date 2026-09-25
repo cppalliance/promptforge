@@ -18,11 +18,10 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::routing::{get, put};
-use serde_json::Value;
 
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
-use crate::workspace_file::{check_ui_state_cap, ui_state_key};
+use crate::workspace_file::ui_state::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
 
 use super::file::SavedResponse;
 use super::respond;
@@ -61,12 +60,8 @@ async fn store(
     key: &str,
     body: &[u8],
 ) -> Result<SavedResponse, WorkspaceError> {
-    let key = ui_state_key(key)?;
-    check_ui_state_cap(body.len())?;
-    let value: Value =
-        serde_json::from_slice(body).map_err(|source| WorkspaceError::UiStateNotJson {
-            source: source.into(),
-        })?;
+    let value =
+        workshop_support::validate_bucket_body(key, &UI_STATE_KEYS, body, UI_STATE_VALUE_CAP)?;
     let saved = workspace.put_ui_state(key, value).await?;
     Ok(SavedResponse { saved })
 }

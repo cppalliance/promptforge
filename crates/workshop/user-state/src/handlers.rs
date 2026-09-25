@@ -24,7 +24,7 @@ use serde_json::Value;
 use workshop_support::{DEFAULT_DEADLINE, with_deadline};
 
 use crate::error::UserStateError;
-use crate::store::{UserStateStore, check_text_cap, user_state_key};
+use crate::store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
 
 /// The user-state routes, narrowed to the [`UserStateStore`] - the only
 /// state their handlers use - under the default deadline tier. The
@@ -70,11 +70,8 @@ async fn store_value(
     key: &str,
     body: &[u8],
 ) -> Result<Value, UserStateError> {
-    let key = user_state_key(key)?;
-    check_text_cap(body.len())?;
-    let value: Value = serde_json::from_slice(body).map_err(|source| UserStateError::NotJson {
-        source: source.into(),
-    })?;
+    let value =
+        workshop_support::validate_bucket_body(key, &USER_STATE_KEYS, body, USER_STATE_VALUE_CAP)?;
     store.put(key, value).await?;
     Ok(serde_json::json!({ "saved": true }))
 }

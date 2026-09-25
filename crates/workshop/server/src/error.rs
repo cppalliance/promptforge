@@ -15,20 +15,14 @@
 //! ([`workshop_support::ConfigError`], [`crate::serve::SpawnError`]) and
 //! never cross the wire.
 
-use std::fmt::Write as _;
-
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use promptforge::{ParseError, ParseErrorKind};
 use workshop_protocol::ErrorEnvelope;
+use workshop_support::{LEAK_DETAIL, render_message};
 
 use crate::gateway::GatewayError;
-
-/// Whether wire bodies include internal failure detail. Debug builds append
-/// the source chain to the envelope message; production bodies stay at the
-/// variant's own message.
-const LEAK_DETAIL: bool = cfg!(debug_assertions);
 
 /// A failure answered over the HTTP wire.
 ///
@@ -143,23 +137,6 @@ impl IntoResponse for AppError {
                 .into_response(),
         }
     }
-}
-
-/// Renders the envelope message for `error`: its own `Display` text, with
-/// the source chain appended as `: cause` segments when `leak_detail` is
-/// set.
-fn render_message(error: &AppError, leak_detail: bool) -> String {
-    let mut message = error.to_string();
-    if leak_detail {
-        let mut source = std::error::Error::source(error);
-        while let Some(cause) = source {
-            // fmt::Write to a String cannot fail; the Result is a trait
-            // artifact.
-            let _ = write!(message, ": {cause}");
-            source = cause.source();
-        }
-    }
-    message
 }
 
 #[cfg(test)]

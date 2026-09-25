@@ -32,11 +32,7 @@ pub(crate) fn empty_ui_state() -> BTreeMap<&'static str, Option<Value>> {
 /// Returns [`WorkspaceError::UiStateKey`] when `key` is not one of
 /// [`UI_STATE_KEYS`].
 pub(crate) fn ui_state_key(key: &str) -> Result<&'static str, WorkspaceError> {
-    UI_STATE_KEYS
-        .iter()
-        .copied()
-        .find(|allowed| *allowed == key)
-        .ok_or_else(|| WorkspaceError::UiStateKey(key.to_string()))
+    workshop_support::resolve_bucket_key(key, &UI_STATE_KEYS).map_err(WorkspaceError::from)
 }
 
 /// Checks that a value whose JSON text is `len` bytes fits under the cap.
@@ -44,13 +40,7 @@ pub(crate) fn ui_state_key(key: &str) -> Result<&'static str, WorkspaceError> {
 /// # Errors
 /// Returns [`WorkspaceError::UiStateTooLarge`] past the cap.
 pub(crate) fn check_ui_state_cap(len: usize) -> Result<(), WorkspaceError> {
-    if len > UI_STATE_VALUE_CAP {
-        return Err(WorkspaceError::UiStateTooLarge {
-            actual: len,
-            cap: UI_STATE_VALUE_CAP,
-        });
-    }
-    Ok(())
+    workshop_support::check_bucket_cap(len, UI_STATE_VALUE_CAP).map_err(WorkspaceError::from)
 }
 
 /// Checks that `json_text` fits under the cap and parses as JSON. The
@@ -61,11 +51,7 @@ pub(crate) fn check_ui_state_cap(len: usize) -> Result<(), WorkspaceError> {
 /// [`WorkspaceError::UiStateNotJson`] for text that does not parse.
 pub(crate) fn check_ui_state_text(json_text: &str) -> Result<(), WorkspaceError> {
     check_ui_state_cap(json_text.len())?;
-    serde_json::from_str::<serde::de::IgnoredAny>(json_text)
-        .map(|_| ())
-        .map_err(|source| WorkspaceError::UiStateNotJson {
-            source: source.into(),
-        })
+    workshop_support::check_bucket_text(json_text).map_err(WorkspaceError::from)
 }
 
 impl WorkspaceFile {

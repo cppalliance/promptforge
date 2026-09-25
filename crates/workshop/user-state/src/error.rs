@@ -9,7 +9,6 @@
 //! the response body in debug builds only; production bodies stay at
 //! each variant's own message.
 
-use std::fmt::Write as _;
 use std::io;
 
 use axum::http::{StatusCode, header};
@@ -21,13 +20,9 @@ use axum::response::{IntoResponse, Response};
 // cause across the workspace rather than one per crate.
 use shared_error_source::JsonSource;
 use workshop_protocol::ErrorEnvelope;
+use workshop_support::{LEAK_DETAIL, StateBucketError, render_message};
 
 use crate::store::USER_STATE_KEYS;
-
-/// Whether wire bodies include internal failure detail. Debug builds append
-/// the source chain to the envelope message; production bodies stay at
-/// the variant's own message.
-const LEAK_DETAIL: bool = cfg!(debug_assertions);
 
 /// A user-state operation failure.
 #[derive(Debug, thiserror::Error)]
@@ -101,21 +96,18 @@ impl IntoResponse for UserStateError {
     }
 }
 
-/// Renders the envelope message for `error`: its own `Display` text, with
-/// the source chain appended as `: cause` segments when `leak_detail` is
-/// set.
-fn render_message(error: &UserStateError, leak_detail: bool) -> String {
-    let mut message = error.to_string();
-    if leak_detail {
-        let mut source = std::error::Error::source(error);
-        while let Some(cause) = source {
-            // fmt::Write to a String cannot fail; the Result is a trait
-            // artifact.
-            let _ = write!(message, ": {cause}");
-            source = cause.source();
+impl From<StateBucketError> for UserStateError {
+    /// Maps a shared state-bucket refusal onto this crate's wire error,
+    /// preserving each refusal's own message.
+    fn from(error: StateBucketError) -> Self {
+        match error {
+            StateBucketError::Key(key) => Self::Key(key),
+            StateBucketError::TooLarge { actual, cap } => Self::TooLarge { actual, cap },
+            StateBucketError::NotJson { source } => Self::NotJson {
+                source: source.into(),
+            },
         }
     }
-    message
 }
 
 #[cfg(test)]
