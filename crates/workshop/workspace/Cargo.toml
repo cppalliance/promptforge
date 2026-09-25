@@ -18,7 +18,6 @@ test-fixtures = []
 axum.workspace = true
 dunce.workspace = true
 humantime.workspace = true
-percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shared-error-source = { workspace = true, features = ["database", "json"] }
@@ -32,6 +31,7 @@ workshop-support.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
+percent-encoding.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower.workspace = true

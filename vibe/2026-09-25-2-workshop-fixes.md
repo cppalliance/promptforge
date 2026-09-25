@@ -369,7 +369,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-4>
 
-### Step 4: Decode workspace GET paths once
+### Step 4: Decode workspace GET paths once [completed]
 
 - Component: Workspace confinement
 

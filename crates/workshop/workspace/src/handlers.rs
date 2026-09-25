@@ -1,6 +1,7 @@
-//! The `/workspace/*` route handlers: query and body DTOs, the path
-//! decoding that defangs double-encoded traversal, and the router
-//! constructor the subsystem registers into the registry.
+//! The `/workspace/*` route handlers: query and body DTOs and the router
+//! constructor the subsystem registers into the registry. Query paths
+//! arrive decoded once by the query layer, like the undecoded JSON body
+//! paths, so a surviving `%XX` is part of a literal name.
 
 use std::path::Path;
 
@@ -106,17 +107,6 @@ pub(crate) struct RevokeResponse {
     revoked: std::path::PathBuf,
 }
 
-/// Percent-decodes a workspace path parameter before validation. The query
-/// layer already decoded once, so any surviving `%XX` sequence is a second
-/// encoding layer - decoding it here means an encoded traversal (`%2e%2e`)
-/// reaches the lexical `..` check as a literal `..` however the client
-/// encoded it. Invalid sequences pass through unchanged.
-fn decode_path_param(raw: &str) -> String {
-    percent_encoding::percent_decode_str(raw)
-        .decode_utf8_lossy()
-        .into_owned()
-}
-
 /// Lists one level of a workspace directory, or the granted roots when the
 /// query has no path. The listing is filesystem work and runs on the
 /// blocking pool; the confinement check runs inside the same call, so the
@@ -125,10 +115,9 @@ pub(crate) async fn tree(
     State(workspace): State<Workspace>,
     Query(query): Query<TreeQuery>,
 ) -> Response {
-    let path = query.path.as_deref().map(decode_path_param);
     respond(
         try_blocking(
-            move || workspace.tree(path.as_deref().map(Path::new)),
+            move || workspace.tree(query.path.as_deref().map(Path::new)),
             |source| WorkspaceError::ListDirectory { source },
         )
         .await,
@@ -141,10 +130,9 @@ pub(crate) async fn read_file(
     State(workspace): State<Workspace>,
     Query(query): Query<FileQuery>,
 ) -> Response {
-    let path = decode_path_param(&query.path);
     respond(
         try_blocking(
-            move || workspace.read_file(Path::new(&path)),
+            move || workspace.read_file(Path::new(&query.path)),
             |source| WorkspaceError::ReadFile { source },
         )
         .await,
