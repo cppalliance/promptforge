@@ -220,7 +220,7 @@ fn the_workshop_shell_without_the_marker_passes_and_stays_outside_the_ceiling() 
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "workshop/shell",
+        "workshop/desktop",
         "workshop",
         UNMARKED,
         MAX_FILE_LINES + 1,

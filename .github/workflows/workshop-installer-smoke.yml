@@ -5,8 +5,8 @@ on:
     paths:
       - .github/workflows/workshop-installer-smoke.yml
       - crates/build-workshop/**
-      - crates/workshop/shell/installer.nsi
-      - crates/workshop/shell/tauri*.conf.json
+      - crates/workshop/desktop/installer.nsi
+      - crates/workshop/desktop/tauri*.conf.json
       - tools/stage-gateway-sidecar.mjs
   workflow_dispatch:
 
@@ -40,7 +40,7 @@ jobs:
       - name: Compile unsigned debug NSIS installer
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
-          projectPath: crates/workshop/shell
+          projectPath: crates/workshop/desktop
           args: --debug --bundles nsis --config tauri.nightly.conf.json
 
       - name: Remove Gateway sidecar

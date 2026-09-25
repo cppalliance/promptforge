@@ -81,9 +81,9 @@ fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
 }
 
 /// The crate directory for a tiered workshop package: the family sits in
-/// the `crates/workshop/` container, with the shell at `shell/`.
+/// the `crates/workshop/` container, with the desktop app at `desktop/`.
 fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
-    let short = name.strip_prefix("workshop-").unwrap_or("shell");
+    let short = name.strip_prefix("workshop-").unwrap_or("desktop");
     root.join("crates").join("workshop").join(short)
 }
 

@@ -456,7 +456,7 @@ fn launch_workshop(tray: &Tray) {
         command
     } else {
         // The unbundled dev fallback detaches the way the shell's own
-        // gateway spawn does (crates/workshop/shell/src/gateway.rs): its own
+        // gateway spawn does (crates/workshop/desktop/src/gateway.rs): its own
         // process group, so a terminal Ctrl-C on the gateway does not
         // SIGINT the workshop.
         let mut command = std::process::Command::new(exe);

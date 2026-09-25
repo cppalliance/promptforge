@@ -49,7 +49,7 @@ fn platform_interrupt_after_staging_kills_child_cleans_and_fails() {
     let staged = repository
         .join("crates")
         .join("workshop")
-        .join("shell")
+        .join("desktop")
         .join("binaries")
         .join(SIDECAR_NAME);
     let temp = tempfile::tempdir().expect("temporary test root");

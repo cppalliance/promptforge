@@ -34,7 +34,7 @@ function sidecarPath(root, target) {
     root,
     "crates",
     "workshop",
-    "shell",
+    "desktop",
     "binaries",
     gatewaySidecarName(target),
   );

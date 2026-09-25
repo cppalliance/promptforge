@@ -592,7 +592,7 @@ fn open_settings(tray: &Tray) {
 /// through the gateway discovery file and outlives it.
 fn launch_workshop(tray: &Tray) {
     // The same detach the shell uses for its own gateway spawn
-    // (crates/workshop/shell/src/gateway.rs): broken out of any job object whose
+    // (crates/workshop/desktop/src/gateway.rs): broken out of any job object whose
     // kill-on-close would reap the workshop with the gateway, no inherited
     // stdio, and a new process group.
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;

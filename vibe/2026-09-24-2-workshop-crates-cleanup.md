@@ -852,7 +852,7 @@ Components, in dependency order:
 
 <step-13>
 
-### Step 13: Move the desktop app to crates/workshop/desktop
+### Step 13: Move the desktop app to crates/workshop/desktop [completed]
 
 - Component: Shell vocabulary
 - Piece: directory move
