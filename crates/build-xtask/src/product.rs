@@ -27,8 +27,10 @@
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
 //!   with `gateway-stt` as its public member - the one crate inside the
 //!   family outside the subsystem may name.
-//! - Desktop-app boundary: the `workshop` desktop app depends on `workshop-server-api`
-//!   and never on `workshop-server`.
+//! - Desktop-app boundary: the `workshop` desktop app may depend on no
+//!   workshop crate except `workshop-server-api`, and `workshop-server-api`
+//!   on none except `workshop-server`. A crate's dependency on itself is
+//!   not an edge.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,7 +121,10 @@ pub(crate) fn product_boundary_violations(root: &Path) -> Vec<String> {
 
 /// The Tauri desktop app crate, bound by the desktop-app boundary rule.
 const DESKTOP: &str = "workshop";
-/// The server crate the desktop app must never name directly.
+/// The server's re-export facade: the one workshop crate the desktop app
+/// may name.
+const SERVER_API: &str = "workshop-server-api";
+/// The server crate: the one workshop crate the facade may name.
 const SERVER: &str = "workshop-server";
 /// The promptforge-family crates outside crates may depend on directly.
 const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
@@ -134,11 +139,15 @@ const PUBLIC_HARNESS: &str = "harness-api";
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
 fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
-    if package.package == DESKTOP && dep.package == SERVER {
-        return Some(
-            "the workshop desktop app depends on workshop-server-api, never on workshop-server"
-                .to_owned(),
-        );
+    if let Some(face) = desktop_boundary_face(&package.package)
+        && family(&dep.package) == Family::Workshop
+        && dep.package != face
+        && dep.package != package.package
+    {
+        return Some(format!(
+            "on the desktop-app boundary, {} may depend on workshop crates only through {face}",
+            package.package
+        ));
     }
     if let Some(container) = container_of(&dep.dir) {
         // Inside is physical containment: a crate anywhere under
@@ -211,6 +220,16 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             None
         }
     })
+}
+
+/// The one workshop crate a crate on the desktop-app boundary may name, or
+/// `None` for a crate the boundary does not bind.
+fn desktop_boundary_face(package: &str) -> Option<&'static str> {
+    match package {
+        DESKTOP => Some(SERVER_API),
+        SERVER_API => Some(SERVER),
+        _ => None,
+    }
 }
 
 /// The root-relative path of the deepest manifestless `crates/<container>/`

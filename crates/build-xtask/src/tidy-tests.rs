@@ -53,7 +53,7 @@ fn a_tiered_crate_whose_manifest_is_missing_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(root.path().join("crates")).expect("the crates directory creates");
     let violations = tier_dependency_violations(root.path());
-    let tiered = [VOCABULARY, SERVICES, FEATURES, SERVER].concat();
+    let tiered = packages(&[VOCABULARY, SERVICES, FEATURES, SERVER]);
     assert_eq!(
         violations.len(),
         tiered.len(),
@@ -394,15 +394,15 @@ fn tier_table_grants_each_tier_only_lower_tiers() {
     );
     assert_eq!(
         allowed_dependencies("workshop-gateway"),
-        Some(VOCABULARY.to_vec())
+        Some(packages(&[VOCABULARY]))
     );
     assert_eq!(
         allowed_dependencies("workshop-workspace"),
-        Some([VOCABULARY, SERVICES].concat())
+        Some(packages(&[VOCABULARY, SERVICES]))
     );
     assert_eq!(
         allowed_dependencies("workshop-server"),
-        Some([VOCABULARY, SERVICES, FEATURES].concat())
+        Some(packages(&[VOCABULARY, SERVICES, FEATURES]))
     );
     assert_eq!(allowed_dependencies("gateway"), None);
 }

@@ -19,16 +19,31 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A tiered workshop crate: its package name and its directory under the
+/// `crates/workshop/` container.
+type Tiered = (&'static str, &'static str);
+
 /// Tier 0: vocabulary crates. No internal `workshop-*` dependencies.
-const VOCABULARY: &[&str] = &["workshop-protocol", "workshop-registry", "workshop-support"];
+const VOCABULARY: &[Tiered] = &[
+    ("workshop-protocol", "protocol"),
+    ("workshop-registry", "registry"),
+    ("workshop-support", "support"),
+];
 /// Tier 1: domain services. Depend on vocabulary crates only.
-const SERVICES: &[&str] = &["workshop-gateway", "workshop-menu", "workshop-status"];
+const SERVICES: &[Tiered] = &[
+    ("workshop-gateway", "gateway"),
+    ("workshop-menu", "menu"),
+    ("workshop-status", "status"),
+];
 /// Tier 2: features. Depend on vocabulary and service crates. The
 /// sessions subsystem sits inside the server since Workshop moved onto the
 /// harness, so it has no crate here.
-const FEATURES: &[&str] = &["workshop-user-state", "workshop-workspace"];
+const FEATURES: &[Tiered] = &[
+    ("workshop-user-state", "user-state"),
+    ("workshop-workspace", "workspace"),
+];
 /// Tier 3: the server. May depend on every lower tier.
-const SERVER: &[&str] = &["workshop-server"];
+const SERVER: &[Tiered] = &[("workshop-server", "server")];
 
 /// File-line ceiling from the `AGENTS.md` structural rules.
 const MAX_FILE_LINES: usize = 500;
@@ -62,29 +77,31 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
 /// The internal `workshop-*` crates a tiered crate may depend on, or `None`
 /// when `name` is not part of the decomposition's crate map.
 fn allowed_dependencies(name: &str) -> Option<Vec<&'static str>> {
+    let in_tier = |tier: &[Tiered]| tier.iter().any(|&(package, _)| package == name);
     let allowed = if name == "workshop-registry" {
         // The proxy slots speak the wire types: the status push-channel
         // slot holds `workshop-protocol`'s `StatusBarUpdate`.
         vec!["workshop-protocol"]
-    } else if VOCABULARY.contains(&name) {
+    } else if in_tier(VOCABULARY) {
         Vec::new()
-    } else if SERVICES.contains(&name) {
-        VOCABULARY.to_vec()
-    } else if FEATURES.contains(&name) {
-        [VOCABULARY, SERVICES].concat()
-    } else if SERVER.contains(&name) {
-        [VOCABULARY, SERVICES, FEATURES].concat()
+    } else if in_tier(SERVICES) {
+        packages(&[VOCABULARY])
+    } else if in_tier(FEATURES) {
+        packages(&[VOCABULARY, SERVICES])
+    } else if in_tier(SERVER) {
+        packages(&[VOCABULARY, SERVICES, FEATURES])
     } else {
         return None;
     };
     Some(allowed)
 }
 
-/// The crate directory for a tiered workshop package: the family sits in
-/// the `crates/workshop/` container, with the desktop app at `desktop/`.
-fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
-    let short = name.strip_prefix("workshop-").unwrap_or("desktop");
-    root.join("crates").join("workshop").join(short)
+/// The package names of the crates in `tiers`, in table order.
+fn packages(tiers: &[&[Tiered]]) -> Vec<&'static str> {
+    tiers
+        .iter()
+        .flat_map(|tier| tier.iter().map(|&(package, _)| package))
+        .collect()
 }
 
 /// Checks that tiered `workshop-*` crates depend only on lower tiers.
@@ -94,11 +111,15 @@ fn tiered_crate_dir(root: &Path, name: &str) -> PathBuf {
 #[must_use]
 pub(crate) fn tier_dependency_violations(root: &Path) -> Vec<String> {
     let mut violations = Vec::new();
-    for name in [VOCABULARY, SERVICES, FEATURES, SERVER].concat() {
+    for (name, dir) in [VOCABULARY, SERVICES, FEATURES, SERVER].concat() {
         let Some(allowed) = allowed_dependencies(name) else {
             continue;
         };
-        let manifest_path = tiered_crate_dir(root, name).join("Cargo.toml");
+        let manifest_path = root
+            .join("crates")
+            .join("workshop")
+            .join(dir)
+            .join("Cargo.toml");
         let Ok(text) = fs::read_to_string(&manifest_path) else {
             violations.push(format!(
                 "{name}: tiered crate has no manifest at {}",

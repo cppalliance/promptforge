@@ -583,7 +583,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-3>
 
-### Step 3: Enforce the desktop dependency boundary
+### Step 3: Enforce the desktop dependency boundary [completed]
 
 - Component: Build check
 - Component placement: second, because it has no dependencies and should guard the facade edge before the server and desktop steps reshape their surfaces.

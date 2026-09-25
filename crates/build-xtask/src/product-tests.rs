@@ -63,19 +63,65 @@ fn the_desktop_app_re_adding_workshop_server_is_reported() {
 }
 
 #[test]
-fn other_workshop_crates_may_depend_on_workshop_server() {
+fn the_desktop_boundarys_allowed_edges_pass() {
     let root = tempfile::TempDir::new().expect("tempdir");
+    let api = "workshop-server-api = { path = \"../workshop-server-api\" }\n";
+    write_crate(
+        root.path(),
+        "workshop",
+        "workshop",
+        &format!("[dependencies]\n{api}[dev-dependencies]\n{api}"),
+    );
     write_crate(
         root.path(),
         "workshop-server-api",
         "workshop-server-api",
-        "[dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n",
+        "[dependencies]\nworkshop-server = { path = \"../workshop-server\" }\n\
+         [dev-dependencies]\nworkshop-server-api = { path = \".\", features = [\"test-fixtures\"] }\n",
     );
     write_crate(root.path(), "workshop-server", "workshop-server", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the rule binds only the desktop app crate: {violations:?}"
+        "the desktop app names the facade, and the facade names the server and itself: {violations:?}"
+    );
+}
+
+#[test]
+fn a_desktop_dependency_on_a_workshop_crate_other_than_the_facade_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop",
+        "workshop",
+        "[dependencies]\nworkshop-gateway = { path = \"../workshop-gateway\" }\n",
+    );
+    write_crate(root.path(), "workshop-gateway", "workshop-gateway", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("workshop depends on workshop-gateway:")
+            && violations[0].ends_with("only through workshop-server-api"),
+        "the violation names the desktop app, the forbidden dep, and the facade: {violations:?}"
+    );
+}
+
+#[test]
+fn a_facade_dependency_on_a_workshop_crate_other_than_the_server_is_reported() {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_crate(
+        root.path(),
+        "workshop-server-api",
+        "workshop-server-api",
+        "[dev-dependencies]\nworkshop-status = { path = \"../workshop-status\" }\n",
+    );
+    write_crate(root.path(), "workshop-status", "workshop-status", "");
+    let violations = product_boundary_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with("workshop-server-api depends on workshop-status:")
+            && violations[0].ends_with("only through workshop-server"),
+        "the violation names the facade, the forbidden dep, and the server: {violations:?}"
     );
 }
 
