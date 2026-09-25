@@ -1,0 +1,10 @@
+[book]
+title = "PromptForge Workshop Guide"
+authors = ["Vinnie Falco"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/cppalliance/promptforge"
+site-url = "/promptforge/workshop/"
+additional-js = ["back-link.js"]

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>PromptForge</h1>
+<p class="tagline">Prompts as programs. Human judgment as source code.</p>
+
+<p>PromptForge starts from one premise: human intent is the source code, and everything downstream of it (plans, prompts, reports) is a build artifact. Source is versioned and artifacts are regenerated, so getting a result back costs a run, not a reconstruction.</p>
+
+<p>That ordering follows from scarcity. Human judgment is scarce and model output is abundant, so models advise and compare while people decide. PromptForge protects the judgment you invest in two ways. The structure of your method lives in the prompt file itself, where the runtime enforces it: the sections, the control flow, and the models and tools the prompt may use. A rule written there cannot be forgotten when a model's context fills up. And every run is recorded, so the reasoning that built a pipeline is never lost.</p>
+
+<p>A PromptForge prompt is a Markdown file. The prose says what you want, and small Lua blocks decide what happens next: which model to ask, which tool to call, which section runs, and what fans out in parallel. The control flow belongs to you, not to the model. Runs are deterministic: replaying a recorded run with the same answers reproduces the same steps, so a run can be tested and audited. And because the program hosting a run performs all of its outside work, that program can stop a run cleanly at any point.</p>
+
+<p>The system has four components, and each one has its own documentation. They connect in one direction. The Workshop sits on the Harness, the Harness runs PromptForge programs, and every model call leaves through the Gateway. Each also stands on its own: you can embed PromptForge in your own Rust program, or run the Gateway as a standalone service for any OpenAI-compatible client.</p>
+
+<p><strong>Where to start.</strong> To use PromptForge day to day, start with the Workshop. To run models for yourself or a team, start with the Gateway. To write prompts, read the Prompt Language guide. To embed prompt execution in your own program, start with the PromptForge API.</p>
+
+<table class="products">
+<tr>
+<td class="product-text">
+<p class="product-name"><strong>PromptForge</strong></p>
+<p>The library at the center. It parses PromptForge prompt files and runs them as a sans-I/O state machine. A run never opens a socket, touches a file, or reads the clock. It hands your program each model call, tool call, and timer as an <em>effect</em>, and it reports what happened as <em>events</em>. Every piece of outside work stays under the host's control.</p>
+<p class="links">Links: <a href="promptforge/index.html">API reference</a> and <a href="language/language/index.html">Prompt Language guide</a>.</p>
+</td>
+<td class="product-image">
+<!-- Replace with img/promptforge.png -->
+<div class="image-slot">image</div>
+</td>
+</tr>
+<tr>
+<td class="product-text">
+<p class="product-name"><strong>Harness</strong></p>
+<p>The runtime that puts PromptForge to work. It drives runs on an async runtime and performs their effects: model calls through the Gateway, web fetch and web search tools, and run-scoped files. It also supervises agent sessions and writes every run's effects, answers, and events to an append-only log. Clients like the Workshop reach it through one public API.</p>
+<p class="links">Links: <a href="harness/index.html">API reference</a> and <a href="language/agent/index.html">Agent Programs guide</a>.</p>
+</td>
+<td class="product-image">
+<!-- Replace with img/harness.png -->
+<div class="image-slot">image</div>
+</td>
+</tr>
+<tr>
+<td class="product-text">
+<p class="product-name"><strong>Workshop</strong></p>
+<p>The desktop application. It hosts the Harness in-process and opens a window onto your workspace, where you write and run prompts and agents with every run on the record. On startup it attaches to a running Gateway, or launches one if none is running.</p>
+<p class="links">Links: <a href="workshop/index.html">Workshop guide</a>.</p>
+</td>
+<td class="product-image">
+<!-- Replace with img/workshop.png -->
+<div class="image-slot">image</div>
+</td>
+</tr>
+<tr>
+<td class="product-text">
+<p class="product-name"><strong>Gateway</strong></p>
+<p>The one process that talks to model backends. It serves an OpenAI-compatible API (chat completions, embeddings, rerank, speech, and transcription), holds every credential, and routes each request to a configured remote provider or a local model on your own hardware. Nothing above it ever holds a vendor key.</p>
+<p class="links">Links: <a href="gateway/index.html">Gateway guide</a>.</p>
+</td>
+<td class="product-image">
+<!-- Replace with img/gateway.png -->
+<div class="image-slot">image</div>
+</td>
+</tr>
+</table>
+</body>
+</html>

@@ -1,0 +1,77 @@
+body {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.6;
+  color: #222;
+  background: #fff;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.tagline {
+  margin-top: 0;
+  font-size: 1.2rem;
+  color: #555;
+}
+
+.products {
+  width: 100%;
+  margin-top: 2rem;
+  border-collapse: collapse;
+}
+
+.products td {
+  padding: 1.25rem 1rem;
+  vertical-align: top;
+  border-top: 1px solid #ddd;
+}
+
+.products td.product-text {
+  width: 60%;
+}
+
+.products td.product-image {
+  width: 40%;
+}
+
+.product-name {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.links a {
+  color: #0b5cad;
+}
+
+.image-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 320px;
+  height: 200px;
+  max-width: 100%;
+  border: 2px dashed #999;
+  color: #777;
+}
+
+@media (max-width: 800px) {
+  .products,
+  .products tbody,
+  .products tr,
+  .products td,
+  .products td.product-text,
+  .products td.product-image {
+    display: block;
+    width: auto;
+  }
+
+  .products td.product-image {
+    padding-top: 0;
+    border-top: none;
+  }
+}
