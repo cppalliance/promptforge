@@ -202,6 +202,36 @@ fn books_only_skips_only_the_rustdoc_folders() {
 }
 
 #[test]
+fn the_encoded_flags_join_on_the_unit_separator_and_keep_a_spaced_path_whole() {
+    let banner = Path::new("C:/Program Files/checkout dir/guide/chrome/banner.html");
+    let flags = encoded_rustdoc_flags(banner);
+    let flags = flags.to_str().expect("the flags are UTF-8");
+    assert_eq!(
+        flags.split('\u{1f}').collect::<Vec<_>>(),
+        [
+            "--html-before-content",
+            "C:/Program Files/checkout dir/guide/chrome/banner.html"
+        ]
+    );
+}
+
+#[test]
+fn the_crate_page_uses_the_underscored_crate_name() {
+    assert_eq!(crate_page("harness-api"), "harness_api/index.html");
+    assert_eq!(crate_page("promptforge"), "promptforge/index.html");
+}
+
+#[test]
+fn the_redirect_sends_only_to_the_crate_page() {
+    let html = redirect_page("harness-api");
+    assert!(
+        html.contains("<meta http-equiv=\"refresh\" content=\"0; url=harness_api/index.html\">"),
+        "{html}"
+    );
+    assert_eq!(hrefs(&html).collect::<Vec<_>>(), ["harness_api/index.html"]);
+}
+
+#[test]
 fn a_child_that_cannot_start_is_named() {
     let error = run_child(&mut Command::new("promptforge-no-such-program"))
         .expect_err("the program does not exist");

@@ -508,7 +508,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-6>
 
-### Step 6: Rustdoc pipeline in the site command
+### Step 6: Rustdoc pipeline in the site command [completed]
 
 - Component: Site command
 - Piece: rustdoc pipeline. Built after the books pipeline.

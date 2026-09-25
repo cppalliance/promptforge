@@ -8,17 +8,21 @@
 //! 3. Runs `$MDBOOK build` (`MDBOOK` defaults to `mdbook`) on every staged
 //!    folder, into `target/site/<book>/`. The folders are read from the
 //!    stage output; no book is named here.
-//! 4. Copies `guide/landing/` into `target/site/`.
-//! 5. Checks the landing links: every relative `href` in
-//!    `target/site/index.html` must name a file under `target/site/`.
+//! 4. Unless `--books-only` is set, builds the rustdoc sites
+//!    `target/site/promptforge/` and `target/site/harness/` through the
+//!    separate `target/site-doc` folder, so the developer's `target/doc`
+//!    is untouched. Each page carries the `guide/chrome/banner.html` bar,
+//!    and each site folder gets an `index.html` redirect to its crate.
+//! 5. Copies `guide/landing/` into `target/site/`.
+//! 6. Checks the landing links: every relative `href` in
+//!    `target/site/index.html` must name a file under `target/site/`. With
+//!    `--books-only`, links into the rustdoc folders are skipped.
 //!
 //! Every path passed to a child process is absolute, built from the
-//! workspace root. This command does not build the rustdoc folders
-//! (`promptforge/` and `harness/`), so both modes produce the books and the
-//! link check skips links into those folders.
+//! workspace root.
 
 use std::borrow::Cow;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -26,8 +30,10 @@ use std::process::{Command, ExitCode};
 
 const USAGE: &str = "usage: cargo xtask site [--books-only]";
 
-/// The site folders that hold rustdoc output rather than a book.
-const RUSTDOC_DIRS: [&str; 2] = ["promptforge", "harness"];
+/// The rustdoc sites: the folder under `target/site/` and the crate it
+/// documents, with default features, the facade as hosts read it.
+const RUSTDOC_SITES: [(&str, &str); 2] =
+    [("promptforge", "promptforge"), ("harness", "harness-api")];
 
 /// Link targets the landing check never resolves.
 const IGNORED_PREFIXES: [&str; 4] = ["http:", "https:", "mailto:", "#"];
@@ -71,7 +77,7 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     run_child(
-        Command::new(cargo)
+        Command::new(&cargo)
             .current_dir(root)
             .args(["run", "-p", "build-user-guide", "--", "stage"])
             .arg(&staged),
@@ -89,12 +95,75 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
     }
 
     if !options.books_only {
-        println!("site: the rustdoc stage is not built yet, so this site holds the books only");
+        build_rustdoc(root, &cargo, &site)?;
     }
 
     copy_dir(&root.join("guide").join("landing"), &site)?;
-    check_landing(&site, true)?;
+    check_landing(&site, options.books_only)?;
     Ok(site)
+}
+
+/// Builds every rustdoc site into `site/<dir>/`.
+fn build_rustdoc(root: &Path, cargo: &OsStr, site: &Path) -> Result<(), String> {
+    let target_dir = root.join("target").join("site-doc");
+    let flags = encoded_rustdoc_flags(&root.join("guide").join("chrome").join("banner.html"));
+    for (dir, krate) in RUSTDOC_SITES {
+        // Rustdoc merges every crate in a doc folder into one crate list and
+        // search index, so each crate starts from an empty folder.
+        run_child(
+            Command::new(cargo)
+                .current_dir(root)
+                .args(["clean", "--doc", "--target-dir"])
+                .arg(&target_dir),
+        )?;
+        run_child(
+            Command::new(cargo)
+                .current_dir(root)
+                .args(["doc", "-p", krate, "--no-deps", "--target-dir"])
+                .arg(&target_dir)
+                .env("CARGO_ENCODED_RUSTDOCFLAGS", &flags),
+        )?;
+        let out = site.join(dir);
+        copy_dir(&target_dir.join("doc"), &out)?;
+        let redirect = out.join("index.html");
+        fs::write(&redirect, redirect_page(krate))
+            .map_err(|error| format!("site: cannot write {}: {error}", redirect.display()))?;
+    }
+    Ok(())
+}
+
+/// The `CARGO_ENCODED_RUSTDOCFLAGS` value that injects `banner` before
+/// every rustdoc page's content. Cargo splits this variable only on the
+/// `0x1f` separator, so a checkout path with spaces stays one argument;
+/// `RUSTDOCFLAGS` splits on spaces and would break it.
+fn encoded_rustdoc_flags(banner: &Path) -> OsString {
+    let mut flags = OsString::from("--html-before-content\u{1f}");
+    flags.push(banner);
+    flags
+}
+
+/// The page of `krate` relative to its doc folder. Rustdoc names the
+/// folder after the crate with `-` replaced by `_`.
+fn crate_page(krate: &str) -> String {
+    format!("{}/index.html", krate.replace('-', "_"))
+}
+
+/// The `index.html` that sends a rustdoc site folder to its crate's page.
+fn redirect_page(krate: &str) -> String {
+    let page = crate_page(krate);
+    format!(
+        "<!DOCTYPE html>\n\
+         <html lang=\"en\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta http-equiv=\"refresh\" content=\"0; url={page}\">\n\
+         <title>{krate}</title>\n\
+         </head>\n\
+         <body>\n\
+         <p><a href=\"{page}\">{krate}</a></p>\n\
+         </body>\n\
+         </html>\n"
+    )
 }
 
 /// Removes `dir` and everything in it; a folder that does not exist is
@@ -187,7 +256,12 @@ fn broken_links(site: &Path, html: &str, skip_rustdoc: bool) -> Vec<String> {
                 .iter()
                 .any(|prefix| href.starts_with(prefix))
         })
-        .filter(|href| !(skip_rustdoc && RUSTDOC_DIRS.contains(&first_segment(href))))
+        .filter(|href| {
+            !(skip_rustdoc
+                && RUSTDOC_SITES
+                    .iter()
+                    .any(|(dir, _)| *dir == first_segment(href)))
+        })
         .filter_map(|href| unresolved(site, href).map(|reason| format!("{href}: {reason}")))
         .collect()
 }
