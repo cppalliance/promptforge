@@ -1,11 +1,14 @@
 // Save-timeout test for the editor panel (src/parts/editor/editor-panel.ts):
 // a 408 on save (the deadline_elapsed error) leaves the conflict token
 // unknown, and the next save reconciles with the file on disk instead of
-// re-sending a token that may now be stale. Covers four cases: the 408
+// re-sending a token that may now be stale. Covers six cases: the 408
 // marks the token unknown and sends no stale token; a disk match adopts
-// the fresh token and saves; a mismatch shows the conflict dialog; and a
+// the fresh token and saves; a mismatch shows the conflict dialog; a
 // late write that lands after the re-read surfaces the conflict dialog,
-// not a raw error. Drives the real EditorPanel with a stubbed surface and
+// not a raw error; an Overwrite 408 marks the token unknown the same way
+// a save 408 does; and an Overwrite entered with the token already
+// unknown, whose timed-out write landed, lets the next save adopt the
+// fresh token. Drives the real EditorPanel with a stubbed surface and
 // scripted reader/writer, the same way editor-save-race.mjs does.
 // Run: node test/editor-save-timeout.mjs
 import { writeFile } from "node:fs/promises";
@@ -139,6 +142,10 @@ const conflictError = () =>
 
 const errorBar = (panel) => panel.element.querySelector(".ws-editor-panel__error");
 const conflictOverlay = (panel) => panel.element.querySelector(".ws-editor-conflict-overlay");
+const overwriteButton = (panel) =>
+  [...panel.element.querySelectorAll(".ws-editor-conflict__button")].find(
+    (button) => button.textContent === "Overwrite",
+  );
 
 await assertNoLeaks(lifecycle, async () => {
   // --- A 408 leaves the token unknown and sends no stale token ---------------
@@ -278,6 +285,107 @@ await assertNoLeaks(lifecycle, async () => {
       "a late write landing after the re-read is not a raw error",
       errorBar(panel) === null,
     );
+    panel.dispose();
+  }
+
+  // --- An Overwrite 408 leaves the token unknown ------------------------------
+  {
+    const stub = createStubSurface();
+    const puts = [];
+    let disk = { text: "old", token: "t100" };
+    const panel = new EditorPanel({
+      createSurface: () => stub,
+      readFile: async () => ({
+        path: FILE_PATH, size: disk.text.length, token: disk.token, text: disk.text,
+      }),
+      writeFile: (filePath, text, expectedToken) => {
+        puts.push({ path: filePath, text, expectedToken });
+        if (puts.length === 1) {
+          // The file changed externally since the load: the save conflicts.
+          disk = { text: "external edit", token: "t500" };
+          return Promise.reject(conflictError());
+        }
+        if (puts.length === 2) {
+          // The Overwrite never lands: the server answered 408 before it wrote.
+          return Promise.reject(deadlineError());
+        }
+        return Promise.resolve({ path: filePath, size: text.length, token: "t900", text });
+      },
+    });
+    panel.init(fakeParameters(FILE_PATH));
+    await flush();
+
+    stub.type("new");
+    await panel.save();
+    overwriteButton(panel).click();
+    await flush();
+    check(
+      "an Overwrite 408 tells the user the save may not have landed",
+      errorBar(panel)?.textContent.includes("may or may not"),
+    );
+
+    await panel.save();
+    check(
+      "an Overwrite 408 leaves the token unknown, so the next save re-reads instead of writing",
+      puts.length === 2 && conflictOverlay(panel) !== null,
+    );
+    panel.dispose();
+  }
+
+  // --- An Overwrite whose timed-out write landed adopts the fresh token -------
+  {
+    const stub = createStubSurface();
+    const puts = [];
+    let disk = { text: "old", token: "t100" };
+    const panel = new EditorPanel({
+      createSurface: () => stub,
+      readFile: async () => ({
+        path: FILE_PATH, size: disk.text.length, token: disk.token, text: disk.text,
+      }),
+      writeFile: (filePath, text, expectedToken) => {
+        puts.push({ path: filePath, text, expectedToken });
+        if (puts.length === 1) {
+          // The save never lands: the server answered 408 before it wrote.
+          return Promise.reject(deadlineError());
+        }
+        if (puts.length === 2) {
+          // The late Overwrite lands: the disk now holds what was sent.
+          disk = { text, token: "t600" };
+          return Promise.reject(deadlineError());
+        }
+        return Promise.resolve({ path: filePath, size: text.length, token: "t700", text });
+      },
+    });
+    panel.init(fakeParameters(FILE_PATH));
+    await flush();
+
+    stub.type("new");
+    await panel.save();
+    // The file changed externally while the write was unknown, so the
+    // reconcile read mismatches and the dialog opens with the token still
+    // unknown.
+    disk = { text: "external edit", token: "t500" };
+    await panel.save();
+    check(
+      "an unknown-token mismatch opens the conflict dialog before the Overwrite",
+      puts.length === 1 && conflictOverlay(panel) !== null,
+    );
+    // Typed after the mismatched save, so the Overwrite sends different
+    // text than the timed-out save did and reconciliation must match the
+    // Overwrite's.
+    stub.type("newer");
+    overwriteButton(panel).click();
+    await flush();
+    await panel.save();
+    check(
+      "an Overwrite whose timed-out write landed lets the next save adopt the fresh token",
+      puts.length === 3 && puts[2].expectedToken === "t600" && puts[2].text === "newer",
+    );
+    check(
+      "the adopted-token save after an Overwrite does not reopen the conflict dialog",
+      conflictOverlay(panel) === null,
+    );
+    check("the adopted-token save after an Overwrite clears the dirty state", !panel.isDirty());
     panel.dispose();
   }
 });

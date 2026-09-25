@@ -339,7 +339,7 @@ use super::*;
 
 <step-2>
 
-### Step 2: Route editor save and overwrite through one write path
+### Step 2: Route editor save and overwrite through one write path [completed]
 
 - Component: workshop-ui
 - Component placement: second of three. `crates/workshop/server/build.rs` bundles `crates/workshop/ui/src/main.ts` into the server's embedded assets, so the UI is an input to `workshop-server`. Landing it before the server steps means the closing exit checks, which rebuild that bundle, exercise the finished UI.
@@ -355,7 +355,9 @@ use super::*;
   - Keep the existing outer `catch` in both methods, which calls `showError` for read failures.
   - Update the doc comments on `save()` and `overwrite()` to say both route through `writeCurrent`.
   - Leave `saveAs()` outside the helper: it writes a different path, so a 408 there must not mark `this.path`'s token unknown.
-  - Add case (a) and case (b) as defined in the Testing Plan, using the file's existing scripted reader and writer. Add the two cases to the header comment's list; leave the existing fourth case's wording alone, because relabeling it belongs to deferred DEBT-X1.
+  - Add case (a) and case (b), using the file's existing scripted reader and writer:
+    - Case (a): save answers 409 on T0, then Overwrite (reads T1) answers 408, then save. Assert that no write carries T0, that the save performs a reconcile read, and that the 408 message appears.
+    - Case (b): an unknown-token mismatch opens the dialog (a timed-out save, then a save whose reconcile read does not match), then Overwrite answers 408, then the disk holds the Overwrite text, then save. Assert that the save adopts the disk token and writes without reopening the dialog. Add the two cases to the header comment's list; leave the existing fourth case's wording alone, because relabeling it belongs to deferred DEBT-X1.
 - Verification, from `crates/workshop/ui`:
   - `node test/editor-save-timeout.mjs` passes all six cases.
   - `node test/editor-panel.mjs` and `node test/editor-save-race.mjs` pass (the Overwrite success and in-flight typing paths).

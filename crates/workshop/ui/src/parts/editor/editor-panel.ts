@@ -175,9 +175,11 @@ export class EditorPanel extends WorkshopPart {
    * save (a 408) leaves the token unknown - the write may or may not have
    * landed - so the next save re-reads the file before sending any token,
    * adopting the fresh token when the disk still holds what was last sent,
-   * and falling back to the conflict dialog otherwise. An untitled buffer
-   * has no write target, so its save runs Save As, which resolves this
-   * panel through the dock's active panel.
+   * and falling back to the conflict dialog otherwise. The write itself
+   * routes through writeCurrent, the same path overwrite() uses, so both
+   * record the 408 and 409 outcomes identically. An untitled buffer has no
+   * write target, so its save runs Save As, which resolves this panel
+   * through the dock's active panel.
    */
   async save(): Promise<void> {
     if (this.path === null) {
@@ -211,10 +213,7 @@ export class EditorPanel extends WorkshopPart {
         expectedToken = onDisk.token;
         this.tokenUnknown = false;
       }
-      this.lastSentText = text;
-      const written = await this.writer()(this.path, text, expectedToken);
-      this.token = written.token;
-      this.surface.markSaved(text);
+      await this.writeCurrent(this.path, text, expectedToken);
     } catch (error: unknown) {
       if (isDeadlineElapsed(error)) {
         this.tokenUnknown = true;
@@ -315,6 +314,32 @@ export class EditorPanel extends WorkshopPart {
     expectedToken: string | null,
   ) => Promise<WorkspaceFile> {
     return this.deps.writeFile ?? writeFile;
+  }
+
+  /**
+   * Writes this panel's own file and records the outcome: the token, the
+   * saved baseline, the text a timed-out write may have landed, the 408
+   * message, and the 409 conflict dialog. Any other error is rethrown. A
+   * 408 marks `this.path`'s token unknown, so a write to any other path
+   * (Save As) must not route through here.
+   */
+  private async writeCurrent(path: string, text: string, expectedToken: string | null): Promise<void> {
+    this.lastSentText = text;
+    try {
+      const written = await this.writer()(path, text, expectedToken);
+      this.token = written.token;
+      this.tokenUnknown = false;
+      this.surface.markSaved(text);
+    } catch (error: unknown) {
+      if (isDeadlineElapsed(error)) {
+        this.tokenUnknown = true;
+        this.showError("The save timed out; the file may or may not have been written.");
+      } else if (isModifiedConflict(error)) {
+        this.showConflictDialog();
+      } else {
+        throw error;
+      }
+    }
   }
 
   /** Loads the document into the surface and records its conflict token. */
@@ -431,8 +456,10 @@ export class EditorPanel extends WorkshopPart {
 
   /**
    * Overwrite path of the conflict dialog: re-read the file for its fresh
-   * token, then write the editor's text against it. A second conflict
-   * (the file changed again in between) reopens the dialog.
+   * token, then write the editor's text against it through writeCurrent,
+   * the same path save() uses. A second conflict (the file changed again
+   * in between) reopens the dialog, and a 408 leaves the token unknown
+   * for the next save to reconcile.
    */
   private async overwrite(): Promise<void> {
     // The saving guard cannot wedge the conflict flow: the dialog's
@@ -445,10 +472,7 @@ export class EditorPanel extends WorkshopPart {
     try {
       const fresh = await this.reader()(this.path);
       const text = this.surface.text();
-      const written = await this.writer()(this.path, text, fresh.token);
-      this.token = written.token;
-      this.tokenUnknown = false;
-      this.surface.markSaved(text);
+      await this.writeCurrent(this.path, text, fresh.token);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {
         this.showConflictDialog();
