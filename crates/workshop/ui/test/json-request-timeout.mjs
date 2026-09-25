@@ -17,6 +17,7 @@ const bundle = await esbuild.build({
     contents: `
       export * as jsonRequest from "./src/services/json-request.ts";
       export * as workspace from "./src/services/workspace-api.ts";
+      export { ErrorCatalog } from "./src/services/error-catalog.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -29,7 +30,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 const code = bundle.outputFiles[0].text;
-const { jsonRequest, workspace } = await import(
+const { jsonRequest, workspace, ErrorCatalog } = await import(
   `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
 );
 
@@ -105,6 +106,10 @@ await withFetch(jsonResponse(408, ENVELOPE), async () => {
     caught !== null && caught.message === TIMEOUT_MESSAGE,
   );
   check("a write's 408 envelope keeps the status", caught !== null && caught.status === 408);
+  check(
+    "a write's 408 is typed as DeadlineElapsed, not HttpStatus",
+    caught !== null && caught.code === ErrorCatalog.DeadlineElapsed,
+  );
 });
 
 await withFetch(emptyResponse, async () => {

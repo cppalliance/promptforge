@@ -22,6 +22,7 @@ import { showPanelDialog } from "./editor-dialog";
 import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
   fetchFile,
+  isDeadlineElapsed,
   isModifiedConflict,
   writeFile,
   type WorkspaceFile,
@@ -70,6 +71,10 @@ export class EditorPanel extends WorkshopPart {
   private untitled = false;
   private title = "Editor";
   private token: string | null = null;
+  /** True while a timed-out save leaves the token unknown. */
+  private tokenUnknown = false;
+  /** The text of the last write attempt, for reconciling an unknown token. */
+  private lastSentText: string | null = null;
   private saving = false;
 
   constructor(private readonly deps: EditorPanelDeps = {}) {
@@ -166,9 +171,13 @@ export class EditorPanel extends WorkshopPart {
   /**
    * Saves through the workspace API with the token from the last read.
    * A stale token means the file changed on disk: rather than overwriting
-   * silently, the conflict dialog offers reload or overwrite. An
-   * untitled buffer has no write target, so its save runs Save As,
-   * which resolves this panel through the dock's active panel.
+   * silently, the conflict dialog offers reload or overwrite. A timed-out
+   * save (a 408) leaves the token unknown - the write may or may not have
+   * landed - so the next save re-reads the file before sending any token,
+   * adopting the fresh token when the disk still holds what was last sent,
+   * and falling back to the conflict dialog otherwise. An untitled buffer
+   * has no write target, so its save runs Save As, which resolves this
+   * panel through the dock's active panel.
    */
   async save(): Promise<void> {
     if (this.path === null) {
@@ -181,16 +190,36 @@ export class EditorPanel extends WorkshopPart {
       return;
     }
     this.saving = true;
+    // The text is captured once: the write and the saved baseline must
+    // agree, or keystrokes typed while the PUT is in flight would be
+    // baselined as saved and silently lost.
+    const text = this.surface.text();
     try {
-      // The text is captured once: the write and the saved baseline must
-      // agree, or keystrokes typed while the PUT is in flight would be
-      // baselined as saved and silently lost.
-      const text = this.surface.text();
-      const written = await this.writer()(this.path, text, this.token);
+      // A timed-out save left the token unknown: reconcile with the file
+      // on disk before sending any token, so a stale token never reaches
+      // the write boundary.
+      let expectedToken = this.token;
+      if (this.tokenUnknown) {
+        const onDisk = await this.reader()(this.path);
+        if (onDisk.text !== this.lastSentText) {
+          // The write may not have landed, or the file changed again:
+          // resolve through the conflict dialog instead of overwriting.
+          this.showConflictDialog();
+          return;
+        }
+        this.token = onDisk.token;
+        expectedToken = onDisk.token;
+        this.tokenUnknown = false;
+      }
+      this.lastSentText = text;
+      const written = await this.writer()(this.path, text, expectedToken);
       this.token = written.token;
       this.surface.markSaved(text);
     } catch (error: unknown) {
-      if (isModifiedConflict(error)) {
+      if (isDeadlineElapsed(error)) {
+        this.tokenUnknown = true;
+        this.showError("The save timed out; the file may or may not have been written.");
+      } else if (isModifiedConflict(error)) {
         this.showConflictDialog();
       } else {
         this.showError(error);
@@ -222,6 +251,7 @@ export class EditorPanel extends WorkshopPart {
       this.untitled = false;
       this.title = baseName(path);
       this.token = written.token;
+      this.tokenUnknown = false;
       this.surface.markSaved(text);
       this.updateTitle();
       getServiceOrNull(RECENT_FILES_STORE)?.add(path);
@@ -291,6 +321,7 @@ export class EditorPanel extends WorkshopPart {
   private async load(path: string): Promise<void> {
     const file = await this.reader()(path);
     this.token = file.token;
+    this.tokenUnknown = false;
     this.surface.open({ path, text: file.text });
   }
 
@@ -416,6 +447,7 @@ export class EditorPanel extends WorkshopPart {
       const text = this.surface.text();
       const written = await this.writer()(this.path, text, fresh.token);
       this.token = written.token;
+      this.tokenUnknown = false;
       this.surface.markSaved(text);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {

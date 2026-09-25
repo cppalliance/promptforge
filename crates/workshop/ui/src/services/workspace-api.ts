@@ -45,6 +45,11 @@ export function isModifiedConflict(error: unknown): error is CatalogError {
   return isCatalogError(error, ErrorCatalog.ModifiedConflict);
 }
 
+/** Narrows a caught error to a route deadline (408) from writeFile. */
+export function isDeadlineElapsed(error: unknown): error is CatalogError {
+  return isCatalogError(error, ErrorCatalog.DeadlineElapsed);
+}
+
 function parseEntry(value: unknown): TreeEntry | null {
   if (!isRecord(value)) {
     return null;
@@ -92,6 +97,9 @@ function httpFailure(body: unknown, status: number, route: string): never {
   const message = errorMessage(body, status, route);
   if (status === 409 && errorCode(body) === "modified_conflict") {
     throw new CatalogError(ErrorCatalog.ModifiedConflict, message, { status });
+  }
+  if (status === 408) {
+    throw new CatalogError(ErrorCatalog.DeadlineElapsed, message, { status });
   }
   throw new CatalogError(ErrorCatalog.HttpStatus, message, { status });
 }

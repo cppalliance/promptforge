@@ -797,7 +797,7 @@ Components, in dependency order:
 
 <step-10>
 
-### Step 10: Track an unknown save token in the editor
+### Step 10: Track an unknown save token in the editor [completed]
 
 - Component: Behavior fixes
 - Piece: save-timeout

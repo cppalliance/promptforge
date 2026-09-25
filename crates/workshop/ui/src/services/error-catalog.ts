@@ -23,6 +23,8 @@ export enum ErrorCatalog {
   UnexpectedShape = "unexpected_shape",
   /** The server refused a write because the file changed on disk. */
   ModifiedConflict = "modified_conflict",
+  /** The server answered a write past its deadline: it may still land. */
+  DeadlineElapsed = "deadline_elapsed",
   /** The server refused to grant a workspace root. */
   GrantRefused = "grant_refused",
 }
