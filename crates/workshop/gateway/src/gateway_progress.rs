@@ -65,14 +65,14 @@ impl Timing {
 /// Dropping the handle without shutting down still stops the task at its
 /// next select point, because the closed channel resolves the stop branch.
 #[derive(Debug)]
-pub struct Subscriber {
+pub(crate) struct Subscriber {
     stop: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Subscriber {
     /// Signals the subscriber to stop and waits for its task to finish.
-    pub async fn shutdown(mut self) {
+    pub(crate) async fn shutdown(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
@@ -86,7 +86,7 @@ impl Subscriber {
 /// pushing busy and idle frames through `push` while `health` reads
 /// reachable.
 #[must_use]
-pub fn spawn(gateway: GatewayBinding, push: Push, health: GatewayHealth) -> Subscriber {
+pub(crate) fn spawn(gateway: GatewayBinding, push: Push, health: GatewayHealth) -> Subscriber {
     spawn_with_timing(gateway, push, health, Timing::DEFAULT)
 }
 

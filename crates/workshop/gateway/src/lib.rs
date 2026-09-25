@@ -1,8 +1,7 @@
 //! workshop-gateway - the gateway subsystem: the bearer-authenticated
 //! HTTP client for the PromptForge gateway's OpenAI-compatible API, the
 //! replaceable endpoint binding and discovery-file resolution, the
-//! reachability heartbeat, the gateway progress subscriber, and the
-//! gateway cache API.
+//! reachability heartbeat, and the gateway progress subscriber.
 //!
 //! ## Invariants
 //!
@@ -22,22 +21,25 @@
 //!   `gateway_api_types::Progress` alone: no progress machinery is
 //!   shared with the gateway family.
 
-pub mod gateway;
-pub mod gateway_binding;
-pub mod gateway_progress;
-pub mod handles;
-pub mod heartbeat;
-pub mod resolve;
+mod gateway;
+mod gateway_binding;
+mod gateway_progress;
+mod handles;
+mod heartbeat;
+mod resolve;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod test_gateway;
 
 pub use gateway::{
-    CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, ProgressStream,
-    SsePayloadStream, SwitchProfileBody, SwitchResponse,
+    ForwardedResponse, GatewayClient, GatewayError, GatewayRealtimeSocket, GatewayResponse,
+    REQUEST_TIMEOUT, SwitchProfileBody, SwitchResponse,
 };
 pub use gateway_binding::{
     GatewayBinding, GatewayPublicationError, GatewaySnapshot, GatewayUpdater,
 };
 pub use handles::{GatewayHandles, GatewayTaskRegistrations, register, register_tasks};
-pub use heartbeat::{GatewayHealth, Heartbeat};
-pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
+pub use heartbeat::{
+    GatewayHealth, Heartbeat, join_status, refresh_catalog, refresh_profiles,
+    spawn as spawn_heartbeat,
+};
+pub use resolve::{GatewaySource, ResolveError, ResolvedGateway, report, resolve};

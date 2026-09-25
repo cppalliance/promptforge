@@ -19,7 +19,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 use promptforge::{ParseError, ParseErrorKind};
-use workshop_gateway::gateway::GatewayError;
+use workshop_gateway::GatewayError;
 use workshop_protocol::ErrorEnvelope;
 use workshop_support::{LEAK_DETAIL, render_message};
 

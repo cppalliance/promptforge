@@ -33,7 +33,7 @@ async fn a_replaced_endpoint_wakes_the_heartbeat_and_refreshes_with_its_new_key(
     let mut status_rx = status.subscribe();
     let mut catalog_rx = catalog.subscribe();
     let (push, _guards) = wired_push(&status, &catalog, &menu);
-    let heartbeat = workshop_gateway::heartbeat::spawn(
+    let heartbeat = workshop_gateway::spawn_heartbeat(
         gateway.clone(),
         push,
         health.clone(),

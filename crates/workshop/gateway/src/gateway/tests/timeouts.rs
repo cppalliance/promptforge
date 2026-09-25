@@ -45,10 +45,9 @@ async fn a_stalled_gateway_trips_the_request_timeout() {
 #[tokio::test]
 async fn a_stalled_gateway_trips_the_stream_header_bound() {
     let base_url = spawn_stalled_gateway().await;
-    let error = impatient_client(&base_url)
-        .cache_ensure("hf://example/blob")
-        .await
-        .expect_err("a gateway that never sends headers must trip the header bound");
+    let Err(error) = impatient_client(&base_url).subscribe_progress().await else {
+        panic!("a gateway that never sends headers must trip the header bound");
+    };
     assert!(
         matches!(error, GatewayError::Transport(_)),
         "expected Transport, got {error:?}"

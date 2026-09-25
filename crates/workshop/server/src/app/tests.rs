@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
 use super::fixtures::{body_bytes, config_for, spawn_gateway, state_for};
-use workshop_gateway::gateway::GatewayClient;
+use workshop_gateway::GatewayClient;
 
 /// The `last-workspace` pointer file inside `state_dir`.
 fn pointer_path(state_dir: &std::path::Path) -> std::path::PathBuf {
@@ -156,7 +156,7 @@ fn default_bind_is_loopback_port_7910() {
 #[test]
 fn the_relay_deadline_outlasts_the_gateway_request_timeout() {
     assert!(
-        workshop_support::RELAY_DEADLINE > workshop_gateway::gateway::REQUEST_TIMEOUT,
+        workshop_support::RELAY_DEADLINE > workshop_gateway::REQUEST_TIMEOUT,
         "the route deadline must let the gateway client time out first, \
          so the caller sees the relay's 502 rather than a blunt 408"
     );

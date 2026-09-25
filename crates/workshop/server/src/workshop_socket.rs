@@ -126,7 +126,7 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
     // recomputed from the current probe instead of replayed stale.
     let retained = status.as_ref().and_then(|channel| channel.latest());
     let join = match state.health() {
-        Some(health) => workshop_gateway::heartbeat::join_status(retained, &health),
+        Some(health) => workshop_gateway::join_status(retained, &health),
         None => retained,
     };
     if let Some(update) = join

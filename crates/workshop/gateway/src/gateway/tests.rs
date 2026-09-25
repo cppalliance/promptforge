@@ -1,11 +1,9 @@
 //! Tests for the gateway client: the client basics live here beside the
-//! shared mock-server helper; the decoder, timeout, cache, and switch
-//! areas each have their own submodule.
+//! shared mock-server helper; the progress, switch, and timeout areas
+//! each have their own submodule.
 
 use super::*;
 
-mod cache;
-mod decoder;
 mod progress;
 mod switch;
 mod timeouts;

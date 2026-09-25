@@ -98,15 +98,16 @@ impl ResolvedGateway {
     }
 
     /// Which source won the resolution.
+    #[cfg(test)]
     #[must_use]
-    pub fn source(&self) -> GatewaySource {
+    pub(crate) fn source(&self) -> GatewaySource {
         self.source
     }
 
     /// Why a gateway discovery file was removed on the way to the config
     /// fallback, when one was.
     #[must_use]
-    pub fn stale(&self) -> Option<StaleReason> {
+    pub(crate) fn stale(&self) -> Option<StaleReason> {
         self.stale
     }
 

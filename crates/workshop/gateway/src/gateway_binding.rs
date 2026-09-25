@@ -142,6 +142,7 @@ impl GatewayBinding {
     }
 
     /// Builds a binding around a client with test-specific timeouts.
+    #[cfg(any(test, feature = "test-fixtures"))]
     #[must_use]
     pub fn from_client(client: GatewayClient) -> Self {
         let base_url = client.base_url.clone();
@@ -193,6 +194,7 @@ impl GatewayBinding {
     }
 
     /// Builds and atomically publishes a complete replacement generation.
+    #[cfg(any(test, feature = "test-fixtures"))]
     fn replace_with_identity(
         &self,
         base_url: &str,
@@ -203,6 +205,7 @@ impl GatewayBinding {
         self.publish_snapshot(snapshot)
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     fn publish_snapshot(
         &self,
         mut snapshot: GatewaySnapshot,
@@ -249,7 +252,8 @@ impl GatewayBinding {
 ///
 /// Replacements accept only validated capabilities, and shutdown reads the
 /// same current immutable snapshot as every workshop consumer. Raw connection
-/// files cannot cross the publication boundary:
+/// files cannot cross the publication boundary, shown here through the
+/// `replace_sidecar` test seam:
 ///
 /// ```compile_fail
 /// use gateway_api_discovery::GatewayDiscoveryFile;
@@ -283,6 +287,7 @@ impl GatewayUpdater {
     /// client cannot initialize, or
     /// [`GatewayPublicationError::PublicationClosed`] after teardown revokes
     /// replacement publication.
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub fn replace_sidecar(
         &self,
         connection: &gateway_api_discovery::ValidatedConnection,

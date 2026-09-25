@@ -93,11 +93,10 @@ pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use harness_api::WaitError;
 pub use push::Push;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
-pub use workshop_gateway::gateway::{
-    GatewayClient, GatewayError, GatewayResponse, SwitchProfileBody, SwitchResponse,
+pub use workshop_gateway::{
+    GatewayClient, GatewayError, GatewayPublicationError, GatewayResponse, GatewaySource,
+    GatewayUpdater, ResolveError, ResolvedGateway, SwitchProfileBody, SwitchResponse,
 };
-pub use workshop_gateway::gateway_binding::{GatewayPublicationError, GatewayUpdater};
-pub use workshop_gateway::resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use workshop_protocol::{Activity, InputFrame, InputResponse};
 pub use workshop_support::{
     AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,

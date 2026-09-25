@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use axum::extract::ws::WebSocket;
 
-use workshop_gateway::heartbeat::{refresh_catalog, refresh_profiles};
 use workshop_gateway::{
-    GatewayClient, GatewayError, GatewayResponse, GatewaySnapshot, SwitchResponse,
+    GatewayClient, GatewayError, GatewayResponse, GatewaySnapshot, SwitchResponse, refresh_catalog,
+    refresh_profiles,
 };
 use workshop_menu::{MenuBus, SwitchOutcome};
 use workshop_protocol::{Activity, SelectModelFrame, SwitchProfileFrame};

@@ -4,7 +4,7 @@
 pub use crate::app::state_with_gateway_and_restart_bound;
 pub use crate::app::{Omit, state_with_gateway, state_with_gateway_omitting};
 pub use crate::push::Push;
-pub use workshop_gateway::heartbeat::{GatewayHealth, Heartbeat};
+pub use workshop_gateway::{GatewayHealth, Heartbeat};
 pub use workshop_menu::catalog::CatalogBus;
 pub use workshop_menu::menu::{MenuBus, MenuRefusal};
 pub use workshop_protocol::{Activity, Severity, StatusBarUpdate};
@@ -53,6 +53,7 @@ pub fn spawn_bindings_forwarder(state: &crate::AppState) {
 }
 
 /// Starts a heartbeat around a fixture Gateway client.
+#[cfg(feature = "test-fixtures")]
 #[must_use]
 pub fn spawn_heartbeat(
     client: crate::GatewayClient,
@@ -61,8 +62,8 @@ pub fn spawn_heartbeat(
     interval: std::time::Duration,
     backoff: ReconnectBackoff,
 ) -> Heartbeat {
-    workshop_gateway::heartbeat::spawn(
-        workshop_gateway::gateway_binding::GatewayBinding::from_client(client),
+    workshop_gateway::spawn_heartbeat(
+        workshop_gateway::GatewayBinding::from_client(client),
         push,
         health,
         interval,

@@ -190,7 +190,7 @@ fn heartbeat_on(
     let menu = MenuBus::new(catalog.clone(), None);
     let backoff = test_backoff();
     let (push, guards) = wired_push(status, catalog, &menu);
-    let heartbeat = workshop_gateway::heartbeat::spawn(
+    let heartbeat = workshop_gateway::spawn_heartbeat(
         gateway,
         push,
         health.clone(),
@@ -393,7 +393,7 @@ async fn an_exhausted_budget_stops_reconnect_probes_with_a_give_up_report() {
     );
     let (push, _guards) = wired_push(&status, &catalog, &menu);
     let heartbeat =
-        workshop_gateway::heartbeat::spawn(gateway, push, health, TEST_INTERVAL, backoff);
+        workshop_gateway::spawn_heartbeat(gateway, push, health, TEST_INTERVAL, backoff);
 
     assert_eq!(next_update(&mut rx).await.label, "Gateway unreachable");
     let report = next_update(&mut rx).await;
@@ -429,7 +429,7 @@ async fn shutdown_stops_the_task_without_waiting_out_the_interval() {
     let catalog = CatalogBus::new();
     let menu = MenuBus::new(catalog.clone(), None);
     let (push, _guards) = wired_push(&status, &catalog, &menu);
-    let heartbeat = workshop_gateway::heartbeat::spawn(
+    let heartbeat = workshop_gateway::spawn_heartbeat(
         gateway,
         push,
         GatewayHealth::new(),

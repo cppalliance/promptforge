@@ -15,8 +15,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::app::{StateError, router, state_with_gateway};
-use workshop_gateway::gateway_binding::GatewayUpdater;
-use workshop_gateway::resolve::ResolvedGateway;
+use workshop_gateway::{GatewayUpdater, ResolvedGateway};
 use workshop_support::Config;
 
 /// How long a signaled shutdown waits for in-flight connections to drain
@@ -195,9 +194,7 @@ fn spawn_inner(
     // failure is the plain no-gateway error, never a bind-then-fail.
     let gateway = match gateway {
         Some(gateway) => gateway,
-        None => {
-            workshop_gateway::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?
-        }
+        None => workshop_gateway::resolve(&config.gateway).map_err(StateError::Resolution)?,
     };
     let initial_gateway_identity = gateway.identity().cloned();
     let (ready_tx, ready_rx) = mpsc::channel();

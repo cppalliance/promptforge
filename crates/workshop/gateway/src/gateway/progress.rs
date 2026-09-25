@@ -2,14 +2,13 @@
 //! [`Progress`] snapshots, decoded block-by-block under a hard size
 //! bound.
 //!
-//! Unlike a profile switch, which answers a single JSON document, and a
-//! cache download, whose stream ends in a terminal event, a progress
-//! subscription never terminates on its own and yields snapshots the
-//! workshop renders verbatim, so the decode keeps the stricter posture
-//! the subscriber always had: only blank-line-terminated blocks dispatch
-//! (an incomplete trailing block is discarded), and a block that grows
-//! past `MAX_EVENT_BLOCK` without its terminator is refused rather than
-//! buffered unbounded.
+//! Unlike a profile switch, which answers a single JSON document, a
+//! progress subscription never terminates on its own and yields
+//! snapshots the workshop renders verbatim, so the decode keeps the
+//! stricter posture the subscriber always had: only
+//! blank-line-terminated blocks dispatch (an incomplete trailing block
+//! is discarded), and a block that grows past `MAX_EVENT_BLOCK` without
+//! its terminator is refused rather than buffered unbounded.
 
 use std::pin::Pin;
 
@@ -35,7 +34,7 @@ const MAX_ERROR_BODY: usize = 2000;
 /// beyond `MAX_EVENT_BLOCK` is yielded as one error item that ends the
 /// stream. The stream ends when the gateway closes the body; whether to
 /// resubscribe is the caller's decision.
-pub type ProgressStream = Pin<Box<dyn Stream<Item = Result<Progress, GatewayError>> + Send>>;
+pub(crate) type ProgressStream = Pin<Box<dyn Stream<Item = Result<Progress, GatewayError>> + Send>>;
 
 /// Turns an answered `GET /admin/progress` request into the snapshot
 /// stream.

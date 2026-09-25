@@ -51,7 +51,7 @@ pub(crate) fn config_for(base_url: &str, state_dir: &Path) -> Config {
 pub(crate) fn state_for(base_url: &str) -> (AppState, tempfile::TempDir) {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let config = config_for(base_url, state_dir.path());
-    let gateway = workshop_gateway::resolve::ResolvedGateway::from_config(&config.gateway);
+    let gateway = workshop_gateway::ResolvedGateway::from_config(&config.gateway);
     let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
     (state, state_dir)
 }

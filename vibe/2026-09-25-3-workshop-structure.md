@@ -605,7 +605,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-4>
 
-### Step 4: Trim the gateway's public surface
+### Step 4: Trim the gateway's public surface [completed]
 
 - Component: Gateway
 - Component placement: third, because the server and desktop steps should import the gateway through its final root paths.

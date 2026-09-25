@@ -3,26 +3,21 @@
 //! [`GatewayClient`] wraps `reqwest` with bearer authentication and returns
 //! responses as raw bytes so the workshop routes can relay them to the
 //! caller byte-for-byte. A non-success status from the gateway is *not* an
-//! error here: it is part of the relayed response. A cache download is
-//! decoded from SSE into a [`SsePayloadStream`] of `data:` payloads, and
-//! the progress subscription into a [`ProgressStream`] of decoded
+//! error here: it is part of the relayed response. The progress
+//! subscription is decoded from SSE into a [`ProgressStream`] of decoded
 //! snapshots.
 
 use std::time::Duration;
 
 mod events;
 pub(crate) mod progress;
+mod socket;
 mod sse;
 
-pub mod socket;
-
-pub use events::{
-    CacheEvent, CacheResponse, ForwardedResponse, GatewayResponse, SsePayloadStream,
-    SwitchProfileBody, SwitchResponse,
-};
-pub use progress::ProgressStream;
+pub use events::{ForwardedResponse, GatewayResponse, SwitchProfileBody, SwitchResponse};
+pub(crate) use progress::ProgressStream;
 pub use socket::GatewayRealtimeSocket;
-use sse::{is_event_stream, payload_stream, read};
+use sse::read;
 
 /// Default bound on a single `GET /health` probe: a gateway that accepts
 /// the connection but never answers must still read as unreachable, and two
@@ -35,11 +30,10 @@ pub(crate) const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Default whole-request timeout for non-streaming operations: the model
-/// catalog fetch, the profile selection, and the initial cache API
-/// handshake. Streaming responses (cache downloads and the progress
-/// subscription) can legitimately run for minutes, so the same bound
-/// covers only their header phase (see `send_bounded`) and the body
-/// stream stays open-ended.
+/// catalog fetch and the profile selection. Forwarded requests and the
+/// progress subscription can legitimately run for minutes, so the same
+/// bound covers only their header phase (see `send_bounded`) and the
+/// body stays open-ended.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A gateway request failure.
@@ -346,37 +340,6 @@ impl GatewayClient {
                 message: "the switch-profile answer is not the outcome document".to_owned(),
                 source: Some(Box::new(source)),
             })
-    }
-
-    /// Posts a cache-ensure request to `POST /v1/cache`, asking the gateway
-    /// to make the blob at `source` available locally.
-    ///
-    /// A cache hit answers a buffered JSON `ready` event
-    /// ([`CacheResponse::Buffered`] on a success status); a miss answers
-    /// `text/event-stream` and returns [`CacheResponse::Download`], whose
-    /// payload stream ends in a terminal `ready` or `error` event. Only
-    /// the wait for the response headers is bounded, so a download stream
-    /// runs without a deadline. A non-success status is buffered and
-    /// returned.
-    ///
-    /// # Errors
-    /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed (the header bound elapsing included) and
-    /// [`GatewayError::ReadBody`] if a buffered answer's body cannot be
-    /// read.
-    pub async fn cache_ensure(&self, source: &str) -> Result<CacheResponse, GatewayError> {
-        let request = self
-            .authorize(self.http.post(format!("{}/v1/cache", self.base_url)))
-            .json(&serde_json::json!({ "source": source }));
-        let response = self.send_bounded(request).await?;
-        let status = response.status();
-        if status.is_success() && is_event_stream(&response) {
-            return Ok(CacheResponse::Download {
-                status,
-                payloads: payload_stream(response),
-            });
-        }
-        read(response).await.map(CacheResponse::Buffered)
     }
 
     /// Subscribes to the gateway's `GET /admin/progress` event stream.

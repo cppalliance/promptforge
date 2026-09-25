@@ -43,11 +43,11 @@ mod refresh;
 pub use refresh::{refresh_catalog, refresh_profiles};
 
 /// The status line announcing that the gateway answers its health probe.
-pub const CONNECTED_LABEL: &str = "Connected to gateway";
+pub(crate) const CONNECTED_LABEL: &str = "Connected to gateway";
 /// The status line announcing that the gateway does not answer.
-pub const UNREACHABLE_LABEL: &str = "Gateway unreachable";
+pub(crate) const UNREACHABLE_LABEL: &str = "Gateway unreachable";
 /// The description sent with the unreachable announcement.
-pub const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
+pub(crate) const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
 
 /// The status frame a joining session hears first: the bus's retained
 /// frame, unless that frame is one of the heartbeat's transition
@@ -87,7 +87,7 @@ pub fn join_status(
 /// How often the heartbeat probes a reachable gateway. Hardcoded for
 /// now; a configuration knob may follow once someone needs one. Probes
 /// of an unreachable gateway follow the [`ReconnectBackoff`] instead.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Shared gateway reachability, written by the heartbeat and read by the
 /// gateway-dependent routes.
