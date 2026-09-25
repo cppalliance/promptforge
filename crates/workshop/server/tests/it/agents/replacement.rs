@@ -232,30 +232,42 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
         .set_selected("model-b")
         .expect("the pending replacement model becomes selected");
     state.catalog().publish(Vec::new());
-    let replacement_started = Arc::new(Notify::new());
-    let replacement_request_started = Arc::clone(&replacement_started);
     let replacement_requests = Arc::new(Mutex::new(Vec::new()));
     let captured_replacement = Arc::clone(&replacement_requests);
     let replacement = spawn_gateway(with_typed_catalog(Router::new().route(
         "/v1/chat/completions",
         post(move |body: String| {
-            let replacement_request_started = Arc::clone(&replacement_request_started);
             let captured_replacement = Arc::clone(&captured_replacement);
             async move {
                 record_request(&captured_replacement, &body);
-                replacement_request_started.notify_one();
                 echo_completions(body).await
             }
         }),
     )))
     .await;
+    let mut lifecycle = state
+        .registry()
+        .state::<harness_api::Harness>()
+        .expect("the harness is registered")
+        .session(&harness_api::SessionId::new(&session))
+        .expect("the session remains registered")
+        .subscribe_state();
     replace_gateway(&state, &replacement, 1_757_000_002);
 
-    assert!(
-        tokio::time::timeout(Duration::from_millis(250), replacement_started.notified())
-            .await
-            .is_err(),
-        "an unavailable catalog cannot relaunch model-b on the replacement Gateway"
+    // The supervisor marks the retired run Closed and executes a relaunch
+    // in one synchronous step on this single-threaded runtime, so Closed
+    // is observable only when the session holds.
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        lifecycle.wait_for(|run| *run == harness_api::SessionState::Closed),
+    )
+    .await
+    .expect("an unavailable catalog cannot relaunch model-b on the replacement Gateway")
+    .expect("the session remains registered");
+    assert_eq!(
+        state.agents().unresolved_waits(&session),
+        Some(Vec::new()),
+        "the held session stays registered with no open wait"
     );
 
     state

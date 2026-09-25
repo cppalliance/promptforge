@@ -253,15 +253,24 @@ async fn recv(
         .expect("the relayed frame is valid")
 }
 
+/// Asserts that no frame precedes the echo of a fresh text marker. The
+/// relay forwards each direction in order and the probe upstream echoes
+/// in order, so a duplicate or forwarded frame already on its way
+/// arrives ahead of the echo, and the upstream has read every frame
+/// relayed before the marker.
 async fn assert_no_frame(
     socket: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
 ) {
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), socket.next())
-            .await
-            .is_err(),
+    let marker = "no-frame marker";
+    socket
+        .send(ClientMessage::Text(marker.into()))
+        .await
+        .expect("the marker sends");
+    assert_eq!(
+        recv(socket).await,
+        ClientMessage::Text(marker.into()),
         "the terminated control frame produces no duplicate or forwarded frame"
     );
 }

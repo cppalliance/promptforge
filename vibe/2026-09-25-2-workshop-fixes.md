@@ -551,7 +551,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-13>
 
-### Step 13: Make the server integration tests deterministic
+### Step 13: Make the server integration tests deterministic [completed]
 
 - Component: Test determinism
 

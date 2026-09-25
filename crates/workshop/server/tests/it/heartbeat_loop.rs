@@ -23,7 +23,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use workshop_gateway::{GatewayBinding, GatewayHealth, Heartbeat};
 use workshop_menu::{CatalogBus, MenuBus};
@@ -61,21 +61,41 @@ fn wired_push(status: &StatusBus, catalog: &CatalogBus, menu: &MenuBus) -> (Push
     )
 }
 
-/// Fast enough to observe transitions without real waiting, slow
-/// enough that a 200 ms quiet window spans several ticks and so proves
-/// the loop does not re-emit a steady state.
+/// Fast enough that transitions, and the probes a quiet check counts,
+/// arrive without real waiting.
 const TEST_INTERVAL: Duration = Duration::from_millis(25);
 
 const CATALOG: &str =
     r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
 
+/// A mock `/health` answer under test control, and the count of probes
+/// served. The loop is sequential - wait, probe, announce, refresh - so
+/// a served probe proves every earlier probe's announcement and refresh
+/// are done.
+#[derive(Clone)]
+struct MockHealth {
+    healthy: Arc<AtomicBool>,
+    probes: watch::Sender<usize>,
+}
+
 /// A mock `/health` whose answer flips under test control.
-async fn flippable_health(State(healthy): State<Arc<AtomicBool>>) -> Response {
-    if healthy.load(Ordering::Relaxed) {
+async fn flippable_health(State(mock): State<MockHealth>) -> Response {
+    mock.probes.send_modify(|served| *served += 1);
+    if mock.healthy.load(Ordering::Relaxed) {
         StatusCode::OK.into_response()
     } else {
         StatusCode::SERVICE_UNAVAILABLE.into_response()
     }
+}
+
+/// A router serving only the flippable `/health`, and the count of the
+/// probes it serves.
+fn health_only(healthy: Arc<AtomicBool>) -> (Router, watch::Receiver<usize>) {
+    let (probes, served) = watch::channel(0);
+    let router = Router::new()
+        .route("/health", get(flippable_health))
+        .with_state(MockHealth { healthy, probes });
+    (router, served)
 }
 
 /// A static mock catalog for the refresh-on-reconnect tests.
@@ -108,13 +128,35 @@ async fn mock_profile_status() -> Response {
 /// Binds a mock gateway whose `/health` flips with `healthy`, with a
 /// static `/v1/models` and the profile endpoints beside it.
 async fn spawn_gateway(healthy: Arc<AtomicBool>) -> String {
-    let app = Router::new()
-        .route("/health", get(flippable_health))
+    spawn_probed_gateway(healthy).await.0
+}
+
+/// [`spawn_gateway`], also returning the count of health probes served.
+async fn spawn_probed_gateway(healthy: Arc<AtomicBool>) -> (String, watch::Receiver<usize>) {
+    let (health, probes) = health_only(healthy);
+    let app = health
         .route("/v1/models", get(mock_models))
         .route("/admin/profiles", get(mock_profiles))
-        .route("/admin/status", get(mock_profile_status))
-        .with_state(healthy);
-    serve(app).await
+        .route("/admin/status", get(mock_profile_status));
+    (serve(app).await, probes)
+}
+
+/// Binds a loopback listener that accepts each connection and drops it
+/// unanswered: an unreachable gateway whose failed probes are counted
+/// the way [`flippable_health`] counts answered ones.
+async fn spawn_silent_gateway() -> (String, watch::Receiver<usize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a loopback port binds");
+    let addr = listener.local_addr().expect("the listener has an address");
+    let (probes, served) = watch::channel(0);
+    drop(tokio::spawn(async move {
+        while let Ok((connection, _)) = listener.accept().await {
+            probes.send_modify(|count| *count += 1);
+            drop(connection);
+        }
+    }));
+    (format!("http://{addr}"), served)
 }
 
 /// Binds `app` on a free loopback port and returns its base URL.
@@ -166,11 +208,30 @@ async fn next_update(rx: &mut broadcast::Receiver<StatusBarUpdate>) -> StatusBar
         .expect("the status bus is open")
 }
 
-/// Asserts no update arrives within a window spanning several ticks.
-async fn assert_quiet(rx: &mut broadcast::Receiver<StatusBarUpdate>) {
-    let quiet = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
+/// Waits until the mock serves `count` more probes, so every probe
+/// before the last of them has finished its announcement and refresh.
+async fn await_probes(probes: &mut watch::Receiver<usize>, count: usize) {
+    let target = *probes.borrow_and_update() + count;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        probes.wait_for(|served| *served >= target),
+    )
+    .await
+    .expect("the probes are served within the deadline")
+    .expect("the mock gateway keeps counting");
+}
+
+/// Asserts that a steady state re-emits nothing: once three more probes
+/// are served, at least two probes after the last transition have
+/// finished without an update.
+async fn assert_quiet(
+    rx: &mut broadcast::Receiver<StatusBarUpdate>,
+    probes: &mut watch::Receiver<usize>,
+) {
+    await_probes(probes, 3).await;
+    let quiet = rx.try_recv();
     assert!(
-        quiet.is_err(),
+        matches!(quiet, Err(broadcast::error::TryRecvError::Empty)),
         "a steady state must not re-emit, got {quiet:?}"
     );
 }
@@ -200,7 +261,7 @@ async fn snapshot_where(
 #[tokio::test]
 async fn a_healthy_gateway_fires_connected_once_and_stays_quiet() {
     let healthy = Arc::new(AtomicBool::new(true));
-    let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+    let (base_url, mut probes) = spawn_probed_gateway(Arc::clone(&healthy)).await;
     let status = StatusBus::new();
     let catalog = CatalogBus::new();
     let mut rx = status.subscribe();
@@ -211,32 +272,31 @@ async fn a_healthy_gateway_fires_connected_once_and_stays_quiet() {
     assert_eq!(update.severity, Severity::Info);
     assert_eq!(update.activity, workshop_protocol::Activity::General);
     assert!(health.is_reachable(), "the probe published reachable");
-    assert_quiet(&mut rx).await;
+    assert_quiet(&mut rx, &mut probes).await;
     heartbeat.shutdown().await;
 }
 
 #[tokio::test]
 async fn an_unreachable_gateway_fires_unreachable_once_and_stays_quiet() {
-    // Nothing listens on port 1, so the connect fails deterministically.
+    let (base_url, mut probes) = spawn_silent_gateway().await;
     let status = StatusBus::new();
     let catalog = CatalogBus::new();
     let mut rx = status.subscribe();
-    let (heartbeat, health, _menu, _backoff, _guards) =
-        heartbeat_on("http://127.0.0.1:1", &status, &catalog);
+    let (heartbeat, health, _menu, _backoff, _guards) = heartbeat_on(&base_url, &status, &catalog);
 
     let update = next_update(&mut rx).await;
     assert_eq!(update.label, "Gateway unreachable");
     assert_eq!(update.severity, Severity::Info);
     assert_eq!(update.activity, workshop_protocol::Activity::General);
     assert!(!health.is_reachable(), "the probe published unreachable");
-    assert_quiet(&mut rx).await;
+    assert_quiet(&mut rx, &mut probes).await;
     heartbeat.shutdown().await;
 }
 
 #[tokio::test]
 async fn each_transition_fires_exactly_one_update() {
     let healthy = Arc::new(AtomicBool::new(true));
-    let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+    let (base_url, mut probes) = spawn_probed_gateway(Arc::clone(&healthy)).await;
     let status = StatusBus::new();
     let catalog = CatalogBus::new();
     let mut rx = status.subscribe();
@@ -249,121 +309,7 @@ async fn each_transition_fires_exactly_one_update() {
     healthy.store(true, Ordering::Relaxed);
     assert_eq!(next_update(&mut rx).await.label, "Connected to gateway");
     assert!(health.is_reachable());
-    assert_quiet(&mut rx).await;
-    heartbeat.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_reconnect_pushes_the_refreshed_catalog() {
-    let healthy = Arc::new(AtomicBool::new(false));
-    let base_url = spawn_gateway(Arc::clone(&healthy)).await;
-    let status = StatusBus::new();
-    let catalog = CatalogBus::new();
-    let mut status_rx = status.subscribe();
-    let mut catalog_rx = catalog.subscribe();
-    let (heartbeat, _health, _menu, _backoff, _guards) = heartbeat_on(&base_url, &status, &catalog);
-
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Gateway unreachable"
-    );
-    healthy.store(true, Ordering::Relaxed);
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Connected to gateway"
-    );
-    let push: CatalogPush = tokio::time::timeout(Duration::from_secs(5), catalog_rx.recv())
-        .await
-        .expect("the refreshed catalog arrives within the deadline")
-        .expect("the catalog bus is open");
-    assert_eq!(
-        push.models,
-        serde_json::json!([{"id": "test-model", "object": "model", "owned_by": "promptforge"}])
-            .as_array()
-            .expect("the fixture is an array")
-            .clone(),
-        "the push includes every chat-capable gateway model"
-    );
-    heartbeat.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_reconnect_whose_refresh_is_declined_pushes_no_catalog() {
-    // No /v1/models route: the refresh is declined with a 404, and a
-    // declined refresh is skipped rather than pushed - pushing it
-    // would empty pickers that still hold a usable list.
-    let healthy = Arc::new(AtomicBool::new(false));
-    let base_url = serve(
-        Router::new()
-            .route("/health", get(flippable_health))
-            .with_state(Arc::clone(&healthy)),
-    )
-    .await;
-    let status = StatusBus::new();
-    let catalog = CatalogBus::new();
-    let mut status_rx = status.subscribe();
-    let mut catalog_rx = catalog.subscribe();
-    let (heartbeat, _health, _menu, _backoff, _guards) = heartbeat_on(&base_url, &status, &catalog);
-
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Gateway unreachable"
-    );
-    healthy.store(true, Ordering::Relaxed);
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Connected to gateway"
-    );
-    let quiet = tokio::time::timeout(Duration::from_millis(200), catalog_rx.recv()).await;
-    assert!(quiet.is_err(), "a declined refresh is skipped, not pushed");
-    heartbeat.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_down_to_up_transition_publishes_a_populated_snapshot() {
-    let healthy = Arc::new(AtomicBool::new(false));
-    let base_url = spawn_gateway(Arc::clone(&healthy)).await;
-    let status = StatusBus::new();
-    let catalog = CatalogBus::new();
-    let mut status_rx = status.subscribe();
-    let (heartbeat, _health, menu, _backoff, _guards) = heartbeat_on(&base_url, &status, &catalog);
-
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Gateway unreachable"
-    );
-    healthy.store(true, Ordering::Relaxed);
-    let populated = snapshot_where(&menu, |snapshot| !snapshot.profiles.is_empty()).await;
-    assert_eq!(populated.profiles, ["coding", "main"]);
-    assert_eq!(populated.active.as_deref(), Some("main"));
-    heartbeat.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_gateway_without_profile_support_publishes_an_empty_list() {
-    // Only /health exists: the profile endpoints answer 404, which
-    // is a state, not an error - the reconnect publishes an empty
-    // list rather than keeping the stale names.
-    let healthy = Arc::new(AtomicBool::new(false));
-    let base_url = serve(
-        Router::new()
-            .route("/health", get(flippable_health))
-            .with_state(Arc::clone(&healthy)),
-    )
-    .await;
-    let status = StatusBus::new();
-    let catalog = CatalogBus::new();
-    let mut status_rx = status.subscribe();
-    let (heartbeat, _health, menu, _backoff, _guards) = heartbeat_on(&base_url, &status, &catalog);
-
-    assert_eq!(
-        next_update(&mut status_rx).await.label,
-        "Gateway unreachable"
-    );
-    menu.set_profiles(vec!["stale".to_string()], Some("stale".to_string()));
-    healthy.store(true, Ordering::Relaxed);
-    let emptied = snapshot_where(&menu, |snapshot| snapshot.profiles.is_empty()).await;
-    assert_eq!(emptied.active, None, "the stale active profile clears");
+    assert_quiet(&mut rx, &mut probes).await;
     heartbeat.shutdown().await;
 }
 
@@ -434,6 +380,9 @@ async fn an_exhausted_budget_stops_reconnect_probes_with_a_give_up_report() {
     let gateway =
         GatewayBinding::new_with_identity(&base_url, "", None).expect("binding builds in tests");
     let health = GatewayHealth::new();
+    // The loop is handed the only reachability sender, so this watch
+    // closes exactly when the loop ends.
+    let mut verdict = health.subscribe();
     let menu = MenuBus::new(catalog.clone(), None);
     // A budget of a few schedule steps: exhausted within a handful of
     // failed probes, well inside the test deadline.
@@ -444,7 +393,7 @@ async fn an_exhausted_budget_stops_reconnect_probes_with_a_give_up_report() {
     );
     let (push, _guards) = wired_push(&status, &catalog, &menu);
     let heartbeat =
-        workshop_gateway::heartbeat::spawn(gateway, push, health.clone(), TEST_INTERVAL, backoff);
+        workshop_gateway::heartbeat::spawn(gateway, push, health, TEST_INTERVAL, backoff);
 
     assert_eq!(next_update(&mut rx).await.label, "Gateway unreachable");
     let report = next_update(&mut rx).await;
@@ -453,9 +402,18 @@ async fn an_exhausted_budget_stops_reconnect_probes_with_a_give_up_report() {
     // The gateway coming back after the give-up changes nothing: the
     // loop has ended, so no probe ever notices.
     healthy.store(true, Ordering::Relaxed);
-    assert_quiet(&mut rx).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while verdict.changed().await.is_ok() {}
+    })
+    .await
+    .expect("the loop ends with its give-up report");
+    let after = rx.try_recv();
     assert!(
-        !health.is_reachable(),
+        matches!(after, Err(broadcast::error::TryRecvError::Empty)),
+        "an ended loop reports nothing more, got {after:?}"
+    );
+    assert!(
+        !*verdict.borrow(),
         "an ended loop leaves the last verdict standing"
     );
     heartbeat.shutdown().await;
@@ -484,4 +442,5 @@ async fn shutdown_stops_the_task_without_waiting_out_the_interval() {
 }
 
 mod recovery;
+mod refresh_on_reconnect;
 mod startup_convergence;

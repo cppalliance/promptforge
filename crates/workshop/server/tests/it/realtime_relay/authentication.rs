@@ -58,7 +58,7 @@ async fn realtime_relay_is_authenticated_fixed_and_payload_opaque() {
     })
     .await
     .expect("the Gateway hop receives its automatic pong");
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_no_frame(&mut socket).await;
     assert_eq!(
         probe.pongs(),
         vec![vec![9, 8, 7]],
@@ -68,7 +68,6 @@ async fn realtime_relay_is_authenticated_fixed_and_payload_opaque() {
         probe.pings().is_empty(),
         "the browser ping terminates at Workshop"
     );
-    assert_no_frame(&mut socket).await;
     socket.close(None).await.expect("the browser socket closes");
 
     assert_eq!(
