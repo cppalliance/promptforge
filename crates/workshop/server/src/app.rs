@@ -9,6 +9,7 @@
 //! runtime infrastructure - the shared reconnect backoff - plus the
 //! registration guards keeping every self-registration alive.
 
+mod compose;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub(crate) mod fixtures;
 #[cfg(test)]
@@ -19,20 +20,19 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use harness_api::Harness;
-
 use workshop_gateway::GatewayHandles;
 use workshop_menu::MenuHandles;
-use workshop_registry::{Push, Registration, Registry, WorkspaceRoots};
+use workshop_registry::{Push, Registration, Registry};
 use workshop_status::StatusBus;
 use workshop_support::{Config, DEFAULT_DEADLINE, ReconnectBackoff, with_deadline};
-use workshop_user_state::UserStateStore;
 use workshop_workspace::Workspace;
 
-use crate::agents::{self, AgentSessions, SessionsState};
+use crate::agents::AgentSessions;
 use crate::catalog::CatalogBus;
 use crate::gateway::GatewayError;
-use crate::gateway_binding::{GatewayBinding, GatewaySnapshot, GatewayUpdater};
+#[cfg(test)]
+use crate::gateway_binding::GatewayBinding;
+use crate::gateway_binding::{GatewaySnapshot, GatewayUpdater};
 use crate::heartbeat::GatewayHealth;
 use crate::menu::MenuBus;
 use crate::resolve::ResolvedGateway;
@@ -271,7 +271,7 @@ pub fn state_with_gateway(
     config: &Config,
     gateway: &ResolvedGateway,
 ) -> Result<AppState, StateError> {
-    compose(config, gateway, None, None)
+    compose::compose(config, gateway, None, None)
 }
 
 /// [`state_with_gateway`] with the profile switch's sidecar restart bound
@@ -288,7 +288,7 @@ pub fn state_with_gateway_and_restart_bound(
     gateway: &ResolvedGateway,
     restart_bound: std::time::Duration,
 ) -> Result<AppState, StateError> {
-    compose(config, gateway, None, Some(restart_bound))
+    compose::compose(config, gateway, None, Some(restart_bound))
 }
 
 /// [`state_with_gateway`] with one subsystem's `register` call removed:
@@ -304,128 +304,7 @@ pub fn state_with_gateway_omitting(
     gateway: &ResolvedGateway,
     omit: Omit,
 ) -> Result<AppState, StateError> {
-    compose(config, gateway, Some(omit), None)
-}
-
-/// The composition root behind [`state_with_gateway`]; `omit` removes
-/// one subsystem's `register` call for the boot-failure test, and
-/// `restart_bound` replaces the sessions subsystem's sidecar restart
-/// bound when given.
-fn compose(
-    config: &Config,
-    gateway: &ResolvedGateway,
-    omit: Option<Omit>,
-    restart_bound: Option<std::time::Duration>,
-) -> Result<AppState, StateError> {
-    let status = StatusBus::new();
-    let catalog = CatalogBus::new();
-    // The per-profile model memory lives in the state directory; a bad
-    // or missing memory file costs the memory, never startup.
-    let state_dir = &config.server.state_dir;
-    // A crash between an atomic write's temp file and its rename
-    // orphans the temp; boot is the one moment the directory is
-    // known and quiet, so it is swept here.
-    workshop_support::sweep_orphaned_temps(state_dir);
-    let menu = MenuBus::new(catalog.clone(), Some(state_dir));
-    // The subsystems self-register: consumers reach their channels,
-    // sinks, state handles, routes, and tasks through the registry's
-    // collections instead of by name.
-    let registry = Registry::new();
-    let mut registrations = Registrations::new();
-    if omit != Some(Omit::Status) {
-        let (channel, sink, state) = workshop_status::register(&registry, &status);
-        registrations.hold(channel);
-        registrations.hold(sink);
-        registrations.hold(state);
-    }
-    if omit != Some(Omit::Menu) {
-        let (catalog_sink, menu_sink, menu_state) =
-            workshop_menu::register(&registry, &catalog, &menu);
-        registrations.hold(catalog_sink);
-        registrations.hold(menu_sink);
-        registrations.hold(menu_state);
-    }
-    let push = registry.push();
-    // Startup phases are reported as they run; with no client connected
-    // yet these land on an empty bus, ready for the first session.
-    crate::resolve::report(gateway, &push);
-    let gateway_binding = GatewayBinding::new_with_identity(
-        gateway.base_url(),
-        gateway.api_key(),
-        gateway.identity().cloned(),
-    )
-    .map_err(StateError::Gateway)?;
-    let backoff = ReconnectBackoff::new();
-    let health = GatewayHealth::new();
-    let gateway_handles = GatewayHandles::new(gateway_binding, health.clone());
-    if omit != Some(Omit::Gateway) {
-        registrations.hold(workshop_gateway::register(
-            &registry,
-            gateway_handles.clone(),
-        ));
-    }
-    // The background tasks register beside the state handles; the server
-    // spawns them from the registry's task vector when it starts
-    // serving.
-    let (heartbeat, subscriber) =
-        workshop_gateway::register_tasks(&registry, &gateway_handles, backoff.clone());
-    registrations.hold(heartbeat);
-    registrations.hold(subscriber);
-    // The workspace remembers its last-used file in the state directory;
-    // boot follows that memory through `reopen_last_workspace` once the
-    // runtime is up, since the reopen is async and composition is not.
-    let workspace = Workspace::with_state_dir(state_dir);
-    if omit != Some(Omit::Workspace) {
-        let (routes, state, roots) = workshop_workspace::register(&registry, &workspace);
-        registrations.hold(routes);
-        registrations.hold(state);
-        registrations.hold(roots);
-        // The shutdown lever that closes the workspace file inside the
-        // graceful stop, so a quit leaves one complete file and no
-        // sidecar.
-        registrations.hold(workshop_workspace::register_tasks(&registry, &workspace));
-    }
-    // The account-scoped UI state lives beside the menu memory in the
-    // state directory; a bad or missing file costs the state, never
-    // startup.
-    let user_state = Arc::new(UserStateStore::new(state_dir));
-    let (routes, state) = workshop_user_state::register(&registry, user_state);
-    registrations.hold(routes);
-    registrations.hold(state);
-    // Agent sessions run in the harness, the engine's production host,
-    // built here like every other subsystem and reached through the
-    // registry; `agents` pushes the server's state through its public API.
-    let harness = agents::harness_for(config, &registry);
-    let agents = AgentSessions::new(registry.clone(), backoff.clone());
-    let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
-    if let Some(bound) = restart_bound {
-        sessions = sessions.with_restart_bound(bound);
-    }
-    if omit != Some(Omit::Sessions) {
-        let (routes, harness, agents) = agents::register(&registry, &sessions, harness, &agents);
-        registrations.hold(routes);
-        registrations.hold(harness);
-        registrations.hold(agents);
-        // The bindings forwarder, spawned with serving like every task.
-        registrations.hold(agents::register_tasks(&registry));
-    }
-    // The boot contract: every subsystem's handle set is present before
-    // state is shared, so a missing contribution fails here, naming the
-    // type, instead of panicking later at first use.
-    registry.require::<StatusBus>()?;
-    registry.require::<MenuHandles>()?;
-    registry.require::<GatewayHandles>()?;
-    registry.require::<Harness>()?;
-    registry.require::<AgentSessions>()?;
-    registry.require::<Workspace>()?;
-    registry.require::<dyn WorkspaceRoots>()?;
-    registry.require::<UserStateStore>()?;
-    push.push_idle();
-    Ok(AppState {
-        backoff,
-        registry,
-        _registrations: registrations,
-    })
+    compose::compose(config, gateway, Some(omit), None)
 }
 
 /// A shared-state construction failure: rich, init-only, and never sent

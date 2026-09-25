@@ -982,7 +982,7 @@ Components, in dependency order:
 
 <step-20>
 
-### Step 20: Break compose into per-subsystem register helpers
+### Step 20: Break compose into per-subsystem register helpers [completed]
 
 - Component: Structural consolidation
 - Piece: split
