@@ -28,18 +28,17 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use harness_api::{
-    Delta, DeltaKind, Session, SessionEvent, SessionFailure, WaitError, WaitFrame, display_chain,
+    Delta, Session, SessionEvent, SessionFailure, WaitError, WaitFrame, display_chain,
 };
-use promptforge::event::Event;
 use tokio::sync::broadcast;
 
 use workshop_protocol::{
-    Activity, AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, AgentSessionFrame, AgentsFrame,
-    ErrorFrame, InputFrame, InputResponse,
+    Activity, AgentSessionFrame, AgentsFrame, ErrorFrame, InputFrame, InputResponse,
 };
 
 use super::LaunchRefusal;
 use super::session::{cross_site_refusal, send_error, send_frame};
+use super::socket_frames::{delta_frame, drain_events, frame_entry, input_frame};
 use super::state::SessionsState;
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
@@ -58,16 +57,16 @@ pub(crate) async fn upgrade(
 
 /// The attachment state of one socket: the session it serves and the
 /// per-client cursors deriving durable-frame indices.
-struct Attached {
+pub(crate) struct Attached {
     /// The session this socket serves.
-    session: Session,
+    pub(crate) session: Session,
     /// The next transcript index to consider; everything below it has
     /// been read (framed or skipped) for this client already.
-    cursor: u64,
+    pub(crate) cursor: u64,
     /// The wire index the next framed entry takes: the count of
     /// transcript entries with a wire shape sent so far, so the durable
     /// frames number the transcript the client renders, gap-free.
-    framed: u64,
+    pub(crate) framed: u64,
 }
 
 /// Receives from an optional subscription, pending forever when absent,
@@ -215,29 +214,6 @@ type Subscriptions<'a> = (
     &'a mut Option<broadcast::Receiver<WaitFrame>>,
     &'a mut Option<broadcast::Receiver<SessionFailure>>,
 );
-
-/// Renders a harness wait frame as the protocol's input frame: the one
-/// place the harness's wait vocabulary meets Workshop's wire shape.
-fn input_frame(frame: WaitFrame) -> InputFrame {
-    match frame {
-        WaitFrame::Required { token } => InputFrame::Required { token },
-        WaitFrame::Cancelled { token } => InputFrame::Cancelled { token },
-    }
-}
-
-/// Renders a harness delta as the protocol's delta frame, the reply stamp
-/// passed through; `None` for a side channel the wire has no label for,
-/// dropped like a lagged delta because the completed-reply event repairs
-/// the transcript.
-fn delta_frame(delta: Delta) -> Option<AgentDeltaFrame> {
-    let channel = match delta.kind {
-        DeltaKind::Text => AgentDeltaKind::Text,
-        DeltaKind::Reasoning => AgentDeltaKind::Reasoning,
-        // `DeltaKind` is `#[non_exhaustive]` in `harness-sessions`.
-        _ => return None,
-    };
-    Some(AgentDeltaFrame::new(channel, delta.content, delta.reply))
-}
 
 /// Handles one inbound text frame. A `false` return means the client is
 /// gone and the socket loop should end.
@@ -426,53 +402,6 @@ async fn on_event_wake(
         }
         _ => drain_events(attached, socket).await,
     }
-}
-
-/// Sends every transcript entry past the client's cursor as a durable
-/// `agent_event` frame stamped with its wire index and, on the
-/// model-round content kinds, the reply stamp its deltas had. A `false`
-/// return means the client is gone.
-async fn drain_events(attached: &mut Attached, socket: &mut WebSocket) -> bool {
-    let transcript = match attached.session.transcript(attached.cursor).await {
-        Ok(transcript) => transcript,
-        Err(error) => {
-            // The run log refused the read; the next wakeup retries from
-            // the same cursor, so nothing is skipped.
-            tracing::warn!(session = %attached.session.id(), %error, "transcript read failed");
-            return true;
-        }
-    };
-    for entry in &transcript {
-        if !frame_entry(attached, entry, socket).await {
-            return false;
-        }
-    }
-    true
-}
-
-/// Frames one transcript entry at or past the cursor and advances the
-/// cursor over it. An entry with no wire shape (lifecycle, task, and
-/// debug events) advances the cursor without a frame or a wire index. A
-/// `false` return means the client is gone.
-async fn frame_entry(
-    attached: &mut Attached,
-    entry: &SessionEvent,
-    socket: &mut WebSocket,
-) -> bool {
-    if entry.index < attached.cursor {
-        return true;
-    }
-    attached.cursor = entry.index + 1;
-    let Ok(event) = serde_json::from_value::<Event>(entry.event.clone()) else {
-        // A stored payload this build cannot read has no wire shape
-        // either; the transcript's index sequence stays whole.
-        return true;
-    };
-    let Some(frame) = AgentEventFrame::new(attached.framed, entry.reply, &event) else {
-        return true;
-    };
-    attached.framed += 1;
-    send_frame(socket, &frame).await
 }
 
 /// Re-announces every unresolved wait to this socket in creation order -

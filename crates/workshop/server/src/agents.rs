@@ -24,6 +24,7 @@ mod bindings;
 pub(crate) mod relay;
 pub(crate) mod session;
 pub(crate) mod socket;
+pub(crate) mod socket_frames;
 pub(crate) mod state;
 mod status;
 

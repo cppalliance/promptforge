@@ -995,7 +995,7 @@ Components, in dependency order:
 
 <step-21>
 
-### Step 21: Split out the agent socket's framing helpers
+### Step 21: Split out the agent socket's framing helpers [completed]
 
 - Component: Structural consolidation
 - Piece: split
