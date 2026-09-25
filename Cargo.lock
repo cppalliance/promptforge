@@ -8510,7 +8510,6 @@ dependencies = [
  "futures-util",
  "gateway-api-discovery",
  "gateway-api-types",
- "promptforge",
  "reqwest",
  "serde",
  "serde_json",

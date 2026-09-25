@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop gateway subsystem: the bearer-authenticated gateway HTTP client, endpoint binding and discovery, heartbeat, progress subscriber, and the run event log"
+description = "Workshop gateway subsystem: the bearer-authenticated gateway HTTP client, endpoint binding and discovery, heartbeat, and progress subscriber"
 
 [features]
 test-fixtures = ["dep:tempfile"]
@@ -17,8 +17,6 @@ futures-util.workspace = true
 # The gateway's public wire vocabulary: the progress snapshot the
 # `GET /admin/progress` stream sends.
 gateway-api-types.workspace = true
-# The engine's public API: the events the run event log records.
-promptforge.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

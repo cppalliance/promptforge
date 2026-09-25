@@ -1,6 +1,5 @@
 //! The shell's status relay for one agent session: the status-bar frames
-//! and the backoff reset the session's run used to push from inside the
-//! sessions crate, now derived in the shell from the session's live
+//! and the backoff reset, derived in the shell from the session's live
 //! events, deltas, and error reports.
 //!
 //! One relay task per session, spawned at launch. It holds only the

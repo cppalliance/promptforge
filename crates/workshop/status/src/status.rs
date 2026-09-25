@@ -18,7 +18,7 @@
 
 use tokio::sync::broadcast;
 
-use workshop_protocol::{Activity, Severity, StatusBarUpdate};
+use workshop_protocol::StatusBarUpdate;
 use workshop_support::RetainedBus;
 
 /// Ring capacity of the status bus. Covers a startup burst plus an agent
@@ -62,59 +62,6 @@ impl StatusBus {
     pub fn emit(&self, update: StatusBarUpdate) {
         self.bus.send(update);
     }
-
-    /// Broadcasts one non-busy update at the given severity.
-    pub fn report(
-        &self,
-        label: impl Into<String>,
-        description: impl Into<String>,
-        severity: Severity,
-        activity: Activity,
-    ) {
-        self.emit(StatusBarUpdate {
-            label: label.into(),
-            description: description.into(),
-            busy: false,
-            severity,
-            activity,
-        });
-    }
-
-    /// Broadcasts a user-visible status text.
-    pub fn info(
-        &self,
-        label: impl Into<String>,
-        description: impl Into<String>,
-        activity: Activity,
-    ) {
-        self.report(label, description, Severity::Info, activity);
-    }
-
-    /// Broadcasts an internal instrumentation pulse the UI does not
-    /// display.
-    pub fn debug(
-        &self,
-        label: impl Into<String>,
-        description: impl Into<String>,
-        activity: Activity,
-    ) {
-        self.report(label, description, Severity::Debug, activity);
-    }
-
-    /// Broadcasts a failure the user should see.
-    pub fn error(
-        &self,
-        label: impl Into<String>,
-        description: impl Into<String>,
-        activity: Activity,
-    ) {
-        self.report(label, description, Severity::Error, activity);
-    }
-
-    /// Returns the bar to its resting state.
-    pub fn idle(&self) {
-        self.info("Ready", "idle", Activity::General);
-    }
 }
 
 impl Default for StatusBus {
@@ -126,19 +73,32 @@ impl Default for StatusBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use workshop_protocol::{Activity, Severity};
+
+    /// A non-busy, info-severity update: the tests read the label back,
+    /// so the severity and activity are fixed.
+    fn update(label: &str, description: &str) -> StatusBarUpdate {
+        StatusBarUpdate {
+            label: label.to_owned(),
+            description: description.to_owned(),
+            busy: false,
+            severity: Severity::Info,
+            activity: Activity::General,
+        }
+    }
 
     #[tokio::test]
     async fn emitting_with_no_subscribers_is_a_no_op() {
         let bus = StatusBus::new();
-        bus.info("Ready", "idle", Activity::General);
+        bus.emit(update("Ready", "idle"));
     }
 
     #[test]
     fn the_newest_update_is_retained_for_the_connect_snapshot() {
         let bus = StatusBus::new();
         assert!(bus.latest().is_none(), "an untouched bus has no snapshot");
-        bus.info("one", "", Activity::General);
-        bus.info("two", "", Activity::General);
+        bus.emit(update("one", ""));
+        bus.emit(update("two", ""));
         let latest = bus.latest().expect("the bus retains the newest update");
         assert_eq!(
             latest.label, "two",
@@ -153,7 +113,7 @@ mod tests {
         let sent = STATUS_CHANNEL_CAPACITY + 10;
         for index in 0..sent {
             // Sends never block, however far behind the receiver is.
-            bus.debug(format!("update {index}"), "", Activity::General);
+            bus.emit(update(&format!("update {index}"), ""));
         }
         let lag = match receiver.recv().await {
             Err(broadcast::error::RecvError::Lagged(skipped)) => skipped,

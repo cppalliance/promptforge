@@ -25,7 +25,6 @@ pub mod gateway_binding;
 pub mod gateway_progress;
 pub mod handles;
 pub mod heartbeat;
-pub mod observer;
 pub mod resolve;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod test_gateway;
@@ -39,5 +38,4 @@ pub use gateway_binding::{
 };
 pub use handles::{GatewayHandles, register, register_tasks};
 pub use heartbeat::{GatewayHealth, Heartbeat};
-pub use observer::WorkshopObserver;
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};

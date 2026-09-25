@@ -818,7 +818,7 @@ Components, in dependency order:
 
 <step-11>
 
-### Step 11: Delete the dead gateway, status, and server code
+### Step 11: Delete the dead gateway, status, and server code [completed]
 
 - Component: Dead code
 - Piece: dead code

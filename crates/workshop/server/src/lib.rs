@@ -60,9 +60,7 @@ mod serve;
 // The extracted subsystem crates, aliased at their pre-decomposition
 // module paths so the shell's internals read as they did before the
 // split. The tier graph is enforced by `cargo test -p build-xtask`.
-pub use workshop_gateway::{
-    gateway, gateway_binding, gateway_progress, heartbeat, observer, resolve,
-};
+pub use workshop_gateway::{gateway, gateway_binding, gateway_progress, heartbeat, resolve};
 pub use workshop_menu::{catalog, menu};
 pub use workshop_status::status;
 
@@ -90,10 +88,7 @@ pub mod fixtures;
 pub use agents::AgentSessions;
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
-pub use gateway::{
-    CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
-    SwitchOutcome, SwitchResponse,
-};
+pub use gateway::{GatewayClient, GatewayError, GatewayResponse, SwitchOutcome, SwitchResponse};
 pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
 /// The refusal an answered input wait returns when its token names no
 /// unresolved wait: the harness's own, named here so an embedding host
