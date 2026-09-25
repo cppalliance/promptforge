@@ -482,7 +482,7 @@ Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\`, kee
 
 <step-5>
 
-### Step 5: Site command with the books pipeline and landing link check
+### Step 5: Site command with the books pipeline and landing link check [completed]
 
 - Component: Site command
 - Piece: books pipeline. Built before the rustdoc piece, because it establishes the command, the absolute-path handling, and the copy helpers that the rustdoc piece reuses. `--books-only` is exactly this slice.

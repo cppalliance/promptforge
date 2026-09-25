@@ -20,6 +20,7 @@ mod manifest;
 mod new_crate;
 mod product;
 mod retired_symbols;
+mod site;
 mod test_support_leak;
 mod tidy;
 
@@ -47,6 +48,7 @@ fn main() -> ExitCode {
             None => usage(),
         },
         Some("api") => api::run(root, &args[2..]),
+        Some("site") => site::run(root, &args[2..]),
         Some("tidy") => {
             let violations = tidy::all_violations(root);
             if violations.is_empty() {
@@ -66,7 +68,8 @@ fn main() -> ExitCode {
 fn usage() -> ExitCode {
     eprintln!(
         "usage: cargo xtask new-crate <workshop-name> | cargo xtask tidy | \
-         cargo +<pinned nightly> xtask api [--check | --bless]"
+         cargo +<pinned nightly> xtask api [--check | --bless] | \
+         cargo xtask site [--books-only]"
     );
     ExitCode::from(2)
 }
