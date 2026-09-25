@@ -31,6 +31,13 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - **view**: a DOM component.
 - **placeholder**: what a lazy panel shows while its code chunk loads.
 - **entry bundle**: the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code.
+- **take**: one push-to-talk dictation recording and the transcript region it owns in the target text.
+- **zone**: a named Dockview tab bank in the Workshop layout: `left` holds the workspace tree, `main` document editors, and `right` the agent session, with `bottom` reserved. A zone survives its last panel closing.
+- **chip**: an inline pill in the chat box: a mention, a typeahead row, or an attachment. The host owns its kind and payload.
+- **contribution**: an item a subsystem self-registers into `workshop-registry`: a route, background task, state handle, or push sink. In the SPA, an eager `*.contribution.ts` module that registers a feature's command, menu, and quick-access rows at module scope, before any service exists.
+- **status bus**: the broadcast channel in `workshop-status` that carries status bar updates from every subsystem to every connected `/ws` session and retains the newest update for sessions that connect later.
+- **sidecar**: the local `promptforge-gateway` process the desktop app attaches to through its discovery file or launches beside itself. An explicitly configured gateway endpoint is not a sidecar.
+- **publication**: installing a validated gateway endpoint into the gateway binding as its next generation. The whole snapshot of client, base URL, and bearer is built first and stored atomically, then long-lived tasks are woken to reconnect. Teardown closes publication for good.
 
 ## Structure
 

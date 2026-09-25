@@ -2,9 +2,11 @@
 //!
 //! Every gateway-dependent workshop path loads one immutable snapshot
 //! containing the HTTP client, base URL, bearer, and generation.
-//! A local-sidecar replacement builds the complete next snapshot before one
-//! atomic store, then notifies long-lived tasks to reconnect. Explicitly
-//! configured endpoints never receive an updater from the desktop app.
+//! Publication installs a validated local-sidecar replacement as the next
+//! generation: it builds the complete next snapshot before one atomic
+//! store, then notifies long-lived tasks to reconnect. Teardown closes
+//! publication permanently. Explicitly configured endpoints never receive
+//! an updater from the desktop app.
 
 mod publication;
 mod shutdown;

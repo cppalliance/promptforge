@@ -696,7 +696,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 
 <step-19>
 
-### Step 19: Add the crate map and vocabulary entries
+### Step 19: Add the crate map and vocabulary entries [completed]
 
 - Component: Documentation
 

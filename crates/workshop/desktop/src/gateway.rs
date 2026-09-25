@@ -1,5 +1,10 @@
 //! Attach-or-launch lifecycle for the desktop app's Gateway sidecar.
 //!
+//! The sidecar is the local `promptforge-gateway` process found through
+//! its gateway discovery file or launched detached beside the desktop app.
+//! An explicit `workshop.toml` `[gateway]` endpoint is not a sidecar and
+//! gets no supervision.
+//!
 //! Boot planning and one-shot launch (`boot`), validated identity
 //! (`identity`), and continuous supervision (`supervisor`) are private
 //! sibling modules whose imports run both ways. `boot` and `supervisor`
