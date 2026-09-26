@@ -756,7 +756,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-10>
 
-### Step 10: Share the envelope response and validate state buckets once
+### Step 10: Share the envelope response and validate state buckets once [completed]
 
 - Component: Shared helpers
 - Component placement: sixth, after the workspace because both helpers replace copies at its final paths, and before the server component because the server's error mapping adopts the envelope helper.

@@ -1,13 +1,13 @@
 //! The opaque ui-state values a workspace file holds in its `kv` table
 //! beside the window geometry: the dock layout, the expanded tree
-//! folders, and the closed-editor stack. The server stores the text
-//! the client sent, verbatim, and never interprets it beyond checking
-//! that it parses as JSON and fits under the cap; the SPA owns each
-//! value's schema.
+//! folders, and the closed-editor stack. The server stores each
+//! validated value's compact JSON text and never interprets it
+//! further; the SPA owns each value's schema.
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
+use workshop_support::StateBucketValue;
 
 use super::actor::Command;
 use super::{WorkspaceFile, WorkspaceFileError};
@@ -17,60 +17,21 @@ use crate::error::WorkspaceError;
 /// now: `scroll`, `agent_sessions`.
 pub(crate) const UI_STATE_KEYS: [&str; 3] = ["layout", "tree", "closed_editors"];
 
-/// The largest ui-state value the file accepts, in bytes of JSON text.
-pub(crate) const UI_STATE_VALUE_CAP: usize = 1 << 20;
-
 /// The ui-state map with every key present and no value: what a file
 /// with no ui-state rows reads as, and what save-as writes.
 pub(crate) fn empty_ui_state() -> BTreeMap<&'static str, Option<Value>> {
     UI_STATE_KEYS.iter().map(|key| (*key, None)).collect()
 }
 
-/// Resolves `key` to its allow-list entry.
-///
-/// # Errors
-/// Returns [`WorkspaceError::UiStateKey`] when `key` is not one of
-/// [`UI_STATE_KEYS`].
-pub(crate) fn ui_state_key(key: &str) -> Result<&'static str, WorkspaceError> {
-    workshop_support::resolve_bucket_key(key, &UI_STATE_KEYS).map_err(WorkspaceError::from)
-}
-
-/// Checks that a value whose JSON text is `len` bytes fits under the cap.
-///
-/// # Errors
-/// Returns [`WorkspaceError::UiStateTooLarge`] past the cap.
-pub(crate) fn check_ui_state_cap(len: usize) -> Result<(), WorkspaceError> {
-    workshop_support::check_bucket_cap(len, UI_STATE_VALUE_CAP).map_err(WorkspaceError::from)
-}
-
-/// Checks that `json_text` fits under the cap and parses as JSON. The
-/// cap is checked first so oversized text is never parsed.
-///
-/// # Errors
-/// Returns [`WorkspaceError::UiStateTooLarge`] past the cap and
-/// [`WorkspaceError::UiStateNotJson`] for text that does not parse.
-pub(crate) fn check_ui_state_text(json_text: &str) -> Result<(), WorkspaceError> {
-    check_ui_state_cap(json_text.len())?;
-    workshop_support::check_bucket_text(json_text).map_err(WorkspaceError::from)
-}
-
 impl WorkspaceFile {
-    /// Stores `json_text` verbatim under the allow-listed `key`,
-    /// replacing any earlier value. Validation runs before anything is
-    /// sent to the actor, so a refused put writes nothing.
+    /// Stores the validated `put`'s JSON text under its key, replacing
+    /// any earlier value.
     ///
     /// # Errors
-    /// Returns [`WorkspaceError::UiStateKey`], [`WorkspaceError::UiStateTooLarge`],
-    /// or [`WorkspaceError::UiStateNotJson`] for a refused input, and
-    /// [`WorkspaceError::WorkspaceFileFailed`] when the write fails.
-    pub(crate) async fn put_ui_state(
-        &self,
-        key: &str,
-        json_text: &str,
-    ) -> Result<(), WorkspaceError> {
-        let key = ui_state_key(key)?;
-        check_ui_state_text(json_text)?;
-        let json_text = json_text.to_owned();
+    /// Returns [`WorkspaceError::WorkspaceFileFailed`] when the write fails.
+    pub(crate) async fn put_ui_state(&self, put: &StateBucketValue) -> Result<(), WorkspaceError> {
+        let key = put.key();
+        let json_text = put.text().to_owned();
         self.request(|reply| Command::PutUiState {
             key,
             json_text,

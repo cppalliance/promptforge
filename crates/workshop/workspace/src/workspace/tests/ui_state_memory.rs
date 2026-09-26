@@ -1,19 +1,25 @@
 //! The workspace-level ui-state API over the backing file: an ephemeral
 //! put is a no-op that says so, a file-backed put lands in the file and
-//! in `ui_state()`, open reads the file's values into memory, a refused
-//! key or over-cap value touches neither memory nor file, a failed
+//! in `ui_state()`, open reads the file's values into memory, a failed
 //! persist leaves the in-memory value standing, and save-as and
 //! duplicate start their new backing with the expected values.
 
 use std::collections::BTreeMap;
 
 use serde_json::json;
+use workshop_support::StateBucketValue;
 
 use super::*;
 
 use crate::workspace_file::{
     UI_STATE_KEYS, WorkspaceContents, WorkspaceFile, empty_ui_state, open_database,
 };
+
+/// A validated put of `value` under `key`, as the route builds one.
+fn bucket(key: &str, value: &serde_json::Value) -> StateBucketValue {
+    StateBucketValue::new(key, &UI_STATE_KEYS, value.to_string().as_bytes())
+        .expect("the fixture is a valid put")
+}
 
 /// Opens the file at `path` directly, bypassing any `Workspace`, and
 /// returns the ui-state values it holds.
@@ -41,11 +47,6 @@ async fn kv_row_count(path: &Path) -> i64 {
     row.get(0).expect("count is an integer")
 }
 
-/// A JSON string value whose serialized text is exactly `len` bytes.
-fn string_of_serialized_len(len: usize) -> serde_json::Value {
-    serde_json::Value::String("x".repeat(len - 2))
-}
-
 /// One distinct value per allow-listed key.
 fn sample_values() -> [(&'static str, serde_json::Value); 3] {
     [
@@ -68,10 +69,7 @@ async fn put_while_ephemeral_returns_false_and_writes_nothing() {
     );
 
     for (key, value) in sample_values() {
-        let saved = workspace
-            .put_ui_state(key, value)
-            .await
-            .expect("an ephemeral put is a no-op, not a failure");
+        let saved = workspace.put_ui_state(bucket(key, &value)).await;
         assert!(!saved, "nothing was written, and the caller is told so");
     }
 
@@ -96,10 +94,7 @@ async fn put_with_a_file_open_persists_and_ui_state_reflects_it() {
     );
 
     for (key, value) in sample_values() {
-        let saved = workspace
-            .put_ui_state(key, value.clone())
-            .await
-            .expect("an allowed key writes");
+        let saved = workspace.put_ui_state(bucket(key, &value)).await;
         assert!(saved, "a file-backed put reports that it wrote");
         assert_eq!(
             workspace.ui_state().get(key).cloned().flatten(),
@@ -109,10 +104,10 @@ async fn put_with_a_file_open_persists_and_ui_state_reflects_it() {
     }
     // A second put replaces the first in memory and on disk.
     let replaced = json!({ "expanded": [] });
-    workspace
-        .put_ui_state("tree", replaced.clone())
-        .await
-        .expect("the replace writes");
+    assert!(
+        workspace.put_ui_state(bucket("tree", &replaced)).await,
+        "the replace writes"
+    );
     assert_eq!(
         workspace.ui_state().get("tree").cloned().flatten(),
         Some(replaced.clone())
@@ -148,9 +143,8 @@ async fn overlapping_puts_to_one_key_leave_the_file_holding_what_memory_holds() 
             let workspace = workspace.clone();
             tokio::spawn(async move {
                 workspace
-                    .put_ui_state("tree", json!({ "round": round, "n": n }))
+                    .put_ui_state(bucket("tree", &json!({ "round": round, "n": n })))
                     .await
-                    .expect("an allowed key writes")
             })
         });
         for put in puts {
@@ -190,7 +184,7 @@ async fn open_reads_a_files_ui_state_into_memory_and_a_later_open_replaces_it() 
     .await
     .expect("the full file creates");
     for (key, value) in sample_values() {
-        file.put_ui_state(key, &value.to_string())
+        file.put_ui_state(&bucket(key, &value))
             .await
             .expect("the storage layer writes");
     }
@@ -235,83 +229,6 @@ async fn open_reads_a_files_ui_state_into_memory_and_a_later_open_replaces_it() 
 }
 
 #[tokio::test]
-async fn a_disallowed_key_is_refused_without_touching_memory_or_file() {
-    let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("key.pfwork");
-    let workspace = Workspace::new();
-    workspace.save_as(&path).await.expect("save as creates");
-
-    for key in ["window", "scroll", "agent_sessions", "Layout", ""] {
-        let error = workspace
-            .put_ui_state(key, json!({}))
-            .await
-            .expect_err("a key outside the allow-list is refused");
-        assert!(
-            matches!(&error, WorkspaceError::UiStateKey(refused) if refused == key),
-            "expected UiStateKey({key:?}), got {error:?}"
-        );
-    }
-    assert_eq!(workspace.ui_state(), empty_ui_state());
-    workspace.close_backing_for_test().await;
-    assert_eq!(kv_row_count(&path).await, 0, "a refused key writes nothing");
-
-    // The allow-list applies before the ephemeral check: a bad key is
-    // an error even where a good one would be a no-op.
-    let ephemeral = Workspace::new();
-    let error = ephemeral
-        .put_ui_state("window", json!({}))
-        .await
-        .expect_err("an ephemeral workspace still refuses a foreign key");
-    assert!(matches!(error, WorkspaceError::UiStateKey(_)));
-}
-
-#[tokio::test]
-async fn an_over_cap_value_is_refused_without_touching_memory_or_file() {
-    let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("cap.pfwork");
-    let workspace = Workspace::new();
-    workspace.save_as(&path).await.expect("save as creates");
-    let cap = crate::workspace_file::ui_state_kv::UI_STATE_VALUE_CAP;
-
-    let oversized = string_of_serialized_len(cap + 1);
-    assert_eq!(oversized.to_string().len(), cap + 1);
-    let error = workspace
-        .put_ui_state("layout", oversized)
-        .await
-        .expect_err("a value past the cap is refused");
-    assert!(
-        matches!(
-            error,
-            WorkspaceError::UiStateTooLarge { actual, cap: reported }
-                if actual == cap + 1 && reported == cap
-        ),
-        "expected UiStateTooLarge naming actual and cap, got {error:?}"
-    );
-    assert_eq!(
-        workspace.ui_state().get("layout").cloned().flatten(),
-        None,
-        "the refused value never reached memory"
-    );
-
-    let at_cap = string_of_serialized_len(cap);
-    assert_eq!(at_cap.to_string().len(), cap);
-    assert!(
-        workspace
-            .put_ui_state("layout", at_cap.clone())
-            .await
-            .expect("a value at the cap writes")
-    );
-    workspace.close_backing_for_test().await;
-
-    assert_eq!(
-        file_ui_state(&path).await.get("layout").cloned().flatten(),
-        Some(at_cap),
-        "only the at-cap value landed"
-    );
-    assert_eq!(kv_row_count(&path).await, 1);
-}
-
-#[tokio::test]
 async fn a_failed_persist_leaves_the_in_memory_value_standing() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let path = home.path().join("closed.pfwork");
@@ -322,10 +239,7 @@ async fn a_failed_persist_leaves_the_in_memory_value_standing() {
     workspace.close_backing_for_test().await;
 
     let value = json!({ "version": 3 });
-    let saved = workspace
-        .put_ui_state("layout", value.clone())
-        .await
-        .expect("a failed persist is logged, never surfaced");
+    let saved = workspace.put_ui_state(bucket("layout", &value)).await;
     assert!(
         saved,
         "the workspace is file-backed, so the put is accepted"
@@ -354,10 +268,10 @@ async fn save_as_starts_empty_and_duplicate_keeps_the_live_values() {
         .await
         .expect("the first save as creates");
     let layout = json!({ "version": 3 });
-    workspace
-        .put_ui_state("layout", layout.clone())
-        .await
-        .expect("layout writes into the first file");
+    assert!(
+        workspace.put_ui_state(bucket("layout", &layout)).await,
+        "layout writes into the first file"
+    );
 
     workspace
         .save_as(&second_path)

@@ -1,10 +1,15 @@
 //! The JSON state-bucket validator shared by the workshop's two persisted
 //! ui-state buckets (the account-scoped user-state and the workspace
 //! file): one allow-list check on the key, one size cap, and one JSON
-//! parse, returning a support-level refusal the caller maps onto its own
-//! wire error so the wire code and message stay the caller's.
+//! parse, run once at the route to build the [`StateBucketValue`] the
+//! buckets' lower layers accept without checking again. A refusal is a
+//! support-level error the caller maps onto its own wire error, so the
+//! wire code and message stay the caller's.
 
 use serde_json::Value;
+
+/// The largest value either state bucket accepts, in bytes of JSON text.
+pub const STATE_BUCKET_VALUE_CAP: usize = 1 << 20;
 
 /// A state-bucket refusal: one variant per way a put is refused. The
 /// bucket crates map each onto their own wire error, so the wire code
@@ -33,11 +38,67 @@ pub enum StateBucketError {
     },
 }
 
+/// One validated state-bucket put: an allow-listed key and a JSON value
+/// whose compact text fits under [`STATE_BUCKET_VALUE_CAP`].
+#[derive(Debug)]
+pub struct StateBucketValue {
+    /// The allow-list entry the key resolved to.
+    key: &'static str,
+    /// The parsed value.
+    value: Value,
+    /// The value's compact JSON text, the form the buckets store.
+    text: String,
+}
+
+impl StateBucketValue {
+    /// Validates one put, in cheapest-refusal-first order: `key` against
+    /// `allowed`, the body's size against the cap, then the body's shape.
+    /// The compact text is held to the same cap, because a body under it
+    /// can re-serialize past it (`1e15` becomes `1000000000000000.0`).
+    ///
+    /// # Errors
+    /// Returns [`StateBucketError::Key`], [`StateBucketError::TooLarge`], or
+    /// [`StateBucketError::NotJson`] for a refused input.
+    pub fn new(key: &str, allowed: &[&'static str], body: &[u8]) -> Result<Self, StateBucketError> {
+        let key = resolve_bucket_key(key, allowed)?;
+        check_bucket_cap(body.len(), STATE_BUCKET_VALUE_CAP)?;
+        let value: Value =
+            serde_json::from_slice(body).map_err(|source| StateBucketError::NotJson { source })?;
+        let text = value.to_string();
+        check_bucket_cap(text.len(), STATE_BUCKET_VALUE_CAP)?;
+        Ok(Self { key, value, text })
+    }
+
+    /// The allow-list entry the key resolved to.
+    #[must_use]
+    pub fn key(&self) -> &'static str {
+        self.key
+    }
+
+    /// The parsed value.
+    #[must_use]
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    /// The value's compact JSON text.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The parsed value, without the key and text.
+    #[must_use]
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+}
+
 /// Resolves `key` to its allow-list entry.
 ///
 /// # Errors
 /// Returns [`StateBucketError::Key`] when `key` is not in `allowed`.
-pub fn resolve_bucket_key<'a>(key: &str, allowed: &[&'a str]) -> Result<&'a str, StateBucketError> {
+fn resolve_bucket_key<'a>(key: &str, allowed: &[&'a str]) -> Result<&'a str, StateBucketError> {
     allowed
         .iter()
         .copied()
@@ -49,41 +110,11 @@ pub fn resolve_bucket_key<'a>(key: &str, allowed: &[&'a str]) -> Result<&'a str,
 ///
 /// # Errors
 /// Returns [`StateBucketError::TooLarge`] past `cap`.
-pub fn check_bucket_cap(actual: usize, cap: usize) -> Result<(), StateBucketError> {
+fn check_bucket_cap(actual: usize, cap: usize) -> Result<(), StateBucketError> {
     if actual > cap {
         return Err(StateBucketError::TooLarge { actual, cap });
     }
     Ok(())
-}
-
-/// Checks that `text` parses as JSON, without building a value; the
-/// file-backed bucket stores text verbatim and needs only the validity
-/// check.
-///
-/// # Errors
-/// Returns [`StateBucketError::NotJson`] for text that does not parse.
-pub fn check_bucket_text(text: &str) -> Result<(), StateBucketError> {
-    serde_json::from_str::<serde::de::IgnoredAny>(text)
-        .map(|_| ())
-        .map_err(|source| StateBucketError::NotJson { source })
-}
-
-/// Validates one state-bucket put, in cheapest-refusal-first order: the
-/// key against `allowed`, the body's size against `cap`, then the body's
-/// shape. Returns the parsed value.
-///
-/// # Errors
-/// Returns [`StateBucketError::Key`], [`StateBucketError::TooLarge`], or
-/// [`StateBucketError::NotJson`] for a refused input.
-pub fn validate_bucket_body(
-    key: &str,
-    allowed: &[&str],
-    body: &[u8],
-    cap: usize,
-) -> Result<Value, StateBucketError> {
-    resolve_bucket_key(key, allowed)?;
-    check_bucket_cap(body.len(), cap)?;
-    serde_json::from_slice(body).map_err(|source| StateBucketError::NotJson { source })
 }
 
 #[cfg(test)]

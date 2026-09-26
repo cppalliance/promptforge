@@ -2,6 +2,8 @@
 
 use super::*;
 
+use axum::http::header;
+
 use crate::test_support::body_bytes;
 
 /// A distinctive injected cause for leak-boundary assertions.

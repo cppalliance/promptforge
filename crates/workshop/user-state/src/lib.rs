@@ -32,4 +32,4 @@ mod store;
 pub use error::UserStateError;
 pub use handlers::routes;
 pub use handles::{UserStateRegistrations, register};
-pub use store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
+pub use store::{USER_STATE_KEYS, UserStateStore};

@@ -82,7 +82,7 @@ pub(crate) enum Command {
         reply: Ack,
     },
     /// Inserts or replaces one opaque ui-state value. The key is already
-    /// allow-listed and the text already validated by the handle.
+    /// allow-listed and the text already validated at the route.
     PutUiState {
         /// The allow-listed kv key.
         key: &'static str,

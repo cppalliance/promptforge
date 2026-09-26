@@ -1,13 +1,20 @@
 //! The user-state store's file round trip and its tolerated failures:
-//! a missing or corrupt file reads as empty, a put writes the whole
-//! document atomically, and a refused put touches nothing.
+//! a missing or corrupt file reads as empty, and a put writes the whole
+//! document atomically.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::{Value, json};
+use workshop_support::{STATE_BUCKET_VALUE_CAP, StateBucketValue};
 
 use super::*;
+
+/// A validated put of `value` under `key`, as the route builds one.
+fn bucket(key: &str, value: &Value) -> StateBucketValue {
+    StateBucketValue::new(key, &USER_STATE_KEYS, value.to_string().as_bytes())
+        .expect("the fixture is a valid put")
+}
 
 /// Every file name in `dir`, sorted, so a test can assert exactly what a
 /// write left behind.
@@ -48,11 +55,11 @@ async fn a_put_round_trips_through_a_fresh_store() {
     {
         let store = UserStateStore::new(dir.path());
         store
-            .put("zoom", json!(1.25))
+            .put(bucket("zoom", &json!(1.25)))
             .await
             .expect("an allow-listed value under the cap is stored");
         store
-            .put("recent_files", json!(["C:/a.md", "C:/b.md"]))
+            .put(bucket("recent_files", &json!(["C:/a.md", "C:/b.md"])))
             .await
             .expect("an allow-listed value under the cap is stored");
     }
@@ -82,7 +89,7 @@ async fn a_corrupt_file_yields_all_null_and_the_next_put_replaces_it() {
         "corrupt state degrades to no state, never to a failure"
     );
     store
-        .put("zoom", json!(2))
+        .put(bucket("zoom", &json!(2)))
         .await
         .expect("the put succeeds over a corrupt file");
     let document: Value =
@@ -111,11 +118,14 @@ async fn a_write_leaves_no_temp_and_the_file_holds_the_full_document() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let store = UserStateStore::new(dir.path());
     store
-        .put("editor_settings", json!({ "wordWrap": "on" }))
+        .put(bucket("editor_settings", &json!({ "wordWrap": "on" })))
         .await
         .expect("stored");
     store
-        .put("commands_history", json!(["workbench.action.files.save"]))
+        .put(bucket(
+            "commands_history",
+            &json!(["workbench.action.files.save"]),
+        ))
         .await
         .expect("stored");
     assert_eq!(
@@ -137,68 +147,13 @@ async fn a_write_leaves_no_temp_and_the_file_holds_the_full_document() {
 }
 
 #[tokio::test]
-async fn a_disallowed_key_is_refused_without_a_write() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let store = UserStateStore::new(dir.path());
-    let error = store
-        .put("layout", json!({}))
-        .await
-        .expect_err("a workspace-bucket key is not a user-bucket key");
-    assert!(
-        matches!(&error, UserStateError::Key(key) if key == "layout"),
-        "the refusal names the key: {error:?}"
-    );
-    assert!(
-        error.to_string().contains("editor_settings"),
-        "the message lists the allow-list: {error}"
-    );
-    assert!(
-        dir_names(dir.path()).is_empty(),
-        "a refused put creates no file"
-    );
-    assert_eq!(
-        store.all().await,
-        all_null(),
-        "a refused put stores nothing"
-    );
-}
-
-#[tokio::test]
-async fn an_over_cap_value_is_refused_without_a_write() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let store = UserStateStore::new(dir.path());
-    let oversized = Value::String("x".repeat(USER_STATE_VALUE_CAP));
-    let error = store
-        .put("zoom", oversized)
-        .await
-        .expect_err("a value whose JSON text exceeds the cap is refused");
-    assert!(
-        matches!(
-            error,
-            UserStateError::TooLarge { actual, cap }
-                if actual == USER_STATE_VALUE_CAP + 2 && cap == USER_STATE_VALUE_CAP
-        ),
-        "the refusal names the actual size and the cap: {error:?}"
-    );
-    assert!(
-        dir_names(dir.path()).is_empty(),
-        "a refused put creates no file"
-    );
-    assert_eq!(
-        store.all().await,
-        all_null(),
-        "a refused put stores nothing"
-    );
-}
-
-#[tokio::test]
 async fn a_value_exactly_at_the_cap_is_accepted() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let store = UserStateStore::new(dir.path());
     // A JSON string's text is its content plus two quotes.
-    let at_cap = Value::String("x".repeat(USER_STATE_VALUE_CAP - 2));
+    let at_cap = Value::String("x".repeat(STATE_BUCKET_VALUE_CAP - 2));
     store
-        .put("zoom", at_cap.clone())
+        .put(bucket("zoom", &at_cap))
         .await
         .expect("a value at the cap is under the limit, not over it");
     assert_eq!(store.all().await["zoom"], Some(at_cap));
@@ -212,7 +167,7 @@ async fn an_unwritable_state_dir_reports_io_and_keeps_the_value_in_memory() {
     std::fs::create_dir(dir.path().join(USER_STATE_FILE)).expect("directory in the file's place");
     let store = UserStateStore::new(dir.path());
     let error = store
-        .put("zoom", json!(1))
+        .put(bucket("zoom", &json!(1)))
         .await
         .expect_err("renaming over a directory must fail");
     assert!(
@@ -239,7 +194,7 @@ async fn unknown_keys_in_the_file_are_preserved_but_not_served() {
         USER_STATE_KEYS.len(),
         "only allow-listed keys are served"
     );
-    store.put("zoom", json!(4)).await.expect("stored");
+    store.put(bucket("zoom", &json!(4))).await.expect("stored");
     let document: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("readable")).expect("valid json");
     assert_eq!(

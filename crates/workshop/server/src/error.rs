@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use promptforge::{ParseError, ParseErrorKind};
 use workshop_gateway::GatewayError;
 use workshop_protocol::ErrorEnvelope;
-use workshop_support::{LEAK_DETAIL, render_message};
+use workshop_support::{LEAK_DETAIL, envelope_response, render_message};
 
 /// A failure answered over the HTTP wire.
 ///
@@ -121,12 +121,7 @@ impl IntoResponse for AppError {
         match self.code() {
             Some(code) => {
                 let envelope = ErrorEnvelope::new(render_message(&self, LEAK_DETAIL), code);
-                // Serializing the envelope cannot fail: two strings only.
-                // A body that somehow cannot serialize degrades to the
-                // status line's own text.
-                let body = serde_json::to_string(&envelope)
-                    .unwrap_or_else(|_| status.canonical_reason().unwrap_or("error").to_string());
-                (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+                envelope_response(status, &envelope)
             }
             None => (
                 status,

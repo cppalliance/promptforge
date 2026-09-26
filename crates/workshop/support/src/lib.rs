@@ -2,8 +2,9 @@
 //! crash-safe atomic writes, the gateway reconnect backoff, route
 //! deadline tiers, `workshop.toml` configuration, the generic retained
 //! broadcast bus the status, catalog, and menu buses are thin wrappers
-//! over, the shared error-message rendering, and the JSON state-bucket
-//! validator the user-state and workspace buckets both use.
+//! over, the shared error-message and envelope rendering, and the
+//! JSON state-bucket validator the user-state and workspace buckets
+//! both use.
 //!
 //! ## Invariants
 //!
@@ -35,7 +36,5 @@ pub use deadline::{
     DEADLINE_ELAPSED_CODE, DEFAULT_DEADLINE, RELAY_DEADLINE, deadline_elapsed_message,
     with_deadline,
 };
-pub use error_message::{LEAK_DETAIL, render_message};
-pub use state_bucket::{
-    StateBucketError, check_bucket_cap, check_bucket_text, resolve_bucket_key, validate_bucket_body,
-};
+pub use error_message::{LEAK_DETAIL, envelope_response, render_message};
+pub use state_bucket::{STATE_BUCKET_VALUE_CAP, StateBucketError, StateBucketValue};

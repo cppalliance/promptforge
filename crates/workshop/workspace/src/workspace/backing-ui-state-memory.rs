@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 use std::sync::PoisonError;
 
 use serde_json::Value;
+use workshop_support::StateBucketValue;
 
 use crate::Workspace;
-use crate::error::WorkspaceError;
-use crate::workspace_file::{check_ui_state_cap, empty_ui_state, ui_state_key};
+use crate::workspace_file::empty_ui_state;
 
 impl Workspace {
     /// The ui-state values as memory holds them: every allow-listed key,
@@ -26,8 +26,8 @@ impl Workspace {
             .map_or_else(empty_ui_state, |backing| backing.ui_state.clone())
     }
 
-    /// Stores `value` under the allow-listed `key`, in memory first and
-    /// then in the backing file. Returns `Ok(false)` without keeping
+    /// Stores the validated `put` under its key, in memory first and
+    /// then in the backing file. Returns `false` without keeping
     /// anything when the workspace is ephemeral: an unsaved workspace
     /// has nowhere to put it, and the SPA keeps its own copy. A persist
     /// that fails is logged, and the in-memory value stands.
@@ -37,37 +37,26 @@ impl Workspace {
     /// same key reach the file in the order they reached memory and the
     /// next open restores what memory last held. Without it the two
     /// inserts could order one way and the two sends the other.
-    ///
-    /// # Errors
-    /// Returns [`WorkspaceError::UiStateKey`] for a key outside the
-    /// allow-list and [`WorkspaceError::UiStateTooLarge`] for a value
-    /// whose JSON text exceeds the cap; both are refused before anything
-    /// changes, ephemeral or not. Persistence never fails the call.
-    pub(crate) async fn put_ui_state(
-        &self,
-        key: &str,
-        value: Value,
-    ) -> Result<bool, WorkspaceError> {
-        let key = ui_state_key(key)?;
-        let json_text = value.to_string();
-        check_ui_state_cap(json_text.len())?;
+    pub(crate) async fn put_ui_state(&self, put: StateBucketValue) -> bool {
         let _serial = self.ui_state_puts.lock().await;
         let file = {
             let mut backing = self.backing.write().unwrap_or_else(PoisonError::into_inner);
             let Some(backing) = backing.as_mut() else {
-                return Ok(false);
+                return false;
             };
-            backing.ui_state.insert(key, Some(value));
+            backing
+                .ui_state
+                .insert(put.key(), Some(put.value().clone()));
             backing.file.clone()
         };
-        if let Err(error) = file.put_ui_state(key, &json_text).await {
+        if let Err(error) = file.put_ui_state(&put).await {
             tracing::warn!(
                 %error,
-                key,
+                key = put.key(),
                 file = %file.path().display(),
                 "ui state not persisted to the workspace file; the in-memory value stands"
             );
         }
-        Ok(true)
+        true
     }
 }

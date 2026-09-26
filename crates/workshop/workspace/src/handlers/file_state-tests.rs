@@ -9,10 +9,10 @@ use super::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
+use workshop_support::STATE_BUCKET_VALUE_CAP;
 
 use crate::handlers::routes;
 use crate::test_support::json_body;
-use crate::workspace_file::ui_state_kv::UI_STATE_VALUE_CAP;
 
 /// Builds a `GET /workspace/file/state` request.
 fn get_request() -> Request<Body> {
@@ -175,8 +175,12 @@ async fn an_unknown_key_is_refused_and_the_state_stands() {
 async fn an_over_cap_body_is_refused_and_the_state_stands() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let (workspace, _path) = file_backed(&home).await;
-    let body = format!("\"{}\"", "x".repeat(UI_STATE_VALUE_CAP - 1));
-    assert_eq!(body.len(), UI_STATE_VALUE_CAP + 1, "one byte past the cap");
+    let body = format!("\"{}\"", "x".repeat(STATE_BUCKET_VALUE_CAP - 1));
+    assert_eq!(
+        body.len(),
+        STATE_BUCKET_VALUE_CAP + 1,
+        "one byte past the cap"
+    );
 
     let response = send(&workspace, put_request("layout", body)).await;
 
@@ -187,8 +191,8 @@ async fn an_over_cap_body_is_refused_and_the_state_stands() {
         .as_str()
         .expect("the envelope includes a message");
     assert!(
-        message.contains(&format!("{} bytes", UI_STATE_VALUE_CAP + 1))
-            && message.contains(&format!("{UI_STATE_VALUE_CAP} bytes")),
+        message.contains(&format!("{} bytes", STATE_BUCKET_VALUE_CAP + 1))
+            && message.contains(&format!("{STATE_BUCKET_VALUE_CAP} bytes")),
         "the refusal names actual and cap: {message}"
     );
     assert_eq!(state_of(&workspace).await, all_null());
@@ -198,15 +202,15 @@ async fn an_over_cap_body_is_refused_and_the_state_stands() {
 async fn a_body_exactly_at_the_cap_is_accepted() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let (workspace, _path) = file_backed(&home).await;
-    let body = format!("\"{}\"", "x".repeat(UI_STATE_VALUE_CAP - 2));
-    assert_eq!(body.len(), UI_STATE_VALUE_CAP);
+    let body = format!("\"{}\"", "x".repeat(STATE_BUCKET_VALUE_CAP - 2));
+    assert_eq!(body.len(), STATE_BUCKET_VALUE_CAP);
 
     let response = send(&workspace, put_request("layout", body.clone())).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         state_of(&workspace).await["layout"],
-        serde_json::Value::String("x".repeat(UI_STATE_VALUE_CAP - 2))
+        serde_json::Value::String("x".repeat(STATE_BUCKET_VALUE_CAP - 2))
     );
 }
 

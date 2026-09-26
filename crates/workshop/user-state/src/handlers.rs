@@ -21,10 +21,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use serde_json::Value;
 
-use workshop_support::{DEFAULT_DEADLINE, with_deadline};
+use workshop_support::{DEFAULT_DEADLINE, StateBucketValue, with_deadline};
 
 use crate::error::UserStateError;
-use crate::store::{USER_STATE_KEYS, USER_STATE_VALUE_CAP, UserStateStore};
+use crate::store::{USER_STATE_KEYS, UserStateStore};
 
 /// The user-state routes, narrowed to the [`UserStateStore`] - the only
 /// state their handlers use - under the default deadline tier. The
@@ -70,9 +70,8 @@ async fn store_value(
     key: &str,
     body: &[u8],
 ) -> Result<Value, UserStateError> {
-    let value =
-        workshop_support::validate_bucket_body(key, &USER_STATE_KEYS, body, USER_STATE_VALUE_CAP)?;
-    store.put(key, value).await?;
+    let value = StateBucketValue::new(key, &USER_STATE_KEYS, body)?;
+    store.put(value).await?;
     Ok(serde_json::json!({ "saved": true }))
 }
 

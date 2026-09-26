@@ -1,14 +1,18 @@
 //! The three opaque ui-state kv keys: round trip through create, put,
-//! close, open; refusal of a foreign key, an over-cap value, and
-//! non-JSON text before any write; an old file reading all three as
-//! absent; and save-as leaving the new file's keys empty.
+//! close, open; an old file reading all three as absent; and save-as
+//! leaving the new file's keys empty.
 
 use serde_json::json;
+use workshop_support::{STATE_BUCKET_VALUE_CAP, StateBucketValue};
 
 use super::*;
 use crate::Workspace;
-use crate::error::WorkspaceError;
-use crate::workspace_file::ui_state_kv::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
+use crate::workspace_file::ui_state_kv::UI_STATE_KEYS;
+
+/// A validated put of `text` under `key`, as the route builds one.
+fn bucket(key: &str, text: &str) -> StateBucketValue {
+    StateBucketValue::new(key, &UI_STATE_KEYS, text.as_bytes()).expect("the fixture is a valid put")
+}
 
 /// A contents value with no grants, no window, and no ui state.
 fn bare_contents(name: &str) -> WorkspaceContents {
@@ -46,7 +50,7 @@ async fn kv_row_count(path: &Path) -> i64 {
 #[test]
 fn the_allow_list_names_exactly_the_three_workspace_keys() {
     assert_eq!(UI_STATE_KEYS, ["layout", "tree", "closed_editors"]);
-    assert_eq!(UI_STATE_VALUE_CAP, 1 << 20);
+    assert_eq!(STATE_BUCKET_VALUE_CAP, 1 << 20);
     let empty = empty_ui_state();
     assert_eq!(empty.len(), 3, "the empty map still has every key");
     assert!(empty.values().all(Option::is_none));
@@ -69,7 +73,7 @@ async fn each_allowed_key_round_trips_through_create_put_close_and_open() {
     ];
 
     for (key, value) in &values {
-        file.put_ui_state(key, &value.to_string())
+        file.put_ui_state(&bucket(key, &value.to_string()))
             .await
             .expect("an allowed key writes");
     }
@@ -94,13 +98,11 @@ async fn a_second_put_replaces_the_first_and_the_text_is_stored_verbatim() {
         .await
         .expect("creates");
 
-    file.put_ui_state("tree", r#"{"expanded":[]}"#)
+    file.put_ui_state(&bucket("tree", r#"{"expanded":[]}"#))
         .await
         .expect("first put");
-    // Whitespace and key order are the client's; the server keeps them.
-    file.put_ui_state("tree", "{ \"expanded\" : [ \"C:\\\\b\", \"C:\\\\a\" ] }")
-        .await
-        .expect("second put");
+    let second = bucket("tree", r#"{"expanded":["C:\\b","C:\\a"]}"#);
+    file.put_ui_state(&second).await.expect("second put");
     file.close().await;
 
     let conn = open_database(&path).await.expect("the closed file opens");
@@ -114,96 +116,13 @@ async fn a_second_put_replaces_the_first_and_the_text_is_stored_verbatim() {
         .expect("the row reads")
         .expect("exactly one tree row");
     let stored: String = row.get(0).expect("value is text");
-    assert_eq!(stored, "{ \"expanded\" : [ \"C:\\\\b\", \"C:\\\\a\" ] }");
+    assert_eq!(
+        stored,
+        second.text(),
+        "the row holds the put's text as it is"
+    );
     drop(conn);
     assert_eq!(kv_row_count(&path).await, 1, "a replace adds no row");
-}
-
-#[tokio::test]
-async fn a_disallowed_key_is_refused_without_a_write() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("key.pfwork");
-    let file = WorkspaceFile::create(&path, &bare_contents("Key"))
-        .await
-        .expect("creates");
-
-    for key in ["window", "scroll", "agent_sessions", "Layout", ""] {
-        let error = file
-            .put_ui_state(key, "{}")
-            .await
-            .expect_err("a key outside the allow-list is refused");
-        assert!(
-            matches!(&error, WorkspaceError::UiStateKey(refused) if refused == key),
-            "expected UiStateKey({key:?}), got {error:?}"
-        );
-    }
-    file.close().await;
-
-    assert_eq!(kv_row_count(&path).await, 0, "a refused key writes nothing");
-}
-
-#[tokio::test]
-async fn an_over_cap_value_is_refused_without_a_write() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("cap.pfwork");
-    let file = WorkspaceFile::create(&path, &bare_contents("Cap"))
-        .await
-        .expect("creates");
-    // A valid JSON string one byte past the cap.
-    let mut oversized = String::with_capacity(UI_STATE_VALUE_CAP + 1);
-    oversized.push('"');
-    oversized.extend(std::iter::repeat_n('x', UI_STATE_VALUE_CAP - 1));
-    oversized.push('"');
-    assert_eq!(oversized.len(), UI_STATE_VALUE_CAP + 1);
-
-    let error = file
-        .put_ui_state("layout", &oversized)
-        .await
-        .expect_err("a value past the cap is refused");
-    assert!(
-        matches!(
-            error,
-            WorkspaceError::UiStateTooLarge { actual, cap }
-                if actual == UI_STATE_VALUE_CAP + 1 && cap == UI_STATE_VALUE_CAP
-        ),
-        "expected UiStateTooLarge naming actual and cap, got {error:?}"
-    );
-
-    // Exactly at the cap is allowed.
-    oversized.pop();
-    oversized.pop();
-    oversized.push('"');
-    assert_eq!(oversized.len(), UI_STATE_VALUE_CAP);
-    file.put_ui_state("layout", &oversized)
-        .await
-        .expect("a value at the cap writes");
-    file.close().await;
-
-    assert_eq!(kv_row_count(&path).await, 1, "only the at-cap value landed");
-}
-
-#[tokio::test]
-async fn non_json_text_is_refused_without_a_write() {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("json.pfwork");
-    let file = WorkspaceFile::create(&path, &bare_contents("Json"))
-        .await
-        .expect("creates");
-
-    for text in ["", "not json", "{ \"open\": ", "[1, 2,]", "{} trailing"] {
-        let error = file
-            .put_ui_state("closed_editors", text)
-            .await
-            .expect_err("text that does not parse as JSON is refused");
-        assert!(
-            matches!(error, WorkspaceError::UiStateNotJson { .. }),
-            "expected UiStateNotJson for {text:?}, got {error:?}"
-        );
-    }
-    file.close().await;
-
-    assert_eq!(kv_row_count(&path).await, 0, "refused text writes nothing");
-    assert!(reopen_ui_state(&path).await.values().all(Option::is_none));
 }
 
 #[tokio::test]
@@ -213,19 +132,20 @@ async fn a_row_that_no_longer_parses_reads_as_none_beside_intact_rows() {
     let file = WorkspaceFile::create(&path, &bare_contents("Corrupt"))
         .await
         .expect("creates");
-    file.put_ui_state("layout", r#"{"version":3}"#)
+    file.put_ui_state(&bucket("layout", r#"{"version":3}"#))
         .await
         .expect("layout writes");
-    file.put_ui_state("tree", r#"{"expanded":[]}"#)
+    file.put_ui_state(&bucket("tree", r#"{"expanded":[]}"#))
         .await
         .expect("tree writes");
-    file.put_ui_state("closed_editors", r#"{"paths":["C:\\a"]}"#)
+    file.put_ui_state(&bucket("closed_editors", r#"{"paths":["C:\\a"]}"#))
         .await
         .expect("closed editors write");
     file.close().await;
 
-    // `put_ui_state` refuses non-JSON, so the only way a row stops
-    // parsing is an outside edit of the closed file; seed one directly.
+    // `put_ui_state` takes only validated JSON, so the only way a row
+    // stops parsing is an outside edit of the closed file; seed one
+    // directly.
     let conn = open_database(&path).await.expect("the closed file opens");
     conn.execute(
         "UPDATE kv SET value = ?1 WHERE key = 'tree'",
@@ -308,15 +228,15 @@ async fn save_as_leaves_the_new_files_three_keys_empty() {
         .await
         .expect("the first file creates");
     first
-        .put_ui_state("layout", r#"{"version":3}"#)
+        .put_ui_state(&bucket("layout", r#"{"version":3}"#))
         .await
         .expect("layout writes");
     first
-        .put_ui_state("tree", r#"{"expanded":["C:\\x"]}"#)
+        .put_ui_state(&bucket("tree", r#"{"expanded":["C:\\x"]}"#))
         .await
         .expect("tree writes");
     first
-        .put_ui_state("closed_editors", r#"{"paths":[]}"#)
+        .put_ui_state(&bucket("closed_editors", r#"{"paths":[]}"#))
         .await
         .expect("closed editors write");
     first.close().await;

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
+use workshop_support::StateBucketValue;
 
 use crate::error::UserStateError;
 
@@ -17,9 +18,6 @@ pub const USER_STATE_KEYS: [&str; 4] = [
     "recent_files",
     "commands_history",
 ];
-
-/// The largest user-state value the store accepts, in bytes of JSON text.
-pub const USER_STATE_VALUE_CAP: usize = 1 << 20;
 
 /// Name of the persisted user-state file, written in the server's state
 /// directory.
@@ -67,24 +65,17 @@ impl UserStateStore {
             .collect()
     }
 
-    /// Stores `value` under the allow-listed `key`, replacing any earlier
-    /// value, and rewrites the whole document atomically. Validation runs
-    /// before the lock is taken, so a refused put writes nothing. A
-    /// failed write leaves the new value in memory: the map is the source
-    /// of truth and the file is its mirror.
+    /// Stores the validated `put` under its key, replacing any earlier
+    /// value, and rewrites the whole document atomically. A failed write
+    /// leaves the new value in memory: the map is the source of truth and
+    /// the file is its mirror.
     ///
     /// # Errors
-    /// Returns [`UserStateError::Key`] for a key outside
-    /// [`USER_STATE_KEYS`], [`UserStateError::TooLarge`] when the value's
-    /// JSON text exceeds [`USER_STATE_VALUE_CAP`], and
-    /// [`UserStateError::Io`] when the write fails.
-    pub async fn put(&self, key: &str, value: Value) -> Result<(), UserStateError> {
-        let key = workshop_support::resolve_bucket_key(key, &USER_STATE_KEYS)?;
-        // The compact serialization is what the document holds, so its
-        // length is the size the cap governs.
-        workshop_support::check_bucket_cap(value.to_string().len(), USER_STATE_VALUE_CAP)?;
+    /// Returns [`UserStateError::Io`] when the write fails.
+    pub async fn put(&self, put: StateBucketValue) -> Result<(), UserStateError> {
+        let key = put.key();
         let mut state = self.state.lock().await;
-        state.insert(key.to_owned(), value);
+        state.insert(key.to_owned(), put.into_value());
         // Serializing a map of already-parsed values cannot fail; a
         // failure here is a serde_json invariant break, reported as I/O
         // rather than panicking the server.

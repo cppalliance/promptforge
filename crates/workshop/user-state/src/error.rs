@@ -11,7 +11,7 @@
 
 use std::io;
 
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 // The JSON cause behind `UserStateError::NotJson`. A caller that needs
@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 // cause across the workspace rather than one per crate.
 use shared_error_source::JsonSource;
 use workshop_protocol::ErrorEnvelope;
-use workshop_support::{LEAK_DETAIL, StateBucketError, render_message};
+use workshop_support::{LEAK_DETAIL, StateBucketError, envelope_response, render_message};
 
 use crate::store::USER_STATE_KEYS;
 
@@ -85,14 +85,8 @@ impl UserStateError {
 
 impl IntoResponse for UserStateError {
     fn into_response(self) -> Response {
-        let status = self.status();
         let envelope = ErrorEnvelope::new(render_message(&self, LEAK_DETAIL), self.code());
-        // Serializing the envelope cannot fail: two strings only. A body
-        // that somehow cannot serialize degrades to the status line's
-        // own text.
-        let body = serde_json::to_string(&envelope)
-            .unwrap_or_else(|_| status.canonical_reason().unwrap_or("error").to_string());
-        (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+        envelope_response(self.status(), &envelope)
     }
 }
 

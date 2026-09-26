@@ -96,11 +96,7 @@ fn gateway_message(error: &GatewayError) -> String {
 /// Renders one `gateway_unreachable` envelope at `status`.
 fn envelope(status: StatusCode, message: String) -> Response {
     let envelope = ErrorEnvelope::new(message, "gateway_unreachable");
-    // Serializing the envelope cannot fail: two strings only. A body
-    // that somehow cannot serialize degrades to the status line's text.
-    let body = serde_json::to_string(&envelope)
-        .unwrap_or_else(|_| status.canonical_reason().unwrap_or("error").to_string());
-    (status, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+    workshop_support::envelope_response(status, &envelope)
 }
 
 #[cfg(test)]

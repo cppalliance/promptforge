@@ -10,8 +10,9 @@ use super::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
+use workshop_support::STATE_BUCKET_VALUE_CAP;
 
-use crate::store::{USER_STATE_FILE, USER_STATE_VALUE_CAP};
+use crate::store::USER_STATE_FILE;
 
 /// Collects a response body already buffered in memory and parses it.
 async fn json_body(response: Response) -> serde_json::Value {
@@ -179,10 +180,10 @@ async fn an_unknown_key_is_refused_and_the_state_stands() {
 async fn an_over_cap_body_is_refused_and_the_state_stands() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let store = fresh_store(&dir);
-    let body = format!("\"{}\"", "x".repeat(USER_STATE_VALUE_CAP - 1));
+    let body = format!("\"{}\"", "x".repeat(STATE_BUCKET_VALUE_CAP - 1));
     assert_eq!(
         body.len(),
-        USER_STATE_VALUE_CAP + 1,
+        STATE_BUCKET_VALUE_CAP + 1,
         "one byte past the cap"
     );
 
@@ -195,8 +196,8 @@ async fn an_over_cap_body_is_refused_and_the_state_stands() {
         .as_str()
         .expect("the envelope includes a message");
     assert!(
-        message.contains(&format!("{} bytes", USER_STATE_VALUE_CAP + 1))
-            && message.contains(&format!("{USER_STATE_VALUE_CAP} bytes")),
+        message.contains(&format!("{} bytes", STATE_BUCKET_VALUE_CAP + 1))
+            && message.contains(&format!("{STATE_BUCKET_VALUE_CAP} bytes")),
         "the refusal names actual and cap: {message}"
     );
     assert_eq!(state_of(&store).await, all_null());
@@ -210,15 +211,15 @@ async fn an_over_cap_body_is_refused_and_the_state_stands() {
 async fn a_body_exactly_at_the_cap_is_accepted() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let store = fresh_store(&dir);
-    let body = format!("\"{}\"", "x".repeat(USER_STATE_VALUE_CAP - 2));
-    assert_eq!(body.len(), USER_STATE_VALUE_CAP);
+    let body = format!("\"{}\"", "x".repeat(STATE_BUCKET_VALUE_CAP - 2));
+    assert_eq!(body.len(), STATE_BUCKET_VALUE_CAP);
 
     let response = send(&store, put_request("zoom", body)).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         state_of(&store).await["zoom"],
-        serde_json::Value::String("x".repeat(USER_STATE_VALUE_CAP - 2))
+        serde_json::Value::String("x".repeat(STATE_BUCKET_VALUE_CAP - 2))
     );
 }
 

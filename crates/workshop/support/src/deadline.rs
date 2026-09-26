@@ -131,7 +131,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_prompt_route_passes_through_its_deadline_untouched() {
+    async fn a_quick_route_passes_through_its_deadline_untouched() {
         let app = with_deadline(
             Router::new().route("/quick", get(|| async { "ok" })),
             DEFAULT_DEADLINE,

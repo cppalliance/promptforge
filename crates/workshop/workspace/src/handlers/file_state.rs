@@ -18,10 +18,11 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::routing::{get, put};
+use workshop_support::StateBucketValue;
 
 use crate::error::WorkspaceError;
 use crate::workspace::Workspace;
-use crate::workspace_file::ui_state_kv::{UI_STATE_KEYS, UI_STATE_VALUE_CAP};
+use crate::workspace_file::ui_state_kv::UI_STATE_KEYS;
 
 use super::file::SavedResponse;
 use super::respond;
@@ -60,9 +61,8 @@ async fn store(
     key: &str,
     body: &[u8],
 ) -> Result<SavedResponse, WorkspaceError> {
-    let value =
-        workshop_support::validate_bucket_body(key, &UI_STATE_KEYS, body, UI_STATE_VALUE_CAP)?;
-    let saved = workspace.put_ui_state(key, value).await?;
+    let value = StateBucketValue::new(key, &UI_STATE_KEYS, body)?;
+    let saved = workspace.put_ui_state(value).await;
     Ok(SavedResponse { saved })
 }
 
