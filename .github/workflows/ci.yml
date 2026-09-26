@@ -140,10 +140,13 @@ jobs:
       - name: Docs
         run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api
 
-      # The facade as hosts read it: the topic docs build with default
-      # features.
+      # Each facade as hosts read it and as the docs site publishes it: the
+      # topic docs build alone, with default features.
       - name: Facade docs
         run: cargo doc -p promptforge --no-deps
+
+      - name: Harness facade docs
+        run: cargo doc -p harness --no-deps
 
   check-workshop:
     runs-on: windows-latest
