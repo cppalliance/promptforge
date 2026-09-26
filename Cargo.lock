@@ -8671,6 +8671,7 @@ dependencies = [
  "workshop-protocol",
  "workshop-registry",
  "workshop-support",
+ "workshop-workspace",
  "workspace-hack",
 ]
 

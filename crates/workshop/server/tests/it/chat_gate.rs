@@ -28,37 +28,18 @@ use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
 
-use workshop_server::fixtures::{
-    gateway_updater, replace_gateway, spawn_bindings_forwarder, state_with_gateway,
-};
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, InputResponse, ResolvedGateway, ServerConfig,
-    router,
-};
+use workshop_server::fixtures::{gateway_updater, replace_gateway, spawn_bindings_forwarder};
+use workshop_server::{AgentsConfig, AppState, Config, InputResponse};
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
-use crate::common::{JsonSocket, spawn_gateway};
+use crate::common::{
+    JsonSocket, connect_agents, echo_stream, launch, spawn_gateway, spawn_router, sse_chunk,
+    sse_line, test_config, typed_catalog,
+};
 
 /// Every completion request body the gate mock received, in arrival
 /// order: the gate's proof of exactly what the model was shown.
 type CapturedRequests = Arc<Mutex<Vec<serde_json::Value>>>;
-
-/// One SSE data line containing `event`.
-fn sse_line(event: &serde_json::Value) -> String {
-    format!("data: {event}\n\n")
-}
-
-/// One streaming chunk in OpenAI's format, attributed to `model`.
-fn sse_chunk(
-    model: &str,
-    delta: &serde_json::Value,
-    finish: &serde_json::Value,
-) -> serde_json::Value {
-    json!({
-        "model": model,
-        "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }],
-    })
-}
 
 /// The gate mock: streams `echo:<last user message>` as a reasoning chunk
 /// plus split content, echoing the requested model id back on every
@@ -93,20 +74,7 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
         )
             .into_response();
     }
-    let reply = format!("echo:{last}");
-    let (first, second) = reply.split_at(reply.len() / 2);
-    let mut sse = String::new();
-    for event in [
-        sse_chunk(&model, &json!({ "role": "assistant" }), &null),
-        sse_chunk(&model, &json!({ "reasoning_content": "mm" }), &null),
-        sse_chunk(&model, &json!({ "content": first }), &null),
-        sse_chunk(&model, &json!({ "content": second }), &null),
-        sse_chunk(&model, &json!({}), &json!("stop")),
-    ] {
-        sse.push_str(&sse_line(&event));
-    }
-    sse.push_str("data: [DONE]\n\n");
-    ([(header::CONTENT_TYPE, "text/event-stream")], sse).into_response()
+    echo_stream(&model, &last)
 }
 
 /// A profile selection the gateway serves without a restart, whose
@@ -128,29 +96,10 @@ struct GateServer {
     _dir: tempfile::TempDir,
 }
 
-/// The typed catalog a mock gateway serves from `/v1/models`: the launch
-/// resolves the menu selection through it, so every id a gate may select
-/// has a window that clears chat's declared minimum, and a gate tests
-/// the host wiring rather than a refused binding. `model-b` stays first:
-/// the profile-switch gates rely on the menu auto-selecting it from this
-/// list.
-async fn gate_models() -> axum::Json<serde_json::Value> {
-    let entry = |id: &str| {
-        json!({
-            "id": id, "object": "model", "kind": "chat", "description": id,
-            "context": 200_000, "thinking": "never",
-        })
-    };
-    axum::Json(json!({
-        "object": "list",
-        "data": [
-            entry("model-b"),
-            entry("model-a"),
-            entry("test-model"),
-            entry("claude-opus-4-6"),
-        ],
-    }))
-}
+/// Every id a gate may select, in the order the typed catalog lists
+/// them. `model-b` stays first: the profile-switch gates rely on the menu
+/// auto-selecting it from this list.
+const GATE_MODELS: &[&str] = &["model-b", "model-a", "test-model", "claude-opus-4-6"];
 
 /// Spawns the gate server with `models` in the retained catalog and the
 /// first of them selected in the menu.
@@ -182,29 +131,20 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
                 "/admin/status",
                 get(|| async { axum::Json(json!({"profile": "beta"})) }),
             )
-            .route("/v1/models", get(gate_models)),
+            .route("/v1/models", typed_catalog(GATE_MODELS)),
     )
     .await;
     let dir = tempfile::TempDir::new().expect("tempdir");
     let config = Config {
-        gateway: GatewayConfig {
-            base_url: gateway_url.clone(),
-            api_key: "test-key".to_string(),
-        },
-        server: ServerConfig {
-            state_dir: dir.path().to_path_buf(),
-            ..ServerConfig::default()
-        },
         agents: AgentsConfig {
             path: dir.path().join("missing-agents"),
         },
+        ..test_config(&gateway_url, dir.path())
     };
-    // Discovery is bypassed: a test never consults the real run directory.
-    let gateway = ResolvedGateway::from_config(&config.gateway);
-    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
-    // The router is bound directly, without the serving loop that spawns
-    // the registered tasks, so the forwarder that pushes gateway and
-    // catalog replacements into the harness is spawned here.
+    let (state, ws_base) = spawn_router(&config).await;
+    // The router is bound without the serving loop that spawns the
+    // registered tasks, so the forwarder that pushes gateway and catalog
+    // replacements into the harness is spawned here.
     spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models
@@ -218,9 +158,8 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
             .set_selected(selected)
             .expect("the selected model is in the retained catalog");
     }
-    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
     GateServer {
-        ws_base: format!("ws://{addr}"),
+        ws_base,
         state,
         captured,
         _dir: dir,
@@ -231,30 +170,12 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
 /// the built-in: end-to-end proof that a missing agents directory still
 /// offers `chat`.
 async fn connect_chat(base: &str) -> JsonSocket {
-    let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
-    assert_eq!(
-        socket.recv_json().await,
-        json!({ "type": "agents", "agents": ["chat"] }),
-        "a missing agents directory still offers the built-in chat"
-    );
-    socket
+    connect_agents(base, &["chat"]).await
 }
 
 /// Launches the built-in chat and returns the session id.
 async fn launch_chat(socket: &mut JsonSocket) -> String {
-    socket
-        .send_json(&json!({ "type": "launch", "agent": "chat" }))
-        .await;
-    let frame = socket.recv_json().await;
-    assert_eq!(
-        frame["type"], "agent_session",
-        "launch acknowledged: {frame}"
-    );
-    assert_eq!(frame["agent"], "chat");
-    frame["session"]
-        .as_str()
-        .expect("the acknowledgment includes the session id")
-        .to_owned()
+    launch(socket, "chat").await
 }
 
 /// Asserts that no input wait or error is buffered. The socket refuses
@@ -299,8 +220,8 @@ fn pair(role: &str, content: &str) -> (String, String) {
     (role.to_owned(), content.to_owned())
 }
 
-include!("chat_gate/protocol.rs");
-include!("chat_gate/lifecycle.rs");
-include!("chat_gate/recovery.rs");
-include!("chat_gate/overload.rs");
-include!("chat_gate/canonical_sequence.rs");
+mod canonical_sequence;
+mod lifecycle;
+mod overload;
+mod protocol;
+mod recovery;

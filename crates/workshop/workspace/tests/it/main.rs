@@ -1,6 +1,9 @@
 //! Integration tests for `workshop-workspace`: the registration
 //! contract - routes and the granted-roots handle served through the
-//! registry's contribution collections.
+//! registry's contribution collections - and the save timeout on the
+//! workspace routes.
+
+mod save_timeout;
 
 use std::path::Path;
 

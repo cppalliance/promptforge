@@ -1,3 +1,8 @@
+//! The turn-cancel gate: a stop mid-generation returns to waiting
+//! without an error.
+
+use super::*;
+
 /// GATE 5 - turn-cancel. Current-chat behavior: the stop button kills
 /// generation mid-stream without an error, and the chat is immediately
 /// usable again.

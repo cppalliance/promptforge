@@ -888,7 +888,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-15>
 
-### Step 15: Restructure the server integration tests and close the server test gaps
+### Step 15: Restructure the server integration tests and close the server test gaps [completed]
 
 - Component: Server
 - Artifacts:

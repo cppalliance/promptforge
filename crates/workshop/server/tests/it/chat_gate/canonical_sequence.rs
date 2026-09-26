@@ -1,3 +1,8 @@
+//! The history gate: the conversation accumulates byte-exact across
+//! turns.
+
+use super::*;
+
 /// GATE 1 - multi-turn history. Current-chat behavior: the conversation
 /// accumulates turn over turn, and what the user typed reaches the model
 /// byte-exact with no untrusted envelope around it.

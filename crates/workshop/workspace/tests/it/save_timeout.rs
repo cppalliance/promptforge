@@ -1,7 +1,8 @@
-//! The save-timeout behavior end to end: a `PUT /workspace/file` whose
-//! write outlasts the route deadline answers a 408 whose body is the JSON
-//! error envelope, and the blocking write - abandoned, not cancelled -
-//! still lands on disk once the test releases it.
+//! The save-timeout behavior on the workspace routes: a
+//! `PUT /workspace/file` whose write outlasts the route deadline answers
+//! a 408 whose body is the JSON error envelope, and the blocking write -
+//! abandoned, not cancelled - still lands on disk once the test releases
+//! it.
 
 use std::time::Duration;
 

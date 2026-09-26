@@ -91,7 +91,7 @@ async fn a_revoke_during_a_running_session_pushes_roots_without_the_revoked_fold
 
     let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
     assert_eq!(socket.recv_json().await["type"], "agents");
-    let session = launch_agent(&mut socket, "roots").await;
+    let session = launch(&mut socket, "roots").await;
     let at_launch = tokio::time::timeout(Duration::from_secs(10), launches.recv())
         .await
         .expect("the launch opens its model round")

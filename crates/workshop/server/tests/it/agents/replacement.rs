@@ -33,7 +33,7 @@ async fn gateway_replacement_interrupts_a_catalog_wait_on_accepted_input() {
         .set_selected("model-a")
         .expect("the original model becomes selected");
     let mut socket = connect(&base).await;
-    let session = launch_agent(&mut socket, "chat").await;
+    let session = launch(&mut socket, "chat").await;
     let token = next_wait_token(&mut socket).await;
 
     let catalog_state = state.clone();
@@ -128,7 +128,7 @@ async fn retained_catalog_generation_replays_on_the_replacement_gateway() {
         .set_selected("model-a")
         .expect("the original model becomes selected");
     let mut socket = connect(&base).await;
-    let session = launch_agent(&mut socket, "chat").await;
+    let session = launch(&mut socket, "chat").await;
     let token = next_wait_token(&mut socket).await;
 
     let catalog_state = state.clone();
@@ -202,7 +202,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
         .set_selected("model-a")
         .expect("the original model becomes selected");
     let mut socket = connect(&base).await;
-    let session = launch_agent(&mut socket, "chat").await;
+    let session = launch(&mut socket, "chat").await;
     let token = next_wait_token(&mut socket).await;
 
     let catalog_state = state.clone();

@@ -1,3 +1,8 @@
+//! The streaming gate: live text and reasoning deltas, superseded by the
+//! completed reply under the same id.
+
+use super::*;
+
 /// GATE 2 - live streaming. Current-chat behavior: while the model
 /// generates, the client sees answer text and reasoning arrive as live
 /// chunks, and the completed reply supersedes them under the same id.

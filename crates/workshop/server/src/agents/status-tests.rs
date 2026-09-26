@@ -136,6 +136,41 @@ fn a_completed_reply_pushes_idle_and_resets_the_backoff() {
 }
 
 #[test]
+fn each_delta_pulses_the_activity_of_its_channel() {
+    let (push, mut status_rx, _guards) = wired_push();
+    // `Delta` is `#[non_exhaustive]` in `harness-sessions`, so each
+    // fixture is deserialized rather than written as a struct literal.
+    let cases = [
+        (
+            r#"{"kind":"text","content":"po","reply":1}"#,
+            Activity::Generating,
+        ),
+        (
+            r#"{"kind":"reasoning","content":"hmm","reply":1}"#,
+            Activity::Thinking,
+        ),
+    ];
+
+    for (json, activity) in cases {
+        let delta: Delta = serde_json::from_str(json).expect("the delta fixture parses");
+        on_delta(&delta, &push);
+        let update = status_rx
+            .try_recv()
+            .expect("every delta pushes an activity pulse");
+        assert_eq!(
+            update.activity, activity,
+            "the channel picks the LED: {json}"
+        );
+        assert_eq!(
+            update.severity,
+            Severity::Debug,
+            "a pulse drives the LED and is never displayed as text"
+        );
+        assert_eq!(update.label, "Streaming response...");
+    }
+}
+
+#[test]
 fn a_lifecycle_event_pushes_nothing() {
     let (push, mut status_rx, _guards) = wired_push();
     let backoff = ReconnectBackoff::new();

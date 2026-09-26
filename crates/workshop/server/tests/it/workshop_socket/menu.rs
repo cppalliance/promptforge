@@ -1,8 +1,10 @@
 //! Model-menu behavior of the `/ws` workshop socket: `select_model` and
 //! `switch_profile` orchestration, the selection sequence without a
 //! restart, the no-profile selection, and the single-flight refusal. The
-//! sidecar restart sequence sits in the `restart` child.
+//! sidecar restart sequence sits in the `restart` child, and the
+//! selections that fail before an outcome in the `failures` child.
 
+mod failures;
 mod restart;
 
 use std::sync::{Arc, Mutex};
@@ -102,6 +104,50 @@ fn switching(name: &str) -> (String, String) {
         "Switching profile...".to_string(),
         format!("switching to {name}"),
     )
+}
+
+/// Connects to the `/ws` socket at `url`, sends a switch to `beta` that
+/// must fail, and returns the failure status and the restored workbench
+/// snapshot once both have arrived.
+async fn failed_switch_frames(url: &str) -> (serde_json::Value, serde_json::Value) {
+    let (mut socket, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .expect("connect to /ws");
+
+    let switch = serde_json::json!({"type": "switch_profile", "name": "beta"}).to_string();
+    socket
+        .send(tungstenite::Message::Text(switch.into()))
+        .await
+        .expect("the switch frame is sent");
+    frames_until(&mut socket, |frame| {
+        frame["type"] == "workbench" && frame["switching"] == "beta"
+    })
+    .await;
+    let mut frames = frames_until(&mut socket, |frame| {
+        frame["type"] == "status" && frame["label"] == "Profile switch failed"
+    })
+    .await;
+    let failure = frames.last().expect("the failure status is last").clone();
+    assert_eq!(failure["severity"], "error");
+
+    // The restored snapshot and the failure status are sent on different
+    // buses, so their wire order is not pinned; read on if needed.
+    let is_restored =
+        |frame: &serde_json::Value| frame["type"] == "workbench" && frame["switching"].is_null();
+    if !frames.iter().any(is_restored) {
+        frames.extend(frames_until(&mut socket, is_restored).await);
+    }
+    let restored = frames
+        .iter()
+        .find(|frame| is_restored(frame))
+        .expect("the restored snapshot was pushed")
+        .clone();
+    assert_eq!(
+        restored["switch_in_flight"], false,
+        "the failed switch clears the in-flight mark: {restored}"
+    );
+    socket.close(None).await.expect("close the socket");
+    (failure, restored)
 }
 
 #[tokio::test]

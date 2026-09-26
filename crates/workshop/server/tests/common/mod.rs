@@ -1,6 +1,8 @@
 //! Shared helpers for the workshop server integration tests: an in-process
-//! spawn fixture over [`workshop_server::spawn`] and a typed JSON
-//! WebSocket client over tokio-tungstenite.
+//! spawn fixture over [`workshop_server::spawn`], a router-level fixture
+//! over composed state, the SSE echo and typed catalog mock gateways
+//! serve, a typed JSON WebSocket client over tokio-tungstenite, and the
+//! `/agents/ws` connect-and-launch pair.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions and
 // #[cfg(test)] modules only, not integration-test helpers; failing a test
@@ -10,13 +12,22 @@
     reason = "test helpers fail by panicking with the invariant named"
 )]
 
+use std::path::Path;
 use std::time::Duration;
 
+use axum::http::header;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{MethodRouter, get};
 use futures_util::{SinkExt, StreamExt};
+use serde_json::json;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
+use workshop_server::fixtures::state_with_gateway;
+use workshop_server::{
+    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, ServerHandle,
+    router,
+};
 
 /// How long one frame read may take before the test fails: generous enough
 /// for a slow CI runner, far below any test's own deadline.
@@ -135,6 +146,100 @@ impl Drop for TestServer {
 // gateway on a free loopback port and returns its base URL.
 pub(crate) use workshop_server::fixtures::spawn_gateway;
 
+/// The configuration a router-level test composes state from: the
+/// gateway at `gateway_base_url` under the fixture bearer, state in
+/// `state_dir`, and the default agents directory.
+pub(crate) fn test_config(gateway_base_url: &str, state_dir: &Path) -> Config {
+    Config {
+        gateway: GatewayConfig {
+            base_url: gateway_base_url.to_string(),
+            api_key: "test-key".to_string(),
+        },
+        server: ServerConfig {
+            state_dir: state_dir.to_path_buf(),
+            ..ServerConfig::default()
+        },
+        agents: AgentsConfig::default(),
+    }
+}
+
+/// Composes state from `config` and binds the full workshop router over
+/// it, returning the state and the server's `ws://` base URL. Discovery
+/// is bypassed: a test never consults the real run directory. The
+/// router is bound without the serving loop, so no registered task runs
+/// unless the test spawns it.
+pub(crate) async fn spawn_router(config: &Config) -> (AppState, String) {
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let state = state_with_gateway(config, &gateway).expect("state builds in tests");
+    let base = serve_router(&state).await;
+    (state, base)
+}
+
+/// Binds the full workshop router over `state` on a free loopback port
+/// and returns the server's `ws://` base URL.
+pub(crate) async fn serve_router(state: &AppState) -> String {
+    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
+    format!("ws://{addr}")
+}
+
+/// One SSE data line holding `event`.
+pub(crate) fn sse_line(event: &serde_json::Value) -> String {
+    format!("data: {event}\n\n")
+}
+
+/// One streaming chunk in OpenAI's format, attributed to `model`.
+pub(crate) fn sse_chunk(
+    model: &str,
+    delta: &serde_json::Value,
+    finish: &serde_json::Value,
+) -> serde_json::Value {
+    json!({
+        "model": model,
+        "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }],
+    })
+}
+
+/// Streams `echo:<text>` as an SSE completion attributed to `model`: a
+/// reasoning chunk, the content split across two chunks, the finish
+/// chunk, and the `[DONE]` sentinel - so a turn provably yields multiple
+/// live deltas.
+pub(crate) fn echo_stream(model: &str, text: &str) -> Response {
+    let null = serde_json::Value::Null;
+    let reply = format!("echo:{text}");
+    let (first, second) = reply.split_at(reply.len() / 2);
+    let mut sse = String::new();
+    for event in [
+        sse_chunk(model, &json!({ "role": "assistant" }), &null),
+        sse_chunk(model, &json!({ "reasoning_content": "mm" }), &null),
+        sse_chunk(model, &json!({ "content": first }), &null),
+        sse_chunk(model, &json!({ "content": second }), &null),
+        sse_chunk(model, &json!({}), &json!("stop")),
+    ] {
+        sse.push_str(&sse_line(&event));
+    }
+    sse.push_str("data: [DONE]\n\n");
+    ([(header::CONTENT_TYPE, "text/event-stream")], sse).into_response()
+}
+
+/// The typed `/v1/models` route a launch resolves the menu selection
+/// through, listing `ids` in order. Every entry is a chat model whose
+/// window clears the built-in chat's declared minimum, so a test pins
+/// the host wiring rather than a refused binding.
+pub(crate) fn typed_catalog(ids: &'static [&'static str]) -> MethodRouter {
+    get(move || async move {
+        let data: Vec<serde_json::Value> = ids
+            .iter()
+            .map(|id| {
+                json!({
+                    "id": id, "object": "model", "kind": "chat", "description": id,
+                    "context": 200_000, "thinking": "never",
+                })
+            })
+            .collect();
+        axum::Json(json!({ "object": "list", "data": data }))
+    })
+}
+
 /// A typed JSON WebSocket client: JSON and control frames out, JSON frames
 /// in, every receive bounded by a timeout.
 pub(crate) struct JsonSocket {
@@ -203,4 +308,34 @@ impl JsonSocket {
     pub(crate) async fn close(mut self) {
         self.socket.close(None).await.expect("the socket closes");
     }
+}
+
+/// Connects to `/agents/ws` at `base`, asserting the connect-time push
+/// lists exactly `agents`.
+pub(crate) async fn connect_agents(base: &str, agents: &[&str]) -> JsonSocket {
+    let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
+    assert_eq!(
+        socket.recv_json().await,
+        json!({ "type": "agents", "agents": agents }),
+        "the connect-time push lists the offered agents"
+    );
+    socket
+}
+
+/// Launches `agent` on `socket` and returns the session id from the
+/// acknowledgment frame.
+pub(crate) async fn launch(socket: &mut JsonSocket, agent: &str) -> String {
+    socket
+        .send_json(&json!({ "type": "launch", "agent": agent }))
+        .await;
+    let frame = socket.recv_json().await;
+    assert_eq!(
+        frame["type"], "agent_session",
+        "launch acknowledged: {frame}"
+    );
+    assert_eq!(frame["agent"], agent);
+    frame["session"]
+        .as_str()
+        .expect("the acknowledgment includes the session id")
+        .to_owned()
 }

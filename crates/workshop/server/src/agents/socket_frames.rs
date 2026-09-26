@@ -67,20 +67,27 @@ pub(crate) async fn frame_entry(
     entry: &SessionEvent,
     socket: &mut WebSocket,
 ) -> bool {
-    if entry.index < attached.cursor {
-        return true;
+    match advance(&mut attached.cursor, &mut attached.framed, entry) {
+        Some(frame) => send_frame(socket, &frame).await,
+        None => true,
     }
-    attached.cursor = entry.index + 1;
-    let Ok(event) = serde_json::from_value::<Event>(entry.event.clone()) else {
-        // A stored payload this build cannot read has no wire shape
-        // either; the transcript's index sequence stays whole.
-        return true;
-    };
-    let Some(frame) = AgentEventFrame::new(attached.framed, entry.reply, &event) else {
-        return true;
-    };
-    attached.framed += 1;
-    send_frame(socket, &frame).await
+}
+
+/// Moves the transcript `cursor` past `entry` and returns the entry's
+/// frame, stamped with the wire index `framed` and advancing it. An entry
+/// below the cursor was already read and moves neither; an entry with no
+/// wire shape moves only the cursor.
+fn advance(cursor: &mut u64, framed: &mut u64, entry: &SessionEvent) -> Option<AgentEventFrame> {
+    if entry.index < *cursor {
+        return None;
+    }
+    *cursor = entry.index + 1;
+    // A stored payload this build cannot read has no wire shape either;
+    // the transcript's index sequence stays whole.
+    let event = serde_json::from_value::<Event>(entry.event.clone()).ok()?;
+    let frame = AgentEventFrame::new(*framed, entry.reply, &event)?;
+    *framed += 1;
+    Some(frame)
 }
 
 #[cfg(test)]

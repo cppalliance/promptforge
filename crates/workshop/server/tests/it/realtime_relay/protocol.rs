@@ -1,3 +1,7 @@
+//! The relay's route surface and its close frames in both directions.
+
+use super::*;
+
 #[tokio::test]
 async fn workshop_exposes_only_the_realtime_speech_route() {
     let (gateway, _probe) = spawn_probe().await;

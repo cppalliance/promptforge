@@ -19,14 +19,12 @@ use workshop_server::fixtures::{
     ValidatedGateway, gateway_updater, replace_gateway, run_validated_gateway_fixture_process,
     state_with_gateway, state_with_gateway_and_restart_bound,
 };
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
-};
+use workshop_server::{AppState, ResolvedGateway};
 
-use crate::common::spawn_gateway;
+use crate::common::{serve_router, spawn_gateway, test_config};
 
 use super::super::{frames_until, spawn_session_server};
-use super::{busy_frames, profile_routes, recording_switch, switching};
+use super::{busy_frames, failed_switch_frames, profile_routes, recording_switch, switching};
 
 /// The bearer the sidecar fixture expects and the workshop presents.
 const SIDECAR_KEY: &str = "sidecar-key";
@@ -144,24 +142,15 @@ async fn spawn_sidecar_server(
     let identity = gateway.validate(SIDECAR_KEY, 1_778_000_001, "2026-09-15T18:00:01Z");
     let resolved = ResolvedGateway::from_validated(identity).with_base_url(api_url);
     let state_dir = tempfile::TempDir::new().expect("tempdir");
-    let config = Config {
-        gateway: GatewayConfig {
-            base_url: api_url.to_string(),
-            api_key: SIDECAR_KEY.to_string(),
-        },
-        server: ServerConfig {
-            state_dir: state_dir.path().to_path_buf(),
-            ..ServerConfig::default()
-        },
-        agents: AgentsConfig::default(),
-    };
+    let mut config = test_config(api_url, state_dir.path());
+    config.gateway.api_key = SIDECAR_KEY.to_string();
     let state = match restart_bound {
         Some(bound) => state_with_gateway_and_restart_bound(&config, &resolved, bound),
         None => state_with_gateway(&config, &resolved),
     }
     .expect("state builds in tests");
-    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
-    (format!("ws://{addr}/ws"), state_dir, state, gateway)
+    let base = serve_router(&state).await;
+    (format!("{base}/ws"), state_dir, state, gateway)
 }
 
 /// Waits off the executor for the fixture to report the shutdown
@@ -311,6 +300,32 @@ async fn a_replacement_that_never_appears_fails_within_the_bound() {
         "the menu keeps the last known profile after a failed restart"
     );
     socket.close(None).await.expect("close the socket");
+}
+
+#[tokio::test]
+async fn a_sidecar_that_cannot_take_its_shutdown_fails_the_switch() {
+    let dying_url = spawn_gateway(dying_sidecar_api()).await;
+    let (url, _state_dir, state, gateway) = spawn_sidecar_server(&dying_url, None).await;
+    // The validated identity outlives its process, so the shutdown
+    // request has no sidecar to reach.
+    drop(gateway);
+    state.menu().set_gateway_reachable(true);
+    state.menu().set_profiles(
+        vec!["main".to_string(), "beta".to_string()],
+        Some("main".to_string()),
+    );
+    let (failure, restored) = failed_switch_frames(&url).await;
+    assert!(
+        failure["description"]
+            .as_str()
+            .expect("the failure has a description")
+            .starts_with("the gateway did not accept its shutdown request: "),
+        "the failure names the refused shutdown: {failure}"
+    );
+    assert_eq!(
+        restored["active"], "main",
+        "the menu keeps the last known profile after a refused shutdown"
+    );
 }
 
 #[tokio::test]

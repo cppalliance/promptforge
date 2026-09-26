@@ -1,3 +1,8 @@
+//! The canonical Realtime sequences and an hour-equivalent take cross
+//! the relay unchanged.
+
+use super::*;
+
 #[derive(Clone, Default)]
 struct HourRelayProbe {
     appends: Arc<std::sync::atomic::AtomicUsize>,
@@ -158,8 +163,7 @@ async fn hour_equivalent_one_take_crosses_the_opaque_relay() {
         let ClientMessage::Text(frame) = recv(&mut socket).await else {
             panic!("the hour result remains text");
         };
-        let event =
-            serde_json::from_str::<serde_json::Value>(&frame).expect("hour event parses");
+        let event = serde_json::from_str::<serde_json::Value>(&frame).expect("hour event parses");
         assert_eq!(event["type"], expected);
         let item_id = event["item_id"]
             .as_str()

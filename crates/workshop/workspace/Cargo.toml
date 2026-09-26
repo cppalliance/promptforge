@@ -33,6 +33,9 @@ workshop-support.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
+# The save-timeout integration test drives `routes_with_deadline` and the
+# write stall, both behind `test-fixtures`.
+workshop-workspace = { path = ".", features = ["test-fixtures"] }
 percent-encoding.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

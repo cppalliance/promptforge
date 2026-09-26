@@ -1,3 +1,8 @@
+//! Recovery gates: a live chat relaunching on a replacement Gateway, a
+//! failed completion the chat survives, and a selection lost mid-turn.
+
+use super::*;
+
 #[tokio::test]
 async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
     let server = spawn_chat_server(&["test-model"]).await;
@@ -28,7 +33,7 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
             // The relaunch resolves its model through the replacement's
             // catalog; without one it binds the fallback window and the
             // chat role's minimum refuses the run.
-            .route("/v1/models", get(gate_models)),
+            .route("/v1/models", typed_catalog(GATE_MODELS)),
     )
     .await;
     replace_gateway(
@@ -36,7 +41,7 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
         &replacement,
         "replacement-key",
     )
-        .expect("the replacement publishes");
+    .expect("the replacement publishes");
 
     let replacement_wait = next_wait_token(&mut socket).await;
     assert_ne!(

@@ -1,3 +1,8 @@
+//! A failed Gateway connect answers 502, and the browser's retry reaches
+//! the replacement Gateway.
+
+use super::*;
+
 #[tokio::test]
 async fn browser_realtime_retry_reaches_the_new_port_and_key_without_workshop_reload() {
     let server = TestServer::spawn("http://127.0.0.1:1");

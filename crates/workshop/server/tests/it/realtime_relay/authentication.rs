@@ -1,3 +1,9 @@
+//! The relay's authority: the Gateway bearer replaces the browser's, the
+//! upstream target is fixed, payloads pass opaque, and the handshake
+//! enforces same-origin with no subprotocol.
+
+use super::*;
+
 #[tokio::test]
 async fn realtime_relay_is_authenticated_fixed_and_payload_opaque() {
     let (gateway, probe) = spawn_probe().await;

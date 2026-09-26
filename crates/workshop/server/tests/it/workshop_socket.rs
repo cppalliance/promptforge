@@ -27,10 +27,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt as _;
 use tokio_tungstenite::tungstenite;
 
-use workshop_server::fixtures::state_with_gateway;
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
-};
+use workshop_server::AppState;
+
+use crate::common::{spawn_router, test_config};
 
 const CATALOG: &str =
     r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
@@ -55,22 +54,8 @@ async fn mock_models() -> Response {
 /// poking the status and catalog buses directly).
 async fn spawn_session_server(base_url: &str) -> (String, tempfile::TempDir, AppState) {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
-    let config = Config {
-        gateway: GatewayConfig {
-            base_url: base_url.to_string(),
-            api_key: "test-key".to_string(),
-        },
-        server: ServerConfig {
-            state_dir: state_dir.path().to_path_buf(),
-            ..ServerConfig::default()
-        },
-        agents: AgentsConfig::default(),
-    };
-    // Discovery is bypassed: a test never consults the real run directory.
-    let gateway = ResolvedGateway::from_config(&config.gateway);
-    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
-    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
-    (format!("ws://{addr}/ws"), state_dir, state)
+    let (state, base) = spawn_router(&test_config(base_url, state_dir.path())).await;
+    (format!("{base}/ws"), state_dir, state)
 }
 
 /// Reads one text frame from the client socket and parses it as JSON.

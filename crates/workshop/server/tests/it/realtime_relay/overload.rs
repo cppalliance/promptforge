@@ -1,3 +1,7 @@
+//! A stalled browser send is cancelled within the bounded cleanup.
+
+use super::*;
+
 #[tokio::test]
 async fn stalled_browser_cleanup_is_bounded_after_gateway_disconnect() {
     let probe = StalledPeerProbe::default();

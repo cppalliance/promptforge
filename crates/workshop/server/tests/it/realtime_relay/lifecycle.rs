@@ -1,3 +1,7 @@
+//! An abrupt browser disconnect releases the Gateway hop.
+
+use super::*;
+
 #[tokio::test]
 async fn browser_disconnect_releases_the_gateway_peer() {
     let (gateway, probe) = spawn_probe().await;

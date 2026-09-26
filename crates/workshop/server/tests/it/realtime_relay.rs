@@ -371,9 +371,9 @@ async fn rejected_status(request: tokio_tungstenite::tungstenite::http::Request<
     StatusCode::from_u16(response.status().as_u16()).expect("the status is standard")
 }
 
-include!("realtime_relay/authentication.rs");
-include!("realtime_relay/protocol.rs");
-include!("realtime_relay/lifecycle.rs");
-include!("realtime_relay/recovery.rs");
-include!("realtime_relay/overload.rs");
-include!("realtime_relay/canonical_sequence.rs");
+mod authentication;
+mod canonical_sequence;
+mod lifecycle;
+mod overload;
+mod protocol;
+mod recovery;

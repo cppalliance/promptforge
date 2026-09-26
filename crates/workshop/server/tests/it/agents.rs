@@ -25,13 +25,13 @@ use tokio::sync::Notify;
 
 use workshop_server::fixtures::{
     gateway_updater, replace_gateway as replace_fixture_gateway, spawn_bindings_forwarder,
-    state_with_gateway,
 };
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
-};
+use workshop_server::{AgentsConfig, AppState, Config};
 
-use crate::common::{JsonSocket, spawn_gateway};
+use crate::common::{
+    JsonSocket, connect_agents, echo_stream, launch, spawn_gateway, spawn_router, test_config,
+    typed_catalog,
+};
 
 /// The echo agent: a Markdown prompt on the unified runtime that loops
 /// on `user_input`, runs one chat round per input against the fixture's
@@ -62,9 +62,8 @@ end
 ```
 ";
 
-/// Streams `echo:<last user message>` as an SSE completion: a reasoning
-/// chunk, the content split across two chunks, the finish chunk, and the
-/// `[DONE]` sentinel - so a turn provably yields multiple live deltas.
+/// Streams `echo:<last user message>` from `test-model` as an SSE
+/// completion.
 async fn echo_completions(body: String) -> Response {
     let body: serde_json::Value = serde_json::from_str(&body).expect("the request is JSON");
     let text = body["messages"]
@@ -72,33 +71,7 @@ async fn echo_completions(body: String) -> Response {
         .and_then(|messages| messages.last())
         .and_then(|message| message["content"].as_str())
         .expect("the request includes a user message");
-    let reply = format!("echo:{text}");
-    let (first, second) = reply.split_at(reply.len() / 2);
-    let chunk = |delta: serde_json::Value, finish: serde_json::Value| {
-        json!({
-            "model": "test-model",
-            "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }],
-        })
-        .to_string()
-    };
-    let events = [
-        chunk(json!({ "role": "assistant" }), serde_json::Value::Null),
-        chunk(
-            json!({ "reasoning_content": "mm" }),
-            serde_json::Value::Null,
-        ),
-        chunk(json!({ "content": first }), serde_json::Value::Null),
-        chunk(json!({ "content": second }), serde_json::Value::Null),
-        chunk(json!({}), json!("stop")),
-    ];
-    let mut sse = String::new();
-    for event in events {
-        sse.push_str("data: ");
-        sse.push_str(&event);
-        sse.push_str("\n\n");
-    }
-    sse.push_str("data: [DONE]\n\n");
-    ([(header::CONTENT_TYPE, "text/event-stream")], sse).into_response()
+    echo_stream("test-model", text)
 }
 
 /// Accepts one completion and then leaves its SSE body open forever.
@@ -112,30 +85,13 @@ fn hanging_completions(started: &Notify) -> Response {
         .into_response()
 }
 
-/// Adds the typed `/v1/models` catalog a launch resolves the menu selection
-/// through. Every id these tests select has a window that clears the
-/// built-in chat's declared minimum; a mock without this route fails the
-/// launch with the reported catalog-fetch cause.
+/// Adds the typed `/v1/models` catalog holding every id these tests
+/// select; a mock without this route fails the launch with the reported
+/// catalog-fetch cause.
 fn with_typed_catalog(router: Router) -> Router {
     router.route(
         "/v1/models",
-        axum::routing::get(|| async {
-            let entry = |id: &str| {
-                json!({
-                    "id": id, "object": "model", "kind": "chat", "description": id,
-                    "context": 200_000, "thinking": "never",
-                })
-            };
-            axum::Json(json!({
-                "object": "list",
-                "data": [
-                    entry("model-a"),
-                    entry("model-b"),
-                    entry("model-c"),
-                    entry("test-model"),
-                ],
-            }))
-        }),
+        typed_catalog(&["model-a", "model-b", "model-c", "test-model"]),
     )
 }
 
@@ -196,30 +152,20 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     std::fs::create_dir(&agents_dir).expect("the agents directory creates");
     std::fs::write(agents_dir.join("echo.md"), ECHO_MD).expect("the echo agent writes");
     let config = Config {
-        gateway: GatewayConfig {
-            base_url,
-            api_key: "test-key".to_string(),
-        },
-        server: ServerConfig {
-            state_dir: dir.path().to_path_buf(),
-            ..ServerConfig::default()
-        },
         agents: AgentsConfig { path: agents_dir },
+        ..test_config(&base_url, dir.path())
     };
-    // Discovery is bypassed: a test never consults the real run directory.
-    let gateway = ResolvedGateway::from_config(&config.gateway);
-    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
-    // The router is bound directly, without the serving loop that spawns
-    // the registered tasks, so the forwarder that pushes gateway and
-    // catalog replacements into the harness is spawned here.
+    let (state, base) = spawn_router(&config).await;
+    // The router is bound without the serving loop that spawns the
+    // registered tasks, so the forwarder that pushes gateway and catalog
+    // replacements into the harness is spawned here.
     spawn_bindings_forwarder(&state);
     // The session's model catalog is built from the retained catalog at
     // launch, so the catalog lands before any test launches.
     state
         .catalog()
         .publish(vec![json!({ "id": "test-model", "object": "model" })]);
-    let (addr, _handle) = workshop_support::fixtures::serve(router(state.clone())).await;
-    (format!("ws://{addr}"), dir, state)
+    (base, dir, state)
 }
 
 /// Publishes `base_url` as the next complete Gateway generation.
@@ -228,35 +174,15 @@ fn replace_gateway(state: &AppState, base_url: &str, _epoch: u64) {
         .expect("the replacement Gateway publishes");
 }
 
-/// Connects to `/agents/ws` and consumes the connect-time agent list.
+/// Connects to `/agents/ws`, where the connect-time push lists the
+/// discovered agents plus the built-in chat.
 async fn connect(base: &str) -> JsonSocket {
-    let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
-    assert_eq!(
-        socket.recv_json().await,
-        json!({ "type": "agents", "agents": ["chat", "echo"] }),
-        "the connect-time push lists the discovered agents plus the built-in chat"
-    );
-    socket
+    connect_agents(base, &["chat", "echo"]).await
 }
 
-/// Launches the echo agent on `socket` and returns the session id from
-/// the acknowledgment frame.
+/// Launches the echo agent on `socket` and returns its session id.
 async fn launch_echo(socket: &mut JsonSocket) -> String {
-    launch_agent(socket, "echo").await
-}
-
-/// Launches `agent` and returns its acknowledged session id.
-async fn launch_agent(socket: &mut JsonSocket, agent: &str) -> String {
-    socket
-        .send_json(&json!({ "type": "launch", "agent": agent }))
-        .await;
-    let frame = socket.recv_json().await;
-    assert_eq!(frame["type"], "agent_session");
-    assert_eq!(frame["agent"], agent);
-    frame["session"]
-        .as_str()
-        .expect("the acknowledgment includes the session id")
-        .to_owned()
+    launch(socket, "echo").await
 }
 
 /// Receives frames until the next `input_required` and returns its

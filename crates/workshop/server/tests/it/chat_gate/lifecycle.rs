@@ -1,3 +1,9 @@
+//! Run lifecycle gates: the model binding frozen at launch, delayed
+//! startup convergence, and the relaunch across a profile switch or a
+//! catalog replacement.
+
+use super::*;
+
 /// GATE 3 - model switch. Current-chat behavior: the run's model is the
 /// dropdown selection bound at launch, so selecting another model leaves
 /// the live run untouched and takes effect on the next run; the reply is
@@ -248,7 +254,9 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
                     answer(&mut socket, &token, "after replacement").await;
                 }
                 Some("input_cancelled") => {
-                    let token = frame["token"].as_str().expect("the cancel includes its token");
+                    let token = frame["token"]
+                        .as_str()
+                        .expect("the cancel includes its token");
                     assert!(
                         announced.iter().any(|announced| announced == token),
                         "only an announced wait is cancelled: {token}"
@@ -267,10 +275,17 @@ async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_onc
     .await
     .expect("the replacement relaunch completes a turn");
     assert_eq!(second["event"]["model"], "model-b");
-    assert_eq!(accepted_events, 1, "accepted input is recorded exactly once");
+    assert_eq!(
+        accepted_events, 1,
+        "accepted input is recorded exactly once"
+    );
     {
         let requests = server.captured.lock().expect("the capture lock is healthy");
-        assert_eq!(requests.len(), 2, "the raced turn and the recovery turn each dispatch once");
+        assert_eq!(
+            requests.len(),
+            2,
+            "the raced turn and the recovery turn each dispatch once"
+        );
         assert_eq!(
             requests[0]["model"], "model-a",
             "the raced turn runs on its launch-frozen binding, never the live selection"
