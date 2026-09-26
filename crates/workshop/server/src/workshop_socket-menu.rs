@@ -18,10 +18,9 @@ use workshop_menu::{MenuBus, SwitchOutcome};
 use workshop_protocol::{Activity, SelectModelFrame, SwitchProfileFrame};
 use workshop_registry::Push;
 
-use crate::agents::relay::value_from_bytes;
-use crate::agents::state::SessionsState;
+use crate::websocket::send_error;
 
-use super::send_error;
+use super::WorkshopSocketState;
 
 /// Handles a `select_model` frame: the menu validates the id against
 /// the retained catalog and publishes the fresh workbench snapshot,
@@ -31,7 +30,7 @@ use super::send_error;
 /// missing field) is answered with an `error` frame and the session
 /// continues.
 pub(super) async fn select_model(
-    state: &SessionsState,
+    state: &WorkshopSocketState,
     id: Option<&serde_json::Value>,
     frame: &serde_json::Value,
     socket: &mut WebSocket,
@@ -55,7 +54,7 @@ pub(super) async fn select_model(
 /// switch already in flight, a missing or mistyped `name`) is answered
 /// with an `error` frame and the session continues.
 pub(super) async fn start_switch(
-    state: &SessionsState,
+    state: &WorkshopSocketState,
     id: Option<&serde_json::Value>,
     frame: &serde_json::Value,
     socket: &mut WebSocket,
@@ -113,7 +112,7 @@ const REPLACEMENT_POLL: Duration = Duration::from_millis(250);
 /// ends with a non-busy frame (idle, the deferred notice, or the
 /// failure), so no separate idle push is needed.
 async fn run_switch(
-    state: &SessionsState,
+    state: &WorkshopSocketState,
     snapshot: Arc<GatewaySnapshot>,
     push: &Push,
     menu: &MenuBus,
@@ -208,7 +207,7 @@ impl SwitchFailure {
 /// supervised sidecar, else the shutdown-and-reappear step whose
 /// replacement generation ends up `Serving`.
 async fn drive_switch(
-    state: &SessionsState,
+    state: &WorkshopSocketState,
     snapshot: &Arc<GatewaySnapshot>,
     name: Option<&str>,
 ) -> Result<Settled, SwitchFailure> {
@@ -252,7 +251,7 @@ async fn drive_switch(
 /// reports `target` as the served profile, within the state's restart
 /// bound.
 async fn await_replacement(
-    state: &SessionsState,
+    state: &WorkshopSocketState,
     generation: u64,
     target: Option<&str>,
 ) -> Result<Arc<GatewaySnapshot>, SwitchFailure> {
@@ -319,4 +318,10 @@ fn switch_refusal(refusal: &GatewayResponse) -> String {
             || format!("gateway declined the switch with status {}", refusal.status),
             str::to_string,
         )
+}
+
+/// Parses a gateway body as JSON, falling back to a plain string.
+fn value_from_bytes(body: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(body)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()))
 }

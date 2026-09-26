@@ -35,11 +35,12 @@ use tokio::sync::broadcast;
 use workshop_protocol::{
     Activity, AgentSessionFrame, AgentsFrame, ErrorFrame, InputFrame, InputResponse,
 };
+use workshop_support::recv_or_pending;
 
 use super::LaunchRefusal;
 use super::socket_frames::{delta_frame, drain_events, frame_entry, input_frame};
 use super::state::SessionsState;
-use crate::workshop_socket::{cross_site_refusal, send_error, send_frame};
+use crate::websocket::{cross_site_refusal, send_error, send_frame};
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
 /// foreign `Origin` is refused with 403, as the workshop socket's
@@ -67,17 +68,6 @@ pub(crate) struct Attached {
     /// transcript entries with a wire shape sent so far, so the durable
     /// frames number the transcript the client renders, gap-free.
     pub(crate) framed: u64,
-}
-
-/// Receives from an optional subscription, pending forever when absent,
-/// so a `select!` branch for a detached channel simply never fires.
-async fn recv_or_pending<T: Clone>(
-    receiver: &mut Option<broadcast::Receiver<T>>,
-) -> Result<T, broadcast::error::RecvError> {
-    match receiver {
-        Some(receiver) => receiver.recv().await,
-        None => std::future::pending().await,
-    }
 }
 
 /// Runs one agent-session socket until it closes or fails.

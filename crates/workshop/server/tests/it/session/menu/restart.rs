@@ -35,8 +35,8 @@ const SIDECAR_KEY: &str = "sidecar-key";
 const SHUTDOWN_OBSERVATION: Duration = Duration::from_secs(10);
 
 /// The named child-process half of [`ValidatedGateway`]: the fixture
-/// spawns a copy of this test binary with this test's name, so the name
-/// must stay in sync with the `spawn_in` call below.
+/// spawns a copy of this test binary with this test's name, which
+/// `spawn_sidecar_server` derives from this module's path.
 #[test]
 #[ignore = "runs only as a named child process"]
 fn validated_gateway_fixture_process() {
@@ -132,9 +132,14 @@ async fn spawn_sidecar_server(
     api_url: &str,
     restart_bound: Option<Duration>,
 ) -> (String, tempfile::TempDir, AppState, ValidatedGateway) {
+    // libtest names a test by its path below the crate root, so the
+    // binary's own name (`it`) is dropped from `module_path!()`.
+    let module = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, rest)| rest);
     let gateway = ValidatedGateway::spawn_in(
         SIDECAR_KEY,
-        "session::menu::restart::validated_gateway_fixture_process",
+        &format!("{module}::validated_gateway_fixture_process"),
     );
     let identity = gateway.validate(SIDECAR_KEY, 1_778_000_001, "2026-09-15T18:00:01Z");
     let resolved = ResolvedGateway::from_validated(identity).with_base_url(api_url);

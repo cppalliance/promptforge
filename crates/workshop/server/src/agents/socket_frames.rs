@@ -10,7 +10,7 @@ use promptforge::event::Event;
 use workshop_protocol::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, InputFrame};
 
 use super::socket::Attached;
-use crate::workshop_socket::send_frame;
+use crate::websocket::send_frame;
 
 /// Renders a harness wait frame as the protocol's input frame: the one
 /// place the harness's wait vocabulary meets Workshop's wire shape.

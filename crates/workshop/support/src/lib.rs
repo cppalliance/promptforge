@@ -27,7 +27,7 @@ mod state_bucket;
 
 pub use atomic::{sweep_orphaned_temps, write_atomic};
 pub use backoff::ReconnectBackoff;
-pub use bus::RetainedBus;
+pub use bus::{RetainedBus, recv_or_pending};
 pub use config::{
     AgentsConfig, Config, ConfigError, DEFAULT_ADDR, DEFAULT_CONFIG_PATH, GatewayConfig,
     ServerConfig,

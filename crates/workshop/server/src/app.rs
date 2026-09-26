@@ -247,9 +247,9 @@ pub enum Omit {
     Gateway,
     /// `workshop_workspace::register`.
     Workspace,
-    /// `agents::register`: the sessions routes, the harness, and the
-    /// agent-session opener.
-    Sessions,
+    /// `agents::register`: the agent-sessions routes, the harness, and
+    /// the agent-session opener.
+    AgentSessions,
 }
 
 /// Builds shared state against an already-resolved gateway endpoint: the

@@ -1,8 +1,9 @@
-//! The sessions subsystem of the server: the `/agents/ws` agent-session
-//! socket ([`socket`]), the `/v1/models` catalog relay ([`relay`]), their
-//! shared route state ([`state`]), and [`AgentSessions`], the server's
-//! opener of agent sessions in the harness. The `/ws` workshop socket is
-//! [`crate::workshop_socket`], outside this subsystem.
+//! The agent-sessions subsystem of the server: the `/agents/ws`
+//! agent-session socket ([`socket`]), the `/v1/models` catalog relay
+//! ([`relay`]), their shared route state ([`state`]), and
+//! [`AgentSessions`], the server's opener of agent sessions in the
+//! harness. The `/ws` workshop socket sits outside this subsystem; the
+//! two share only [`crate::websocket`].
 //!
 //! Agent sessions run in the harness. The composition root constructs a
 //! [`Harness`] from `harness-api` and registers it like every other

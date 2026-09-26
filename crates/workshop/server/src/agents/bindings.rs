@@ -17,8 +17,8 @@ use harness_api::{CatalogBinding, GatewayBinding, Harness, HostSnapshot};
 use tokio::sync::{broadcast, watch};
 use workshop_gateway::{GatewayHandles, GatewaySnapshot};
 use workshop_menu::{CatalogBus, MenuHandles};
-use workshop_protocol::WorkbenchSnapshot;
 use workshop_registry::{Registry, WorkspaceRoots};
+use workshop_support::recv_or_pending;
 
 /// Pushes the server's current host snapshot, chat catalog, and gateway
 /// binding into `harness`, each read through `registry` at this moment.
@@ -154,17 +154,6 @@ async fn changed(watch: &mut Option<watch::Receiver<u64>>) -> bool {
         None => std::future::pending().await,
     }
 }
-
-/// Receives from an optional subscription, pending forever when absent.
-async fn recv_or_pending(
-    receiver: &mut Option<broadcast::Receiver<WorkbenchSnapshot>>,
-) -> Result<WorkbenchSnapshot, broadcast::error::RecvError> {
-    match receiver {
-        Some(receiver) => receiver.recv().await,
-        None => std::future::pending().await,
-    }
-}
-
 #[cfg(test)]
 #[path = "bindings-tests.rs"]
 mod tests;

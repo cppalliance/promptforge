@@ -54,12 +54,6 @@ fn report_gateway_outcome(
     }
 }
 
-/// Parses a gateway body as JSON, falling back to a plain string.
-pub(crate) fn value_from_bytes(body: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(body)
-        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()))
-}
-
 /// Turns a gateway call outcome into the workshop's HTTP response.
 ///
 /// Success (any status) is relayed byte-for-byte; a transport failure

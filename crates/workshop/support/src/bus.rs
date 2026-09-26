@@ -12,7 +12,8 @@
 //!
 //! The status, catalog, and menu buses are thin wrappers over this one
 //! type; each wrapper owns its ring capacity and its intent-named helper
-//! methods.
+//! methods. [`recv_or_pending`] is the consumer side's shared helper for
+//! a subscription that may be absent.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -71,6 +72,22 @@ impl<T: Clone> RetainedBus<T> {
         // A send only fails when there are no receivers, which is the
         // bus's resting state before the first client connects.
         let _ = self.sender.send(value);
+    }
+}
+
+/// Receives from an optional subscription, pending forever when absent,
+/// so a `select!` branch for a detached or unregistered channel simply
+/// never fires.
+///
+/// # Errors
+/// Returns the receiver's own [`broadcast::error::RecvError`]: `Lagged`
+/// when it fell behind the ring, `Closed` once every sender is gone.
+pub async fn recv_or_pending<T: Clone>(
+    receiver: &mut Option<broadcast::Receiver<T>>,
+) -> Result<T, broadcast::error::RecvError> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -148,6 +165,30 @@ mod tests {
             bus.latest().as_deref(),
             Some("through the clone"),
             "the clone's send moves the shared snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_present_subscription_receives_what_its_channel_sends() {
+        let (sender, receiver) = broadcast::channel(4);
+        let mut receiver = Some(receiver);
+        sender.send(3).expect("the receiver is subscribed");
+        assert_eq!(
+            recv_or_pending(&mut receiver)
+                .await
+                .expect("the value is queued"),
+            3
+        );
+    }
+
+    #[test]
+    fn an_absent_subscription_pends_forever() {
+        let mut receiver: Option<broadcast::Receiver<u32>> = None;
+        let mut wait = std::pin::pin!(recv_or_pending(&mut receiver));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(
+            wait.as_mut().poll(&mut context).is_pending(),
+            "a detached select! branch must never fire"
         );
     }
 }

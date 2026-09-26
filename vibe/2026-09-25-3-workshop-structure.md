@@ -783,7 +783,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-11>
 
-### Step 11: Finish the `/ws` split
+### Step 11: Finish the `/ws` split [completed]
 
 - Component: Server
 - Component placement: seventh, after the gateway, workspace, and shared helpers it imports, and before the desktop and UI components that read its final surface and fixture paths.

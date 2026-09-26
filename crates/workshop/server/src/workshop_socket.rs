@@ -19,8 +19,8 @@
 //! refused with an `error` frame. Both events echo an `id` on their
 //! refusals when the frame included one. A frame that is not a
 //! well-formed menu event is answered with an `error` frame and the
-//! session continues. Chat itself is on the `/agents/ws` socket
-//! ([`crate::agents::socket`]).
+//! session continues. Chat itself is on the `/agents/ws` socket, served
+//! by the sessions subsystem.
 //!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
@@ -34,78 +34,152 @@
 //! snapshot rather than slowing the producers.
 //!
 //! The status channel is reached through the subsystem registry
-//! ([`SessionsState::registry`]), not named directly: an unregistered
+//! ([`SocketState::registry`]), not named directly: an unregistered
 //! slot degrades the session to no status frames rather than failing it.
 
 #[path = "workshop_socket-menu.rs"]
 mod menu;
 
+use std::ops::Deref;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
+use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
+use axum::routing::get;
 use tokio::sync::broadcast;
 
-use workshop_protocol::{ErrorEnvelope, ErrorFrame};
+use workshop_menu::{CatalogBus, MenuBus, MenuHandles};
+use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
+use workshop_support::recv_or_pending;
 
-use crate::agents::state::SessionsState;
+use crate::websocket::{SocketState, cross_site_refusal, send_error, send_frame};
 
 use self::menu::{select_model, start_switch};
 
-/// Session ids for log correlation, handed out in connection order.
-static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+/// How long a profile switch waits for a relaunched sidecar gateway to
+/// publish a replacement generation serving the selection before the
+/// switch fails. Model downloads never run inside this window (the boot
+/// load publishes its listener first), so it covers process exit, the
+/// supervisor's relaunch, and the bind.
+pub(crate) const DEFAULT_RESTART_BOUND: Duration = Duration::from_secs(90);
 
-/// Logs the session close when the connection task ends, however it ends,
-/// so the session loop's exit paths need no cleanup calls.
-struct SessionLog {
-    session: u64,
+/// The `/ws` route state: the socket state every socket route shares
+/// (registry, origin policy, and the gateway and push accessors, reached
+/// through `Deref`), plus the catalog and menu buses the session forwards
+/// and the bound a profile switch waits for a relaunched sidecar.
+#[derive(Debug, Clone)]
+pub(crate) struct WorkshopSocketState {
+    socket: SocketState,
+    restart_bound: Duration,
 }
 
-impl Drop for SessionLog {
-    fn drop(&mut self) {
-        tracing::info!(session = self.session, "chat session closed");
+impl WorkshopSocketState {
+    /// Builds the route state over the subsystem registry and the
+    /// server's origin policy, with the default restart bound.
+    #[must_use]
+    pub(crate) fn new(registry: Registry, origin_allowed: fn(&HeaderMap) -> bool) -> Self {
+        Self {
+            socket: SocketState::new(registry, origin_allowed),
+            restart_bound: DEFAULT_RESTART_BOUND,
+        }
+    }
+
+    /// Replaces the bound a profile switch waits for a relaunched sidecar
+    /// (see [`DEFAULT_RESTART_BOUND`]); a host embedding a slower
+    /// supervisor, or a test that must trip the bound, sets it here.
+    #[must_use]
+    pub(crate) fn with_restart_bound(mut self, bound: Duration) -> Self {
+        self.restart_bound = bound;
+        self
+    }
+
+    /// The bound a profile switch waits for a relaunched sidecar.
+    pub(crate) fn restart_bound(&self) -> Duration {
+        self.restart_bound
+    }
+
+    /// The catalog bus every `/ws` session forwards from, or `None`
+    /// while the menu subsystem has not registered.
+    pub(crate) fn catalog(&self) -> Option<CatalogBus> {
+        self.registry()
+            .state::<MenuHandles>()
+            .map(|handles| handles.catalog().clone())
+    }
+
+    /// The menu bus every `/ws` session forwards and drives, or `None`
+    /// while the menu subsystem has not registered.
+    pub(crate) fn menu(&self) -> Option<MenuBus> {
+        self.registry()
+            .state::<MenuHandles>()
+            .map(|handles| handles.menu().clone())
     }
 }
 
-/// The 403 refusal every WebSocket upgrade answers a foreign `Origin`
-/// with: the same `cross_site` envelope the server's guard middleware
-/// renders for plain HTTP requests.
-pub(crate) fn cross_site_refusal() -> Response {
-    let envelope = ErrorEnvelope::new("cross-site request refused", "cross_site");
-    // Serializing the envelope cannot fail: two strings only.
-    let body = serde_json::to_string(&envelope)
-        .unwrap_or_else(|_| "cross-site request refused".to_string());
-    (
-        axum::http::StatusCode::FORBIDDEN,
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        body,
-    )
-        .into_response()
+impl Deref for WorkshopSocketState {
+    type Target = SocketState;
+
+    fn deref(&self) -> &SocketState {
+        &self.socket
+    }
 }
 
-/// Upgrades a `GET /ws` request to a WebSocket session. A foreign
+/// The `/ws` route. The upgrade answers immediately and then outlives
+/// any deadline, so none applies.
+pub(crate) fn routes(state: WorkshopSocketState) -> Router {
+    Router::new().route("/ws", get(upgrade)).with_state(state)
+}
+
+/// Registers the `/ws` route into the registry, merged into the server's
+/// API router. The returned guard keeps the registration alive; the
+/// composition root holds it for the process lifetime.
+pub(crate) fn register(registry: &Registry, state: &WorkshopSocketState) -> Registration {
+    registry.register_routes(Arc::new(RouteRegistrarAdapter::new({
+        let state = state.clone();
+        move || routes(state.clone())
+    })))
+}
+
+/// Connection ids for log correlation, handed out in connection order.
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
+
+/// Logs the connection close when the connection task ends, however it
+/// ends, so the connection loop's exit paths need no cleanup calls.
+struct ConnectionLog {
+    connection: u64,
+}
+
+impl Drop for ConnectionLog {
+    fn drop(&mut self) {
+        tracing::info!(connection = self.connection, "workshop socket closed");
+    }
+}
+
+/// Upgrades a `GET /ws` request to a WebSocket connection. A foreign
 /// `Origin` is refused with 403: WS upgrades bypass Sec-Fetch in older
 /// browsers, so the server's loopback origin policy guards the upgrade
 /// itself.
-pub(crate) async fn upgrade(
-    State(state): State<SessionsState>,
+async fn upgrade(
+    State(state): State<WorkshopSocketState>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     if !state.origin_allowed(&headers) {
         return cross_site_refusal();
     }
-    ws.on_upgrade(move |socket| run_session(socket, state))
+    ws.on_upgrade(move |socket| run_connection(socket, state))
 }
 
-/// Runs one session until the socket closes or fails: a single `select!`
-/// loop owning the socket for both reading and writing.
-async fn run_session(mut socket: WebSocket, state: SessionsState) {
-    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-    tracing::info!(session, "workshop session opened");
-    let _closed = SessionLog { session };
+/// Runs one connection until the socket closes or fails: a single
+/// `select!` loop owning the socket for both reading and writing.
+async fn run_connection(mut socket: WebSocket, state: WorkshopSocketState) {
+    let connection = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
+    tracing::info!(connection, "workshop socket opened");
+    let _closed = ConnectionLog { connection };
 
     // Subscribe before snapshotting, so an update emitted between the two
     // arrives at least once; the possible duplicate is harmless because
@@ -146,11 +220,9 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
     }
 
     // The buses close only when the server state tears down; a closed bus
-    // disables its branch rather than spinning the loop on `Closed`.
-    let mut status_open = true;
-    let mut catalog_open = true;
-    let mut menu_open = true;
-
+    // drops its receiver, which leaves its branch pending rather than
+    // spinning the loop on `Closed`. An unregistered bus has no receiver
+    // from the start, so its branch never runs.
     loop {
         tokio::select! {
             // Biased, buses first: draining them ahead of inbound bounds
@@ -161,57 +233,38 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
             // skips ahead to the retained window, which is a resync
             // because every status and catalog frame is a complete
             // snapshot.
-            received = async {
-                match status_rx.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    // The unregistered slot: a graceful no-op that never
-                    // fires, so the branch simply never runs.
-                    None => std::future::pending().await,
-                }
-            }, if status_open => match received {
+            received = recv_or_pending(&mut status_rx) => match received {
                 Ok(update) => {
                     if !send_frame(&mut socket, &update.frame()).await {
                         break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
+                    tracing::debug!(connection, skipped, "status receiver lagged; skipped updates");
                 }
-                Err(broadcast::error::RecvError::Closed) => status_open = false,
+                Err(broadcast::error::RecvError::Closed) => status_rx = None,
             },
-            received = async {
-                match catalog_rx.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    // Unregistered menu subsystem: the branch never runs.
-                    None => std::future::pending().await,
-                }
-            }, if catalog_open => match received {
+            received = recv_or_pending(&mut catalog_rx) => match received {
                 Ok(catalog) => {
                     if !send_frame(&mut socket, &catalog.frame()).await {
                         break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(session, skipped, "catalog receiver lagged; skipped pushes");
+                    tracing::debug!(connection, skipped, "catalog receiver lagged; skipped pushes");
                 }
-                Err(broadcast::error::RecvError::Closed) => catalog_open = false,
+                Err(broadcast::error::RecvError::Closed) => catalog_rx = None,
             },
-            received = async {
-                match menu_rx.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    // Unregistered menu subsystem: the branch never runs.
-                    None => std::future::pending().await,
-                }
-            }, if menu_open => match received {
+            received = recv_or_pending(&mut menu_rx) => match received {
                 Ok(snapshot) => {
                     if !send_frame(&mut socket, &snapshot.frame()).await {
                         break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(session, skipped, "menu receiver lagged; skipped snapshots");
+                    tracing::debug!(connection, skipped, "menu receiver lagged; skipped snapshots");
                 }
-                Err(broadcast::error::RecvError::Closed) => menu_open = false,
+                Err(broadcast::error::RecvError::Closed) => menu_rx = None,
             },
             inbound = socket.recv() => match inbound {
                 Some(Ok(Message::Text(text))) => {
@@ -222,7 +275,7 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
                 Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Err(error)) => {
-                    tracing::warn!(session, %error, "workshop session socket failed");
+                    tracing::warn!(connection, %error, "workshop socket failed");
                     break;
                 }
             },
@@ -233,7 +286,7 @@ async fn run_session(mut socket: WebSocket, state: SessionsState) {
 /// Handles one inbound text frame: `select_model` and `switch_profile`
 /// drive the Model menu, and anything else is answered with an `error`
 /// frame. Refusals echo the frame's `id` when it included one.
-async fn handle_frame(state: &SessionsState, text: &str, socket: &mut WebSocket) {
+async fn handle_frame(state: &WorkshopSocketState, text: &str, socket: &mut WebSocket) {
     let frame: serde_json::Value = match serde_json::from_str(text) {
         Ok(frame) => frame,
         Err(error) => {
@@ -259,27 +312,4 @@ async fn handle_frame(state: &SessionsState, text: &str, socket: &mut WebSocket)
         "unknown frame type; expected \"select_model\" or \"switch_profile\"",
     )
     .await;
-}
-
-/// Sends one JSON text frame; a false return means the client is gone.
-/// Shared with the agent-session socket, its second production consumer.
-pub(crate) async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
-    // Serializing the protocol frames cannot fail: strings, integers, and
-    // JSON values only. A frame that somehow cannot serialize is skipped,
-    // which is not a gone client.
-    let Ok(text) = serde_json::to_string(frame) else {
-        return true;
-    };
-    socket.send(Message::Text(text.into())).await.is_ok()
-}
-
-/// Sends one `error` frame with `message`, tagged with the request's
-/// `id` when there is one, ignoring a dead client. Shared with the
-/// agent-session socket, its second production consumer.
-pub(crate) async fn send_error(
-    socket: &mut WebSocket,
-    id: Option<&serde_json::Value>,
-    message: impl Into<String>,
-) {
-    let _ = send_frame(socket, &ErrorFrame::new(message.into(), id)).await;
 }

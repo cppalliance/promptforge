@@ -19,11 +19,12 @@ use workshop_workspace::Workspace;
 
 use super::{AppState, Omit, Registrations, StateError};
 use crate::agents::{self, AgentSessions, SessionsState};
+use crate::workshop_socket::{self, WorkshopSocketState};
 
 /// The composition root behind [`super::state_with_gateway`]; `omit`
 /// removes one subsystem's `register` call for the boot-failure test, and
-/// `restart_bound` replaces the sessions subsystem's sidecar restart
-/// bound when given.
+/// `restart_bound` replaces the `/ws` socket's sidecar restart bound when
+/// given.
 pub(super) fn compose(
     config: &Config,
     gateway: &ResolvedGateway,
@@ -51,14 +52,8 @@ pub(super) fn compose(
     let backoff = register_gateway(&registry, &mut registrations, gateway, &push, omit)?;
     register_workspace(&registry, &mut registrations, state_dir, omit);
     register_user_state(&registry, &mut registrations, state_dir);
-    register_sessions(
-        &registry,
-        &mut registrations,
-        config,
-        &backoff,
-        restart_bound,
-        omit,
-    );
+    register_sessions(&registry, &mut registrations, config, &backoff, omit);
+    register_workshop_socket(&registry, &mut registrations, restart_bound);
     // The boot contract: every subsystem's handle set is present before
     // state is shared, so a missing contribution fails here, naming the
     // type, instead of panicking later at first use.
@@ -190,14 +185,13 @@ fn register_user_state(
 }
 
 /// The harness (agent-sessions) subsystem: the harness, the agent-session
-/// opener, and the `/ws` sessions state, plus the routes and bindings
-/// task it self-registers.
+/// opener, and their route state, plus the routes and bindings task it
+/// self-registers.
 fn register_sessions(
     registry: &Registry,
     registrations: &mut Registrations,
     config: &Config,
     backoff: &ReconnectBackoff,
-    restart_bound: Option<std::time::Duration>,
     omit: Option<Omit>,
 ) {
     // Agent sessions run in the harness, the engine's production host,
@@ -205,16 +199,27 @@ fn register_sessions(
     // registry; `agents` pushes the server's state through its public API.
     let harness = agents::harness_for(config, registry);
     let agents = AgentSessions::new(registry.clone(), backoff.clone());
-    let mut sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
-    if let Some(bound) = restart_bound {
-        sessions = sessions.with_restart_bound(bound);
-    }
-    if omit != Some(Omit::Sessions) {
-        let (routes, harness, agents) = agents::register(registry, &sessions, harness, &agents);
-        registrations.hold(routes);
-        registrations.hold(harness);
-        registrations.hold(agents);
+    let sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);
+    if omit != Some(Omit::AgentSessions) {
+        let regs = agents::register(registry, &sessions, harness, &agents);
+        registrations.hold(regs.routes);
+        registrations.hold(regs.harness);
+        registrations.hold(regs.agents);
         // The bindings forwarder, spawned with serving like every task.
         registrations.hold(agents::register_tasks(registry));
     }
+}
+
+/// The `/ws` workshop socket: its route state, with the sidecar restart
+/// bound replaced when given, and the route it self-registers.
+fn register_workshop_socket(
+    registry: &Registry,
+    registrations: &mut Registrations,
+    restart_bound: Option<std::time::Duration>,
+) {
+    let mut state = WorkshopSocketState::new(registry.clone(), crate::cross_site::origin_allowed);
+    if let Some(bound) = restart_bound {
+        state = state.with_restart_bound(bound);
+    }
+    registrations.hold(workshop_socket::register(registry, &state));
 }

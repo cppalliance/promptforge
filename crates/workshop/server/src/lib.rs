@@ -10,9 +10,10 @@
 //!
 //! The crate is the composition root of the workshop server
 //! decomposition: the feature subsystems (`workshop-user-state`,
-//! `workshop-workspace`, and the sessions subsystem in `agents`, which
-//! serves the `/agents/ws` agent-session socket and the `/v1/models`
-//! catalog relay), the `/ws` workshop socket in `workshop_socket`, the
+//! `workshop-workspace`, and the agent-sessions subsystem in `agents`,
+//! which serves the `/agents/ws` agent-session socket and the
+//! `/v1/models` catalog relay), the `/ws` workshop socket in
+//! `workshop_socket` (the two sockets share `websocket`), the
 //! domain services (`workshop-gateway`, `workshop-status`,
 //! `workshop-menu`), and the vocabulary crates (`workshop-protocol`,
 //! `workshop-registry`, `workshop-support`) are assembled in `app`
@@ -61,6 +62,7 @@ mod csp;
 mod error;
 mod routes;
 mod serve;
+mod websocket;
 mod workshop_socket;
 
 /// The intent-named push facade over the registry's producer sink slots:
