@@ -9,8 +9,8 @@ use gateway_api_discovery::Resolution;
 
 use super::{TestIdentity, assert_bounded_supervisor_shutdown, live_file, test_identity};
 use crate::gateway::supervisor::{
-    GatewaySupervisor, SupervisionProbe, launch_and_attach_cancellable_with, run_effect_if_active,
-    run_supervision, wait_for_launched_file_cancellable_with,
+    GatewaySupervisor, SupervisionProbe, SystemClock, launch_and_attach_cancellable_with,
+    run_effect_if_active, run_supervision, wait_for_launched_file_cancellable_with,
 };
 
 #[test]
@@ -108,6 +108,7 @@ fn exit_joins_a_supervisor_blocked_in_health_wait_before_resolve() {
             &run_dir,
             Duration::from_secs(30),
             &cancellation,
+            &SystemClock,
             |_, _, cancellation| {
                 entered.send(()).expect("announce blocked health wait");
                 let _ = cancellation.wait_timeout(Duration::from_secs(30));

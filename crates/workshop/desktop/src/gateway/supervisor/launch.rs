@@ -14,11 +14,33 @@ use super::boot;
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Delay between readiness polls.
-const RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(25);
+pub(in crate::gateway) const RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// Longest single health probe, so a discovery file rewritten while a
 /// probe is failing is read again well before the readiness budget ends.
 const HEALTH_PROBE_WINDOW: Duration = Duration::from_millis(250);
+
+/// The readiness wait's only source of time.
+pub(in crate::gateway) trait WaitClock {
+    /// The current instant.
+    fn now(&self) -> Instant;
+
+    /// Pauses for `delay`, returning `true` when `cancellation` fires first.
+    fn pause(&self, delay: Duration, cancellation: &CancellationToken) -> bool;
+}
+
+/// The monotonic clock and the token's own timed wait.
+pub(in crate::gateway) struct SystemClock;
+
+impl WaitClock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn pause(&self, delay: Duration, cancellation: &CancellationToken) -> bool {
+        cancellation.wait_timeout(delay)
+    }
+}
 
 /// Settles and performs a cancellable launch. Boot passes a token that is
 /// never cancelled.
@@ -97,33 +119,37 @@ fn wait_for_launched_file_cancellable(
         run_dir,
         timeout,
         cancellation,
+        &SystemClock,
         gateway_api_discovery::wait_for_health_cancellable,
         gateway_api_discovery::resolve_cancellable,
     )
 }
 
-/// Readiness wait with health and validation injected. A failed probe
-/// does not end the wait; the budget does, reporting the last probe error.
-pub(in crate::gateway) fn wait_for_launched_file_cancellable_with<Health, Resolve>(
+/// Readiness wait with time, health, and validation injected. A failed
+/// probe does not end the wait; the budget does, reporting the last probe
+/// error.
+pub(in crate::gateway) fn wait_for_launched_file_cancellable_with<Clock, Health, Resolve>(
     run_dir: &Path,
     timeout: Duration,
     cancellation: &CancellationToken,
+    clock: &Clock,
     mut health: Health,
     mut resolve: Resolve,
 ) -> anyhow::Result<GatewayDiscoveryFile>
 where
+    Clock: WaitClock,
     Health:
         FnMut(&str, Duration, &CancellationToken) -> Result<(), gateway_api_discovery::HealthError>,
     Resolve: FnMut(&Path, &CancellationToken) -> Result<Resolution, SidecarError>,
 {
-    let deadline = Instant::now() + timeout;
+    let deadline = clock.now() + timeout;
     let mut last_probe_error = None;
     loop {
         if cancellation.is_cancelled() {
             anyhow::bail!("the launched gateway wait was cancelled");
         }
         if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = deadline.saturating_duration_since(clock.now());
             let url = format!("http://127.0.0.1:{}", file.port);
             match health(&url, remaining.min(HEALTH_PROBE_WINDOW), cancellation) {
                 Ok(()) => {
@@ -169,7 +195,7 @@ where
         if cancellation.is_cancelled() {
             anyhow::bail!("the launched gateway wait was cancelled");
         }
-        if Instant::now() >= deadline {
+        if clock.now() >= deadline {
             let failure = format!(
                 "the launched gateway wrote no validated gateway discovery file within {timeout:?}"
             );
@@ -178,7 +204,7 @@ where
                 None => anyhow::anyhow!(failure),
             });
         }
-        if cancellation.wait_timeout(RECOVERY_POLL_INTERVAL) {
+        if clock.pause(RECOVERY_POLL_INTERVAL, cancellation) {
             anyhow::bail!("the launched gateway wait was cancelled");
         }
     }

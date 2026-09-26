@@ -16,8 +16,8 @@ mod signals;
 
 #[cfg(test)]
 pub(super) use launch::{
-    launch_and_attach_cancellable_with, run_effect_if_active,
-    wait_for_launched_file_cancellable_with,
+    RECOVERY_POLL_INTERVAL, SystemClock, WaitClock, launch_and_attach_cancellable_with,
+    run_effect_if_active, wait_for_launched_file_cancellable_with,
 };
 #[cfg(test)]
 pub(super) use lifecycle::SUPERVISOR_SHUTDOWN_BUDGET;

@@ -231,7 +231,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Put the readiness wait behind a time seam
+### Step 2: Put the readiness wait behind a time seam [completed]
 
 - Component: Desktop readiness wait
 - Debt: DEBT-STRUCT-01.
