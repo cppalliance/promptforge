@@ -94,7 +94,7 @@ impl ToolCallOutcome {
 /// `tool_calls` and `reply`, never on `finish_reason` alone - backends
 /// routinely finish tool-call rounds with `stop`. Absent optional fields
 /// are simply never set on the resumed table, so they read back as nil;
-/// `overflow` is always set, as a boolean.
+/// `overflow` is always set, as a boolean, and `turn` as an integer.
 // No `Eq`: `metrics` holds `f64` timings transitively.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
@@ -122,6 +122,11 @@ pub struct ChatResult {
     pub model: String,
     /// Everything measured about the round.
     pub metrics: Option<CallMetrics>,
+    /// The turn the round was reported under: the advanced counter for a
+    /// served or empty round, the unchanged counter when no round ran.
+    /// The loop shim passes it back with each requested tool call, so the
+    /// call reports the round that requested it.
+    pub turn: u32,
 }
 
 /// The successful answer to a `user_input` request: the resumed text and

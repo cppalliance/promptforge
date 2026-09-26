@@ -55,6 +55,7 @@ fn tool_call_round() -> Answer<Error> {
         finish_reason: Some("tool_calls".to_owned()),
         model: "test-model".to_owned(),
         metrics: None,
+        turn: 1,
     })))
 }
 
@@ -69,6 +70,7 @@ fn reply_round(text: &str) -> Answer<Error> {
         finish_reason: Some("stop".to_owned()),
         model: "test-model".to_owned(),
         metrics: None,
+        turn: 2,
     })))
 }
 

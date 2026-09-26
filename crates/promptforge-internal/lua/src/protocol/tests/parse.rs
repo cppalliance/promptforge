@@ -104,10 +104,12 @@ fn tool_call_parses_alias_and_args() {
             alias,
             args,
             call_id,
+            turn,
         } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
             assert_eq!(call_id, None, "a script call omits the call id");
+            assert_eq!(turn, None, "a script call omits the turn");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
@@ -141,6 +143,61 @@ fn a_non_string_call_id_is_a_malformed_yield() {
     table.raw_set("alias", "echo").expect("raw_set");
     table.raw_set("call_id", 7).expect("raw_set");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
+}
+
+#[test]
+fn a_tool_call_without_a_turn_parses_it_as_none() {
+    // A script call and the test-only `tools.call_as_model` hook leave
+    // `turn` out; the scheduler falls back to the live counter.
+    let lua = Lua::new();
+    let table = request_table(&lua, "tool_call");
+    table.raw_set("alias", "echo").expect("raw_set");
+    table.raw_set("call_id", "call_7").expect("raw_set");
+    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    match request {
+        Request::ToolCall { turn, .. } => assert_eq!(turn, None),
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_tool_call_with_a_turn_parses_the_requesting_round() {
+    // The loop shim passes back the turn its chat round reported the
+    // batch under.
+    let lua = Lua::new();
+    let table = request_table(&lua, "tool_call");
+    table.raw_set("alias", "echo").expect("raw_set");
+    table.raw_set("call_id", "call_7").expect("raw_set");
+    table.raw_set("turn", 3).expect("raw_set");
+    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    match request {
+        Request::ToolCall { call_id, turn, .. } => {
+            assert_eq!(call_id.as_deref(), Some("call_7"));
+            assert_eq!(turn, Some(3));
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_turn_outside_u32_or_not_an_integer_is_a_malformed_yield() {
+    // `turn` is shim-produced, never author-supplied: a wrong shape is a
+    // corrupted yield, not a catchable call error.
+    let lua = Lua::new();
+    let bad_turns = [
+        Value::Integer(-1),
+        Value::Integer(i64::from(u32::MAX) + 1),
+        Value::Number(2.0),
+        Value::Number(2.5),
+        Value::String(lua.create_string("2").expect("string")),
+    ];
+    for bad in bad_turns {
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", "echo").expect("raw_set");
+        table.raw_set("call_id", "call_7").expect("raw_set");
+        table.raw_set("turn", bad).expect("raw_set");
+        assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
+    }
 }
 
 #[test]

@@ -83,8 +83,9 @@ impl Scheduler {
         alias: &str,
         args: serde_json::Value,
         call_id: Option<String>,
+        turn: Option<u32>,
     ) {
-        match self.prepare_tool_call(id, alias, args, call_id) {
+        match self.prepare_tool_call(id, alias, args, call_id, turn) {
             // An issued call is parked on the pending table; a parked
             // wait was recorded on the chain, and a member's end or the
             // timer's firing answers it.
@@ -121,6 +122,7 @@ impl Scheduler {
         alias: &str,
         args: serde_json::Value,
         call_id: Option<String>,
+        _turn: Option<u32>,
     ) -> Result<ToolCallDispatch> {
         let tool_set = self.chains[id.index()].ctx.tool_set_snapshot()?;
         // The reservation wins over every lookup: a bound or local tool

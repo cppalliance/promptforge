@@ -168,10 +168,12 @@ fn tools_call_yields_a_well_formed_request() {
             alias,
             args,
             call_id,
+            turn,
         } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
             assert_eq!(call_id, None, "a script call leaves the call id unset");
+            assert_eq!(turn, None, "a script call leaves the turn unset");
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }

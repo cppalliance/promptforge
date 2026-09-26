@@ -159,6 +159,13 @@ pub enum Request {
         /// raise-at-call-site behavior. Shim-produced, never
         /// author-supplied: a wrong shape is a malformed yield.
         call_id: Option<String>,
+        /// `Some`: the turn of the chat round that requested a
+        /// model-issued call, passed back by the loop shim from the
+        /// round's result. `None`: a script call, or the test-only
+        /// `tools.call_as_model` hook, which report the live counter.
+        /// Shim-produced, never author-supplied: a wrong shape is a
+        /// malformed yield.
+        turn: Option<u32>,
     },
     /// The second yield of a local tool call: the shim ran the handler the
     /// `tool_call` answer handed it and reports how the handler ended.

@@ -197,8 +197,9 @@ impl Scheduler {
                 alias,
                 args,
                 call_id,
+                turn,
             } => {
-                self.dispatch_tool_call(id, &alias, args, call_id);
+                self.dispatch_tool_call(id, &alias, args, call_id, turn);
                 Ok(())
             }
             Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),

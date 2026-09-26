@@ -114,6 +114,7 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
     if let Some(metrics) = result.metrics {
         table.raw_set("metrics", lua.to_value(&metrics)?)?;
     }
+    table.raw_set("turn", result.turn)?;
     Ok(table)
 }
 

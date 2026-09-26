@@ -128,6 +128,23 @@ fn shim_optional_string(
     }
 }
 
+/// Reads one shim-produced optional integer field: absent or nil is
+/// `None`, an integer within `u32` range is `Some`, and any other shape (a
+/// float included) is a malformed yield, since the shims set the field by
+/// construction and no author argument reaches it.
+fn shim_optional_u32(
+    table: &mlua::Table,
+    name: &str,
+) -> std::result::Result<Option<u32>, FieldFailure> {
+    match table.raw_get::<Value>(name) {
+        Ok(Value::Nil) => Ok(None),
+        Ok(Value::Integer(value)) => u32::try_from(value)
+            .map(Some)
+            .map_err(|_| FieldFailure::Malformed),
+        Ok(_) | Err(_) => Err(FieldFailure::Malformed),
+    }
+}
+
 /// Reads the shim-produced `var` snapshot; a failure is a malformed yield,
 /// since the snapshot helper produces a plain JSON-representable table by
 /// construction.
@@ -355,14 +372,15 @@ fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, F
 
 /// Parses a `tools.call` request: the author-supplied `alias` (a string or
 /// a Tool object, decoded through the one alias-or-Tool polymorphism) and
-/// `args`, plus the shim-produced optional `call_id`.
+/// `args`, plus the shim-produced optional `call_id` and `turn`.
 ///
 /// An absent or nil `args` parses as the empty object (the empty-argument
 /// call every tool accepts). A non-table or JSON-unrepresentable `args` is
 /// the call's error, framed as the other author-argument failures are,
 /// so an author `pcall` catches it at the call site. `call_id` is set only
 /// by the loop shim for a model-issued call, so a present non-string is a
-/// malformed yield rather than a call error.
+/// malformed yield rather than a call error; `turn`, set by the same shim,
+/// is likewise malformed unless it is an integer within `u32` range.
 fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let alias = match table.raw_get::<Value>("alias") {
         // Flatten to the call-error string so the answer frames exactly as
@@ -389,10 +407,12 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         Err(_) => return Err(FieldFailure::Malformed),
     };
     let call_id = shim_optional_string(table, "call_id")?;
+    let turn = shim_optional_u32(table, "turn")?;
     Ok(Request::ToolCall {
         alias,
         args,
         call_id,
+        turn,
     })
 }
 

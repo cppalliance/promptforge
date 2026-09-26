@@ -34,6 +34,7 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
                 e2e_ms: 41.5,
             }),
         }),
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)
@@ -97,6 +98,7 @@ fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
         finish_reason: Some("tool_calls".to_owned()),
         model: "fixture-model".to_owned(),
         metrics: None,
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)
@@ -131,6 +133,39 @@ fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
 }
 
 #[test]
+fn a_chat_tool_calls_answer_resumes_the_turn_it_was_reported_under() {
+    // The loop shim passes `turn` back with each call so the call reports
+    // the round that requested it, not the counter when it runs.
+    let lua = Lua::new();
+    let result = ChatResult {
+        overflow: false,
+        overflow_reason: None,
+        reply: None,
+        empty_detail: None,
+        tool_calls: Some(vec![ToolCallEvent {
+            id: "call_1".to_owned(),
+            name: "echo".to_owned(),
+            arguments: json!({}),
+        }]),
+        finish_reason: Some("tool_calls".to_owned()),
+        model: "fixture-model".to_owned(),
+        metrics: None,
+        turn: 4,
+    };
+    let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+        .into_envelope(&lua)
+        .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, turn, is_integer): (bool, i64, bool) = lua
+        .load("local ok, r = ...; return ok, r.turn, math.type(r.turn) == 'integer'")
+        .call(envelope)
+        .expect("the result table reads back through Lua");
+    assert!(ok);
+    assert_eq!(turn, 4);
+    assert!(is_integer, "the turn resumes as a Lua integer");
+}
+
+#[test]
 fn an_overflow_chat_answer_resumes_with_overflow_true_and_nothing_else() {
     // The request was refused as too large before or by the provider: no
     // round ran, so the shim branches on `overflow` and calls the compactor
@@ -145,6 +180,7 @@ fn an_overflow_chat_answer_resumes_with_overflow_true_and_nothing_else() {
         finish_reason: None,
         model: String::new(),
         metrics: None,
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)
@@ -191,6 +227,7 @@ fn an_empty_reply_chat_answer_resumes_with_nil_reply_and_its_finish_reason() {
         finish_reason: Some("stop".to_owned()),
         model: "fixture-model".to_owned(),
         metrics: None,
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)
@@ -240,6 +277,7 @@ fn an_empty_reply_string_chat_answer_also_resumes_with_nil_reply() {
         finish_reason: Some("stop".to_owned()),
         model: "fixture-model".to_owned(),
         metrics: None,
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)
@@ -292,6 +330,7 @@ fn an_overflow_chat_answer_resumes_the_flag_and_the_compactor_tag() {
             finish_reason: None,
             model: String::new(),
             metrics: None,
+            turn: 1,
         };
         let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
             .into_envelope(&lua)
@@ -327,6 +366,7 @@ fn an_empty_round_chat_answer_resumes_its_detail_beside_the_absent_reply() {
         finish_reason: Some("stop".to_owned()),
         model: String::new(),
         metrics: None,
+        turn: 1,
     };
     let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
         .into_envelope(&lua)

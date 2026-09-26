@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use promptforge_model_client::detail::tool_call_arguments;
 use promptforge_types::metrics::ToolCallEvent;
@@ -42,8 +42,9 @@ use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
-/// or by the provider: no round ran, so every other field is absent.
-fn overflow_result(reason: OverflowReason) -> ChatResult {
+/// or by the provider: no round ran, so every other field is absent and
+/// `turn` is the unadvanced counter.
+fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
     ChatResult {
         overflow: true,
         overflow_reason: Some(reason),
@@ -53,6 +54,7 @@ fn overflow_result(reason: OverflowReason) -> ChatResult {
         finish_reason: None,
         model: String::new(),
         metrics: None,
+        turn,
     }
 }
 
@@ -122,7 +124,8 @@ impl Scheduler {
         // every local Lua tool.
         let bound = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
         let locals = vm.local_tool_schemas()?;
-        let emitter = frame.reporting_handles().emitter;
+        let handles = frame.reporting_handles();
+        let emitter = handles.emitter;
         let (mut schemas, mut dispatch) =
             prepare_effective_scope(&bound, &locals, emitter.as_ref(), &section)?;
         // `tools.allow_tasks` is the section's opt-in: while its allowlist
@@ -147,7 +150,7 @@ impl Scheduler {
         if let Err(reason) = precheck(&conversation, context) {
             emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
-                overflow_result(reason),
+                overflow_result(reason, handles.turns.load(Ordering::Relaxed)),
             )))));
         }
         let effect = Effect::Chat {
@@ -204,7 +207,7 @@ impl Scheduler {
         let turn = advance_turn(&round.turns);
         let (outcome, served) = round.served(*completion, turn);
         let result = match outcome {
-            CompletionResult::Text(text) => Ok(Round::text_reply(&served, text)),
+            CompletionResult::Text(text) => Ok(Round::text_reply(&served, text, turn)),
             CompletionResult::ToolCalls(calls) => {
                 // The scope is recorded before the round is spawned; its
                 // absence is a scheduler fault, never an author-visible
@@ -250,14 +253,17 @@ impl Round {
             Error::Backend { status, body } if is_context_overflow(status, &body) => {
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_FAILED);
-                Ok(Box::new(overflow_result(OverflowReason::Provider)))
+                Ok(Box::new(overflow_result(
+                    OverflowReason::Provider,
+                    self.turns.load(Ordering::Relaxed),
+                )))
             }
             Error::EmptyModelReply {
                 detail: phrase,
                 finish_reason,
                 ..
             } => {
-                advance_turn(&self.turns);
+                let turn = advance_turn(&self.turns);
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
                 Ok(Box::new(ChatResult {
@@ -269,6 +275,7 @@ impl Round {
                     finish_reason,
                     model: String::new(),
                     metrics: None,
+                    turn,
                 }))
             }
             error => {
@@ -297,7 +304,7 @@ impl Round {
     /// Builds a text reply's answer. Its `assistant_reply` content report,
     /// with the truncation observation on a `length` finish, fired from
     /// [`report_model_turn`].
-    fn text_reply(served: &Served, text: String) -> ChatResult {
+    fn text_reply(served: &Served, text: String, turn: u32) -> ChatResult {
         ChatResult {
             overflow: false,
             overflow_reason: None,
@@ -307,6 +314,7 @@ impl Round {
             finish_reason: served.finish_reason.clone(),
             model: served.model.clone(),
             metrics: served.metrics.clone(),
+            turn,
         }
     }
 
@@ -358,6 +366,7 @@ impl Round {
             finish_reason: served.finish_reason.clone(),
             model: served.model.clone(),
             metrics: served.metrics.clone(),
+            turn,
         }))
     }
 }
