@@ -6,7 +6,7 @@
 -- the host's serde conversion, prose substitution, and the chat protocol's
 -- validation consume the records exactly as if the author had written the
 -- array by hand. The builders validate nothing; the protocol parse owns the
--- whole message contract, so a malformed record fails at the models.chat
+-- whole message contract, so a malformed record fails at the models.loop
 -- call site, pcall-able, exactly like a hand-written array.
 
 local function new()

@@ -39,8 +39,8 @@ fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
         .into_envelope(&lua)
         .expect("the envelope renders");
     assert!(retained.is_none());
-    // Presence-branching is the agent contract: absent fields must read
-    // back as true Lua nil, never a serde null sentinel.
+    // The loop shim branches on presence: absent fields must read back as
+    // true Lua nil, never a serde null sentinel.
     let (ok, reply, tools_nil, finish, model, total, llama_nil, e2e, overflow): (
         bool,
         String,

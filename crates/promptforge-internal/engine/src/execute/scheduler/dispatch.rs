@@ -204,13 +204,8 @@ impl Scheduler {
                 Ok(())
             }
             Request::Store { op } => self.dispatch_store(id, op),
-            Request::Chat {
-                messages,
-                binding,
-                model,
-                tools,
-            } => {
-                self.dispatch_chat(id, &messages, binding, model.as_deref(), tools.as_deref());
+            Request::Chat { messages, binding } => {
+                self.dispatch_chat(id, &messages, binding);
                 Ok(())
             }
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),

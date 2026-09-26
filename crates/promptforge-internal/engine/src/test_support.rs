@@ -12,8 +12,7 @@
 //! (a struct of boxed async closures, one per kind) on the current tokio
 //! runtime, runs store operations on the blocking pool, sleeps timers on
 //! the timer wheel, and hands every event to the caller's sink. It is the
-//! interim host of Workshop's agent sessions until the harness lands, and
-//! the host the engine's own suites drive.
+//! host the engine's own suites drive.
 //!
 //! [`RunHost`] bundles the resources the suites used to hand the retired
 //! in-crate loop - an observer, a client, a fixture tool table, a broker, a

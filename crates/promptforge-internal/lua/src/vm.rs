@@ -95,8 +95,9 @@ pub struct SectionVm {
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
-    /// The Agent-window model-picker hack: when set, `models.get` resolves
-    /// an undeclared alias as a raw gateway catalog model id. Set by
+    /// The raw-model-id fallback, on whenever the host passes a host-state
+    /// snapshot (`RunContext::ui`): when set, `models.get` resolves an
+    /// undeclared alias as a raw gateway catalog model id. Set by
     /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before host
     /// injection; unset everywhere else.
     raw_model_ids: bool,
@@ -322,13 +323,14 @@ impl SectionVm {
         self.instruction_budget.set_cancel(cancel);
     }
 
-    /// Opts the VM into the Agent-window model-picker hack: `models.get`
+    /// Opts the VM into the raw-model-id fallback, on whenever the host
+    /// passes a host-state snapshot (`RunContext::ui`): `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
     ///
     /// Must be called before [`inject_host_with_var`](Self::inject_host_with_var),
-    /// whose H2 `models` table install reads the flag. The Workshop's
-    /// Agent-window session is the only caller; every other context keeps
-    /// strict declared-alias resolution.
+    /// whose H2 `models` table install reads the flag. A run without a
+    /// snapshot never calls it, so it keeps strict declared-alias
+    /// resolution.
     pub fn allow_raw_model_ids(&mut self) {
         self.raw_model_ids = true;
     }

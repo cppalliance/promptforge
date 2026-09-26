@@ -2,11 +2,9 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `tasks.spawn`, `fanout`, `tools.call`, the section-only `user_input()`
-//! and `store.*`,
-//! the agent-only `models.chat`, and the `chat` and `tool_call` rounds the
-//! section-only `models.loop` shim yields on the author's behalf) is a
-//! Lua-side shim that yields a request table; the driver validates the
+//! `tasks.spawn`, `fanout`, `tools.call`, `user_input()`, `store.*`, and
+//! the `chat` and `tool_call` rounds the `models.loop` shim yields on the
+//! author's behalf) is a Lua-side shim that yields a request table; the driver validates the
 //! yield into a [`Request`], dispatches it, and resumes the coroutine with
 //! the `(ok, result)` envelope rendered from an [`Answer`]. The two enums
 //! are the audit surface: what a script can cause the host to do is one

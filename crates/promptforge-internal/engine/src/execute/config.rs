@@ -84,7 +84,8 @@ pub struct RunContext {
     pub(crate) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
     /// The host-state snapshot the `ui()` global serves, taken by the host
-    /// at run start; its presence is the Agent-window context.
+    /// at run start; its presence also turns on the raw-model-id
+    /// `models.get` fallback.
     pub(crate) ui: Option<serde_json::Value>,
     pub(crate) vfs: VfsRef,
     /// Whether the host set `vfs` itself ([`vfs`](RunContext::vfs)), in
@@ -178,12 +179,11 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's host-state snapshot and, with it, the Agent-window
-    /// context: section VMs gain a `ui()` global serving this snapshot
-    /// (taken by the host at run start, so a host-state change takes
-    /// effect on the next run), and `models.get` resolves an undeclared
-    /// alias as a raw gateway catalog model id, so the Workshop Agent
-    /// window can run `models.loop(models.get(ui().selected_model), ...)`
+    /// Sets the run's host-state snapshot. Section VMs gain a `ui()` global
+    /// serving this snapshot (taken by the host at run start, so a
+    /// host-state change takes effect on the next run), and `models.get`
+    /// resolves an undeclared alias as a raw gateway catalog model id, so a
+    /// prompt can run `models.loop(models.get(ui().selected_model), ...)`
     /// without declaring its model. The default (`None`) installs no `ui`
     /// global and keeps strict declared-alias resolution.
     #[must_use]

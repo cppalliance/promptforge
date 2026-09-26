@@ -36,7 +36,7 @@ fn eval_json(lua: &Lua, source: &str) -> serde_json::Value {
 }
 
 /// Parses a message list through the chat protocol boundary, as a
-/// `models.chat` yield would.
+/// `models.loop` round's yield would.
 fn chat_parse(lua: &Lua, messages: Value) -> Vec<MessageRecord> {
     let request = lua.create_table().expect("table creation cannot fail");
     request.raw_set("op", "chat").expect("raw_set");

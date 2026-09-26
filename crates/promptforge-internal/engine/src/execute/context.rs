@@ -105,13 +105,13 @@ pub(crate) struct RunState {
     /// The run's `started_at` rendered as RFC 3339, stamped into every
     /// section's `sys.when`, the H1 pass included.
     when: Arc<str>,
-    /// The run's host-state snapshot; its presence is the Agent-window
-    /// context (the `ui()` global plus raw-id `models.get`).
+    /// The run's host-state snapshot; its presence gives every section VM
+    /// the `ui()` global and the raw-model-id `models.get` fallback.
     ui: Option<Arc<serde_json::Value>>,
-    /// Test-only: installs the raw protocol shims (`models.chat`,
-    /// `tools.call_as_model`) in every section VM, so a fixture section
-    /// can yield one raw `chat` round or one model-issued `tool_call` at
-    /// the scheduler's dispatch arms without going through a loop shim.
+    /// Test-only: installs the raw `tools.call_as_model` shim in every
+    /// section VM, so a fixture section can yield one model-issued
+    /// `tool_call` at the scheduler's dispatch arm without going through a
+    /// loop shim.
     #[cfg(test)]
     raw_shims: bool,
 }
@@ -173,10 +173,9 @@ impl RunState {
         }
     }
 
-    /// Exposes the raw protocol shims (`models.chat`, `tools.call_as_model`)
-    /// in every section VM this run starts, so a test fixture can drive the
-    /// scheduler's `Chat` arm with one raw round or its `tool_call` arm
-    /// with one model-issued call.
+    /// Exposes the raw `tools.call_as_model` shim in every section VM this
+    /// run starts, so a test fixture can drive the scheduler's `tool_call`
+    /// arm with one model-issued call.
     #[cfg(test)]
     pub(crate) fn expose_raw_shims_for_test(&mut self) {
         self.raw_shims = true;

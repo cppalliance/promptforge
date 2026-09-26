@@ -38,7 +38,7 @@ use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
 
-use super::builtins::{advertise_task_builtins, scope_halves, task_allowlist};
+use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
@@ -77,10 +77,8 @@ impl Scheduler {
         id: ChainIndex,
         messages: &[MessageRecord],
         binding: Option<ModelBinding>,
-        model: Option<&str>,
-        tools: Option<&[String]>,
     ) {
-        match self.prepare_chat(id, messages, binding, model, tools) {
+        match self.prepare_chat(id, messages, binding) {
             Ok(ChatDispatch::Issued) => {}
             Ok(ChatDispatch::Answered(answer)) => {
                 self.answer_inline(id, answer);
@@ -92,18 +90,15 @@ impl Scheduler {
     }
 
     /// The fallible half of chat dispatch: the binding (the loop shim's
-    /// leading handle when it named one, else `model: None` is the
-    /// section's current model and an alias is its frozen binding), the
-    /// call-time tool scope recorded on the chain as `advertised`, the
-    /// per-dispatch projection, the context precheck, and the issued
-    /// effect.
+    /// leading handle when it named one, else the section's current
+    /// model), the call-time tool scope recorded on the chain as
+    /// `advertised`, the per-dispatch projection, the context precheck,
+    /// and the issued effect.
     fn prepare_chat(
         &mut self,
         id: ChainIndex,
         messages: &[MessageRecord],
         binding: Option<ModelBinding>,
-        model: Option<&str>,
-        tools: Option<&[String]>,
     ) -> Result<ChatDispatch> {
         let chain = &self.chains[id.index()];
         let section = chain.section_name().to_owned();
@@ -112,24 +107,22 @@ impl Scheduler {
             .as_ref()
             .ok_or(Error::internal("a live chain holds its frame"))?;
         let vm = frame.vm()?;
-        let binding = match (binding, model) {
-            (Some(binding), _) => binding,
-            (None, None) => resolve_model_binding(chain.ctx.models(), &vm.model_runtime)?
-                .ok_or_else(|| Error::ModelRequired {
-                    section: section.clone(),
-                })?,
-            (None, Some(alias)) => chain.ctx.models().binding(alias)?.ok_or_else(|| {
-                Error::Lua(format!("model alias {alias:?} has no frozen binding"))
-            })?,
+        let binding = if let Some(binding) = binding {
+            binding
+        } else {
+            let current = resolve_model_binding(chain.ctx.models(), &vm.model_runtime)?;
+            current.ok_or_else(|| Error::ModelRequired {
+                section: section.clone(),
+            })?
         };
         let tool_set = chain.ctx.tool_set_snapshot()?;
         // The scope is read at call time: `tools.add` and `tools.add_local`
         // calls since the last model operation shape this round's
-        // advertised set.
-        let effective = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
-        let local_schemas = vm.local_tool_schemas()?;
+        // advertised set, which is the section's effective bindings plus
+        // every local Lua tool.
+        let bound = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
+        let locals = vm.local_tool_schemas()?;
         let emitter = frame.reporting_handles().emitter;
-        let (bound, locals) = scope_halves(tools, effective, local_schemas, &tool_set)?;
         let (mut schemas, mut dispatch) =
             prepare_effective_scope(&bound, &locals, emitter.as_ref(), &section)?;
         // `tools.allow_tasks` is the section's opt-in: while its allowlist

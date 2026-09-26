@@ -354,7 +354,7 @@ fn the_handle_exposes_label_and_the_full_keyword_set() {
     assert_eq!(inspected, "writer|m1|frontier,thinking");
 }
 
-/// Builds a section VM with the Agent-window raw-id opt-in as `raw_ids`,
+/// Builds a section VM with the raw-model-id fallback set to `raw_ids`,
 /// host values injected (which installs the `models` table).
 fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     let emitter = crate::tests::recording::null_emitter();

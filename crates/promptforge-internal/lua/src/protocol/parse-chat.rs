@@ -1,6 +1,6 @@
-//! The chat request parser: the loop shim's optional leading handle, the
-//! author-supplied `messages` list validated once into message records,
-//! and the `opts` table.
+//! The chat request parser: the loop shim's optional leading handle and
+//! the author-supplied `messages` list, validated once into message
+//! records.
 
 use mlua::{Lua, LuaSerdeExt, Value};
 
@@ -23,16 +23,14 @@ fn chat_error(message: impl Into<String>) -> FieldFailure {
     FieldFailure::Call(Error::Lua(message.into()))
 }
 
-/// Parses a `chat` request: the loop shim's optional leading `handle`, the
-/// author-supplied `messages` list, and the optional `opts` table holding
-/// `model` and `tools`.
+/// Parses a `chat` request: the loop shim's optional leading `handle` and
+/// the author-supplied `messages` list.
 ///
-/// The whole messages/opts validation happens here, once - the driver
-/// converts the validated records without re-checking. Every
-/// author-argument failure is the call's error, raised at the
-/// `models.chat` or `models.loop` call site so a program `pcall` catches
-/// it. The handle is checked first, as the loop's leading argument: only
-/// the loop shim sets it, so its error names `models.loop`.
+/// The whole messages validation happens here, once - the driver converts
+/// the validated records without re-checking. Every author-argument
+/// failure is the call's error, raised at the `models.loop` call site so a
+/// program `pcall` catches it. The handle is checked first, as the loop's
+/// leading argument.
 pub(super) fn parse_chat(
     lua: &Lua,
     table: &mlua::Table,
@@ -51,13 +49,7 @@ pub(super) fn parse_chat(
         Err(_) => return Err(FieldFailure::Malformed),
     };
     let messages = parse_messages(&messages)?;
-    let (model, tools) = parse_chat_opts(table)?;
-    Ok(Request::Chat {
-        messages,
-        binding,
-        model,
-        tools,
-    })
+    Ok(Request::Chat { messages, binding })
 }
 
 /// Parses the converted message array into validated records, once, at the
@@ -274,77 +266,4 @@ fn parse_tool_call_record(
         name,
         arguments,
     })
-}
-
-/// Parses the optional `opts` table: `model` (an optional catalog model
-/// name) and `tools` (the aliases to advertise this round). An absent
-/// `tools` is `None` - the section VM's shape, resolved by the driver to
-/// the section's current scope - and a present list, empty included, is
-/// the explicit set.
-fn parse_chat_opts(
-    table: &mlua::Table,
-) -> std::result::Result<(Option<String>, Option<Vec<String>>), FieldFailure> {
-    let opts = match table.raw_get::<Value>("opts") {
-        Ok(Value::Nil) => return Ok((None, None)),
-        Ok(Value::Table(opts)) => opts,
-        Ok(other) => {
-            return Err(chat_error(format!(
-                "opts must be a table, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let model = match opts.raw_get::<Value>("model") {
-        Ok(Value::Nil) => None,
-        Ok(Value::String(name)) => Some(
-            name.to_str()
-                .map_err(|_| chat_error("opts.model must be a valid UTF-8 string"))?
-                .to_owned(),
-        ),
-        Ok(other) => {
-            return Err(chat_error(format!(
-                "opts.model must be a string, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let tools = match opts.raw_get::<Value>("tools") {
-        Ok(Value::Nil) => None,
-        Ok(Value::Table(aliases)) => {
-            let mut tools = Vec::new();
-            for (position, alias) in aliases.sequence_values::<Value>().enumerate() {
-                let alias_index = position + 1;
-                match alias {
-                    Ok(Value::String(alias)) => tools.push(
-                        alias
-                            .to_str()
-                            .map_err(|_| {
-                                chat_error(format!(
-                                    "opts.tools[{alias_index}] must be a valid UTF-8 string"
-                                ))
-                            })?
-                            .to_owned(),
-                    ),
-                    Ok(other) => {
-                        return Err(chat_error(format!(
-                            "opts.tools[{alias_index}] must be a string tool alias, got {}",
-                            other.type_name()
-                        )));
-                    }
-                    Err(_) => return Err(FieldFailure::Malformed),
-                }
-            }
-            Some(tools)
-        }
-        Ok(other) => {
-            return Err(chat_error(format!(
-                "opts.tools must be an array of tool alias strings, got {}",
-                other.type_name()
-            )));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    Ok((model, tools))
 }

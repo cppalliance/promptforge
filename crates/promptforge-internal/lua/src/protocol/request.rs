@@ -153,10 +153,10 @@ pub enum Request {
         /// author-supplied: a wrong shape is a malformed yield.
         call_id: Option<String>,
     },
-    /// `models.chat(messages, opts)`: one stateless tool-capable model
-    /// round over an author-built message list. The agent VM installs the
-    /// `models.chat` shim; the section VM's `models.loop` shim yields the
-    /// same request per round, so one dispatch arm serves both.
+    /// One stateless tool-capable model round over an author-built message
+    /// list, yielded by the `models.loop` shim once per round. The round
+    /// advertises the section's current tool scope, local Lua tools
+    /// included, resolved in the dispatch arm where the tool scope sits.
     Chat {
         /// The validated message records. Each holds a known role
         /// ([`MessageRole`]), visible text or a non-empty content-parts
@@ -167,34 +167,19 @@ pub enum Request {
         messages: Vec<MessageRecord>,
         /// The loop shim's leading handle, as its frozen binding cloned
         /// out of the userdata while the VM handle is live; `None` when
-        /// the round names no handle. Wins over `model` when both are
-        /// present (the shims never set both).
+        /// the round names no handle, and the driver resolves the
+        /// section's current model.
         binding: Option<ModelBinding>,
-        /// `opts.model`: the catalog model to use for this round, or
-        /// `None` for the program's current `models.use` selection.
-        model: Option<String>,
-        /// `opts.tools`: the tool aliases to advertise for this round.
-        /// `Some`: the agent VM's explicit list, which the driver
-        /// never adds to (an empty list advertises nothing). `None`: no
-        /// list was given - a section VM's shape - and the driver resolves
-        /// the section's current tool scope, local Lua tools included. The
-        /// aliases resolve to schemas in the dispatch arm, where the tool
-        /// scope sits.
-        tools: Option<Vec<String>>,
     },
     /// `user_input()`: a direct operator-input request to the run's input
-    /// broker. Section VMs alone install the shim; the agent driver
-    /// holds an unreachable internal-invariant guard for the arm its
-    /// exhaustive match forces. The request is argument-free: the broker
-    /// and its host policy own the whole interaction.
+    /// broker. The request is argument-free: the broker and its host
+    /// policy own the whole interaction.
     UserInput,
     /// `store.*(...)`: one run-scoped store operation as a leaf yield.
-    /// Section VMs and the live H1 VM run the store shims; the agent
-    /// driver holds an unreachable internal-invariant guard for the arm
-    /// its exhaustive match forces (an agent VM's store table keeps the
-    /// direct closures). Every operation takes this path uniformly -
-    /// memory- and host-backed alike, with no inline fast path - so
-    /// interleaving behavior never depends on the backend.
+    /// Section VMs and the live H1 VM run the store shims. Every operation
+    /// takes this path uniformly - memory- and host-backed alike, with no
+    /// inline fast path - so interleaving behavior never depends on the
+    /// backend.
     Store {
         /// The validated operation and its author-supplied arguments.
         op: StoreOp,

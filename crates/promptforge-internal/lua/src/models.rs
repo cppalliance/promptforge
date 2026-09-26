@@ -34,7 +34,7 @@ const RAW_ID_CONTEXT: NonZeroU32 = match NonZeroU32::new(8192) {
     None => unreachable!(),
 };
 
-/// Builds the Agent-window hack's binding: an undeclared `models.get`
+/// Builds the raw-model-id fallback's binding: an undeclared `models.get`
 /// alias resolved as a raw gateway catalog model id, with no invocation
 /// overrides and the fallback context window.
 fn raw_gateway_binding(alias: &str) -> mlua::Result<ModelBinding> {
@@ -247,10 +247,11 @@ impl ModelRuntime {
 /// different label errors. There is no `models.bind`: binding is the
 /// frontmatter's, and an unknown label is a hard error.
 ///
-/// `raw_ids` is the Agent-window model-picker hack: when set, `models.get`
-/// resolves an undeclared alias as a raw gateway catalog model id, so the
-/// Workshop chat prompt can run `models.get(ui().selected_model)` without
-/// declaring its model. Unset, an undeclared alias is the usual error.
+/// `raw_ids` is the raw-model-id fallback, on whenever the host passes a
+/// host-state snapshot (`RunContext::ui`): when set, `models.get` resolves
+/// an undeclared alias as a raw gateway catalog model id, so the built-in
+/// chat prompt can run `models.get(ui().selected_model)` without declaring
+/// its model. Unset, an undeclared alias is the usual error.
 ///
 /// The coroutine shim layer installs the suspending `models.loop`, because
 /// yield cannot cross the Rust callback boundary.
@@ -330,7 +331,7 @@ pub(crate) fn install_models(
             if let Some(binding) = lock_models(&frozen)?.binding(&alias).cloned() {
                 return Ok(LuaModelHandle::from_binding(&binding));
             }
-            // The Agent-window hack: with the host's raw-id opt-in, an
+            // The raw-model-id fallback: with the host's raw-id opt-in, an
             // undeclared alias resolves as a raw gateway catalog model id
             // under the fallback context window. The alias grammar does not
             // apply - gateway ids include `/`, `.`, and `:` - so the id's own

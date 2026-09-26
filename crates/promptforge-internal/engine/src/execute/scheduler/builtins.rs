@@ -1,7 +1,7 @@
 //! The model's task built-ins: `task`, `task_cancel`, `task_status`,
 //! `await_tasks` (whose arm sits in the `await_tasks` module), and
 //! `task_events` (whose arm sits in the `task_events` module), answered
-//! by the scheduler over its task arena, and the round scope they join.
+//! by the scheduler over its task arena.
 //!
 //! An author opts a section in with `tools.allow_tasks(targets?)`, which
 //! records an allowlist on the section's tool runtime. While it is set,
@@ -40,13 +40,10 @@ use serde_json::Value;
 
 use crate::execute::protocol::{Answer, TaskStatus, ToolCallOutcome};
 use crate::execute::section_context::TaskSeed;
-use crate::lua::{SectionVm, TaskAllowlist, ToolBinding, ToolSet};
-use crate::model::ToolSchema;
+use crate::lua::{SectionVm, TaskAllowlist};
 use crate::{Error, Result};
-use promptforge_model_client::detail::tool_schema_name;
 use promptforge_types::event::lifecycle;
 
-use super::dispatch::unbound_tool_call;
 use super::tool_call::ToolCallDispatch;
 use super::{ChainIndex, Scheduler};
 
@@ -78,47 +75,6 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
     Ok(runtime.allowed_tasks.clone())
-}
-
-/// The bound and local halves of one round's tool scope, resolved from the
-/// request's `tools` against the section: an absent list is the section's
-/// current effective scope plus every local Lua tool; an explicit list
-/// names its members, each a local tool, an effective binding (which
-/// holds the section's description override), or a bound catalog slot.
-///
-/// # Errors
-/// Returns [`Error::UnboundToolCall`] when an explicit alias names no
-/// local tool and no bound slot.
-pub(super) fn scope_halves(
-    tools: Option<&[String]>,
-    effective: Vec<ToolBinding>,
-    local_schemas: Vec<ToolSchema>,
-    tool_set: &ToolSet,
-) -> Result<(Vec<ToolBinding>, Vec<ToolSchema>)> {
-    let Some(aliases) = tools else {
-        return Ok((effective, local_schemas));
-    };
-    let mut bound = Vec::with_capacity(aliases.len());
-    let mut locals = Vec::new();
-    for alias in aliases {
-        if let Some(schema) = local_schemas
-            .iter()
-            .find(|schema| tool_schema_name(schema) == alias)
-        {
-            locals.push(schema.clone());
-            continue;
-        }
-        let binding = effective
-            .iter()
-            .find(|binding| binding.alias() == alias)
-            .or_else(|| tool_set.binding(alias))
-            .cloned();
-        match binding {
-            Some(binding) => bound.push(binding),
-            None => return Err(unbound_tool_call(tool_set, alias)),
-        }
-    }
-    Ok((bound, locals))
 }
 
 /// One built-in's answer: the text the model reads, whether it served the

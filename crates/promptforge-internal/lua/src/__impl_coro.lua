@@ -140,17 +140,6 @@ local function tools_call_as_model(call_id, alias_or_tool, args)
   return result
 end
 
--- One stateless tool-capable model round. The host installs this as
--- models.chat in agent VMs only; a section VM never sees it. Both
--- arguments pass through unvalidated: the protocol parse owns the whole
--- messages/opts validation, so every argument error surfaces at this call
--- site (pcall-able) with no second validator anywhere.
-local function chat(messages, opts)
-  local ok, result = yield({ op = "chat", messages = messages, opts = opts })
-  if not ok then fail(result) end
-  return result
-end
-
 -- Appends one record to the author's list. The list is a plain array (a
 -- messages.new() list keeps its builders behind __index, never as
 -- fields), so the append is an ordinary sequence store.
@@ -195,11 +184,14 @@ end
 -- models.loop(handle?, messages, compactor?): the model-tool loop over an
 -- author-owned message list, driven here over `chat` and `tool_call`
 -- yields so every network wait inside it is an ordinary suspension. The
--- host installs this as models.loop in section VMs only; an agent VM
--- never sees it. The leading handle is optional: a userdata first argument
--- selects the handle's frozen binding, anything else is the messages
--- argument (a wrong handle type is the protocol parse's call error,
--- exactly as for models.infer). The compactor defaults to compactors.fail.
+-- host installs this as models.loop. The leading handle is optional: a
+-- userdata first argument selects the handle's frozen binding, anything
+-- else is the messages argument (a wrong handle type is the protocol
+-- parse's call error, exactly as for models.infer). The messages pass
+-- through unvalidated: the protocol parse owns the whole message
+-- contract, so every argument error surfaces at this call site
+-- (pcall-able) with no second validator anywhere. The compactor defaults
+-- to compactors.fail.
 --
 -- Per round: drain pending task notices, yield one `chat` over the list;
 -- on an overflow round invoke the compactor; on tool calls yield one
@@ -271,11 +263,10 @@ local function models_loop(...)
 end
 
 -- user_input(): direct operator input through the run's input broker. The
--- host installs this as a global in section VMs only; an agent VM never
--- sees it. The resume is (ok, text, available): on success the call
--- returns the text plus the availability flag, so the broker's fixed
--- fallback sentence cannot be spoofed by identical human text; on failure
--- the call raises the host's message at the call site.
+-- host installs this as a global. The resume is (ok, text, available): on
+-- success the call returns the text plus the availability flag, so the
+-- broker's fixed fallback sentence cannot be spoofed by identical human
+-- text; on failure the call raises the host's message at the call site.
 local function user_input(...)
   if select('#', ...) > 0 then
     raise("lua", { message = "user_input takes no arguments" })
@@ -289,9 +280,8 @@ end
 -- against the sync VFS uniformly for all backends - no inline fast path,
 -- so interleaving behavior never depends on which backend serves the
 -- mount. The host installs these onto the store table of section VMs and
--- the live H1 VM only; an agent VM's store table keeps its direct
--- closures. `end` is a keyword, so the read bounds travel under bracket
--- keys.
+-- the live H1 VM. `end` is a keyword, so the read bounds travel under
+-- bracket keys.
 local function store_request(store_op, fields)
   fields.op = "store"
   fields.store_op = store_op
@@ -377,7 +367,6 @@ return {
   -- (`__impl_tasks.lua`, `__impl_fanout.lua`) so their shims raise the one
   -- error shape this prelude defines.
   helpers = { raise = raise, fail = fail, host_type = host_type },
-  chat = chat,
   infer = infer,
   loop = models_loop,
   model_tool_call = tools_call_as_model,

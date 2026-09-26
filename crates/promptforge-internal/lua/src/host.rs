@@ -112,9 +112,8 @@ const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::Serializ
 /// table, JSON nulls reading as nil, so author code that mutates one
 /// result never sees the mutation on the next call. The snapshot is the
 /// host state as the host captured it at run start; a change on the host
-/// takes effect on the next run. The Workshop's Agent-window session is
-/// the snapshot's only producer; a run without one never installs the
-/// global, so `ui` is absent - not stubbed - in every other context.
+/// takes effect on the next run. A run whose host supplies no snapshot
+/// never installs the global, so `ui` is absent there - not stubbed.
 ///
 /// The snapshot arrives shared: one run installs it into every section VM
 /// it starts, and the closure serializes through the `Arc`, so no VM holds

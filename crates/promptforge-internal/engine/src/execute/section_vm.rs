@@ -81,13 +81,12 @@ pub(crate) struct SectionVmSetup<'a> {
     /// by the `fanout` shim as its window.
     pub(crate) max_fanout_concurrency: usize,
     /// The run's host-state snapshot, when the host supplied one: its
-    /// presence is the Agent-window context, so the section VM gains the
-    /// `ui()` global and the raw-id `models.get` fallback. Shared through
-    /// the run's `Arc`, so every section VM serializes the one tree.
+    /// presence gives the section VM the `ui()` global and the
+    /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
+    /// so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
-    /// Test-only: installs the raw protocol shims (`models.chat`,
-    /// `tools.call_as_model`), so a fixture section can yield one raw
-    /// `chat` round or one model-issued `tool_call`.
+    /// Test-only: installs the raw `tools.call_as_model` shim, so a fixture
+    /// section can yield one model-issued `tool_call`.
     #[cfg(test)]
     pub(crate) raw_shims: bool,
 }
@@ -120,8 +119,8 @@ pub(crate) fn setup_section_vm<L>(
 where
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
-    // The raw-id fallback reads its flag during host injection, so the
-    // Agent-window opt-in lands first.
+    // The raw-model-id fallback reads its flag during host injection, so
+    // the snapshot's opt-in lands first.
     if setup.ui.is_some() {
         vm.allow_raw_model_ids();
     }
@@ -144,7 +143,6 @@ where
     crate::lua::install_section_user_input_shim(vm.lua())?;
     #[cfg(test)]
     if setup.raw_shims {
-        promptforge_lua::install_model_chat_shim(vm.lua())?;
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
     }
     vm.replay_shared(setup.shared, setup.emitter, setup.section_name)?;
