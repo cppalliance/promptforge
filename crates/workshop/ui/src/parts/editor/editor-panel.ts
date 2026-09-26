@@ -19,7 +19,7 @@ import { Commands } from "../../services/command-registry";
 import { errorText } from "../../services/error-catalog";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getServiceOrNull } from "../../services/service-registry";
-import { showPanelDialog } from "./editor-dialog";
+import { showPanelDialog } from "../shared/panel-dialog";
 import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
   fetchFile,

@@ -48,7 +48,7 @@ interface StubRow {
 const stubRows = [
   // File
   { id: "workbench.action.newWindow", title: "New Window", menu: MenuId.MenubarFileMenu, group: "1_new", order: 2, keybinding: "ctrlcmd+shift+n" },
-  // Open Workspace from File..., Save Workspace As..., and Duplicate Workspace... are wired by the workspace-files contribution.
+  // Open Workspace from File..., Save Workspace As..., and Duplicate Workspace... are wired by the workspace-document contribution.
   { id: "workbench.action.toggleAutoSave", title: "Auto Save", menu: MenuId.MenubarFileMenu, group: "5_share", order: 2, toggled: "false" },
   { id: "workbench.action.closeFolder", title: "Close Folder", menu: MenuId.MenubarFileMenu, group: "6_close", order: 3, keybinding: "ctrlcmd+m f" },
   // File > New Window with Profile (the dynamic profile rows have no backing store)

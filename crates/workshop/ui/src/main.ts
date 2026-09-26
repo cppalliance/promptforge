@@ -38,7 +38,7 @@ import { KeybindingDispatcher } from "./parts/layout/keybinding-dispatcher";
 import { CommandsHistory } from "./parts/quickinput/commands-history";
 import { QuickInputService } from "./parts/quickinput/quick-input";
 import { setupWorkspaceDrops } from "./parts/workspace/workspace-drops";
-import { register as registerWorkspaceFiles } from "./parts/workspace-files/index";
+import { register as registerWorkspaceDocument } from "./parts/workspace-document/index";
 import { persistZoom, restoreZoom } from "./parts/chrome/zoom";
 import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
@@ -248,7 +248,7 @@ disposables.add(setupWindowMenus());
 // The workspace-document actions (Open Workspace from File...) register
 // eagerly with the contribution surface above; the feature's activation
 // hands their registrations to the ownership tree.
-disposables.add(registerWorkspaceFiles());
+disposables.add(registerWorkspaceDocument());
 
 // The server-owned selection and the rest of the workbench state arrive
 // in the same snapshot: the model service takes the selection, the

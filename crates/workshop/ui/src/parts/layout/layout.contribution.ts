@@ -1,16 +1,14 @@
-// The layout contribution: the eager module registering the sidebar and
-// explorer catalog rows at module scope, before any service exists.
-// Layout is a light feature - main.ts already loads zones eagerly - so
-// the run bodies are direct calls.
+// The layout contribution: the module loaded eagerly to register the
+// Secondary Side Bar catalog row at module scope, before any service
+// exists. Layout is a light feature - main.ts already loads zones
+// eagerly - so the run body is a direct call.
 //
-// Explorer shows and focuses the Workshop tree. Primary Side Bar toggles
-// the tree panel and mirrors the outcome into the sideBarVisible context
-// key; Secondary Side Bar hides and shows the agent zone's dockview
-// group through group.api.setVisible, so the agent panel's session
-// socket survives - the panel is never removed - and mirrors the outcome
-// into auxiliaryBarVisible. Both keys bind with a visible-by-default
-// value on first toggle; layout's register() binds them at chunk load so
-// the Appearance checkboxes read true from first paint.
+// Secondary Side Bar hides and shows the agent zone's dockview group
+// through group.api.setVisible, so the agent panel's session socket
+// survives - the panel is never removed - and mirrors the outcome into
+// auxiliaryBarVisible. The key binds with a visible-by-default value on
+// first toggle; the workspace directory's register() binds it at chunk
+// load so the Appearance checkbox reads true from first paint.
 
 import type { IDisposable } from "../../base/lifecycle";
 import { registerAction, type ActionDescriptor } from "../../services/action-registry";
@@ -19,7 +17,6 @@ import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "../../services/menu-registry";
 import { getService } from "../../services/service-registry";
-import { focusWorkshopTree, toggleWorkshopPanel } from "./workshop-panel";
 import { openInZone, toggleZoneVisibility } from "./zones";
 
 /** The Appearance flyout's id; the menubar contribution declares the submenu. */
@@ -33,31 +30,10 @@ function addAction(action: ActionDescriptor): void {
   }
 }
 
-/** Mirrors a visibility outcome into its context key (both default visible). */
+/** Mirrors a visibility outcome into its context key (default visible). */
 function setVisibilityKey(name: string, visible: boolean): void {
   getService(CONTEXT_KEY_SERVICE).createKey(name, true).set(visible);
 }
-
-addAction({
-  id: "workbench.view.explorer",
-  title: "Explorer",
-  f1: true,
-  keybinding: { keybinding: "ctrlcmd+shift+e" },
-  menu: [{ id: MenuId.MenubarViewMenu, group: "3_views", order: 1 }],
-  run: focusWorkshopTree,
-});
-
-addAction({
-  id: "workbench.action.toggleSidebarVisibility",
-  title: "Primary Side Bar",
-  f1: true,
-  toggled: "sideBarVisible",
-  keybinding: { keybinding: "ctrlcmd+b" },
-  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 2 }],
-  run: () => {
-    setVisibilityKey("sideBarVisible", toggleWorkshopPanel());
-  },
-});
 
 addAction({
   id: "workbench.action.toggleAuxiliaryBar",

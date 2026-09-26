@@ -1,0 +1,139 @@
+/* Styles for workshop-panel.ts, which imports this file; esbuild bundles
+   it into dist/app.css. Covers the Workshop tree panel. Themed values
+   come from the :root tokens in shared-ui/tokens.css. */
+
+/* The Workshop file tree panel: one directory per level, folders before
+   files, disclosure chevrons on directories. Rows are real buttons.
+   Positioned so the Add Folder dialog overlay can cover the panel. */
+.ws-workshop-tree {
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: var(--space-xs) 0;
+  font-family: var(--font-prose);
+  font-size: var(--font-size-base);
+  color: var(--text);
+}
+
+/* The panel header holds the Add Folder icon button. */
+.ws-workshop-tree__header {
+  display: flex;
+  justify-content: flex-end;
+  height: var(--ws-control-height-compact);
+  line-height: var(--ws-control-height-compact);
+  padding: 0 var(--space-xs) var(--space-xs);
+  border-bottom: var(--ws-border-width) solid var(--border);
+  text-transform: uppercase;
+  font-size: var(--ws-label-font-size);
+  font-weight: 700;
+}
+
+.ws-workshop-tree__add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xs);
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ws-workshop-tree__add:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ws-workshop-tree__add:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ws-workshop-tree__list,
+.ws-workshop-tree__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ws-workshop-tree__children {
+  padding-inline-start: var(--ws-tree-indent);
+}
+
+.ws-workshop-tree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  height: var(--ws-control-height-compact);
+  line-height: var(--ws-control-height-compact);
+  padding: 0 var(--space-md) 0 var(--ws-size-4);
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-workshop-tree__row:hover {
+  background: var(--bg-hover);
+}
+
+.ws-workshop-tree__row:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+}
+
+.ws-workshop-tree__row:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ws-workshop-tree__chevron {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.ws-workshop-tree__row[aria-expanded="true"] .ws-workshop-tree__chevron {
+  transform: rotate(90deg);
+}
+
+.ws-workshop-tree__row--file {
+  padding-left: calc(var(--space-md) + var(--space-lg));
+}
+
+.ws-workshop-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A granted root deleted from disk: strikethrough plus the danger color
+   on the name, and the "missing" text label beside it - three signals,
+   never color alone. */
+.ws-workshop-tree__row--missing .ws-workshop-tree__name {
+  text-decoration: line-through;
+  color: var(--danger-text);
+}
+
+.ws-workshop-tree__missing {
+  flex: none;
+  font-size: var(--font-size-xs);
+  color: var(--danger-text);
+}
+
+.ws-workshop-tree__empty,
+.ws-workshop-tree__error {
+  margin: var(--space-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.ws-workshop-tree__error {
+  color: var(--danger-text);
+  list-style: none;
+}

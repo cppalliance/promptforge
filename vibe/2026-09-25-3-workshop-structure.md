@@ -974,7 +974,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-19>
 
-### Step 19: Move the tree panel into workspace and settle the workspace folders
+### Step 19: Move the tree panel into workspace and settle the workspace folders [completed]
 
 - Component: UI structure
 - Artifacts:

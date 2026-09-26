@@ -12,9 +12,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import type { IDisposable } from "../../base/lifecycle";
 import { getServiceOrNull } from "../../services/service-registry";
-import { showPanelDialog } from "../editor/editor-dialog";
+import { showPanelDialog } from "../shared/panel-dialog";
 import { STATUS_BAR } from "../../services/status-bar";
-import { grantPath, WORKSPACE_CHANGED_EVENT } from "./workspace-drops";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
+import { grantPath } from "./workspace-drops";
 
 /** The status-bar surface the flow paints action outcomes onto. */
 export interface AddFolderStatusSink {

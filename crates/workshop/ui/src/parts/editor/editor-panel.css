@@ -1,7 +1,7 @@
 /* Styles for editor-panel.ts, which imports this file; esbuild bundles it
    into dist/app.css. Covers the editor surface and the panel's modal
-   dialogs from editor-dialog.ts. Themed values come from the :root tokens
-   in shared-ui/tokens.css. */
+   dialogs from shared/panel-dialog.ts. Themed values come from the :root
+   tokens in shared-ui/tokens.css. */
 
 /* The editor panel: the CodeMirror surface fills the panel; the editor's
    own theme (colors, gutters, selection, search panel) is applied from JS

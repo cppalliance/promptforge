@@ -41,7 +41,7 @@ const bundle = await esbuild.build({
       export { CommandCenter, WindowTitle } from "./src/parts/chrome/command-center.ts";
       export { CommandRegistry } from "./src/services/command-registry.ts";
       export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
-      export { WORKSPACE_CHANGED_EVENT } from "./src/parts/workspace/workspace-drops.ts";
+      export { WORKSPACE_CHANGED_EVENT } from "./src/services/workspace-events.ts";
       export { TREE_STATE } from "./src/services/tree-state-service.ts";
       export { getService } from "./src/services/service-registry.ts";
     `,

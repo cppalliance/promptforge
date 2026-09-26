@@ -1,4 +1,4 @@
-// The workspace-files contribution: the eager module registering the
+// The workspace-document contribution: the eager module registering the
 // File menu's workspace-document rows at module scope, before any
 // service exists. Open Workspace from File..., Save
 // Workspace As..., and Duplicate Workspace... take over the stub table's
@@ -58,7 +58,8 @@ import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { applyLayoutOrDefault } from "../layout/layout-boot";
 import { buildLayoutEnvelope } from "../layout/layout-persistence";
 import { STATUS_BAR } from "../../services/status-bar";
-import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../workspace/workspace-drops";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
+import type { WorkspaceChangedDetail } from "../workspace/workspace-drops";
 
 /** The Tauri event the desktop app listens for to re-apply window geometry. */
 export const WORKSPACE_OPENED_EVENT = "promptforge:workspace-opened";
@@ -88,7 +89,7 @@ function reportError(label: string): void {
 function addAction(action: ActionDescriptor): void {
   const result: Result<IDisposable, ParseError> = registerAction(action);
   if (!result.ok) {
-    console.error(`workspace-files action '${action.id}': ${result.error.message}`);
+    console.error(`workspace-document action '${action.id}': ${result.error.message}`);
     return;
   }
   registrations.add(result.value);

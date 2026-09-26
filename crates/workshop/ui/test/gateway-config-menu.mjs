@@ -1,6 +1,7 @@
 // Unit test for the step-19 feature contributions: chrome, layout,
-// status, agent, and gateway (src/parts/<feature>/<feature>.contribution.ts).
-// Bundles the five contribution modules with esbuild - the Tauri APIs
+// workspace, status, agent, and gateway
+// (src/parts/<feature>/<feature>.contribution.ts).
+// Bundles the six contribution modules with esbuild - the Tauri APIs
 // aliased to the recording stubs in test/helpers - and drives them
 // through the shared registries against jsdom with a recording fake
 // dock. Covers: the catalog wiring (titles, menu groups, chord labels,
@@ -27,6 +28,7 @@ const bundle = await esbuild.build({
     contents: `
       import "./src/parts/chrome/chrome.contribution.ts";
       import "./src/parts/layout/layout.contribution.ts";
+      import "./src/parts/workspace/workspace.contribution.ts";
       import "./src/parts/status/status.contribution.ts";
       import "./src/parts/agent/agent.contribution.ts";
       import "./src/parts/gateway/gateway.contribution.ts";

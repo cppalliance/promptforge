@@ -1,5 +1,6 @@
 // Integration test for the workshop zone registry and file tree
-// (src/parts/layout/zones.ts, panel-types.ts, workshop-panel.ts). Bundles the
+// (src/parts/layout/zones.ts, panel-types.ts, and
+// src/parts/workspace/workshop-panel.ts). Bundles the
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
 // real index.html, and drives the public API. Covers: the agent-session
 // and Workshop panels mount through the registry; the agent panel is a

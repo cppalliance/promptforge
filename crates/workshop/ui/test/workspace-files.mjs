@@ -1,5 +1,5 @@
 // Unit test for the workspace-file actions (plan steps 10 and 11:
-// src/parts/workspace-files/workspace-files.contribution.ts over
+// src/parts/workspace-document/workspace-document.contribution.ts over
 // src/services/workspace-file-client.ts). Bundles the contribution with
 // esbuild - "@tauri-apps/plugin-dialog" and "@tauri-apps/api/event"
 // aliased to the recording stubs in test/helpers - and drives the Open
@@ -43,13 +43,13 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      import "./src/parts/workspace-files/workspace-files.contribution.ts";
+      import "./src/parts/workspace-document/workspace-document.contribution.ts";
       // The contribution reads the closed-editor stack through its token; the
       // implementation's module scope self-registers the empty default, so
       // importing it here keeps the switch's state snapshot working without a
       // live adapter.
       import "./src/parts/editor/closed-editors.ts";
-      export { register } from "./src/parts/workspace-files/index.ts";
+      export { register } from "./src/parts/workspace-document/index.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus } from "./src/services/menu-registry.ts";
       export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";

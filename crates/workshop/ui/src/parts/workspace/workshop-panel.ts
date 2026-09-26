@@ -28,11 +28,13 @@ import { DOCK, resolvePanelContent } from "../../services/panel-registry";
 import { getService } from "../../services/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
-import { addFolderToWorkspace } from "../workspace/add-folder";
-import { rootsCurrentIn, WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
+import { addFolderToWorkspace } from "./add-folder";
+import { rootsCurrentIn } from "./workspace-drops";
 import { DropdownMenu } from "shared-ui/dropdown";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../shared/icons";
-import { openInZone, panelIdFor } from "./zones";
+import { openInZone, panelIdFor } from "../layout/zones";
+import "./workshop-panel.css";
 
 /** The status-bar surface the panel paints action outcomes onto. */
 export interface TreeStatusSink {

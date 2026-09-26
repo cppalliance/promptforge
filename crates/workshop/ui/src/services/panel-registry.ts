@@ -191,7 +191,7 @@ registerPanelType({
   // The Workshop tree anchors the workbench; its tab has no close
   // button, so the panel cannot be dismissed from the tab strip.
   tabComponent: PERMANENT_TAB,
-  load: () => import("../parts/layout/index"),
+  load: () => import("../parts/workspace/index"),
 });
 registerPanelType({
   type: "editor",

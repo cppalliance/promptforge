@@ -13,12 +13,13 @@ import { DOCK } from "../../services/panel-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
 import { fetchTree } from "../../services/workspace-api";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { asEditor } from "../editor/editor-commands";
-import { focusWorkshopTree } from "../layout/workshop-panel";
 import { openInZone } from "../layout/zones";
 import { STATUS_BAR } from "../../services/status-bar";
 import { addFolderToWorkspace } from "./add-folder";
-import { grantPath, WORKSPACE_CHANGED_EVENT } from "./workspace-drops";
+import { grantPath } from "./workspace-drops";
+import { focusWorkshopTree } from "./workshop-panel";
 
 /** Paints an action outcome onto the status bar, when one is up. */
 function report(label: string, severity: "info" | "error"): void {

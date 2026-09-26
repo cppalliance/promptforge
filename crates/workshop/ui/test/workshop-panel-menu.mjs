@@ -1,5 +1,5 @@
 // Unit test for the Workshop tree's workspace management
-// (src/parts/layout/workshop-panel.ts): the root-row context menu, the
+// (src/parts/workspace/workshop-panel.ts): the root-row context menu, the
 // missing-root rendering, and the Add Folder flows. Bundles the panel
 // with esbuild - with "@tauri-apps/plugin-dialog" aliased to the scripted
 // stub in test/helpers - and drives it against jsdom. Covers: a missing
@@ -39,7 +39,7 @@ globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
   stdin: {
-    contents: `export { WorkshopTreePanel } from "./src/parts/layout/workshop-panel.ts";`,
+    contents: `export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";`,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
   },

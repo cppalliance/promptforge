@@ -26,6 +26,7 @@ import {
 } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
 import type { StatusBar } from "../../services/status-bar";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The native event the app dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";
@@ -37,9 +38,6 @@ const FILE_DROP_EVENT = "promptforge:file-drop";
  * drop anywhere else grants without dispatching, as before.
  */
 export const WORKSPACE_FILE_DROP_EVENT = "workshop:file-drop";
-
-/** Fired on window after grants change, so open panels can refresh. */
-export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
 
 /**
  * The optional detail of a workspace-changed event. A plain event means

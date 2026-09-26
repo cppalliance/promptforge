@@ -1,5 +1,5 @@
 // Unit test for the Workshop tree's restored expansion
-// (src/parts/layout/workshop-panel.ts with src/services/tree-state-service.ts):
+// (src/parts/workspace/workshop-panel.ts with src/services/tree-state-service.ts):
 // after a relaunch the expanded set comes back from the workspace file
 // but the listing cache is empty, so a folder that is expanded with no
 // cached listing must fetch its listing on render rather than rendering
@@ -43,10 +43,10 @@ globalThis.Node = window.Node;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { WorkshopTreePanel } from "./src/parts/layout/workshop-panel.ts";
+      export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
       export { TreeStateService, TREE_STATE } from "./src/services/tree-state-service.ts";
       export { registerService } from "./src/services/service-registry.ts";
-      export { WORKSPACE_CHANGED_EVENT } from "./src/parts/workspace/workspace-drops.ts";
+      export { WORKSPACE_CHANGED_EVENT } from "./src/services/workspace-events.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

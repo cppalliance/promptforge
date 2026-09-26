@@ -1,4 +1,4 @@
-// The layout feature's entry point: register() is the panel registry's
+// The workspace feature's entry point: register() is the panel registry's
 // activation hook. Importers point at the source files directly; this
 // module re-exports nothing.
 
@@ -10,12 +10,12 @@ import { STATUS_BAR } from "../../services/status-bar";
 import { WorkshopTreePanel } from "./workshop-panel";
 
 /**
- * The layout directory's activation: installs the Workshop tree's panel
+ * The workspace directory's activation: installs the Workshop tree's panel
  * factory and binds the sidebar visibility context keys the Appearance
  * menu's checkboxes read - both bars are visible in the boot layout, so
  * the defaults are true. The tree's actions and keybindings (the
  * Ctrl+B toggle, the Ctrl+Shift+E focus) register eagerly from
- * layout.contribution.ts. Called once by the panel registry when the
+ * workspace.contribution.ts. Called once by the panel registry when the
  * directory's chunk first loads; the returned disposable is held for
  * the page lifetime.
  */

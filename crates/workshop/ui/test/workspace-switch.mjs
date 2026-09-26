@@ -1,5 +1,5 @@
 // Unit test for the workspace switch moving UI state (plan step 13:
-// src/parts/workspace-files/workspace-files.contribution.ts over the
+// src/parts/workspace-document/workspace-document.contribution.ts over the
 // UI-state adapter, the dock, the tree state, and the closed-editor
 // stack). Bundles the contribution with esbuild - the Tauri dialog and
 // event modules aliased to the recording stubs in test/helpers - and
@@ -46,8 +46,8 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      import "./src/parts/workspace-files/workspace-files.contribution.ts";
-      export { register } from "./src/parts/workspace-files/index.ts";
+      import "./src/parts/workspace-document/workspace-document.contribution.ts";
+      export { register } from "./src/parts/workspace-document/index.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { registerService } from "./src/services/service-registry.ts";
       export { UI_STORAGE } from "./src/services/ui-storage.ts";
@@ -57,7 +57,7 @@ const bundle = await esbuild.build({
       export { initZones } from "./src/parts/layout/zones.ts";
       export { LAYOUT_SCHEMA_VERSION, startLayoutPersistence } from "./src/parts/layout/layout-persistence.ts";
       export { STATUS_BAR } from "./src/services/status-bar.ts";
-      export { WorkshopTreePanel } from "./src/parts/layout/workshop-panel.ts";
+      export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
       export { WindowTitle } from "./src/parts/chrome/command-center.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

@@ -37,7 +37,7 @@ export interface RecentProviderDeps {
   readonly commands?: CommandRegistry;
 }
 
-/** The workspace file extension; the same suffix the workspace-files pickers filter on. */
+/** The workspace file extension; the same suffix the workspace-document pickers filter on. */
 const WORKSPACE_EXTENSION = ".pfwork";
 
 /** The command an Open Recent workspace row and a Ctrl+P workspace hit dispatch. */

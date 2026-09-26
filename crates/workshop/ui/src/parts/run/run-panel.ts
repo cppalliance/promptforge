@@ -25,7 +25,7 @@ import { errorText } from "../../services/error-catalog";
 import { fetchPromptContract, type RunContract } from "../../services/run-api";
 import { getServiceOrNull } from "../../services/service-registry";
 import { fetchFile } from "../../services/workspace-api";
-import { showPanelDialog } from "../editor/editor-dialog";
+import { showPanelDialog } from "../shared/panel-dialog";
 import { setRunTabLoading } from "../layout/run-tab";
 import { STATUS_BAR } from "../../services/status-bar";
 import { grantPath, WORKSPACE_FILE_DROP_EVENT } from "../workspace/workspace-drops";

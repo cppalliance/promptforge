@@ -28,7 +28,7 @@ import { MenuId, Menus, type MenuItem, type MenuRegistry } from "../../services/
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
 import { STATUS_BAR } from "../../services/status-bar";
-import { WORKSPACE_CHANGED_EVENT } from "../workspace/workspace-drops";
+import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The title shown when no workspace folder is granted. */
 const FALLBACK_TITLE = "PromptForge";

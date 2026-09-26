@@ -1,9 +1,17 @@
 // The workspace contribution: the eager module registering the File
-// menu's picker and file-action rows and the Open Recent and quick-open
-// file providers at module scope, before any service exists. Every run
-// body lazy-imports file-actions, so this file pulls no dockview or
+// menu's picker and file-action rows, the Workshop tree's Explorer and
+// Primary Side Bar rows, and the Open Recent and quick-open file
+// providers at module scope, before any service exists. Every file
+// action's run body lazy-imports file-actions, so this file pulls no
 // CodeMirror into the initial bundle; the type-only import below is
-// erased at compile time.
+// erased at compile time. The tree rows call workshop-panel directly,
+// which imports dockview as a type only.
+//
+// Explorer shows and focuses the Workshop tree. Primary Side Bar toggles
+// the tree panel and mirrors the outcome into the sideBarVisible context
+// key, which binds with a visible-by-default value on first toggle; this
+// directory's register() binds it at chunk load so the Appearance
+// checkbox reads true from first paint.
 //
 // Placements follow the catalog: ctrl-based chords bind ctrlcmd so
 // macOS gets Cmd, Open File and Save As are desktop-only (precondition
@@ -17,6 +25,7 @@
 
 import type { IDisposable } from "../../base/lifecycle";
 import { registerAction, type ActionDescriptor } from "../../services/action-registry";
+import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import type { ParseError } from "../../services/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingWeight } from "../../services/keybinding-registry";
@@ -26,9 +35,13 @@ import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService } from "../../services/service-registry";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { createFileQuickAccessProvider, createRecentMenuProvider } from "./open-recent";
+import { focusWorkshopTree, toggleWorkshopPanel } from "./workshop-panel";
 
 /** The file-actions module as a type only; the runtime import stays lazy. */
 type FileActions = typeof import("./file-actions");
+
+/** The Appearance flyout's id; the menubar contribution declares the submenu. */
+const APPEARANCE_MENU: MenuId = "menubar/view/appearance";
 
 /** Registers one action, reporting a malformed descriptor instead of throwing. */
 function addAction(action: ActionDescriptor): void {
@@ -147,6 +160,27 @@ addAction({
   menu: [{ id: MenuId.MenubarRecentMenu, group: "z_clear" }],
   run: () => {
     getService(RECENT_FILES_STORE).clear();
+  },
+});
+
+addAction({
+  id: "workbench.view.explorer",
+  title: "Explorer",
+  f1: true,
+  keybinding: { keybinding: "ctrlcmd+shift+e" },
+  menu: [{ id: MenuId.MenubarViewMenu, group: "3_views", order: 1 }],
+  run: focusWorkshopTree,
+});
+
+addAction({
+  id: "workbench.action.toggleSidebarVisibility",
+  title: "Primary Side Bar",
+  f1: true,
+  toggled: "sideBarVisible",
+  keybinding: { keybinding: "ctrlcmd+b" },
+  menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 2 }],
+  run: () => {
+    getService(CONTEXT_KEY_SERVICE).createKey("sideBarVisible", true).set(toggleWorkshopPanel());
   },
 });
 
