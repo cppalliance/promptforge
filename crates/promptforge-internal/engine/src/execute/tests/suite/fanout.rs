@@ -6,11 +6,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::RunErrorKind;
+use crate::test_support::recording::{Observation, Observer};
 use promptforge_vfs::{
     Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
 };
 
-use super::support::{Record, run_fixture};
+use super::support::{Record, run_fixture, run_fixture_observed};
 
 const FANOUT_BASIC_EXECUTION: &str = "fixture-fanout-basic";
 const FANOUT_EPILOG_EXECUTION: &str = "fixture-fanout-epilog";
@@ -154,20 +155,36 @@ async fn fanout_store_writes_persist_across_arms() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cross_arm_append_terminates_the_run_with_a_determinism_violation() {
-    // Every store operation is a leaf yield now, so two live arms appending
-    // one path genuinely race in the blocking pool; the claims model booms
-    // the loser and the violation fails the whole run at the answer
-    // boundary. The fixture's pcall proves the violation is uncatchable:
-    // were it resumed into the arm, the handler would record the catch and
-    // the run would return "alpha,beta" instead of failing.
-    let run = run_fixture(
-        FANOUT_CROSS_ARM_APPEND,
-        "execution/fanout-cross-arm-append.md",
-        FANOUT_CROSS_ARM_EXECUTION,
-        "",
-        None,
+    // Every store operation is a leaf yield, so two live arms appending one
+    // path race in the blocking pool, and an append that runs to completion
+    // lets its arm finish and release its claims before the sibling's
+    // append starts. The gate parks the first append to reach the backend
+    // with its write claim held, so the sibling's claim check always meets
+    // that claim; the loser's failed-append observation opens the gate, so
+    // the winner completes ahead of the run-end drain that awaits it. The
+    // fixture's pcall proves the violation is uncatchable: were it resumed
+    // into the arm, the handler would record the catch and the run would
+    // return "alpha,beta" instead of failing.
+    let gate = Arc::new(AppendGate::default());
+    let _guard = GateGuard(Arc::clone(&gate));
+    let opener = Arc::clone(&gate);
+    let run = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_fixture_observed(
+            FANOUT_CROSS_ARM_APPEND,
+            "execution/fanout-cross-arm-append.md",
+            FANOUT_CROSS_ARM_EXECUTION,
+            gated_vfs(&gate),
+            move |inner| -> Arc<dyn Observer> {
+                Arc::new(OpenOnAppendFailure {
+                    gate: opener,
+                    inner,
+                })
+            },
+        ),
     )
-    .await;
+    .await
+    .expect("the loser's failed append opens the gate, so the run ends");
     let error = match run.result {
         Ok(value) => panic!("a cross-arm append must terminate the run, got {value:?}"),
         Err(error) => error,
@@ -258,6 +275,37 @@ impl Drop for GateGuard {
     }
 }
 
+/// Opens the gate when the losing arm's append fails: the failed
+/// observation fires before the answer that ends the run posts, so the
+/// parked winner completes ahead of the run-end drain. Every observation
+/// also forwards to `inner`.
+struct OpenOnAppendFailure {
+    gate: Arc<AppendGate>,
+    inner: Arc<dyn Observer>,
+}
+
+impl Observer for OpenOnAppendFailure {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
+        if matches!(event, Observation::StoreAppendFailed) {
+            self.gate.open();
+        }
+        self.inner.observe(execution, section, event);
+    }
+}
+
+/// A store handle mounting a [`GatedStore`] on `gate`.
+fn gated_vfs(gate: &Arc<AppendGate>) -> VfsRef {
+    VfsRef::builder()
+        .mount(
+            promptforge_vfs::STORE_MOUNT,
+            GatedStore {
+                inner: MemoryBackend::new(),
+                gate: Arc::clone(gate),
+            },
+        )
+        .build()
+}
+
 /// A memory backend whose first `append` parks on the gate, standing in
 /// for a slow host backend: the winning arm's op stays in flight across
 /// the run's terminal failure.
@@ -342,21 +390,12 @@ async fn a_terminal_failure_releases_an_in_flight_arms_claims_before_returning()
     // lingering claim.
     let gate = Arc::new(AppendGate::default());
     let _guard = GateGuard(Arc::clone(&gate));
-    let vfs = VfsRef::builder()
-        .mount(
-            promptforge_vfs::STORE_MOUNT,
-            GatedStore {
-                inner: MemoryBackend::new(),
-                gate: Arc::clone(&gate),
-            },
-        )
-        .build();
     let mut run_task = tokio::spawn(run_fixture(
         FANOUT_CROSS_ARM_APPEND,
         "execution/fanout-cross-arm-append.md",
         FANOUT_CROSS_ARM_EXECUTION,
         "",
-        Some(vfs),
+        Some(gated_vfs(&gate)),
     ));
     // The winning arm's op is now parked inside the backend, its claim
     // held; the sibling's boom needs no test interaction.

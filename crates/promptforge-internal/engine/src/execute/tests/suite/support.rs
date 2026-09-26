@@ -236,3 +236,35 @@ pub(super) async fn run_fixture(
         store: FixtureStore(store),
     }
 }
+
+/// [`run_fixture`] over a caller-built handle with no arguments, with
+/// `front` placed ahead of the recorder: every run observation reaches the
+/// observer `front` returns, which forwards it to the recorder, so a test
+/// whose backend waits on a mid-run observation can release it there and
+/// still assert on the recorder.
+pub(super) async fn run_fixture_observed(
+    source: &str,
+    name: &str,
+    execution: &'static str,
+    vfs: VfsRef,
+    front: impl FnOnce(Arc<dyn Observer>) -> Arc<dyn Observer>,
+) -> FixtureRun {
+    let recorder = Arc::new(Recorder::default());
+    let prompt = parse_execution_fixture(source, name, execution, recorder.as_ref());
+    let observer = front(Arc::clone(&recorder) as Arc<dyn Observer>);
+    let result = run_unprepared(
+        &prompt,
+        "",
+        vfs.clone(),
+        RunOptions {
+            execution,
+            observer,
+        },
+    )
+    .await;
+    FixtureRun {
+        result,
+        recorder,
+        store: FixtureStore(vfs),
+    }
+}
