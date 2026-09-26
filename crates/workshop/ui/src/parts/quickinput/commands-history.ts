@@ -17,7 +17,11 @@
 //
 // Generic and DOM-free: the initial value and the writer are injected.
 
-import { createServiceToken, registerService } from "../../services/service-registry";
+import {
+  COMMANDS_HISTORY,
+  type CommandsHistory as CommandsHistoryContract,
+} from "../../services/commands-history";
+import { registerService } from "../../services/service-registry";
 
 /** The most ids the store keeps; adding past the cap drops the oldest. */
 const MAX_ENTRIES = 50;
@@ -48,7 +52,7 @@ function readIds(initial: unknown): readonly string[] {
  * failure leaves the in-memory list authoritative for the rest of the
  * page lifetime.
  */
-export class CommandsHistory {
+export class CommandsHistory implements CommandsHistoryContract {
   private ids: readonly string[];
 
   /**
@@ -89,9 +93,6 @@ export class CommandsHistory {
     }
   }
 }
-
-/** The registry token for the commands-history singleton. */
-export const COMMANDS_HISTORY = createServiceToken<CommandsHistory>("workshop.commandsHistory");
 
 // Self-registration with an empty list and a no-op writer: a consumer
 // that resolves the token before the composition root re-registers it

@@ -238,9 +238,9 @@ export class EditorPanel extends WorkshopPart {
    * onto it - the tab title, the conflict token, and the saved baseline
    * all move to the new file, and an untitled buffer becomes a file
    * editor. The picker and the parent-directory grant are the caller's
-   * job (the files contribution). Every failure, a 408 included, paints
-   * the error bar and leaves the panel on its old path; the conflict
-   * dialog never opens, because it acts on that old path.
+   * job (the workspace contribution). Every failure, a 408 included,
+   * paints the error bar and leaves the panel on its old path; the
+   * conflict dialog never opens, because it acts on that old path.
    */
   async saveAs(path: string): Promise<void> {
     if (this.saving) {

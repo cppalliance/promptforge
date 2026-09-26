@@ -951,7 +951,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-18>
 
-### Step 18: Settle the UI's service tokens, barrels, backoff, and contribution name
+### Step 18: Settle the UI's service tokens, barrels, backoff, and contribution name [completed]
 
 - Component: UI structure
 - Component placement: ninth, after the Save Workspace As caller change and the agent fixture move, and before the wire guards so they land in settled service files.

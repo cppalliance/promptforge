@@ -1,7 +1,7 @@
-// The files contribution: the eager module registering the File menu's
-// picker and file-action rows and the Open Recent and quick-open file
-// providers at module scope, before any service exists. Every run body
-// lazy-imports file-actions, so this file pulls no dockview or
+// The workspace contribution: the eager module registering the File
+// menu's picker and file-action rows and the Open Recent and quick-open
+// file providers at module scope, before any service exists. Every run
+// body lazy-imports file-actions, so this file pulls no dockview or
 // CodeMirror into the initial bundle; the type-only import below is
 // erased at compile time.
 //

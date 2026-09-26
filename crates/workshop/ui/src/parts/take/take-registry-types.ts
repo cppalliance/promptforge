@@ -4,7 +4,19 @@
 // the public subset.
 
 import type { RealtimeEvent } from "../../services/realtime-event-decoder";
-import type { SttInsertionContext } from "../stt/stt";
+
+/** One immutable snapshot of the target-owned transcript insertion policy. */
+export interface SttInsertionContext {
+  /** The selected range in the target's coordinate space. */
+  readonly range: {
+    readonly start: number;
+    readonly end: number;
+  };
+  /** The selected text a cancelled or failed take restores. */
+  readonly original: string;
+  /** The separator owned by this take, if appending requires one. */
+  readonly compositionPrefix: "" | " ";
+}
 
 /** One transcript region owned by a Realtime audio take. */
 export interface RegistryTake {

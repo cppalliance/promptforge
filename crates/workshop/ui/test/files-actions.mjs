@@ -1,6 +1,6 @@
 // Unit test for the File menu's pickers and file actions (plan step 16:
-// src/parts/workspace/files.contribution.ts, file-actions.ts, and the
-// add-folder flow lifted out of the Workshop tree panel). Bundles the
+// src/parts/workspace/workspace.contribution.ts, file-actions.ts, and
+// the add-folder flow lifted out of the Workshop tree panel). Bundles the
 // contribution with esbuild - "@tauri-apps/plugin-dialog" aliased to the
 // scripted stub in test/helpers - and drives the commands through the
 // shared registries against jsdom. Covers: the catalog wiring (titles,
@@ -33,7 +33,7 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      import "./src/parts/workspace/files.contribution.ts";
+      import "./src/parts/workspace/workspace.contribution.ts";
       export { Commands } from "./src/services/command-registry.ts";
       export { Menus } from "./src/services/menu-registry.ts";
       export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";

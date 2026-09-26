@@ -25,7 +25,7 @@ import {
   type Result,
 } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
-import type { StatusBar } from "../status/status-bar";
+import type { StatusBar } from "../../services/status-bar";
 
 /** The native event the app dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";

@@ -1,5 +1,6 @@
 // Exponential reconnect backoff, shared by the persistent workshop socket
-// (workshop-socket.ts) and the agent-session socket (agent-socket.ts). The
+// (workshop-socket.ts), the agent-session socket (agent-socket.ts), and
+// the Realtime transcription socket (realtime-transcription.ts). The
 // first retry waits `initialMs`, each failure doubles the wait, and `maxMs`
 // keeps a down server from pushing the wait out of bounds. One timer at a
 // time: scheduling while an attempt is already waiting stacks nothing. A

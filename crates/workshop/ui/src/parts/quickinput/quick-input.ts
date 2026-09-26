@@ -21,7 +21,12 @@ import "./quick-input.css";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { QuickAccessRegistry } from "../../services/quick-access-registry";
-import { type QuickAccessProvider, type QuickInputItem, type QuickInputShowOptions } from "../../services/quick-input-service";
+import {
+  type QuickAccessProvider,
+  type QuickInputItem,
+  type QuickInputService as QuickInputServiceContract,
+  type QuickInputShowOptions,
+} from "../../services/quick-input-service";
 
 /** Narrows a factory's unknown product to the provider shape. */
 function asProvider(value: unknown): QuickAccessProvider | undefined {
@@ -53,7 +58,7 @@ let nextInstanceId = 0;
  * registers one instance under QUICK_INPUT_SERVICE and the quick-access
  * actions (showCommands, quickOpen, and friends) call it.
  */
-export class QuickInputService extends Disposable {
+export class QuickInputService extends Disposable implements QuickInputServiceContract {
   /** The quick-access surface the menu actions and command center call. */
   readonly quickAccess = {
     show: (value: string, options?: QuickInputShowOptions): void => {

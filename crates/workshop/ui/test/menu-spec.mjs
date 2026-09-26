@@ -32,7 +32,7 @@ const bundle = await esbuild.build({
       import "./src/parts/menu/stubs.contribution.ts";
       import "./src/parts/menu/edit.contribution.ts";
       import "./src/parts/editor/editor.contribution.ts";
-      import "./src/parts/workspace/files.contribution.ts";
+      import "./src/parts/workspace/workspace.contribution.ts";
       import "./src/parts/workspace-files/workspace-files.contribution.ts";
       import "./src/parts/chrome/chrome.contribution.ts";
       import "./src/parts/layout/layout.contribution.ts";

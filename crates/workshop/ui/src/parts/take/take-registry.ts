@@ -7,7 +7,6 @@
 // connection's wire, commit, and capture bookkeeping. Any other input
 // stamped with a different generation is ignored.
 
-import type { SttInsertionContext } from "../stt/stt";
 import {
   connectionLost,
   failTake,
@@ -25,6 +24,7 @@ import {
 import type {
   Reduction,
   RegistryTake,
+  SttInsertionContext,
   TakeRegistry,
   TakeRegistryInput,
   TakeRegistryTransition,

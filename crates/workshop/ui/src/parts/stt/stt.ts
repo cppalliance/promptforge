@@ -3,20 +3,8 @@
 import "./stt.css";
 
 import type { IDisposable } from "../../base/lifecycle";
+import type { SttInsertionContext } from "../take/take-registry-types";
 export { setupStt } from "./realtime-stt";
-
-/** One immutable snapshot of the target-owned transcript insertion policy. */
-export interface SttInsertionContext {
-  /** The selected range in the target's coordinate space. */
-  readonly range: {
-    readonly start: number;
-    readonly end: number;
-  };
-  /** The selected text a cancelled or failed take restores. */
-  readonly original: string;
-  /** The separator owned by this take, if appending requires one. */
-  readonly compositionPrefix: "" | " ";
-}
 
 /**
  * What dictation needs from its host input: a text target the take can

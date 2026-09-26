@@ -22,13 +22,13 @@
 // shared singletons or the service registry; tests inject their own.
 
 import { Commands, type CommandRegistry } from "../../services/command-registry";
+import { COMMANDS_HISTORY, type CommandsHistory } from "../../services/commands-history";
 import { CONTEXT_KEY_SERVICE, type ContextKeyService } from "../../services/context-key-service";
 import { KeybindingsRegistry } from "../../services/keybinding-registry";
 import { MenuId, Menus, type MenuRegistry } from "../../services/menu-registry";
 import { QuickAccessRegistry, type QuickAccessProviderDescriptor } from "../../services/quick-access-registry";
 import { getService, getServiceOrNull } from "../../services/service-registry";
 import { STATUS_BAR } from "../../services/status-bar";
-import { COMMANDS_HISTORY, type CommandsHistory } from "./commands-history";
 import { QUICK_INPUT_SERVICE, type QuickAccessProvider, type QuickInputItem } from "../../services/quick-input-service";
 
 /** The registries the palette provider reads; tests inject their own. */

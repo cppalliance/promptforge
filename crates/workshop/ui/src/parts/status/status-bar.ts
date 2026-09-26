@@ -14,6 +14,7 @@ import { Disposable, toDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE, type ContextKey } from "../../services/context-key-service";
 import type { StatusFrame } from "../../services/protocol";
 import { getService } from "../../services/service-registry";
+import type { StatusBar as StatusBarContract } from "../../services/status-bar";
 
 type PulseActivity = "thinking" | "generating";
 
@@ -21,7 +22,7 @@ type PulseActivity = "thinking" | "generating";
 // skin that dropped the variable).
 const DEFAULT_LED_PULSE_MS = 250;
 
-export class StatusBar extends Disposable {
+export class StatusBar extends Disposable implements StatusBarContract {
   private readonly view: StatusBarView;
   private readonly led: HTMLElement;
   private readonly rec: HTMLElement;

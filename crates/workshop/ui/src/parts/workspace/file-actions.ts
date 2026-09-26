@@ -1,6 +1,6 @@
-// The File menu's picker and file-action run bodies,
-// lazy-loaded by files.contribution.ts so the contribution module stays
-// out of the dockview and CodeMirror import graph. Open File and Save As
+// The File menu's picker and file-action run bodies, lazy-loaded by
+// workspace.contribution.ts so the contribution module stays out of
+// the dockview and CodeMirror import graph. Open File and Save As
 // are desktop-only rows (precondition !isWeb): their pickers are the
 // native Tauri dialogs. Open Folder and Add Folder to Workspace share
 // the tree's Add Folder flow, which falls back to a typed-path dialog in

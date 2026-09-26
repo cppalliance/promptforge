@@ -40,7 +40,8 @@ const bundle = await esbuild.build({
     contents: `
       export { QuickInputService } from "./src/parts/quickinput/quick-input.ts";
       export { createQuickAccessRegistry } from "./src/services/quick-access-registry.ts";
-      export { CommandsHistory, COMMANDS_HISTORY } from "./src/parts/quickinput/commands-history.ts";
+      export { CommandsHistory } from "./src/parts/quickinput/commands-history.ts";
+      export { COMMANDS_HISTORY } from "./src/services/commands-history.ts";
       export { getService, registerService } from "./src/services/service-registry.ts";
       export {
         createCommandPaletteProvider,

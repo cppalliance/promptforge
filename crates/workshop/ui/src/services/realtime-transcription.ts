@@ -4,10 +4,9 @@ import {
   decodeRealtimeEvent,
   type RealtimeEvent,
 } from "./realtime-event-decoder";
+import { ReconnectBackoff } from "./reconnect-backoff";
 
 const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
-const RECONNECT_INITIAL_MS = 1000;
-const RECONNECT_MAX_MS = 30_000;
 
 /** Readiness of the browser's Realtime transcription connection. */
 export type RealtimeTranscriptionState = "connecting" | "ready" | "unavailable";
@@ -102,8 +101,7 @@ export class RealtimeTranscriptionService extends Disposable {
   private negotiatedHypotheses = false;
   private currentState: RealtimeTranscriptionState = "connecting";
   private currentGeneration: RealtimeSocketGeneration = 0;
-  private reconnectDelayMs = RECONNECT_INITIAL_MS;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly backoff = new ReconnectBackoff();
 
   /** Fires when connection readiness changes. */
   readonly onState: ServiceEvent<RealtimeTranscriptionStateEvent> = this.stateEmitter.event;
@@ -206,10 +204,7 @@ export class RealtimeTranscriptionService extends Disposable {
       return;
     }
     this.disposed = true;
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.backoff.cancel();
     const socket = this.socket;
     this.socket = null;
     socket?.close();
@@ -267,11 +262,7 @@ export class RealtimeTranscriptionService extends Disposable {
         this.negotiatedHypotheses =
           event.session.include.length === 1 &&
           event.session.include[0] === HYPOTHESIS_INCLUDE;
-        this.reconnectDelayMs = RECONNECT_INITIAL_MS;
-        if (this.reconnectTimer !== null) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
+        this.backoff.reset();
         this.setState("ready", generation);
         return;
       case "input_audio_buffer.committed":
@@ -331,15 +322,10 @@ export class RealtimeTranscriptionService extends Disposable {
   }
 
   private scheduleReconnect(): void {
-    if (this.disposed || this.socket !== null || this.reconnectTimer !== null) {
+    if (this.disposed || this.socket !== null) {
       return;
     }
-    const delay = this.reconnectDelayMs;
-    this.reconnectDelayMs = Math.min(delay * 2, RECONNECT_MAX_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
+    this.backoff.schedule(() => this.connect());
   }
 
   private reportError(

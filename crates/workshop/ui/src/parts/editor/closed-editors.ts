@@ -20,7 +20,12 @@
 // from editor-lifecycle.ts, so main.ts can bind the token without pulling
 // the editor chunk into the initial bundle.
 
-import { CLOSED_EDITORS, type ClosedEditor, type ClosedEditorsSnapshot } from "../../services/closed-editors";
+import {
+  CLOSED_EDITORS,
+  type ClosedEditor,
+  type ClosedEditors as ClosedEditorsContract,
+  type ClosedEditorsSnapshot,
+} from "../../services/closed-editors";
 import { registerService } from "../../services/service-registry";
 
 /** The most closed editors the stack retains; older entries drop. */
@@ -67,7 +72,7 @@ function readInitial(initial: unknown): ClosedEditor[] {
  * recent one for reopening; both write the file-path snapshot through
  * the injected writer.
  */
-export class ClosedEditors {
+export class ClosedEditors implements ClosedEditorsContract {
   // Oldest first: the most recent close is last, so the reopen is a pop.
   private stack: ClosedEditor[];
 

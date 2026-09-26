@@ -21,7 +21,6 @@
 
 import { Emitter } from "../../base/event";
 import type { Event } from "../../base/event";
-import type { IDisposable } from "../../base/lifecycle";
 import { ContextKeyService, CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
 import type { ContextKey } from "../../services/context-key-service";
 import {
@@ -30,6 +29,7 @@ import {
   EDITOR_SETTINGS_SERVICE,
   type EditorSettingName,
   type EditorSettings,
+  type EditorSettingsService as EditorSettingsServiceContract,
 } from "../../services/editor-settings-service";
 import { getServiceOrNull, registerService } from "../../services/service-registry";
 
@@ -71,7 +71,7 @@ function readSettings(initial: unknown): EditorSettings {
  * settings; a writer failure leaves the in-memory values authoritative
  * for the rest of the page lifetime.
  */
-export class EditorSettingsService implements IDisposable {
+export class EditorSettingsService implements EditorSettingsServiceContract {
   private current: EditorSettings;
   private readonly changeEmitter = new Emitter<EditorSettings>();
   private readonly keys: { [K in EditorSettingName]?: ContextKey<boolean> } = {};

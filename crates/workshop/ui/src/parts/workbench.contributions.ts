@@ -17,7 +17,7 @@ import "./menu/menubar.contribution";
 import "./menu/stubs.contribution";
 import "./menu/edit.contribution";
 import "./editor/editor.contribution";
-import "./workspace/files.contribution";
+import "./workspace/workspace.contribution";
 import "./workspace-files/workspace-files.contribution";
 import "./chrome/chrome.contribution";
 import "./layout/layout.contribution";
