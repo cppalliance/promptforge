@@ -16,14 +16,16 @@ isProject: false
   - Target: the 43 commits in `3e31cd23..11da61d8` (baseline `upstream/master` at `3e31cd23`, "Close plan: multi-product-docs-site"; endpoint `master` at `11da61d8`, "Close plan: workshop structure"). They carry two plans: `vibe/2026-09-25-2-workshop-fixes.md` (21 commits through `42edc053`) and `vibe/2026-09-25-3-workshop-structure.md` (22 commits after it). This is the content of [cppalliance/promptforge#75](https://github.com/cppalliance/promptforge/pull/75).
   - Disposition checked at `11da61d8`. Every accepted debt below is still present there.
   - Operator addition (2026-09-26): the pre-existing revoke race, DEBT-FIX-X01, is brought into scope as Step 5, placed before the plan's close.
+  - Operator addition (2026-09-26): the gap Step 5 left for grants after the shutdown close, DEBT-FIX-X02, is brought into scope as Step 6, placed before the plan's close.
 - Cleanup goals:
   - The workspace tree listing never opens or reads a link's target outside the grants to decide how to list it, and never reports a target's size or modified time.
   - The desktop app's gateway readiness wait can be driven by tests without wall-clock time, and its tests stop relying on sleeping writer threads, elapsed-time assertions, and released ephemeral ports.
   - `crates/workshop/ui/src/services/protocol.ts` names the right Rust files for the agent frames.
   - A revoke lands whole in the workspace that is open when it completes, the same rule grants follow, and a revoke after the shutdown close is refused instead of answering success. A revoke by the stored grant key does no filesystem work.
+  - A grant after the shutdown close is refused too, so no grant or revoke answers success without reaching the workspace file.
 - Non-goals:
-  - No change to any wire frame shape, route, persisted format, or public API. The revoke refusal reuses an error the workspace routes already answer.
-  - No change to how grants behave after the shutdown close (see Deferred and Out of Scope).
+  - No change to any wire frame shape, route, persisted format, or public API. The revoke and grant refusals reuse an error the workspace routes already answer.
+  - No change to when a grant canonicalizes relative to the switch guard (see Deferred and Out of Scope).
   - No new structural checks or retired-string gates.
   - No edits outside `crates/workshop/**` and this plan's repository copy under `vibe/`.
 - Success criteria:
@@ -65,6 +67,8 @@ isProject: false
   - `0ee7d67d` fixed the same race for grants and recorded this gap in its message. The function body is identical at the baseline, so the target didn't add it. The analyst classed it as exposed and the challenger as unrelated pre-existing. The code facts are confirmed.
   - A likelier variant needs no race: revoking a root on an unreachable share stalls in canonicalization past the route's 10 second deadline. The handler answers 408, but the blocking task can still remove the root from memory, and the file mirror never runs, so the root comes back on the next open.
   - Target state: a revoke resolves its key without changing anything, then removes the key from memory and mirrors the removal under the switch guard. A revoke that finds the workspace closed for shutdown is refused. A revoke of a stored key never touches the filesystem.
+  - DEBT-FIX-X02 (a related gap left after Step 5): `Workspace::grant_and_persist` in `backing.rs` (line 58) takes the switch guard but never calls `refuse_if_closed`, unlike open, Save As, duplicate, and, since Step 5, revoke. A grant that waits out the shutdown close adds its root to memory and finds no backing file. It answers success, and the grant is gone at the next launch. It's pre-existing: `grant_and_persist` never checked `closed` at the baseline.
+  - Target state: a grant that finds the workspace closed for shutdown is refused before it changes memory.
 - **Rejected candidates: 55.**
   - 22 residual-but-acceptable: seams, parameter clusters, and private mirrors that compile-time exhaustiveness or existing tests already protect.
   - 14 weak or speculative: no demonstrated consequence. Examples are the boot probe attempt budget dropping from 2 s to 100 ms, and non-finite metrics.
@@ -99,6 +103,10 @@ isProject: false
   - Resolution runs before the guard, so a slow canonicalize never holds up a switch or the shutdown close. A handler cancelled at the route deadline during resolution leaves memory and the file unchanged.
   - Docs: the `revoke_and_persist` doc says the revoke lands whole in the workspace open when it completes and is refused after the shutdown close. The `switches` field doc (`workspace.rs` line 181) lists revokes beside grants. The `revoke` docs describe the key lookup.
   - Keep `backing.rs` (485 physical lines at `bb6bb7cb`) and `workspace.rs` (440) at or under 500. If `backing.rs` would pass 500, first move `grant_and_persist` and `revoke_and_persist` into a new `crates/workshop/workspace/src/workspace/persist.rs` in the same commit.
+- **Grant refusal after close (DEBT-FIX-X02)**, in `Workspace::grant_and_persist` in `crates/workshop/workspace/src/workspace/backing.rs`:
+  - Right after `self.switches.lock().await`, call `self.refuse_if_closed("grant")?`, before the blocking-pool canonicalize and before any change to memory. It answers `WorkspaceFileError::Closed` (HTTP 500, code `workspace_file_failed`), like the switches and revoke.
+  - Add one sentence to the `grant_and_persist` doc and its `# Errors` section saying a grant after the shutdown close is refused.
+  - Keep `backing.rs` (496 physical lines at `3b2ef532`) at or under 500. If it would pass 500, first move `grant_and_persist` and `revoke_and_persist` into a new `crates/workshop/workspace/src/workspace/persist.rs` in the same commit.
 - No module, interface, data, protocol, or lifecycle change beyond these.
 
 </implementation-contract>
@@ -123,6 +131,9 @@ isProject: false
   - A revoke after `close_backing` answers the `Closed`-derived error and leaves the root granted in memory. It fails before the fix, which answers success.
   - A revoke by the literal stored key succeeds even when that path no longer canonicalizes to itself, for example after the granted folder is replaced by a directory link to another folder. It fails before the fix, which answers `NotGranted`. It keeps the existing `symlink_unavailable` CI guard.
   - The existing revoke tests pass unchanged, including the one where a root deleted from disk stays revocable, and so does the server's revoke integration test in `crates/workshop/server/tests/it/agents/revoke.rs` under `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
+- DEBT-FIX-X02, in `crates/workshop/workspace/src/workspace/tests/switch.rs` beside the Step 5 test for a revoke after `close_backing`, run with `cargo nextest run --locked -p workshop-workspace --all-features`:
+  - A grant after `close_backing` answers the `Closed`-derived error and leaves the root absent from memory. It fails before the fix, which answers success and adds the root.
+  - `a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant` and every other grant test pass unchanged.
 - Exit commands, each at least as green as the structure plan's exit record in `vibe/2026-09-25-3-workshop-structure.md` Step 21:
   - `cargo nextest run --locked -p workshop-workspace --all-features` (Windows)
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
@@ -150,8 +161,9 @@ isProject: false
   - **DEBT-FIX-X01: resolve first, then take the guard.** Chosen over holding the guard across canonicalization, as grants do, because a slow network canonicalize would then hold up every switch and the shutdown close. A cancelled revoke also leaves nothing half-applied. Consequence: a switch between resolution and removal makes the revoke apply to the newly open workspace, which is the rule grants already follow.
   - **DEBT-FIX-X01: refuse a revoke after the shutdown close with the existing `refuse_if_closed` error.** Without it, a revoke that waits out the close would change memory only and answer success, and the next launch would re-grant the root from the file. The error is one the switch operations already answer, so no new wire code appears.
   - **DEBT-FIX-X01: look up the stored key before canonicalizing.** The UI sends the canonical key the roots listing gave it, so the common revoke does no I/O and can't stall on a dead share. The literal key lookup only ever removes an exact stored grant, and `reject_forbidden` still runs first.
+  - **DEBT-FIX-X02: refuse right after taking the guard, before canonicalizing.** Checking `closed` under the guard means no close can land between the check and the memory change, because the close takes the same guard. Checking before the canonicalize means a refused grant does no filesystem work. Consequence: a grant made during quit answers 500 instead of 200. The app is already quitting at that point, and the error is the one open, Save As, duplicate, and revoke answer in the same race.
 - User-resolved architecture choices:
-  - The operator chose to fix DEBT-FIX-X01 in this plan as a fifth step, inserted before the plan's close commit. None of the remedies needed an architecture decision: every one is local, private, and reversible, with no public, persisted, wire, ownership, dependency-direction, or trust-boundary change.
+  - The operator chose to fix DEBT-FIX-X01 in this plan as a fifth step, and then the grant gap DEBT-FIX-X02 as a sixth, each inserted before the plan's close commit. None of the remedies needed an architecture decision: every one is local, private, and reversible, with no public, persisted, wire, ownership, dependency-direction, or trust-boundary change.
 - Rejected alternatives:
   - DEBT-FIX-01: refuse UNC-prefixed link targets after `fs::read_link`. Rejected because `read_link` returns only the first hop, so a relative link to an in-tree UNC link still gets followed. It would also have to recognize `\\?\UNC\`, `\??\UNC\`, `GLOBALROOT` device paths, and mapped drives.
   - DEBT-FIX-01: follow only when the target is lexically inside a grant. Rejected for the same chain problem, unless every hop is checked.
@@ -163,7 +175,6 @@ isProject: false
 
 ### Deferred and Out of Scope
 
-- Grants after the shutdown close still change memory only and answer success, so the grant is lost at the next launch. Revisit by adding the same `refuse_if_closed` call to `grant_and_persist`.
 - The Unix dead-NFS stall in the tree listing. Revisit if Workshop starts supporting network-mounted grants.
 - Boot's per-attempt probe budget dropping from 2 s to 100 ms in `4b8fec5a` (weak, no demonstrated consequence). Revisit if a boot ever fails with `ProofInterrupted` against a live gateway. A fixture gateway whose `/v1/models` answers after 150 ms would settle it.
 - A slow grant canonicalize holding up the shutdown close (weak). Revisit by giving `grant_and_persist` the same resolve-then-guard shape Step 5 gives revokes.
@@ -378,5 +389,27 @@ isProject: false
 - Commit: the revoke change, its docs, and its tests.
 
 </step-5>
+
+<step-6>
+
+### Step 6: Refuse grants after the shutdown close [completed]
+
+- Component: Grant refusal after close
+- Debt: DEBT-FIX-X02.
+- Component placement: sixth, after Step 5, because the operator added it once Step 5 was committed and asked for it just before the plan's close. It reuses the `refuse_if_closed` call pattern Step 5 gave revokes and depends on no other step's code. Its own verification is the plan's final full run.
+- Pieces: one, the refusal in `grant_and_persist` with its doc and test.
+- Artifacts:
+  - `crates/workshop/workspace/src/workspace/backing.rs`, `Workspace::grant_and_persist` (line 58): add `self.refuse_if_closed("grant")?;` right after `let _switch = self.switches.lock().await;` (line 59), before the blocking-pool canonicalize. Add one sentence to its doc and `# Errors` section saying a grant after the shutdown close is refused.
+  - Keep `backing.rs` (496 physical lines at `3b2ef532`) at or under 500. If it would pass 500, move `grant_and_persist` and `revoke_and_persist` into a new `crates/workshop/workspace/src/workspace/persist.rs` in this commit.
+- Tests, in `crates/workshop/workspace/src/workspace/tests/switch.rs`, beside `a_revoke_after_close_backing_is_refused_and_keeps_the_root_granted`:
+  - A grant after `close_backing` is refused with the `Closed`-derived error and leaves the root absent from memory. It fails before the change.
+  - Every existing grant test passes unchanged, including `a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant`.
+- Verify:
+  - `cargo nextest run --locked -p workshop-workspace --all-features` on Windows, and on Linux through CI.
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` with the staged sidecar.
+- Dependencies: none.
+- Commit: the refusal, its doc, and its test.
+
+</step-6>
 
 </execution-plan>

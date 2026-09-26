@@ -51,12 +51,16 @@ impl Workspace {
     /// The grant holds the switch guard from the insert through the
     /// mirror, so it lands whole in the workspace open when it completes:
     /// a switch between the two would wipe the root from memory and then
-    /// mirror it into the file the switch installed.
+    /// mirror it into the file the switch installed. A grant after the
+    /// shutdown close is refused before it resolves or changes anything.
     ///
     /// # Errors
-    /// The same as [`Workspace::grant`]; persistence never fails the call.
+    /// The same as [`Workspace::grant`], plus
+    /// [`WorkspaceError::WorkspaceFileFailed`] when the workspace has been
+    /// closed for shutdown; persistence never fails the call.
     pub async fn grant_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         let _switch = self.switches.lock().await;
+        self.refuse_if_closed("grant")?;
         // The grant canonicalizes and stats the path: blocking-pool work.
         let workspace = self.clone();
         let requested = path.to_path_buf();

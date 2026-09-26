@@ -308,6 +308,33 @@ async fn a_revoke_after_close_backing_is_refused_and_keeps_the_root_granted() {
 }
 
 #[tokio::test]
+async fn a_grant_after_close_backing_is_refused_and_leaves_the_root_ungranted() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+
+    workspace.close_backing().await;
+
+    let refused = workspace.grant_and_persist(dir.path()).await;
+    assert!(
+        matches!(refused, Err(WorkspaceError::WorkspaceFileFailed { .. })),
+        "a grant after the shutdown close must answer the closed mapping, got {refused:?}"
+    );
+    assert_eq!(
+        workspace.granted_roots(),
+        Vec::<PathBuf>::new(),
+        "the refused grant added the root to memory"
+    );
+    assert_eq!(
+        grants_on_disk(&a).await,
+        Vec::<PathBuf>::new(),
+        "the file closed at shutdown gained the refused grant"
+    );
+}
+
+#[tokio::test]
 async fn a_revoke_by_the_stored_key_lands_after_the_folder_becomes_a_link_elsewhere() {
     let home = tempfile::TempDir::new().expect("tempdir");
     let folder = home.path().join("granted");
