@@ -25,7 +25,7 @@ pub(crate) use lifecycle::{GatewaySupervisor, SupervisorShutdown};
 pub(super) use recovery::RecoveryIdentity;
 pub(in crate::gateway) use recovery::{RecoveryCandidate, RecoveryOwnership};
 
-use launch::launch_and_attach_cancellable;
+pub(super) use launch::launch_and_attach_cancellable;
 
 /// Healthy-sidecar supervision cadence.
 const SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);

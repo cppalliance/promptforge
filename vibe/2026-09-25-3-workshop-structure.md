@@ -934,7 +934,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-17>
 
-### Step 17: Merge launch-and-wait and survive a stale discovery file
+### Step 17: Merge launch-and-wait and survive a stale discovery file [completed]
 
 - Component: Desktop
 - Artifacts:

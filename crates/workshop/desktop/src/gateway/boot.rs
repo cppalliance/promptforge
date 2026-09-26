@@ -1,16 +1,15 @@
-//! Boot planning and one-shot detached Gateway launch.
+//! Boot planning and detached Gateway spawn.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use gateway_api_discovery::{
-    GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
+    CancellationToken, GatewayDiscoveryFile, Resolution, SidecarError, ValidatedConnection,
 };
 use workshop_server_api::Config;
 
 use super::identity::GatewayAttachment;
-use super::supervisor::{RecoveryCandidate, RecoveryOwnership};
+use super::supervisor::{RecoveryCandidate, RecoveryOwnership, launch_and_attach_cancellable};
 
 /// The sibling executable the desktop app launches, beside its own.
 #[cfg(windows)]
@@ -18,12 +17,6 @@ pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway.exe";
 /// The sibling executable the desktop app launches, beside its own.
 #[cfg(not(windows))]
 pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
-
-/// Budget for the launch race and the launched Gateway readiness wait.
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Delay between polls for the launched Gateway discovery file.
-pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[cfg(windows)]
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -87,9 +80,11 @@ pub(crate) fn ensure_gateway(config: &Config) -> anyhow::Result<GatewayAttachmen
         GatewayPlan::Attach(file) => validated_attachment(file),
         GatewayPlan::ConfigOnly => Ok(GatewayAttachment::Config),
         GatewayPlan::Fail => Err(no_gateway_error()),
-        GatewayPlan::Launch(exe) => launch_and_attach(&run_dir, &exe)
-            .and_then(validated_recovery_attachment)
-            .context("launch the sidecar gateway"),
+        GatewayPlan::Launch(exe) => {
+            launch_and_attach_cancellable(&run_dir, &exe, &CancellationToken::new())
+                .and_then(validated_recovery_attachment)
+                .context("launch the sidecar gateway")
+        }
     }
 }
 
@@ -151,65 +146,6 @@ pub(super) fn no_gateway_error() -> anyhow::Error {
          gateway.base_url and gateway.api_key in workshop.toml to attach to \
          a gateway over the network"
     )
-}
-
-/// Settles the launch race, launches once when elected, and attaches.
-fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<RecoveryLaunch> {
-    match gateway_api_discovery::launch_or_attach(run_dir, LAUNCH_TIMEOUT)
-        .context("settle the gateway launch race")?
-    {
-        LaunchDecision::Attach(file) => Ok(RecoveryLaunch::Attached(file)),
-        LaunchDecision::Launch(lock) => {
-            let child_pid =
-                spawn_detached(exe).with_context(|| format!("spawn {}", exe.display()))?;
-            let file = wait_for_launched_file(run_dir, LAUNCH_TIMEOUT)?;
-            drop(lock);
-            Ok(RecoveryLaunch::Launched { child_pid, file })
-        }
-        decision => anyhow::bail!("an unknown launch decision: {decision:?}"),
-    }
-}
-
-/// Waits for the launched Gateway to publish a validated connection.
-fn wait_for_launched_file(
-    run_dir: &Path,
-    timeout: Duration,
-) -> anyhow::Result<GatewayDiscoveryFile> {
-    wait_for_launched_file_with(run_dir, timeout, gateway_api_discovery::resolve, || {
-        std::thread::sleep(POLL_INTERVAL);
-    })
-}
-
-/// Waits for readiness with resolution and the pause between polls
-/// injected for deterministic tests.
-pub(super) fn wait_for_launched_file_with<Resolve, Pause>(
-    run_dir: &Path,
-    timeout: Duration,
-    mut resolve: Resolve,
-    mut pause: Pause,
-) -> anyhow::Result<GatewayDiscoveryFile>
-where
-    Resolve: FnMut(&Path) -> Result<Resolution, SidecarError>,
-    Pause: FnMut(),
-{
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let url = format!("http://127.0.0.1:{}", file.port);
-            gateway_api_discovery::wait_for_health(&url, remaining)
-                .context("the launched gateway did not answer its health probe")?;
-            if let Ok(Resolution::Attach(validated)) = resolve(run_dir) {
-                return Ok(validated);
-            }
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!(
-                "the launched gateway wrote no validated gateway discovery file within {timeout:?}"
-            );
-        }
-        pause();
-    }
 }
 
 #[cfg(windows)]

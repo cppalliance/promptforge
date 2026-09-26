@@ -1,8 +1,10 @@
 //! Boot planning and one-shot launch coverage.
 
-use std::time::Duration;
+use std::net::TcpListener;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
-use gateway_api_discovery::GatewayDiscoveryFile;
+use gateway_api_discovery::{CancellationToken, GatewayDiscoveryFile, HealthError};
 
 use super::{
     dead_pid, exe_dir, fixture_gateway, live_file, owned_candidate, probe_own_image,
@@ -11,10 +13,10 @@ use super::{
 #[cfg(windows)]
 use crate::gateway::boot::spawn_detached_windows_with;
 use crate::gateway::boot::{
-    GATEWAY_EXE_NAME, GatewayPlan, POLL_INTERVAL, no_gateway_error, plan_gateway, sibling_gateway,
-    wait_for_launched_file_with,
+    GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway,
 };
 use crate::gateway::identity::GatewayAttachment;
+use crate::gateway::supervisor::wait_for_launched_file_cancellable_with;
 
 const FIXTURE_PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -221,36 +223,65 @@ fn the_sibling_probe_finds_only_the_gateway_exe_beside_the_desktop_app() {
     );
 }
 
+/// Runs the launch wait against the test binary's own process image.
+fn launch_wait_with<Health>(
+    run_dir: &Path,
+    budget: Duration,
+    health: Health,
+) -> anyhow::Result<GatewayDiscoveryFile>
+where
+    Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), HealthError>,
+{
+    wait_for_launched_file_cancellable_with(
+        run_dir,
+        budget,
+        &CancellationToken::new(),
+        health,
+        |run_dir, _| probe_own_image(run_dir),
+    )
+}
+
+fn launch_wait(run_dir: &Path, budget: Duration) -> anyhow::Result<GatewayDiscoveryFile> {
+    launch_wait_with(
+        run_dir,
+        budget,
+        gateway_api_discovery::wait_for_health_cancellable,
+    )
+}
+
+/// A loopback port nothing listens on.
+fn dead_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .expect("reserve a loopback port")
+        .port()
+}
+
 #[test]
 fn the_launch_wait_returns_once_the_file_appears_and_answers() {
     let run = tempfile::TempDir::new().expect("tempdir");
     let file = live_file(fixture_gateway("key"), "key");
-    let mut pauses = 0;
-
-    let waited =
-        wait_for_launched_file_with(run.path(), Duration::from_secs(5), probe_own_image, || {
-            pauses += 1;
-            file.write_to(run.path())
+    let writer = {
+        let run_dir = run.path().to_owned();
+        let file = file.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            file.write_to(&run_dir)
                 .expect("the launched gateway writes");
         })
+    };
+
+    let waited = launch_wait(run.path(), Duration::from_secs(5))
         .expect("the validated file lands and answers");
+    writer.join().expect("the writer finishes");
     assert_eq!(waited, file);
-    assert_eq!(
-        pauses, 1,
-        "the first poll finds no file and the next poll returns it"
-    );
 }
 
 #[test]
 fn the_launch_wait_times_out_when_no_file_appears() {
     let run = tempfile::TempDir::new().expect("tempdir");
-    let error = wait_for_launched_file_with(
-        run.path(),
-        Duration::from_millis(150),
-        probe_own_image,
-        || std::thread::sleep(POLL_INTERVAL),
-    )
-    .expect_err("a gateway that never writes must not hang boot");
+    let error = launch_wait(run.path(), Duration::from_millis(150))
+        .expect_err("a gateway that never writes must not hang boot");
     assert!(
         error
             .to_string()
@@ -266,18 +297,84 @@ fn the_launch_wait_rejects_a_key_the_live_process_does_not_accept() {
         .write_to(run.path())
         .expect("write");
 
-    let error = wait_for_launched_file_with(
-        run.path(),
-        Duration::from_millis(150),
-        probe_own_image,
-        || std::thread::sleep(POLL_INTERVAL),
-    )
-    .expect_err("an unaccepted discovery-file key must not publish");
+    let error = launch_wait(run.path(), Duration::from_millis(150))
+        .expect_err("an unaccepted discovery-file key must not publish");
+    let message = format!("{error:#}");
     assert!(
-        error
-            .to_string()
-            .contains("no validated gateway discovery file"),
-        "the error names the validation failure without exposing the key: {error}"
+        message.contains("no validated gateway discovery file"),
+        "the error names the validation failure: {message}"
+    );
+    assert!(
+        message.contains("bearer was rejected") && !message.contains("rejected-key"),
+        "the error reports the rejection without exposing the key: {message}"
+    );
+}
+
+#[test]
+fn the_launch_wait_completes_when_a_dead_port_file_is_replaced_by_a_live_one() {
+    let run = tempfile::TempDir::new().expect("tempdir");
+    live_file(dead_port(), "key")
+        .write_to(run.path())
+        .expect("write the dead-port file");
+    let live = live_file(fixture_gateway("key"), "key");
+    let mut probes = 0;
+
+    let waited = launch_wait_with(
+        run.path(),
+        Duration::from_secs(5),
+        |url, budget, cancellation| {
+            probes += 1;
+            let probe =
+                gateway_api_discovery::wait_for_health_cancellable(url, budget, cancellation);
+            if probe.is_err() {
+                live.write_to(run.path())
+                    .expect("the gateway rewrites its discovery file");
+            }
+            probe
+        },
+    )
+    .expect("the wait polls past the dead port and attaches to the live gateway");
+
+    assert_eq!(waited, live);
+    assert_eq!(
+        probes, 2,
+        "one failed probe of the dead port, then one of the live gateway"
+    );
+}
+
+#[test]
+fn the_launch_wait_fails_at_its_budget_with_the_last_probe_error() {
+    let run = tempfile::TempDir::new().expect("tempdir");
+    let port = dead_port();
+    live_file(port, "key")
+        .write_to(run.path())
+        .expect("write the dead-port file");
+    let budget = Duration::from_millis(600);
+    let mut probes = 0;
+    let started = Instant::now();
+
+    let error = launch_wait_with(run.path(), budget, |url, budget, cancellation| {
+        probes += 1;
+        gateway_api_discovery::wait_for_health_cancellable(url, budget, cancellation)
+    })
+    .expect_err("a file that never names a live gateway must not hang boot");
+
+    assert!(
+        started.elapsed() >= budget,
+        "the wait polls until its budget runs out"
+    );
+    assert!(
+        probes >= 2,
+        "a failed health probe does not end the wait: {probes} probes"
+    );
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("no validated gateway discovery file"),
+        "the error names the budget failure: {message}"
+    );
+    assert!(
+        message.contains(&format!("http://127.0.0.1:{port}/health")),
+        "the error reports the last probe: {message}"
     );
 }
 
