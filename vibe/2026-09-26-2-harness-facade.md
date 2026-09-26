@@ -393,7 +393,7 @@ The existing workspace gates cover this change: the build, the build-xtask archi
 
 <step-4>
 
-### Step 4: Complete the harness public surface
+### Step 4: Complete the harness public surface [completed]
 
 - Component: harness facade
 - Piece: public surface, built after the restructure (Step 3).

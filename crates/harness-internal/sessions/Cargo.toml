@@ -50,9 +50,16 @@ workspace-hack.workspace = true
 # against, and the tag fixture its server is spawned under.
 axum.workspace = true
 harness-runner = { workspace = true, features = ["test-support"] }
+# `Harness::log` for the suites that read back what a session recorded.
+harness-sessions = { path = ".", default-features = false, features = ["test-support"] }
 # The discovery and session suites seed an agents directory on disk.
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+# `Harness::log`, the run log handle the integration suites read records
+# through; nothing here reaches the harness proper.
+test-support = []
 
 [lints]
 workspace = true

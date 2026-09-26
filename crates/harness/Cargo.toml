@@ -12,6 +12,7 @@ documentation = "https://cppalliance.github.io/promptforge/harness/harness/index
 # Every crate that defines a re-exported item: each `pub use` names the
 # defining crate's path.
 [dependencies]
+harness-log.workspace = true
 harness-runner.workspace = true
 harness-sessions.workspace = true
 workspace-hack.workspace = true

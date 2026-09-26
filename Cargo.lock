@@ -2593,6 +2593,7 @@ dependencies = [
 name = "harness"
 version = "0.3.0"
 dependencies = [
+ "harness-log",
  "harness-runner",
  "harness-sessions",
  "workspace-hack",
@@ -2671,6 +2672,7 @@ dependencies = [
  "harness-log",
  "harness-models",
  "harness-runner",
+ "harness-sessions",
  "harness-web",
  "promptforge",
  "rand 0.9.5",

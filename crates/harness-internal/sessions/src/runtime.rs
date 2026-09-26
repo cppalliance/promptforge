@@ -177,12 +177,19 @@ impl Harness {
         discover_agents(&self.config.agents_path)
     }
 
-    /// The run log, opened under the state directory on first use.
+    /// The run log, opened under the state directory on first use; the
+    /// test-only way a suite reads back what the sessions recorded.
     ///
     /// # Errors
     /// Returns the log's error when the state directory cannot be created
     /// or the log cannot be opened.
+    #[cfg(feature = "test-support")]
     pub async fn log(&self) -> Result<SharedLog, LogError> {
+        self.run_log().await
+    }
+
+    /// The run log, opened under the state directory on first use.
+    pub(crate) async fn run_log(&self) -> Result<SharedLog, LogError> {
         self.log
             .get_or_try_init(|| async {
                 tokio::fs::create_dir_all(&self.config.state_dir).await?;
@@ -243,7 +250,7 @@ impl Harness {
             .await
             .unwrap_or_else(|join| Err(io::Error::other(join)))
             .map_err(|source| LaunchError::SessionState { source })?;
-        let log = self.log().await?;
+        let log = self.run_log().await?;
 
         let (events, lifecycle_rx) = mpsc::unbounded_channel();
         let (cancellations, cancellations_rx) = mpsc::channel(CANCELLATION_CAPACITY);

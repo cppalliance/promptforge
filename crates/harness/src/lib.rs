@@ -29,3 +29,12 @@ pub mod cancel {
     pub use harness_runner::cancel::scope;
     pub use harness_runner::cancel::wait_cancelled;
 }
+
+pub mod log {
+    #![doc = include_str!("log.md")]
+
+    pub use harness_log::DatabaseSource;
+    pub use harness_log::JsonSource;
+    pub use harness_log::LogError;
+    pub use harness_log::RunId;
+}
