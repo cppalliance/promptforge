@@ -8,5 +8,5 @@ This crate owns the desktop app and its product lifecycle.
 - Gateway launch is detached from the desktop app through the gateway-api-discovery launch contract. The desktop app never hosts the Gateway in-process.
 - The desktop app does not read Gateway configuration, own the Gateway discovery file, or kill the Gateway as part of ordinary teardown.
 - Quit requests authenticated shutdown only for a sidecar-attached Gateway. A LAN-configured Gateway remains running.
-- The gateway supervisor (`src/gateway/supervisor/`) stays in this crate. Porting it to a shared crate defers to the headless agent mode plan, which shapes the shared API.
+- The gateway supervisor (`src/gateway/supervisor.rs` plus `src/gateway/supervisor/`) stays in this crate. Porting it to a shared crate defers to the headless agent mode plan, which shapes the shared API.
 - Build the window capability programmatically for the exact bound port. Do not replace it with a wildcard-port capability file.

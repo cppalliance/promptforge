@@ -11,6 +11,7 @@ alwaysApply: false
 - Dependencies flow one way: server -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph.
 - Tiers: vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`) <- services (`workshop-gateway`, `workshop-menu`, `workshop-status`) <- features (`workshop-user-state`, `workshop-workspace`) <- server (`workshop-server`). The sessions subsystem has no crate of its own; it lives inside `workshop-server`.
 - Crates in the same tier never depend on each other, with one exception: `workshop-registry` depends on `workshop-protocol`, because the status push-channel slot holds `workshop-protocol`'s `StatusBarUpdate`. Otherwise same-tier crates meet through `workshop-protocol` wire types and `workshop-registry` proxy slots.
+- The desktop app (package `workshop`) sits outside the tiers and depends on `workshop-server-api`, never on `workshop-server`; the facade is its entire view of the server. `cargo test -p build-xtask` enforces this.
 - Every `workshop-*` crate's `lib.rs` opens with a `//!` doc carrying a `## Invariants` marker that lists what the crate may depend on and what it may not. Read it before adding an import.
 - `lib.rs` is a facade only: crate docs, crate-level attributes, `mod` declarations, and `pub use` re-exports. No logic.
 

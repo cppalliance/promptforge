@@ -1026,7 +1026,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-21>
 
-### Step 21: Update the docs and run the exit gates
+### Step 21: Update the docs and run the exit gates [completed]
 
 - Component: Docs and exit
 - Component placement: last, because the docs describe every move and the exit gates compare the finished tree with Step 1's baselines.
@@ -1083,6 +1083,30 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
     - `crates/workshop/ui/src/parts/editor/editor-dialog.ts`
   - Record each result in an `Exit results` list inside this step, with the Step 1 baseline count beside it for comparison.
 - Commit: the doc edits and the recorded exit results.
+- Exit results (2026-09-25, at `3cac5eb5` plus this step's doc edits; no command failed, so none was rerun and no test is intermittent). Step 1's baseline sits in brackets:
+  - `cargo workshop`: pass [pass]
+  - `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`: pass, sidecar staged and left staged [pass]
+  - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`: pass, 3937 passed, 54 skipped, with the same leaky pass `build-workshop::interruption platform_interrupt_after_staging_kills_child_cleans_and_fails` [3936 passed, 54 skipped, same leaky pass]
+  - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`: pass, 281 passed [281 passed]
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass, 274 passed, 4 skipped [252 passed, 4 skipped]
+  - `cargo nextest run --locked -p workshop-server --features headless`: pass, 165 passed, 2 skipped [146 passed, 2 skipped]
+  - `cargo nextest run --locked -p workshop-workspace --all-features`: pass, 151 passed, 0 skipped [150 passed, 0 skipped]
+  - `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`: pass, 0 doctests [0 doctests]
+  - `cargo doc --locked --no-deps -p workshop-server --document-private-items` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
+  - `cargo test -p build-xtask`: pass, 171 passed, 18 ignored [169 passed, 18 ignored]
+  - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`: pass [pass]
+  - `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`: pass [pass]
+  - `cargo check -p gateway --no-default-features`: pass [pass]
+  - `cargo fmt --all --check`: pass [pass]
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
+  - `cargo doc -p promptforge --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
+  - `cargo +nightly-2026-09-05 xtask api --check`: pass, 0 violations, and the listing matches `public-api.txt` [same]
+  - `mdbook build guide`: pass [pass]
+  - `npm run build` in `crates/workshop/ui`: pass [pass]
+  - `npm test` in `crates/workshop/ui`: pass, 139 passed, 0 failed [139 passed, 0 failed]
+  - `npm run typecheck` in `crates/workshop/ui`: pass [pass]
+  - Retired strings: all 12 searches pass. Eleven find nothing, and `file/save_as` finds only `crates/workshop/workspace/tests/it/main.rs:94`, inside `save_workspace_as_answers_only_on_the_hyphenated_route`, which asserts the old route answers 404.
+  - Retired paths: none of the 15 listed paths exists.
 
 </step-21>
 

@@ -1,7 +1,11 @@
 //! workshop-gateway - the gateway subsystem: the bearer-authenticated
-//! HTTP client for the PromptForge gateway's OpenAI-compatible API, the
-//! replaceable endpoint binding and discovery-file resolution, the
-//! reachability heartbeat, and the gateway progress subscriber.
+//! HTTP client for the PromptForge gateway's OpenAI-compatible API
+//! (`client`), the replaceable endpoint binding (`binding`) and
+//! discovery-file resolution (`resolve`), the reachability heartbeat
+//! (`heartbeat`), the catalog and profile refresh the heartbeat and the
+//! server's profile switch share (`refresh`), and the gateway progress
+//! subscriber (`progress`). Every production module is private, and
+//! the crate root's re-exports are the one public path.
 //!
 //! ## Invariants
 //!

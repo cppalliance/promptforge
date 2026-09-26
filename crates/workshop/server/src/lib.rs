@@ -12,7 +12,8 @@
 //! decomposition: the feature subsystems (`workshop-user-state`,
 //! `workshop-workspace`, and the agent-sessions subsystem in `agents`,
 //! which serves the `/agents/ws` agent-session socket and the
-//! `/v1/models` catalog relay), the `/ws` workshop socket in
+//! `/v1/models` catalog relay and owns that socket's wire frames in
+//! `agents::wire`), the `/ws` workshop socket in
 //! `workshop_socket` (the two sockets share `websocket`), the
 //! domain services (`workshop-gateway`, `workshop-status`,
 //! `workshop-menu`), and the vocabulary crates (`workshop-protocol`,
