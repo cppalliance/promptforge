@@ -63,7 +63,7 @@ tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)
 end)
 ````
 
-The handler runs as a Lua function in the section's own state. The parameter table is rendered to the model as a JSON schema with required properties; each value is a bare type string or a `{type, description}` pair. The handler's returned string goes back to the model verbatim and trusted. The handler can use `store` and section-global variables, but it cannot call `jump`, and a handler error fails the run with the handler's message. A local tool alias cannot collide with a declared slot alias or with another local alias, and every tool schema advertised to the model is validated before it is sent.
+The handler runs as a Lua function in the section's own state. The parameter table is rendered to the model as a JSON schema with required properties; each value is a bare type string or a `{type, description}` pair. The handler's returned string goes back to the model verbatim and trusted. The handler can use `store`, section-global variables, and the other suspending calls (`tools.call`, `models.infer`, `call`, `tasks.*`, and `user_input`), but it still cannot call `jump`, and a handler error fails the run with the handler's message. A local tool alias cannot collide with a declared slot alias or with another local alias, and every tool schema advertised to the model is validated before it is sent.
 
 ## The decision-tool recipe
 

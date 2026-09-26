@@ -266,7 +266,7 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
   - Instruction-budget and cancellation errors raised inside a handler are caught by the shim's `raw_pcall` and raised again unchanged after the `local_tool_done` yield.
   - A suspending call still cannot yield through a C function, such as a `table.sort` comparator or a metamethod. This limitation already exists and is unchanged.
   - The doc comment on `LocalTools::call` lists only `call`, `fanout`, and `models.infer` as off limits (`crates/promptforge-internal/lua/src/vm.rs` lines 175-177). It goes away with that method. The module docs in `tool_call.rs`, `coro.rs`, `request.rs`, and `answer.rs` must describe the handshake.
-  - No generator for `guide/promptforge-language-guide.md` was found, so the `07-tools.md` edit is copied into it by hand.
+  - `guide/promptforge-language-guide.md` is generated from the chapter files by `cargo run -p build-user-guide` and is never edited by hand. Regenerate it after changing `07-tools.md`.
   - Replay: store and bound-tool calls inside a handler are answered from the journal, and the handler runs again. The handler must therefore be deterministic given its inputs, which is already true of section Lua.
 
 ### Deferred and Out of Scope
@@ -404,12 +404,12 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
 
 <step-2>
 
-### Step 2: Update the language guide and run the exit gates
+### Step 2: Update the language guide and run the exit gates [completed]
 
 - Component: `none`
 - Depends on Step 1, whose behavior the guide now describes.
 - `guide/src/language/07-tools.md` line 66: change "The handler can use `store` and section-global variables, but it cannot call `jump`" so it says a handler can use `store`, section-global variables, and the other suspending calls (`tools.call`, `models.infer`, `call`, `tasks.*`, and `user_input`), but still cannot call `jump`. Leave the rest of the paragraph unchanged.
-- `guide/promptforge-language-guide.md`: copy the same edit in by hand, because no generator for this aggregate guide exists.
+- `guide/promptforge-language-guide.md`: regenerate with `cargo run --locked -q -p build-user-guide`, which rebuilds the combined guide from the chapter files. Only this file and `07-tools.md` should change.
 - Verification, the Exit criteria from the Testing Plan:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`.
