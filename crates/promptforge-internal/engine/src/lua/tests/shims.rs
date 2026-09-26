@@ -1,14 +1,17 @@
 //! The yield shims installed on a scheduler-mode section VM produce
 //! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
 //! `tools.call` in their alias and handle forms, the local tool
-//! handshake, the optional leading model handle, the captured alias
-//! globals, and the methodless handle contract.
+//! handshake, the loop's per-call requesting turn, the optional leading
+//! model handle, the captured alias globals, and the methodless handle
+//! contract.
 
 use promptforge_types::ids::TaskOrigin;
+use promptforge_types::metrics::ToolCallEvent;
 use serde_json::json;
 
 use crate::execute::protocol::{
-    Answer, LocalToolOutcome, Request, StoreOp, StoreOutcome, ToolCallOutcome, YieldParse,
+    Answer, ChatResult, LocalToolOutcome, Request, StoreOp, StoreOutcome, ToolCallOutcome,
+    YieldParse,
 };
 use crate::model::ModelSet;
 
@@ -244,6 +247,63 @@ fn a_local_tool_handler_runs_inside_the_block_coroutine() {
         )
         .expect("the block returns a string");
     assert_eq!(text, "stored hi|true|true");
+}
+
+#[test]
+fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
+    // A round requesting two calls under turn 7: each `tool_call` yield
+    // carries that turn beside its call id, so a call reports the round
+    // that requested it however far the counter moved in between.
+    let vm = scheduler_vm_with_tools(&test_models(), &test_tools(), None);
+    let (thread, yielded) = start(
+        &vm,
+        "local msgs = messages.new()\nmsgs:user('hi')\nmodels.loop(msgs)\nreturn #msgs",
+    );
+    assert!(matches!(
+        parse_request(&vm, yielded),
+        Request::DrainTaskNotices
+    ));
+    let yielded = resume_with(&vm, &thread, Answer::DrainTaskNotices(Ok(Vec::new())));
+    assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
+    let call = |id: &str| ToolCallEvent {
+        id: id.to_owned(),
+        name: "echo".to_owned(),
+        arguments: json!({ "value": id }),
+    };
+    let round = ChatResult {
+        overflow: false,
+        overflow_reason: None,
+        reply: None,
+        empty_detail: None,
+        tool_calls: Some(vec![call("c1"), call("c2")]),
+        finish_reason: Some("tool_calls".to_owned()),
+        model: "test-model".to_owned(),
+        metrics: None,
+        turn: 7,
+    };
+    let mut yielded = resume_with(&vm, &thread, Answer::Chat(Ok(Box::new(round))));
+    for expected in ["c1", "c2"] {
+        match parse_request(&vm, yielded) {
+            Request::ToolCall { call_id, turn, .. } => {
+                assert_eq!(call_id.as_deref(), Some(expected));
+                assert_eq!(
+                    turn,
+                    Some(7),
+                    "{expected} carries the requesting round's turn"
+                );
+            }
+            other => panic!("the loop yields the model's tool call, got {other:?}"),
+        }
+        yielded = resume_with(
+            &vm,
+            &thread,
+            Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed".to_owned()))),
+        );
+    }
+    assert!(matches!(
+        parse_request(&vm, yielded),
+        Request::DrainTaskNotices
+    ));
 }
 
 #[test]

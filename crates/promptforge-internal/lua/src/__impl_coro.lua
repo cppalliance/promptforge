@@ -154,18 +154,21 @@ local function tools_call(alias_or_tool, args)
 end
 
 -- The model-issued form of the same dispatch: `call_id` is the id the model
--- attached to its tool call. The driver always resumes a bound tool with
--- content (a tool's own failure becomes untrusted failure text) and fires
--- ToolResult under the id. Shim-internal: the loop shim calls it per
+-- attached to its tool call, and `turn` the turn of the round that
+-- requested it. The driver always resumes a bound tool with content (a
+-- tool's own failure becomes untrusted failure text) and fires ToolResult
+-- under the id and that turn, however far a local handler earlier in the
+-- batch moved the counter. Shim-internal: the loop shim calls it per
 -- requested tool call; authors never see it, and a hand-built yield
--- including `call_id` is refused as a malformed request when its shape is
--- wrong.
-local function tools_call_as_model(call_id, alias_or_tool, args)
+-- including `call_id` or `turn` is refused as a malformed request when its
+-- shape is wrong.
+local function tools_call_as_model(call_id, alias_or_tool, args, turn)
   return dispatch_tool({
     op = "tool_call",
     alias = alias_or_tool,
     args = args,
     call_id = call_id,
+    turn = turn,
   })
 end
 
@@ -224,12 +227,13 @@ end
 --
 -- Per round: drain pending task notices, yield one `chat` over the list;
 -- on an overflow round invoke the compactor; on tool calls yield one
--- `tool_call` per call under its call id, buffer every result, then append
--- the assistant tool-call record and one tool record per result, so the
--- list never shows a half-answered batch; on a reply append it and return
--- nil; on an empty reply with `finish_reason == "stop"` after at least one
--- answered tool call append an empty assistant record and return nil (the
--- model's clean exit); on any other empty reply raise empty_model_reply.
+-- `tool_call` per call under its call id and the round's turn, buffer
+-- every result, then append the assistant tool-call record and one tool
+-- record per result, so the list never shows a half-answered batch; on a
+-- reply append it and return nil; on an empty reply with
+-- `finish_reason == "stop"` after at least one answered tool call append
+-- an empty assistant record and return nil (the model's clean exit); on
+-- any other empty reply raise empty_model_reply.
 -- Past the round cap raise tool_loop_exhausted. The shim emits no events:
 -- the scheduler reports each round as it applies the round's answer.
 local function models_loop(...)
@@ -264,7 +268,7 @@ local function models_loop(...)
     if calls then
       local results = {}
       for index, call in ipairs(calls) do
-        results[index] = tools_call_as_model(call.id, call.name, call.arguments)
+        results[index] = tools_call_as_model(call.id, call.name, call.arguments, round.turn)
       end
       local record_calls = {}
       for index, call in ipairs(calls) do

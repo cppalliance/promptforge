@@ -32,7 +32,6 @@
 mod schemas;
 
 use std::fmt::Write as _;
-use std::sync::atomic::Ordering;
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::tools::OutputTrust;
@@ -182,7 +181,9 @@ impl Scheduler {
     /// whose answer comes from the host's log. Only the caller's own
     /// bookkeeping can fail here (a lost frame, a poisoned runtime); every
     /// model-facing fault is the answer's text. The `tool_call` arm routes
-    /// only [`is_task_builtin`] names here.
+    /// only [`is_task_builtin`] names here. `turn` is the turn the call
+    /// was dispatched under, which every report of its answer carries,
+    /// including a parked or issued answer's later one.
     ///
     /// # Errors
     /// Returns the internal fault the arm met, or [`Error::Internal`] for
@@ -193,13 +194,14 @@ impl Scheduler {
         name: &str,
         args: &Value,
         call_id: &str,
+        turn: u32,
     ) -> Result<ToolCallDispatch> {
         let outcome = match name {
             "task" => BuiltinOutcome::Answered(self.builtin_task(id, args)?),
             "task_cancel" => BuiltinOutcome::Answered(self.builtin_task_cancel(id, args)),
             "task_status" => BuiltinOutcome::Answered(self.builtin_task_status(id, args)),
-            "await_tasks" => self.builtin_await_tasks(id, args, call_id),
-            "task_events" => self.builtin_task_events(id, args, call_id),
+            "await_tasks" => self.builtin_await_tasks(id, args, call_id, turn),
+            "task_events" => self.builtin_task_events(id, args, call_id, turn),
             _ => {
                 return Err(Error::internal(
                     "the tool_call arm routes only the answered task built-ins here",
@@ -212,7 +214,7 @@ impl Scheduler {
             BuiltinOutcome::Issued => return Ok(ToolCallDispatch::Issued),
         };
         let started = answer.started;
-        let answer = self.report_builtin_answer(id, name, call_id, answer);
+        let answer = self.report_builtin_answer(id, name, call_id, turn, answer);
         Ok(match started {
             Some(child) => ToolCallDispatch::Started(answer, child),
             None => ToolCallDispatch::Answered(answer),
@@ -220,15 +222,16 @@ impl Scheduler {
     }
 
     /// Reports one built-in's answer - the succeeded/failed observation and
-    /// the `ToolResult` under the model's call id, trusted unless the
-    /// answer says otherwise - and renders it as the tool call's answer.
-    /// Shared by the immediate answers, the `await_tasks` wake, and the
-    /// `task_events` answer.
+    /// the `ToolResult` under the model's call id and the `turn` the call
+    /// was dispatched under, trusted unless the answer says otherwise - and
+    /// renders it as the tool call's answer. Shared by the immediate
+    /// answers, the `await_tasks` wake, and the `task_events` answer.
     pub(super) fn report_builtin_answer(
         &self,
         id: ChainIndex,
         name: &str,
         call_id: &str,
+        turn: u32,
         answer: BuiltinAnswer,
     ) -> Answer<Error> {
         let chain = &self.chains[id.index()];
@@ -242,14 +245,7 @@ impl Scheduler {
                 lifecycle::TOOL_CALL_FAILED
             },
         );
-        emitter.tool_result(
-            section,
-            chain.ctx.turns().load(Ordering::Relaxed),
-            call_id,
-            name,
-            &answer.text,
-            answer.trust,
-        );
+        emitter.tool_result(section, turn, call_id, name, &answer.text, answer.trust);
         Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(answer.text)))
     }
 

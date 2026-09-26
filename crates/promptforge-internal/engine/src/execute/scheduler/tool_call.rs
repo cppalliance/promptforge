@@ -16,8 +16,10 @@
 //! issued as a `ToolCall` effect whose answer the driver applies through
 //! the shared dispatch body. `call_id: Some` always resumes a bound tool
 //! with content - a tool's own failure becomes untrusted failure text -
-//! and `ToolResult` fires under the id; `call_id: None` keeps the
-//! raise-at-call-site behavior, and its `ToolResult` fires under no id.
+//! and `ToolResult` fires under the id and the turn of the round that
+//! requested the call; `call_id: None` keeps the raise-at-call-site
+//! behavior, and its `ToolResult` fires under no id and the turn at
+//! dispatch.
 //!
 //! A local tool call is a two-yield handshake. The `tool_call` answer is
 //! [`ToolCallOutcome::Local`], which hands the shim the handler, and the
@@ -116,15 +118,23 @@ impl Scheduler {
     /// answer's rules - the model-issued body under a `call_id`, else the
     /// script body classified by the binding's declared output kind - are
     /// the continuation's, applied when the answer lands.
+    ///
+    /// Every report the call makes carries `turn`, the turn of the model
+    /// round that requested it, so a local handler earlier in the same
+    /// batch that runs model rounds cannot shift it. A script call, or a
+    /// model-issued one yielded without a turn, reports the counter's value
+    /// at dispatch.
     fn prepare_tool_call(
         &mut self,
         id: ChainIndex,
         alias: &str,
         args: serde_json::Value,
         call_id: Option<String>,
-        _turn: Option<u32>,
+        turn: Option<u32>,
     ) -> Result<ToolCallDispatch> {
-        let tool_set = self.chains[id.index()].ctx.tool_set_snapshot()?;
+        let chain = &self.chains[id.index()];
+        let tool_set = chain.ctx.tool_set_snapshot()?;
+        let turn = turn.unwrap_or_else(|| chain.ctx.turns().load(Ordering::Relaxed));
         // The reservation wins over every lookup: a bound or local tool
         // registered under one of these names is never reachable here. The
         // built-ins serve the model; the author's own script reaches the
@@ -132,15 +142,13 @@ impl Scheduler {
         // unbound.
         if RESERVED_TOOL_NAMES.contains(&alias) {
             if let Some(call_id) = call_id.as_deref().filter(|_| is_task_builtin(alias)) {
-                return self.answer_task_builtin(id, alias, &args, call_id);
+                return self.answer_task_builtin(id, alias, &args, call_id, turn);
             }
             return Err(unbound_tool_call(&tool_set, alias));
         }
         let chain = &mut self.chains[id.index()];
         let ctx = chain.ctx.clone();
-        let report = ScriptReport {
-            turn: chain.ctx.turns().load(Ordering::Relaxed),
-        };
+        let report = ScriptReport { turn };
         let frame = chain
             .frame
             .as_mut()

@@ -38,6 +38,9 @@ use super::{ChainIndex, Scheduler};
 pub(super) struct AwaitTasks {
     /// The model's call id, for the `ToolResult` the wake reports under.
     call_id: String,
+    /// The turn the call was dispatched under, which the wake's
+    /// `ToolResult` reports.
+    turn: u32,
     /// The timeout timer's slot id, when the call gave a timeout; listed
     /// last in the wait set.
     timer: Option<TaskId>,
@@ -93,6 +96,7 @@ impl Scheduler {
         id: ChainIndex,
         args: &Value,
         call_id: &str,
+        turn: u32,
     ) -> BuiltinOutcome {
         let seconds = match timeout_argument(args) {
             Ok(seconds) => seconds,
@@ -127,6 +131,7 @@ impl Scheduler {
         chain.waiting_on = set;
         chain.awaiting = Some(AwaitTasks {
             call_id: call_id.to_owned(),
+            turn,
             timer,
             seconds,
         });
@@ -161,6 +166,7 @@ impl Scheduler {
             owner,
             "await_tasks",
             &awaiting.call_id,
+            awaiting.turn,
             BuiltinAnswer::served(text),
         );
         self.answer_inline(owner, answer);

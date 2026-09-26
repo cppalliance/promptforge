@@ -314,7 +314,7 @@ All paths are relative to the `promptforge` repository root.
 
 <step-1>
 
-### Step 1: Turn fields in the shim protocol
+### Step 1: Turn fields in the shim protocol [completed]
 
 - Component: batch turn (DEBT-LTC-C1)
 - Component order: first. It removes the only debt the target introduced, which is the primary cleanup goal. It is independent of the other two components, and settling its `__impl_coro.lua` and `event.md` edits first lets the later components edit those files against their final shape.
@@ -337,7 +337,7 @@ All paths are relative to the `promptforge` repository root.
 
 <step-2>
 
-### Step 2: Report the requesting round's turn on every model-issued result
+### Step 2: Report the requesting round's turn on every model-issued result [completed]
 
 - Component: batch turn (DEBT-LTC-C1)
 - Piece: turn propagation. Built after the protocol vocabulary piece, which it depends on. The shim, scheduler, and built-in changes form one behavior, "every model-issued `ToolResult` carries the batch turn", and one regression test set covers all of it, so they ship together.

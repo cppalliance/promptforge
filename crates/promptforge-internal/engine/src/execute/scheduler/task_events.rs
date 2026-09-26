@@ -47,6 +47,9 @@ pub(super) enum TaskEventsReader {
         /// The model's call id, for the `ToolResult` the answer reports
         /// under.
         call_id: String,
+        /// The turn the call was dispatched under, which the answer's
+        /// `ToolResult` reports.
+        turn: u32,
     },
 }
 
@@ -133,13 +136,14 @@ impl Scheduler {
 
     /// The model's `task_events` built-in: over a model task the caller
     /// owns, issues the read as a `TaskEvents` effect under the model's
-    /// call id and parks the chain; every argument fault is the answer's
-    /// text.
+    /// call id and dispatch turn and parks the chain; every argument fault
+    /// is the answer's text.
     pub(super) fn builtin_task_events(
         &mut self,
         id: ChainIndex,
         args: &Value,
         call_id: &str,
+        turn: u32,
     ) -> BuiltinOutcome {
         let task = match self.model_task(id, "task_events", args) {
             Ok(task) => task,
@@ -152,6 +156,7 @@ impl Scheduler {
         let effect = Effect::TaskEvents { task, last };
         let reader = TaskEventsReader::Builtin {
             call_id: call_id.to_owned(),
+            turn,
         };
         self.issue(id, effect, Continuation::TaskEvents(reader));
         self.chains[id.index()].blocked = Some("tasks");
@@ -170,14 +175,14 @@ impl Scheduler {
     ) -> Answer<Error> {
         match reader {
             TaskEventsReader::Shim => Answer::TaskEvents(Ok(events)),
-            TaskEventsReader::Builtin { call_id } => {
+            TaskEventsReader::Builtin { call_id, turn } => {
                 let answer = if events.is_empty() {
                     BuiltinAnswer::served("no new events".to_owned())
                 } else {
                     let nonce = self.chains[chain.index()].ctx.nonce();
                     BuiltinAnswer::served_untrusted(nonce.wrap(&render_events(&events)))
                 };
-                self.report_builtin_answer(chain, "task_events", call_id, answer)
+                self.report_builtin_answer(chain, "task_events", call_id, *turn, answer)
             }
         }
     }
