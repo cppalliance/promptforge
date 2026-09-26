@@ -33,6 +33,7 @@ ManifestDPIAwareness PerMonitorV2
 !include "FileAssociation.nsh"
 !include "Win\COM.nsh"
 !include "Win\Propkey.nsh"
+!include "Win\RestartManager.nsh"
 !include "StrFunc.nsh"
 ${StrCase}
 ${StrLoc}
@@ -723,7 +724,7 @@ SectionEnd
 Section "PromptForge Workshop" SecWorkshop
  SetOutPath $INSTDIR
 
- !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
  ; Copy main executable
  File "${MAINBINARYSRCPATH}"
@@ -779,11 +780,11 @@ Section "PromptForge Gateway" SecGateway
 
  ; The updater's passive install only auto-kills the main binary (the
  ; CheckIfAppIsRunning in the Workshop section), so a running gateway
- ; would file-lock its own overwrite and fail the update. Stop it by
- ; process name through the same nsis_tauri_utils mechanism - parsing
+ ; would file-lock its own overwrite and fail the update. Detect it by
+ ; process name through nsis_tauri_utils - parsing
  ; %USERPROFILE%\.promptforge\run\gateway.json for the pid in NSIS buys
- ; nothing when the image name is unique - and relaunch it in the
- ; Finalize section. Living inside the Gateway section, the stop runs
+ ; nothing when the image name is unique - stop it through the same
+ ; CheckIfAppIsRunning, and relaunch it in the Finalize section. Living inside the Gateway section, the stop runs
  ; only when the component is selected: a declined section leaves the
  ; payload untouched, and a daemon the install does not overwrite is
  ; not the installer's to kill.
@@ -795,7 +796,7 @@ Section "PromptForge Gateway" SecGateway
  Pop $R0
  ${If} $R0 = 0
  StrCpy $GatewayWasRunning 1
- !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\promptforge-gateway.exe" "${PRODUCTNAME}"
  ${EndIf}
 
  ; Copy external binaries (promptforge-gateway.exe via bundle.externalBin,
@@ -935,7 +936,7 @@ Section "un.Gateway"
  !insertmacro NSIS_HOOK_PREUNINSTALL
  !endif
 
- !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\promptforge-gateway.exe" "${PRODUCTNAME}"
 
  ; Delete external binaries (promptforge-gateway.exe)
  {{#each binaries}}
@@ -944,7 +945,7 @@ Section "un.Gateway"
 SectionEnd
 
 Section "un.Workshop"
- !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
  ; Delete the main executable
  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
