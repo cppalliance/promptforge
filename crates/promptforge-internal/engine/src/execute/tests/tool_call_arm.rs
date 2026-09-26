@@ -18,7 +18,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 /// Records every observation and every `on_tool_result` report as one
 /// rendered line, so a test reads the arm's whole reporting sequence.
 #[derive(Default)]
-struct ToolRecorder(Mutex<Vec<String>>);
+pub(super) struct ToolRecorder(Mutex<Vec<String>>);
 
 impl ToolRecorder {
     fn push(&self, line: String) {
@@ -28,7 +28,7 @@ impl ToolRecorder {
             .push(line);
     }
 
-    fn lines(&self) -> Vec<String> {
+    pub(super) fn lines(&self) -> Vec<String> {
         self.0
             .lock()
             .expect("the tool recorder mutex is not poisoned")
@@ -298,7 +298,7 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
 }
 
 /// The `tool_result` lines `recorder` saw, in order.
-fn tool_result_lines(recorder: &ToolRecorder) -> Vec<String> {
+pub(super) fn tool_result_lines(recorder: &ToolRecorder) -> Vec<String> {
     recorder
         .lines()
         .into_iter()

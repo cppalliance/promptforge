@@ -389,7 +389,7 @@ All paths are relative to the `promptforge` repository root.
 
 <step-4>
 
-### Step 4: State the local tool failure exception in the event contract
+### Step 4: State the local tool failure exception in the event contract [completed]
 
 - Component: event contract correction (DEBT-LTC-X2)
 - Component order: last. It is a documentation change plus one pinning test, depends on nothing else, and lands after Step 2's line-398 rewording so the finished contract paragraph can be read as a whole. Its test goes into `local_tools.rs` after Step 3's edits to that file. Because it is last, it also carries the plan's exit checks.

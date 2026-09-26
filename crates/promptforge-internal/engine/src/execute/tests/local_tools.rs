@@ -7,6 +7,7 @@
 
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
+use super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::lua::ToolSet;
 use crate::test_support::tokio_driver::TokioDriver;
@@ -111,7 +112,7 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     ])
     .await;
     let prompt = parse(&grab_loop("error('handler exploded')"));
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Arc::new(ToolRecorder::default());
     let (ctx, host) = loop_context_observed(
         &prompt,
         ToolSet::default(),
@@ -125,11 +126,14 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
         error.to_string().contains("handler exploded"),
         "the handler's error must surface: {error}"
     );
+    let lines = recorder.lines();
     assert!(
-        recorder
-            .events()
-            .contains(&("Only".to_string(), detail::TOOL_CALL_FAILED.to_string())),
-        "the failed handler must be observed as a tool-call failure"
+        lines.contains(&format!("Only: {}", detail::TOOL_CALL_FAILED)),
+        "the failed handler must be observed as a tool-call failure: {lines:?}"
+    );
+    assert!(
+        tool_result_lines(&recorder).is_empty(),
+        "call_1 reports no ToolResult, so the model never sees the failure: {lines:?}"
     );
     assert_eq!(
         gateway.call_count(),
