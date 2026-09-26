@@ -286,7 +286,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Run and record the exit commands
+### Step 4: Run and record the exit commands [completed]
 
 - Component: Exit record
 - Debt: DEBT-FIX-01, DEBT-STRUCT-01, and DEBT-STRUCT-02.
@@ -313,6 +313,22 @@ isProject: false
 - Verify: every exit command is at least as green as its bracketed Step 21 number, and every scope check holds.
 - Dependencies: Steps 1, 2, and 3.
 - Commit: the repository plan copy with the recorded exit results.
+- Exit results (2026-09-26, at `4ab9729e` on Windows; no command failed, so none was rerun and no test is intermittent). The matching result from the `Exit results` list under Step 21 of `vibe/2026-09-25-3-workshop-structure.md` sits in brackets:
+  - Setup: `npm ci` in both UI packages and `cargo build --locked -p gateway --no-default-features`: pass. The sidecar was still staged from Step 2, so it wasn't staged again [pass, sidecar staged and left staged]
+  - `cargo nextest run --locked -p workshop-workspace --all-features`: pass, 151 passed, 0 skipped [151 passed, 0 skipped]
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass, 274 passed, 4 skipped [274 passed, 4 skipped]
+  - `cargo nextest run --locked -p workshop-server --features headless`: pass, 165 passed, 2 skipped [165 passed, 2 skipped]
+  - `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`: pass [pass]
+  - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`: pass [pass]
+  - `cargo fmt --all --check`: pass [pass]
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
+  - `npm run build` in `crates/workshop/ui`: pass [pass]
+  - `npm test` in `crates/workshop/ui`: pass, 139 passed, 0 failed [139 passed, 0 failed]
+  - `npm run typecheck` in `crates/workshop/ui`: pass [pass]
+  - Scope: `git diff --name-only 11da61d8..HEAD` lists 10 paths, all under `crates/workshop/` and `vibe/`: holds
+  - Scope: no wire frame shape, route, persisted format, or public API changed: holds. `TreeEntry` keeps its fields, `WaitClock` and `SystemClock` are `pub(in crate::gateway)`, and the `protocol.ts` edit is comment-only.
+  - Scope: `crates/workshop/workspace/src/workspace/backing.rs` is untouched: holds
+  - Scope: no structural check or retired-string gate was added: holds, since nothing under `crates/build-xtask/` changed
 
 </step-4>
 
