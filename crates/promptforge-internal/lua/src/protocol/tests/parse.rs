@@ -1,5 +1,6 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `tool_call`, `user_input`, the reserved `mcp`), and the
+//! `call`, `tool_call`, `local_tool_done`, `user_input`, the reserved
+//! `mcp`), and the
 //! malformed-yield rejections shared by every op. The task-operation
 //! requests (`spawn`, `timer`, `drain_task_notices`) are in `parse_tasks`.
 
@@ -224,6 +225,67 @@ fn a_tool_call_with_an_unrepresentable_args_table_is_the_calls_error() {
         }
         other => panic!("expected the args call error, got {other:?}"),
     }
+}
+
+/// Parses a `local_tool_done` yield with `ok = true` and `value` set to
+/// what `source` evaluates to, returning the outcome.
+fn local_tool_done_returning(lua: &Lua, source: &str) -> LocalToolOutcome {
+    let table = request_table(lua, "local_tool_done");
+    table.raw_set("ok", true).expect("raw_set");
+    let value: Value = lua.load(source).eval().expect("the value evaluates");
+    table.raw_set("value", value).expect("raw_set");
+    match expect_request(Request::from_yield(lua, &Value::Table(table))) {
+        Request::LocalToolDone { outcome } => outcome,
+        other => panic!("expected a local_tool_done request, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_local_tool_done_return_becomes_its_scalar_text() {
+    let lua = Lua::new();
+    for (source, expected) in [("'hi'", "hi"), ("42", "42"), ("true", "true"), ("nil", "")] {
+        match local_tool_done_returning(&lua, source) {
+            LocalToolOutcome::Returned(text) => assert_eq!(text, expected, "{source}"),
+            other => panic!("{source} must return its text, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_local_tool_done_table_return_is_a_bad_return() {
+    let lua = Lua::new();
+    match local_tool_done_returning(&lua, "{ 1, 2 }") {
+        LocalToolOutcome::BadReturn(Error::Lua(message)) => {
+            assert_eq!(message, "cannot return a table as a result");
+        }
+        other => panic!("a table return must be rejected, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_local_tool_done_with_ok_false_is_raised() {
+    let lua = Lua::new();
+    let table = request_table(&lua, "local_tool_done");
+    table.raw_set("ok", false).expect("raw_set");
+    table.raw_set("value", "ignored").expect("raw_set");
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::LocalToolDone {
+            outcome: LocalToolOutcome::Raised,
+        } => {}
+        other => panic!("expected a raised outcome, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_local_tool_done_without_a_boolean_ok_is_a_malformed_yield() {
+    let lua = Lua::new();
+    let missing = request_table(&lua, "local_tool_done");
+    missing.raw_set("value", "hi").expect("raw_set");
+    assert_direct_yield(Request::from_yield(&lua, &Value::Table(missing)));
+    let truthy = request_table(&lua, "local_tool_done");
+    truthy.raw_set("ok", 1).expect("raw_set");
+    truthy.raw_set("value", "hi").expect("raw_set");
+    assert_direct_yield(Request::from_yield(&lua, &Value::Table(truthy)));
 }
 
 #[test]

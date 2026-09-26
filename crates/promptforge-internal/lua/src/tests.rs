@@ -1756,6 +1756,15 @@ fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
 #[test]
 fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
     let local = LocalTools::default();
+    let schema = promptforge_model_client::detail::tool_schema_new(
+        "grab".to_owned(),
+        "Grab a value".to_owned(),
+        serde_json::json!({ "type": "object", "properties": {} }),
+    )
+    .expect("the schema builds");
+    local
+        .register("grab".to_owned(), schema)
+        .expect("registration succeeds before the poison");
     let handle = local.entries_handle();
     let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _guard = handle.lock().expect("first lock is not poisoned");

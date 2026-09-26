@@ -34,6 +34,31 @@ pub(crate) use decode::tool_alias;
 
 use decode::{add_local_params_schema, collect_tools_add_entries};
 
+/// The registry key of the VM's local-tool handler table: `tools.add_local`
+/// writes each handler under its alias, and the scheduler's `Local` answer
+/// reads it back to hand the function to the shim.
+const LOCAL_HANDLERS_REGISTRY: &str = "promptforge.tools.local_handlers";
+
+/// Reads the handler `tools.add_local` registered under `alias` from the
+/// VM's handler table.
+///
+/// # Errors
+/// Returns an internal-invariant error when the table is absent or holds no
+/// function under `alias`: the scheduler answers `Local` only for an alias
+/// the VM reports as registered.
+pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
+    let handlers: Option<Table> = lua.named_registry_value(LOCAL_HANDLERS_REGISTRY)?;
+    match handlers
+        .map(|handlers| handlers.raw_get::<Value>(alias))
+        .transpose()?
+    {
+        Some(Value::Function(handler)) => Ok(handler),
+        _ => Err(mlua::Error::external(Error::Internal(
+            "a local tool answer names a registered handler",
+        ))),
+    }
+}
+
 /// Locks the run's shared tool set, mapping a poisoned lock to the Lua
 /// boundary error every host callback uses.
 fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, ToolSet>> {
@@ -212,7 +237,27 @@ pub(crate) fn install_tools(
         )
         .map_err(Error::lua)?;
     tools.set("always", always).map_err(Error::lua)?;
+    install_add_local(lua, &tools, set, local_tools)?;
+    install_allow_tasks(lua, &tools, runtime)?;
 
+    globals.raw_set("tools", tools).map_err(Error::lua)
+}
+
+/// Installs `tools.add_local(alias, description, params, handler)` over a
+/// fresh handler table: the alias and schema register on `local_tools`
+/// for membership and advertising, and the handler is written under the
+/// alias for the scheduler's `Local` answer to read back.
+fn install_add_local(
+    lua: &Lua,
+    tools: &Table,
+    set: &Arc<Mutex<ToolSet>>,
+    local_tools: &LocalTools,
+) -> Result<()> {
+    lua.set_named_registry_value(
+        LOCAL_HANDLERS_REGISTRY,
+        lua.create_table().map_err(Error::lua)?,
+    )
+    .map_err(Error::lua)?;
     let declared = Arc::clone(set);
     let local = local_tools.clone();
     let add_local_fn = lua
@@ -232,18 +277,16 @@ pub(crate) fn install_tools(
                 let parameters = add_local_params_schema(&params)?;
                 let schema = tool_schema_new(alias.clone(), description, parameters)
                     .map_err(mlua::Error::external)?;
-                let key = lua.create_registry_value(handler)?;
+                let handlers: Table = lua.named_registry_value(LOCAL_HANDLERS_REGISTRY)?;
+                handlers.raw_set(alias.as_str(), handler)?;
                 local
-                    .register(alias, schema, key)
+                    .register(alias, schema)
                     .map_err(mlua::Error::external)?;
                 Ok(())
             },
         )
         .map_err(Error::lua)?;
-    tools.set("add_local", add_local_fn).map_err(Error::lua)?;
-    install_allow_tasks(lua, &tools, runtime)?;
-
-    globals.raw_set("tools", tools).map_err(Error::lua)
+    tools.set("add_local", add_local_fn).map_err(Error::lua)
 }
 
 /// Installs `tools.allow_tasks(targets?)`, the author's opt-in for the

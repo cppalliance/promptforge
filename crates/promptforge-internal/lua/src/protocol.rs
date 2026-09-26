@@ -29,5 +29,6 @@ pub use answer::{
 };
 pub use parse::YieldParse;
 pub use request::{
-    ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp, ToolCallRecord,
+    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
+    ToolCallRecord,
 };

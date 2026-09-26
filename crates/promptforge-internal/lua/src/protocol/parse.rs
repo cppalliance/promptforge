@@ -9,7 +9,7 @@ mod chat;
 #[path = "parse-tasks.rs"]
 mod tasks;
 
-use mlua::{Lua, LuaSerdeExt, Value};
+use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::TaskOrigin;
 
@@ -20,10 +20,10 @@ use tasks::{
 };
 
 use crate::tools::tool_alias;
-use crate::{Error, LuaModelHandle, Result, resolve_section_target};
+use crate::{Error, LuaModelHandle, Result, resolve_section_target, scalar_return};
 
 use super::answer::Answer;
-use super::request::{Request, StoreOp};
+use super::request::{LocalToolOutcome, Request, StoreOp};
 
 /// The fixed failure for a yield that is not a well-formed request table.
 ///
@@ -195,6 +195,10 @@ impl Request {
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
             }),
+            "local_tool_done" => match parse_local_tool_done(table) {
+                Some(request) => YieldParse::Request(request),
+                None => YieldParse::Malformed(direct_yield_error()),
+            },
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
             // No author arguments exist to fail validation: a well-formed
             // `user_input` or `drain_task_notices` yield is always the unit
@@ -390,6 +394,26 @@ fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Reques
         args,
         call_id,
     })
+}
+
+/// Parses a `local_tool_done` request: the shim-produced `ok` flag and,
+/// when the handler returned, its first return value as `value`. A
+/// returned value takes the scalar-return rule a block's return takes, so
+/// nil reads as `""` and a table is a [`LocalToolOutcome::BadReturn`].
+/// `None` for a missing or non-boolean `ok`.
+fn parse_local_tool_done(table: &mlua::Table) -> Option<Request> {
+    let outcome = match table.raw_get::<Value>("ok").ok()? {
+        Value::Boolean(true) => {
+            let value = table.raw_get::<Value>("value").ok()?;
+            match scalar_return(MultiValue::from_vec(vec![value])) {
+                Ok(text) => LocalToolOutcome::Returned(text.unwrap_or_default()),
+                Err(error) => LocalToolOutcome::BadReturn(error),
+            }
+        }
+        Value::Boolean(false) => LocalToolOutcome::Raised,
+        _ => return None,
+    };
+    Some(Request::LocalToolDone { outcome })
 }
 
 /// Reads one author-supplied optional line bound: absent or nil is `None`,

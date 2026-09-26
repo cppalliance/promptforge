@@ -9,16 +9,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use mlua::{HookTriggers, MultiValue, Thread, Value, VmState};
+use mlua::{HookTriggers, MultiValue, Value, VmState};
 use serde_json::json;
 
 use promptforge_lua::Error;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult, Request, ToolCallOutcome, YieldParse};
-use crate::lua::SectionVm;
+use crate::execute::protocol::{Answer, ChatResult, Request, ToolCallOutcome};
 
-use super::{scheduler_vm_with_tools, test_models, test_tools};
+use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, test_tools};
 
 /// The most Lua instructions one model-tool round may spend inside the
 /// loop shim: from one `chat` yield to the next, through the tool-call
@@ -40,25 +39,6 @@ const ROUND_INSTRUCTION_FLOOR: u64 = 20;
 /// Rounds measured after the first, so the assertion reads steady-state
 /// cost rather than the one-time argument decode.
 const MEASURED_ROUNDS: i64 = 3;
-
-/// Parses one yielded request table, failing on anything malformed.
-fn parse_request(vm: &SectionVm, yielded: MultiValue) -> Request {
-    let value = yielded.into_iter().next().expect("one yielded value");
-    match Request::from_yield(vm.lua(), &value) {
-        YieldParse::Request(request) => request,
-        other => panic!("the shim yield is a well-formed request, got {other:?}"),
-    }
-}
-
-/// Renders `answer` as the shim's envelope and resumes the loop with it.
-fn resume_with(vm: &SectionVm, thread: &Thread, answer: Answer<Error>) -> MultiValue {
-    let (envelope, _retained) = answer
-        .into_envelope(vm.lua())
-        .expect("the envelope renders");
-    thread
-        .resume::<MultiValue>(envelope)
-        .expect("the loop accepts the answer")
-}
 
 /// A completed round that requested one `echo` call.
 fn tool_call_round() -> Answer<Error> {

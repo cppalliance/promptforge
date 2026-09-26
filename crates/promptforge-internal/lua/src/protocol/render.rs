@@ -4,6 +4,7 @@
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
 use crate::error_value::{ErrorValue, error_table};
+use crate::tools::local_handler;
 
 use super::answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
 
@@ -199,6 +200,14 @@ impl<E: ErrorValue> Answer<E> {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Structured(json))) => {
                 vec![lua.to_value(&json)?]
             }
+            // The result slot stays nil: the handler and its arguments ride
+            // after it, so the shim tells a local answer from a bound
+            // result by the handler's presence.
+            Answer::ToolCallResult(Ok(ToolCallOutcome::Local { alias, args })) => vec![
+                Value::Nil,
+                Value::Function(local_handler(lua, &alias)?),
+                lua.to_value(&args)?,
+            ],
             Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
             // The availability flag is a third resume value beside the text,
             // so the shim returns both and the broker's fixed fallback

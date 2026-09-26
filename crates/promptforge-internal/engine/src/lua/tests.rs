@@ -22,7 +22,9 @@ use std::sync::{Arc, Mutex};
 use mlua::{MultiValue, Thread};
 use serde_json::json;
 
-use crate::execute::protocol::{Request, YieldParse};
+use promptforge_lua::Error;
+
+use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{LuaProgram, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelSet};
@@ -141,11 +143,26 @@ fn start(vm: &SectionVm, source: &str) -> (Thread, MultiValue) {
 
 fn yielded_request(vm: &SectionVm, source: &str) -> Request {
     let (_thread, yielded) = start(vm, source);
+    parse_request(vm, yielded)
+}
+
+/// Parses one yielded request table, failing on anything malformed.
+fn parse_request(vm: &SectionVm, yielded: MultiValue) -> Request {
     let value = yielded.into_iter().next().expect("one yielded value");
     match Request::from_yield(vm.lua(), &value) {
         YieldParse::Request(request) => request,
         other => panic!("the shim yield is a well-formed request, got {other:?}"),
     }
+}
+
+/// Renders `answer` as the shim's envelope and resumes the thread with it.
+fn resume_with(vm: &SectionVm, thread: &Thread, answer: Answer<Error>) -> MultiValue {
+    let (envelope, _retained) = answer
+        .into_envelope(vm.lua())
+        .expect("the envelope renders");
+    thread
+        .resume::<MultiValue>(envelope)
+        .expect("the coroutine accepts the answer")
 }
 
 /// Compiles one author block the way the parser's prologue chunks are

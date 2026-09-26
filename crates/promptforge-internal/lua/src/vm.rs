@@ -1,12 +1,21 @@
 //! The per-section Lua VM: construction, host injection, coroutine stepping, and chunk execution.
+//!
+//! A local tool registered with `tools.add_local` runs inside the calling
+//! block's coroutine, never as a host callback. The VM keeps only each
+//! tool's alias and schema; the handler sits in the VM's handler table. A
+//! call takes two yields: the shim's `tool_call`, which the scheduler
+//! answers with the handler itself, and the shim's `local_tool_done`
+//! after the handler ran, which carries its result for the scheduler to
+//! report. Every suspending call the handler makes in between is an
+//! ordinary yield of the same coroutine.
 
 use super::{
     Access, Arc, Argv, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
-    DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, Function, GuardNonce, InstructionBudget,
-    IntoLuaMulti, Json, Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt,
-    LuaToolHandle, ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue,
-    Mutex, Ordering, ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts,
-    ToolRuntime, ToolSet, Value, block_guard, guarded_var, harden, install_compactors,
+    DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
+    Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
+    ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Ordering,
+    ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime,
+    ToolSet, Value, block_guard, guarded_var, harden, install_compactors,
     install_deterministic_iteration, install_instruction_budget, install_log, install_messages,
     install_models, install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
@@ -90,7 +99,8 @@ pub struct SectionVm {
     /// Remaining cumulative `log()` message bytes this VM may emit. Bounds total
     /// log volume even when each event is under the per-event ceilings.
     log_byte_budget: Arc<AtomicUsize>,
-    /// Local tools registered by Lua code, dispatched back into this VM.
+    /// Local tools registered by Lua code: alias and schema, for
+    /// membership and advertising.
     local_tools: LocalTools,
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
@@ -105,31 +115,27 @@ pub struct SectionVm {
 
 /// Local tool registrations owned by a section VM.
 ///
-/// Each entry holds the tool alias, its prebuilt schema, and the registry key
-/// for the Lua handler function captured at registration time. The entries are
-/// shared with the `tools.add_local` Lua callback, which must be `Send`, hence the
-/// `Mutex`; the VM is single-threaded, so the lock never contends.
+/// Each entry holds the tool alias and its prebuilt schema, which serve
+/// membership and advertising. The handler function itself lives in the
+/// VM's handler table, written by `tools.add_local` and read back when the
+/// scheduler answers a call with it. The entries are shared with the
+/// `tools.add_local` Lua callback, which must be `Send`, hence the `Mutex`;
+/// the VM is single-threaded, so the lock never contends.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LocalTools {
-    entries: Arc<Mutex<Vec<(String, ToolSchema, mlua::RegistryKey)>>>,
+    entries: Arc<Mutex<Vec<(String, ToolSchema)>>>,
 }
 
 impl LocalTools {
-    /// Registers a local tool: alias, prebuilt schema, and the registry key
-    /// of the Lua handler function.
+    /// Registers a local tool: alias and prebuilt schema.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the entries lock was poisoned.
-    pub(crate) fn register(
-        &self,
-        alias: String,
-        schema: ToolSchema,
-        handler: mlua::RegistryKey,
-    ) -> Result<()> {
+    pub(crate) fn register(&self, alias: String, schema: ToolSchema) -> Result<()> {
         self.entries
             .lock()
             .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
-            .push((alias, schema, handler));
+            .push((alias, schema));
         Ok(())
     }
 
@@ -143,7 +149,7 @@ impl LocalTools {
             .lock()
             .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
             .iter()
-            .map(|(_, schema, _)| schema.clone())
+            .map(|(_, schema)| schema.clone())
             .collect())
     }
 
@@ -157,56 +163,12 @@ impl LocalTools {
             .lock()
             .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
             .iter()
-            .any(|(name, _, _)| name == alias))
+            .any(|(name, _)| name == alias))
     }
 
     #[cfg(test)]
-    pub(crate) fn entries_handle(
-        &self,
-    ) -> Arc<Mutex<Vec<(String, ToolSchema, mlua::RegistryKey)>>> {
+    pub(crate) fn entries_handle(&self) -> Arc<Mutex<Vec<(String, ToolSchema)>>> {
         Arc::clone(&self.entries)
-    }
-
-    /// Calls the handler registered under `alias` with JSON `args`.
-    ///
-    /// The `jump` global is nilled for the handler's duration and restored
-    /// afterward: a local tool runs outside any chunk's control flow, so a
-    /// jump recorded here would surface stale at the next chunk boundary.
-    /// Handlers cannot call the suspending shims (`call`, `fanout`,
-    /// `models.infer`): the handler runs outside any coroutine, so the
-    /// shim's yield fails with "attempt to yield from outside a coroutine".
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
-    /// the args cannot be bridged, the jump guard cannot be applied or
-    /// restored, the handler fails, or it returns a non-scalar value.
-    pub(crate) fn call(&self, lua: &Lua, alias: &str, args: &Json) -> Result<String> {
-        let handler: Function = {
-            let entries = self
-                .entries
-                .lock()
-                .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?;
-            let key = entries
-                .iter()
-                .find(|(name, _, _)| name == alias)
-                .map(|(_, _, key)| key)
-                .ok_or_else(|| Error::Lua(format!("local tool {alias:?} is not registered")))?;
-            lua.registry_value(key).map_err(Error::lua)?
-        };
-        let table = lua.to_value(args).map_err(Error::lua)?;
-        let globals = lua.globals();
-        let saved_jump: Value = globals.raw_get("jump").map_err(Error::lua)?;
-        globals.raw_set("jump", Value::Nil).map_err(Error::lua)?;
-        let returned = handler.call(table);
-        // Restore even on handler failure; a restore failure on top of a
-        // handler failure reports the handler's error, which came first.
-        let restore = globals.raw_set("jump", saved_jump).map_err(Error::lua);
-        let returned: MultiValue = match (returned, restore) {
-            (Ok(values), Ok(())) => values,
-            (Err(error), _) => return Err(Error::lua(error)),
-            (Ok(_), Err(error)) => return Err(error),
-        };
-        Ok(scalar_return(returned)?.unwrap_or_default())
     }
 }
 
@@ -931,22 +893,6 @@ impl SectionVm {
     #[must_use]
     pub fn lua(&self) -> &Lua {
         &self.lua
-    }
-
-    /// Calls the local tool registered under `alias` with JSON `args`.
-    ///
-    /// The handler is fetched from the Lua registry, invoked with the args
-    /// converted to a Lua table, and its scalar return value is rendered as a
-    /// string. A nil return yields an empty string. The `jump` global is
-    /// nilled for the handler's duration and restored afterward (see
-    /// `LocalTools::call`).
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
-    /// the args cannot be bridged, the handler fails, or it returns a
-    /// non-scalar value.
-    pub fn call_local_tool(&self, alias: &str, args: &Json) -> Result<String> {
-        self.local_tools.call(&self.lua, alias, args)
     }
 
     /// Returns the schemas of every registered local tool.

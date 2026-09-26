@@ -222,6 +222,74 @@ fn an_ok_structured_tool_call_answer_round_trips_as_a_table() {
     assert_eq!(images_len, 0);
 }
 
+/// A fresh VM with the `tools` namespace installed and one local tool,
+/// `grab`, registered through `tools.add_local`.
+fn lua_with_local_grab() -> Lua {
+    let lua = Lua::new();
+    crate::install_tools(
+        &lua,
+        &lua.globals(),
+        &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolSet::default())),
+        &std::sync::Arc::new(std::sync::Mutex::new(crate::ToolRuntime {
+            added: Vec::new(),
+            description_overrides: std::collections::BTreeMap::default(),
+            allowed_tasks: None,
+        })),
+        &crate::vm::LocalTools::default(),
+    )
+    .expect("the tools install cannot fail on a fresh VM");
+    lua.load(
+        "tools.add_local('grab', 'Grab a value', { value = 'string' }, \
+         function(args) return 'got ' .. args.value end)",
+    )
+    .exec()
+    .expect("the local tool registers");
+    lua
+}
+
+#[test]
+fn a_local_tool_call_answer_resumes_with_its_handler_and_args() {
+    let lua = lua_with_local_grab();
+    let (envelope, retained) = Answer::<Error>::ToolCallResult(Ok(ToolCallOutcome::Local {
+        alias: "grab".to_owned(),
+        args: json!({ "value": "hi" }),
+    }))
+    .into_envelope(&lua)
+    .expect("the envelope renders");
+    assert!(retained.is_none());
+    let (ok, result_is_nil, handler_is_fn, called): (bool, bool, bool, String) = lua
+        .load(
+            "local ok, result, handler, args = ...\n\
+             return ok, result == nil, type(handler) == 'function', handler(args)",
+        )
+        .call(envelope)
+        .expect("the envelope reads back through Lua");
+    assert!(ok);
+    assert!(
+        result_is_nil,
+        "the result slot stays nil for a local answer"
+    );
+    assert!(handler_is_fn, "the handler resumes as a function");
+    assert_eq!(called, "got hi", "the registered handler runs on the args");
+}
+
+#[test]
+fn a_local_tool_call_answer_for_an_unregistered_alias_is_an_error() {
+    let lua = lua_with_local_grab();
+    let error = Answer::<Error>::ToolCallResult(Ok(ToolCallOutcome::Local {
+        alias: "missing".to_owned(),
+        args: json!({}),
+    }))
+    .into_envelope(&lua)
+    .expect_err("an alias with no registered handler cannot render");
+    assert!(
+        error
+            .to_string()
+            .contains("a local tool answer names a registered handler"),
+        "the error names the broken invariant: {error}"
+    );
+}
+
 #[test]
 fn an_err_tool_call_answer_round_trips_and_retains_the_typed_error() {
     let lua = Lua::new();

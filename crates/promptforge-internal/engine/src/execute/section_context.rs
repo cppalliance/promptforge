@@ -23,7 +23,7 @@ mod construct;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use crate::lua::{ProseState, SectionVm, ToolBinding, ToolCallCounts};
+use crate::lua::{ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts};
 use crate::{Error, Result, subst};
 use promptforge_types::event::lifecycle;
 
@@ -40,6 +40,20 @@ pub(crate) struct TaskSeed {
     pub(crate) item: Option<serde_json::Value>,
     /// The chain's `sys.index`, when the spawn gave one.
     pub(crate) index: Option<u64>,
+}
+
+/// One local tool call whose handler is running in the frame's block
+/// coroutine: opened when the `tool_call` is answered with the handler,
+/// closed by the shim's `local_tool_done`, which reports under it.
+pub(crate) struct LocalCall {
+    /// The local tool's alias.
+    pub(crate) alias: String,
+    /// The model-issued call id, `None` for a script call.
+    pub(crate) call_id: Option<String>,
+    /// The coordinates recorded at dispatch, so the result reports the
+    /// model turn the call was made in even when the handler runs model
+    /// rounds of its own.
+    pub(crate) report: ScriptReport,
 }
 
 /// One section entry's owned frame within a run.
@@ -75,6 +89,10 @@ pub(crate) struct SectionContext {
     /// The per-section tool-call counts, installed at the first
     /// script-initiated `tools.call`.
     counts: Option<ToolCallCounts>,
+    /// The local tool calls whose handlers are running, innermost last: a
+    /// handler that calls another local tool opens a nested entry, and
+    /// each `local_tool_done` closes the innermost.
+    local_calls: Vec<LocalCall>,
     /// The frame's task-scoped event emitter: the chain's own, so every
     /// report the frame makes - the teardown boundary, the completion -
     /// is stamped with the chain's task.
@@ -216,6 +234,16 @@ impl SectionContext {
             counts.ensure(binding.alias())?;
         }
         Ok(counts.clone())
+    }
+
+    /// Opens a local tool call whose handler the shim is about to run.
+    pub(crate) fn push_local_call(&mut self, call: LocalCall) {
+        self.local_calls.push(call);
+    }
+
+    /// Closes the innermost open local tool call; `None` when none is open.
+    pub(crate) fn pop_local_call(&mut self) -> Option<LocalCall> {
+        self.local_calls.pop()
     }
 }
 

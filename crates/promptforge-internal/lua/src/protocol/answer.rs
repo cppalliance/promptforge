@@ -1,5 +1,12 @@
 //! The answer vocabulary: one dispatched request's outcome and the payload
 //! types its variants hold.
+//!
+//! A local tool call is answered in two steps. The `tool_call` request's
+//! answer is [`ToolCallOutcome::Local`], which resumes the shim with the
+//! handler itself so the shim runs it inside the calling coroutine. The
+//! shim then yields `local_tool_done` with the handler's result, and that
+//! request's answer is an ordinary [`Answer::ToolCallResult`]: the text
+//! on success, the error for a rejected return.
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{TaskId, TaskOrigin};
@@ -35,6 +42,16 @@ pub enum ToolCallOutcome {
     Plain(String),
     /// A structured binding's parsed JSON output, resumed as a Lua table.
     Structured(serde_json::Value),
+    /// A local Lua tool's call, resumed as `(true, nil, handler, args)`:
+    /// the handler registered under `alias` and a fresh table converted
+    /// from `args`, so the shim runs the handler inside the calling
+    /// coroutine and reports how it ended with a `local_tool_done` yield.
+    Local {
+        /// The local tool's alias, naming its handler.
+        alias: String,
+        /// The call's JSON arguments.
+        args: serde_json::Value,
+    },
 }
 
 impl ToolCallOutcome {

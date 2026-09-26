@@ -1,7 +1,9 @@
 //! Tests for `tools.add_local`: the registration rules run end to end, and
 //! the `models.loop` shim's local-tool rounds are driven at prompt level,
-//! so a model-issued call to a local tool is answered on the section VM
-//! and its trusted result is sent back to the model verbatim.
+//! so a model-issued call to a local tool runs its handler inside the
+//! block coroutine - store calls included - and its trusted result is sent
+//! back to the model verbatim. `jump` is withheld only while a handler
+//! runs.
 
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
@@ -133,6 +135,123 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
         gateway.call_count(),
         1,
         "the author's own program failing ends the loop before another round"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("final answer"),
+    ])
+    .await;
+    let prompt = parse(&grab_loop(
+        "store.write('grab.txt', 'kept ' .. args.value)\n\
+           return store.read('grab.txt')",
+    ));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the handler's store calls suspend and resume inside the loop");
+    assert_eq!(out, "final answer");
+    assert_eq!(
+        last_tool_turn_content(&gateway.requests()),
+        "kept hi",
+        "the text the handler read back from the store reaches the model"
+    );
+}
+
+/// The two-section shell the jump tests drive: `lua` runs in `## Only`,
+/// and `## Other` returns a fixed marker when a jump lands there.
+fn jump_prompt(lua: &str) -> String {
+    format!(
+        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n\n\
+         ## Other\n\n```lua\nreturn 'jumped'\n```\n"
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_handler_that_calls_jump_fails_the_run() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("unreachable"),
+    ])
+    .await;
+    let prompt = parse(&jump_prompt(
+        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           jump('## Other')\n\
+         end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         return 'no jump'",
+    ));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect_err("jump is withheld while the handler runs");
+    let message = error.to_string();
+    assert!(
+        message.contains("jump") && message.contains("nil value"),
+        "the handler's call reaches a nil `jump`: {message}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jump_works_in_the_same_block_after_the_loop_returns() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("final answer"),
+    ])
+    .await;
+    let prompt = parse(&jump_prompt(
+        "tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           return 'got ' .. args.value\n\
+         end)\n\
+         local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         jump('## Other')",
+    ));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("jump is restored once the handler returns");
+    assert_eq!(out, "jumped");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("unreachable"),
+    ])
+    .await;
+    let prompt = parse(&grab_loop("return { args.value }"));
+    let recorder = Arc::new(Recorder::default());
+    let (ctx, host) = loop_context_observed(
+        &prompt,
+        ToolSet::default(),
+        Arc::clone(&recorder) as Arc<dyn Observer>,
+    );
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect_err("a table return has no text form");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot return a table as a result"),
+        "the scalar-return rule names the rejected type: {error}"
+    );
+    assert!(
+        recorder
+            .events()
+            .contains(&("Only".to_string(), detail::TOOL_CALL_FAILED.to_string())),
+        "the rejected return is observed as a tool-call failure"
     );
 }
 

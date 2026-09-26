@@ -133,9 +133,9 @@ pub use models::ModelRuntime;
 pub use projection::project_messages;
 pub use prose::ProseState;
 pub use protocol::{
-    Answer, ChatResult, ContentPart, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
-    StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, UserInputOutcome,
-    YieldParse,
+    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole,
+    Request, StoreOp, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord,
+    UserInputOutcome, YieldParse,
 };
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 pub use sys::enrich_sys_model;

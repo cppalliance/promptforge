@@ -6,7 +6,7 @@
 //! uniformly for all backends - no inline fast path - so interleaving
 //! behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
-//! `tool_call`, `chat`, `spawn`, `timer`, `task_events`,
+//! `tool_call`, `local_tool_done`, `chat`, `spawn`, `timer`, `task_events`,
 //! `drain_task_notices`, and task wait, inspection, note, and cancel arms
 //! are defined in their own modules.
 
@@ -100,6 +100,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         | Request::Note { .. }
         | Request::Cancel { .. }
         | Request::DrainTaskNotices
+        | Request::LocalToolDone { .. }
         | Request::Mcp { .. } => None,
     }
 }
@@ -122,8 +123,9 @@ impl Scheduler {
     ///
     /// # Errors
     /// Returns the typed protocol error for a received `mcp` request, which
-    /// no call surface produces yet, or the store arm's error when the
-    /// chain's access capability is gone.
+    /// no call surface produces yet, the store arm's error when the
+    /// chain's access capability is gone, or the `local_tool_done` arm's
+    /// error when no local tool call is open.
     pub(super) fn dispatch(&mut self, id: ChainIndex, request: Request) -> Result<()> {
         self.chains[id.index()].blocked = blocked_on(&request);
         match request {
@@ -199,6 +201,7 @@ impl Scheduler {
                 self.dispatch_tool_call(id, &alias, args, call_id);
                 Ok(())
             }
+            Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),
             Request::UserInput => {
                 self.dispatch_user_input(id);
                 Ok(())

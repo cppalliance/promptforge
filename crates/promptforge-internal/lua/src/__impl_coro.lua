@@ -13,12 +13,14 @@
 -- block's raised value for the host before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
--- through unchanged. The `tasks` namespace and the `fanout` shim live in
+-- through unchanged, and `swap_jump(value)` raw-sets the global `jump` to
+-- `value` and returns the old one, so a local tool's handler runs with
+-- `jump` withheld. The `tasks` namespace and the `fanout` shim live in
 -- their own chunks (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by
 -- the host right after this one over the failure helpers this chunk
 -- returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
-  error_value, stash_failure, normalize_failure = ...
+  error_value, stash_failure, normalize_failure, swap_jump = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -112,32 +114,59 @@ local function call_section(target, input)
   return result
 end
 
--- Suspending dispatch of a bound tool. The first argument is the
--- prompt-local alias string or a Tool object; the alias-or-Tool
--- polymorphism decodes once, in the protocol parse. The driver resumes the
--- result by the binding's declared output kind: a plain binding's text as a
--- string, a structured binding's JSON output as a table.
-local function tools_call(alias_or_tool, args)
-  local ok, result = yield({ op = "tool_call", alias = alias_or_tool, args = args })
-  if not ok then fail(result) end
+-- Runs a local tool's handler inside this block coroutine, so every
+-- suspending call the handler makes is an ordinary yield of the chain.
+-- `jump` is withheld while the handler runs and restored on return or
+-- raise. The raw pcall keeps a Rust callback's failure in mlua's own form.
+-- The `local_tool_done` yield carries the handler's first return value
+-- (only when it returned) for the driver to report; afterward the
+-- handler's own failure is raised again unchanged, a rejected return
+-- raises the driver's error, and a returned value resumes as its text.
+local function run_local_tool(handler, args)
+  local saved_jump = swap_jump(nil)
+  local ok, value = raw_pcall(handler, args)
+  swap_jump(saved_jump)
+  local done = { op = "local_tool_done", ok = ok }
+  if ok then done.value = value end
+  local answered, result = yield(done)
+  if not ok then error(value, 0) end
+  if not answered then fail(result) end
   return result
 end
 
+-- One `tool_call` yield and its resume. A bound tool resumes as
+-- `(ok, result)`; a local tool resumes as `(true, nil, handler, args)`,
+-- and the handler runs here.
+local function dispatch_tool(request)
+  local ok, result, handler, args = yield(request)
+  if not ok then fail(result) end
+  if handler ~= nil then return run_local_tool(handler, args) end
+  return result
+end
+
+-- Suspending dispatch of a tool. The first argument is the prompt-local
+-- alias string or a Tool object; the alias-or-Tool polymorphism decodes
+-- once, in the protocol parse. The driver resumes a bound tool's result by
+-- the binding's declared output kind: a plain binding's text as a string,
+-- a structured binding's JSON output as a table.
+local function tools_call(alias_or_tool, args)
+  return dispatch_tool({ op = "tool_call", alias = alias_or_tool, args = args })
+end
+
 -- The model-issued form of the same dispatch: `call_id` is the id the model
--- attached to its tool call. The driver always resumes it with content (a
--- tool's own failure becomes untrusted failure text) and fires ToolResult
--- under the id. Shim-internal: the loop shim calls it per requested tool
--- call; authors never see it, and a hand-built yield including `call_id` is
--- refused as a malformed request when its shape is wrong.
+-- attached to its tool call. The driver always resumes a bound tool with
+-- content (a tool's own failure becomes untrusted failure text) and fires
+-- ToolResult under the id. Shim-internal: the loop shim calls it per
+-- requested tool call; authors never see it, and a hand-built yield
+-- including `call_id` is refused as a malformed request when its shape is
+-- wrong.
 local function tools_call_as_model(call_id, alias_or_tool, args)
-  local ok, result = yield({
+  return dispatch_tool({
     op = "tool_call",
     alias = alias_or_tool,
     args = args,
     call_id = call_id,
   })
-  if not ok then fail(result) end
-  return result
 end
 
 -- Appends one record to the author's list. The list is a plain array (a

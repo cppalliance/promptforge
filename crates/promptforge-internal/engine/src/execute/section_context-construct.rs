@@ -116,6 +116,7 @@ impl SectionContext {
             var: var.clone(),
             item: seed.item,
             counts: None,
+            local_calls: Vec::new(),
             emitter: Arc::clone(ctx.emitter()),
             turns: Arc::clone(ctx.turns()),
         })
@@ -186,6 +187,7 @@ impl SectionContext {
             var: serde_json::json!({}),
             item: None,
             counts: None,
+            local_calls: Vec::new(),
             emitter: Arc::clone(ctx.emitter()),
             turns: Arc::clone(ctx.turns()),
         })

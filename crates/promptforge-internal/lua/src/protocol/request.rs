@@ -1,6 +1,13 @@
 //! The request vocabulary: the validated suspending host calls a shim can
 //! yield, the store operations they hold, and the message-record types
 //! the chat request is built from.
+//!
+//! A local tool call spans two requests. The first is the ordinary
+//! [`Request::ToolCall`], which the scheduler answers with the handler.
+//! The shim runs the handler inside the calling coroutine, so any
+//! suspending call the handler makes is a request of its own, and then
+//! yields [`Request::LocalToolDone`] with how the handler ended, so the
+//! scheduler can report the call and answer it.
 
 use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::{TaskId, TaskOrigin};
@@ -153,6 +160,14 @@ pub enum Request {
         /// author-supplied: a wrong shape is a malformed yield.
         call_id: Option<String>,
     },
+    /// The second yield of a local tool call: the shim ran the handler the
+    /// `tool_call` answer handed it and reports how the handler ended.
+    /// Shim-produced in every field, so a wrong shape is a malformed
+    /// yield, never an error at the author's call site.
+    LocalToolDone {
+        /// How the handler ended.
+        outcome: LocalToolOutcome,
+    },
     /// One stateless tool-capable model round over an author-built message
     /// list, yielded by the `models.loop` shim once per round. The round
     /// advertises the section's current tool scope, local Lua tools
@@ -193,6 +208,21 @@ pub enum Request {
         /// The reserved argument payload.
         args: serde_json::Value,
     },
+}
+
+/// How a local tool's handler ended, as its `local_tool_done` yield
+/// reports it.
+#[derive(Debug)]
+pub enum LocalToolOutcome {
+    /// The handler returned: its first return value as text under the
+    /// scalar-return rule, `""` for nil.
+    Returned(String),
+    /// The handler returned a value with no text form (a table, a
+    /// function): the scalar-return rule's error.
+    BadReturn(Error),
+    /// The handler raised. The shim raises the handler's own value again
+    /// at the call site, so no error crosses the boundary here.
+    Raised,
 }
 
 impl Request {

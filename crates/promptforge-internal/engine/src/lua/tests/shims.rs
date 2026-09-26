@@ -1,17 +1,20 @@
 //! The yield shims installed on a scheduler-mode section VM produce
 //! well-formed protocol requests: `models.infer`, `call`, `fanout`, and
-//! `tools.call` in their alias and handle forms, the optional leading
-//! model handle, the captured alias globals, and the methodless handle
-//! contract.
+//! `tools.call` in their alias and handle forms, the local tool
+//! handshake, the optional leading model handle, the captured alias
+//! globals, and the methodless handle contract.
 
 use promptforge_types::ids::TaskOrigin;
 use serde_json::json;
 
-use crate::execute::protocol::{Request, YieldParse};
+use crate::execute::protocol::{
+    Answer, LocalToolOutcome, Request, StoreOp, StoreOutcome, ToolCallOutcome, YieldParse,
+};
 use crate::model::ModelSet;
 
 use super::{
-    scheduler_vm, scheduler_vm_with_tools, start, test_models, test_tools, yielded_request,
+    parse_request, resume_with, scheduler_vm, scheduler_vm_with_tools, start, test_models,
+    test_tools, yielded_request,
 };
 
 #[test]
@@ -172,6 +175,73 @@ fn tools_call_yields_a_well_formed_request() {
         }
         other => panic!("expected a tool_call request, got {other:?}"),
     }
+}
+
+#[test]
+fn a_local_tool_handler_runs_inside_the_block_coroutine() {
+    // The two-yield handshake end to end: the `tool_call` yield, the
+    // `Local` answer handing over the handler, the handler's own `store`
+    // yield from inside the same coroutine, the `local_tool_done` yield
+    // carrying its return, and the block's return with the answered text.
+    // `jump` is withheld while the handler runs and back afterward.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (thread, yielded) = start(
+        &vm,
+        "local withheld\n\
+         tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           withheld = jump == nil\n\
+           store.write('grab.txt', args.value)\n\
+           return 'stored ' .. args.value\n\
+         end)\n\
+         local out = tools.call('grab', { value = 'hi' })\n\
+         return out .. '|' .. tostring(withheld) .. '|' .. tostring(jump ~= nil)",
+    );
+    match parse_request(&vm, yielded) {
+        Request::ToolCall { alias, call_id, .. } => {
+            assert_eq!(alias, "grab");
+            assert_eq!(call_id, None);
+        }
+        other => panic!("the block's first yield is the tool call, got {other:?}"),
+    }
+    let yielded = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallResult(Ok(ToolCallOutcome::Local {
+            alias: "grab".to_owned(),
+            args: json!({ "value": "hi" }),
+        })),
+    );
+    match parse_request(&vm, yielded) {
+        Request::Store {
+            op: StoreOp::Write { path, contents },
+        } => {
+            assert_eq!(path, "grab.txt");
+            assert_eq!(contents, "hi");
+        }
+        other => panic!("the handler's store call yields from the block, got {other:?}"),
+    }
+    let yielded = resume_with(&vm, &thread, Answer::Store(Ok(StoreOutcome::Unit)));
+    match parse_request(&vm, yielded) {
+        Request::LocalToolDone {
+            outcome: LocalToolOutcome::Returned(text),
+        } => assert_eq!(text, "stored hi"),
+        other => panic!("the handler's return is reported, got {other:?}"),
+    }
+    let returned = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("stored hi".to_owned()))),
+    );
+    let text: String = vm
+        .lua()
+        .unpack(
+            returned
+                .into_iter()
+                .next()
+                .expect("the block returns a value"),
+        )
+        .expect("the block returns a string");
+    assert_eq!(text, "stored hi|true|true");
 }
 
 #[test]

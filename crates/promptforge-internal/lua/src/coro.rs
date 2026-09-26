@@ -12,6 +12,14 @@
 //! chunk is named with an `@` prefix, so PUC's `luaO_chunkid` renders shim
 //! frames as verbatim `file:line:` references with no `[string "..."]`
 //! wrapper, and the line mapper (`program.rs`) never touches them.
+//!
+//! A local tool call is a two-yield handshake inside the calling block
+//! coroutine. The `tools.call` shim yields `tool_call`; for a local alias
+//! the driver resumes it with the handler instead of a result. The shim
+//! calls the handler under a yield-safe `pcall` with `jump` withheld, so
+//! the handler's own suspending calls are ordinary yields of the same
+//! coroutine, then yields `local_tool_done` with the outcome for the
+//! driver to report, and finally returns the text or raises.
 
 use std::sync::LazyLock;
 
@@ -136,7 +144,10 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// raised failure into the same table. The chunk's `pcall` and `xpcall`
 /// replacements, which run every caught value through that capture, are
 /// installed over the base library's globals here, so a host callback that
-/// fails directly from Rust reaches author code in the one shape.
+/// fails directly from Rust reaches author code in the one shape. A last
+/// capture, `swap_jump(value)`, raw-sets the global `jump` and returns the
+/// old value, so the shim withholds `jump` while a local tool's handler
+/// runs.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -168,6 +179,7 @@ pub(crate) fn install_shim_prelude(
         })
         .map_err(Error::lua)?;
     let normalize_failure = install_normalize_failure(lua).map_err(Error::lua)?;
+    let swap_jump = swap_jump_capture(lua)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -181,6 +193,7 @@ pub(crate) fn install_shim_prelude(
             error_value,
             stash_failure,
             normalize_failure,
+            swap_jump,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
@@ -249,6 +262,18 @@ pub(crate) fn install_shim_prelude(
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
     Ok(())
+}
+
+/// Builds the prelude's `swap_jump(value)` capture: a raw set of the global
+/// `jump` to `value` that returns the old value.
+fn swap_jump_capture(lua: &Lua) -> Result<Function> {
+    lua.create_function(|lua, value: Value| {
+        let globals = lua.globals();
+        let old: Value = globals.raw_get("jump")?;
+        globals.raw_set("jump", value)?;
+        Ok(old)
+    })
+    .map_err(Error::lua)
 }
 
 /// Returns the shim's block guard for a VM whose shim prelude already ran.
