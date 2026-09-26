@@ -4,7 +4,7 @@
 
 use std::io;
 
-use harness_api::LaunchError;
+use harness::LaunchError;
 
 use super::*;
 

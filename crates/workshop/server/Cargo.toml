@@ -14,7 +14,7 @@ futures-util.workspace = true
 # The harness public API: agent sessions run in the harness, which the
 # composition root constructs, registers, and pushes the server's gateway
 # binding, chat catalog, and host snapshot into as data.
-harness-api.workspace = true
+harness.workspace = true
 # The engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.

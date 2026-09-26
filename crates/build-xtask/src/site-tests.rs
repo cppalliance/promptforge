@@ -236,7 +236,7 @@ fn rustdoc_pages_are_not_checked() {
     write_page(site.path(), "promptforge/index.html", &page(&["gone.html"]));
     write_page(
         site.path(),
-        "harness/harness_api/index.html",
+        "harness/harness/index.html",
         &page(&["gone.html"]),
     );
     write_page(
@@ -331,18 +331,30 @@ fn the_encoded_flags_join_on_the_unit_separator_and_keep_a_spaced_path_whole() {
 
 #[test]
 fn the_crate_page_uses_the_underscored_crate_name() {
-    assert_eq!(crate_page("harness-api"), "harness_api/index.html");
+    assert_eq!(
+        crate_page("gateway-api-types"),
+        "gateway_api_types/index.html"
+    );
+    assert_eq!(crate_page("harness"), "harness/index.html");
     assert_eq!(crate_page("promptforge"), "promptforge/index.html");
 }
 
 #[test]
-fn the_redirect_sends_only_to_the_crate_page() {
-    let html = redirect_page("harness-api");
+fn the_harness_site_documents_the_harness_facade() {
     assert!(
-        html.contains("<meta http-equiv=\"refresh\" content=\"0; url=harness_api/index.html\">"),
+        RUSTDOC_SITES.contains(&("harness", "harness")),
+        "the harness/ folder documents the crate harness: {RUSTDOC_SITES:?}"
+    );
+}
+
+#[test]
+fn the_redirect_sends_only_to_the_crate_page() {
+    let html = redirect_page("harness");
+    assert!(
+        html.contains("<meta http-equiv=\"refresh\" content=\"0; url=harness/index.html\">"),
         "{html}"
     );
-    assert_eq!(hrefs(&html).collect::<Vec<_>>(), ["harness_api/index.html"]);
+    assert_eq!(hrefs(&html).collect::<Vec<_>>(), ["harness/index.html"]);
 }
 
 #[test]

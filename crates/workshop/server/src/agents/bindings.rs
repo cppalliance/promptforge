@@ -13,7 +13,7 @@
 //! menu's snapshot bus, and the workspace's grant-set generation watch,
 //! and pushes again.
 
-use harness_api::{CatalogBinding, GatewayBinding, Harness, HostSnapshot};
+use harness::{CatalogBinding, GatewayBinding, Harness, HostSnapshot};
 use tokio::sync::{broadcast, watch};
 use workshop_gateway::{GatewayHandles, GatewaySnapshot};
 use workshop_menu::{CatalogBus, MenuHandles};

@@ -1,4 +1,4 @@
-//! The facade shape check over this workspace's facade, plus fixtures that
+//! The facade shape check over this workspace's facades, plus fixtures that
 //! each allowed form passes and each forbidden form fails at its line.
 
 use std::path::{Path, PathBuf};
@@ -48,12 +48,10 @@ fn facade_dir(root: &Path) -> PathBuf {
     root.join("crates").join("promptforge")
 }
 
-/// Writes `manifest`, when given, as a fake workspace's
-/// `crates/promptforge/Cargo.toml`, and each `(path, text)` under its `src/`.
-fn facade_root(manifest: Option<&str>, files: &[(&str, &str)]) -> tempfile::TempDir {
-    let root = tempfile::TempDir::new().expect("tempdir");
-    let dir = facade_dir(root.path());
-    std::fs::create_dir_all(&dir).expect("the facade directory creates");
+/// Writes `manifest`, when given, as `dir/Cargo.toml`, and each
+/// `(path, text)` under `dir/src/`.
+fn write_facade(dir: &Path, manifest: Option<&str>, files: &[(&str, &str)]) {
+    std::fs::create_dir_all(dir).expect("the facade directory creates");
     if let Some(manifest) = manifest {
         std::fs::write(dir.join("Cargo.toml"), manifest).expect("the manifest writes");
     }
@@ -64,16 +62,54 @@ fn facade_root(manifest: Option<&str>, files: &[(&str, &str)]) -> tempfile::Temp
         std::fs::create_dir_all(dir).expect("the source directory creates");
         std::fs::write(&file, text).expect("the source file writes");
     }
+}
+
+/// A fake workspace whose `crates/promptforge/` facade holds `manifest`,
+/// when given, and each `(path, text)` under its `src/`.
+fn facade_root(manifest: Option<&str>, files: &[(&str, &str)]) -> tempfile::TempDir {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    write_facade(&facade_dir(root.path()), manifest, files);
     root
 }
 
 #[test]
-fn the_real_facade_passes_the_shape_check() {
+fn the_real_facades_pass_the_shape_check() {
     let violations = facade_shape_violations(&workspace_root());
     assert!(
         violations.is_empty(),
         "facade shape violations:\n{}",
         violations.join("\n")
+    );
+}
+
+#[test]
+fn the_harness_facade_is_held_to_the_same_shape() {
+    let root = facade_root(
+        Some(FIXTURE_MANIFEST),
+        &[("lib.rs", "pub use promptforge_engine::Run;\n")],
+    );
+    let harness = root.path().join("crates").join("harness");
+    write_facade(
+        &harness,
+        Some(
+            "[package]\nname = \"harness\"\n\n[dependencies]\n\
+             harness-runner.workspace = true\n\
+             harness-sessions.workspace = true\n",
+        ),
+        &[(
+            "lib.rs",
+            "pub use harness_sessions::runtime::Harness;\n\
+             pub use harness_runner::cancel::{CancelHandle, scope};\n",
+        )],
+    );
+    let violations = facade_shape_violations(root.path());
+    let lib = harness.join("src").join("lib.rs");
+    assert_eq!(
+        violations,
+        [format!(
+            "{}:2: grouped use list: required {REEXPORT}, found `pub use harness_runner::cancel::{{CancelHandle, scope}};`",
+            lib.display()
+        )]
     );
 }
 
@@ -180,7 +216,7 @@ fn the_dependency_crates_are_the_manifest_dependency_keys() {
         pub use serde_json::Value;\n\
         pub use promptforge_types::ids::RunId;\n";
     let root = facade_root(Some(manifest), &[("lib.rs", lib)]);
-    let violations = facade_shape_violations(root.path());
+    let violations = facade_violations(&facade_dir(root.path()));
     assert_eq!(violations.len(), 2, "{violations:?}");
     for (violation, line) in violations.iter().zip([4, 5]) {
         assert!(
@@ -289,7 +325,7 @@ fn every_source_file_under_the_facade_src_is_checked() {
             ("nested/stray.rs", "pub struct Stray;\n"),
         ],
     );
-    let violations = facade_shape_violations(root.path());
+    let violations = facade_violations(&facade_dir(root.path()));
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("stray.rs:1: item definition (struct)"),
@@ -300,18 +336,20 @@ fn every_source_file_under_the_facade_src_is_checked() {
 #[test]
 fn a_missing_facade_crate_root_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    let lib = root
-        .path()
-        .join("crates")
-        .join("promptforge")
-        .join("src")
-        .join("lib.rs");
     let violations = facade_shape_violations(root.path());
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert!(
-        violations[0].starts_with(&lib.display().to_string()),
-        "{violations:?}"
-    );
+    assert_eq!(violations.len(), 2, "{violations:?}");
+    for (violation, facade) in violations.iter().zip(["promptforge", "harness"]) {
+        let lib = root
+            .path()
+            .join("crates")
+            .join(facade)
+            .join("src")
+            .join("lib.rs");
+        assert!(
+            violation.starts_with(&lib.display().to_string()),
+            "{violations:?}"
+        );
+    }
 }
 
 #[test]
@@ -322,7 +360,7 @@ fn an_unreadable_facade_source_is_reported_not_skipped() {
     );
     let event = facade_dir(root.path()).join("src").join("event.rs");
     std::fs::write(&event, [0xff, 0xfe, 0xfd]).expect("the non-UTF-8 source writes");
-    let violations = facade_shape_violations(root.path());
+    let violations = facade_violations(&facade_dir(root.path()));
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with(&format!("{}: unreadable facade source: ", event.display())),
@@ -338,7 +376,7 @@ fn a_missing_or_unparseable_facade_manifest_is_reported_not_skipped() {
     ] {
         let root = facade_root(manifest, &[("lib.rs", "pub struct Stray;\n")]);
         let path = facade_dir(root.path()).join("Cargo.toml");
-        let violations = facade_shape_violations(root.path());
+        let violations = facade_violations(&facade_dir(root.path()));
         assert_eq!(violations.len(), 1, "{violations:?}");
         assert!(
             violations[0].starts_with(&format!("{}: {problem}: ", path.display())),

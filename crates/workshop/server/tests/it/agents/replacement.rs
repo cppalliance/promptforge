@@ -247,9 +247,9 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     .await;
     let mut lifecycle = state
         .registry()
-        .state::<harness_api::Harness>()
+        .state::<harness::Harness>()
         .expect("the harness is registered")
-        .session(&harness_api::SessionId::new(&session))
+        .session(&harness::SessionId::new(&session))
         .expect("the session remains registered")
         .subscribe_state();
     replace_gateway(&state, &replacement, 1_757_000_002);
@@ -259,7 +259,7 @@ async fn unavailable_catalog_waits_without_relaunching_stale_bindings() {
     // is observable only when the session holds.
     tokio::time::timeout(
         Duration::from_secs(10),
-        lifecycle.wait_for(|run| *run == harness_api::SessionState::Closed),
+        lifecycle.wait_for(|run| *run == harness::SessionState::Closed),
     )
     .await
     .expect("an unavailable catalog cannot relaunch model-b on the replacement Gateway")

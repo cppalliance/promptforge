@@ -1,15 +1,16 @@
-//! Harness clippy-ban check: every harness crate forbids raw tokio spawns.
+//! Harness clippy-ban check: every internal harness crate forbids raw
+//! tokio spawns.
 //!
 //! The harness spawns only through one instrumented wrapper in
 //! `harness-runner` that tags each task with its `EffectId` and
-//! `Provenance`, so every crate under `crates/harness/` and the public
-//! crate `crates/harness-api/` has a `clippy.toml` whose `disallowed-methods`
-//! names `tokio::spawn` and `tokio::task::spawn_blocking`. Clippy reads the
-//! nearest `clippy.toml` above each crate's manifest directory, so the file
-//! must sit in the crate itself, not only at the workspace root.
+//! `Provenance`, so every crate under `crates/harness-internal/` has a
+//! `clippy.toml` whose `disallowed-methods` names `tokio::spawn` and
+//! `tokio::task::spawn_blocking`. Clippy reads the nearest `clippy.toml`
+//! above each crate's manifest directory, so the file must sit in the crate
+//! itself, not only at the workspace root. The `crates/harness/` facade
+//! holds only re-exports, so it has no `clippy.toml` and is not checked.
 //!
-//! The check is vacuously true while the container is empty or absent and
-//! while the public crate's directory is absent.
+//! The check is vacuously true while the container is empty or absent.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,18 +18,16 @@ use std::path::{Path, PathBuf};
 /// The methods every harness `clippy.toml` must disallow.
 const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
 
-/// Checks every crate under `container` and, when it exists, the
-/// `public_crate` directory for a complete clippy ban list.
+/// Checks every crate under `container` for a complete clippy ban list.
 #[must_use]
-pub(crate) fn harness_clippy_bans(container: &Path, public_crate: &Path) -> Vec<String> {
-    harness_crates(container, public_crate)
-        .iter()
-        .filter_map(|dir| check_crate(dir))
-        .collect()
+pub(crate) fn harness_clippy_bans(container: &Path) -> Vec<String> {
+    let mut crates = Vec::new();
+    collect_crates(container, &mut crates);
+    crates.iter().filter_map(|dir| check_crate(dir)).collect()
 }
 
-/// The crate directories the ban check covers: every crate under
-/// `container` plus `public_crate` when its directory exists.
+/// The harness family's crate directories: every crate under `container`
+/// plus `public_crate` when its directory exists.
 #[must_use]
 pub(crate) fn harness_crates(container: &Path, public_crate: &Path) -> Vec<PathBuf> {
     let mut crates = Vec::new();

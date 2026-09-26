@@ -10,20 +10,20 @@
 //!   workshop, or harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
 //!   except the family's public pair (`gateway-api-types`,
-//!   `gateway-api-discovery`), and may depend on `harness-*` only through
-//!   `harness-api`.
-//! - `harness-*` crates must not depend on workshop crates, and may depend
-//!   on gateway crates only through the public pair.
+//!   `gateway-api-discovery`), and may depend on the harness family only
+//!   through `harness`.
+//! - `harness`/`harness-*` crates must not depend on workshop crates, and
+//!   may depend on gateway crates only through the public pair.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through `promptforge`.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
-//!   `crates/gateway/`, `crates/workshop/`, and `crates/harness/`
+//!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
 //!   container and the container's named outside exception (`promptforge`
-//!   for `crates/promptforge-internal/`, `harness-api` for
-//!   `crates/harness/`; the gateway and workshop containers name none) may
-//!   depend on the crates it holds. Containers nest:
+//!   for `crates/promptforge-internal/`, `harness` for
+//!   `crates/harness-internal/`; the gateway and workshop containers name
+//!   none) may depend on the crates it holds. Containers nest:
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
 //!   with `gateway-stt` as its public member - the one crate inside the
 //!   family outside the subsystem may name.
@@ -59,7 +59,7 @@ fn family(package: &str) -> Family {
         Family::Gateway
     } else if package == "workshop" || package.starts_with("workshop-") {
         Family::Workshop
-    } else if package.starts_with("harness-") {
+    } else if package == "harness" || package.starts_with("harness-") {
         Family::Harness
     } else if package.starts_with("shared-") {
         Family::Shared
@@ -131,10 +131,10 @@ const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
-/// The harness family's public crate: the only harness crate workshop
-/// crates may name, and the one outside crate permitted into
-/// `crates/harness/`.
-const PUBLIC_HARNESS: &str = "harness-api";
+/// The harness family's facade: the only harness crate workshop crates may
+/// name, and the one outside crate permitted into
+/// `crates/harness-internal/`.
+const PUBLIC_HARNESS: &str = "harness";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -193,7 +193,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             Some("workshop crates must not depend on gateway crates")
         }
         (Family::Workshop, Family::Harness) if dep.package != PUBLIC_HARNESS => {
-            Some("workshop crates may depend on harness-* only through harness-api")
+            Some("workshop crates may depend on harness crates only through harness")
         }
         (Family::Harness, Family::Workshop) => {
             Some("harness crates must not depend on workshop crates")
@@ -262,7 +262,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
         "promptforge-internal" => Some("promptforge"),
-        "harness" => Some(PUBLIC_HARNESS),
+        "harness-internal" => Some(PUBLIC_HARNESS),
         _ => None,
     }
 }

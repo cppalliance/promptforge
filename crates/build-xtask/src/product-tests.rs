@@ -325,7 +325,7 @@ fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness/runner",
+        "harness-internal/runner",
         "harness-runner",
         "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n\
          gateway-api-types = { path = \"../../gateway-api-types\" }\n\
@@ -352,7 +352,7 @@ fn a_harness_crate_depending_on_a_workshop_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness/sessions",
+        "harness-internal/sessions",
         "harness-sessions",
         "[dependencies]\nworkshop-registry = { path = \"../../workshop-registry\" }\n",
     );
@@ -371,7 +371,7 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness/models",
+        "harness-internal/models",
         "harness-models",
         "[dependencies]\ngateway-routing = { path = \"../../gateway-routing\" }\n",
     );
@@ -391,7 +391,7 @@ fn a_harness_crate_reaching_past_the_promptforge_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness/runner",
+        "harness-internal/runner",
         "harness-runner",
         "[dependencies]\npromptforge-lua = { path = \"../../promptforge-lua\" }\n",
     );
@@ -405,24 +405,24 @@ fn a_harness_crate_reaching_past_the_promptforge_facade_is_reported() {
 }
 
 #[test]
-fn a_workshop_crate_depending_on_harness_api_passes() {
+fn a_workshop_crate_depending_on_the_harness_facade_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "workshop/server",
         "workshop-server",
-        "[dependencies]\nharness-api = { path = \"../../harness-api\" }\n",
+        "[dependencies]\nharness = { path = \"../../harness\" }\n",
     );
-    write_crate(root.path(), "harness-api", "harness-api", "");
+    write_crate(root.path(), "harness", "harness", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "harness-api is the harness public crate for workshop crates: {violations:?}"
+        "harness is the harness public crate for workshop crates: {violations:?}"
     );
 }
 
 #[test]
-fn a_workshop_crate_depending_on_a_harness_crate_other_than_harness_api_is_reported() {
+fn a_workshop_crate_depending_on_a_harness_crate_other_than_the_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
@@ -435,16 +435,16 @@ fn a_workshop_crate_depending_on_a_harness_crate_other_than_harness_api_is_repor
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("workshop-server depends on harness-runner:")
-            && violations[0].contains("harness-api"),
-        "the violation names the workshop crate and the harness public crate: {violations:?}"
+            && violations[0].ends_with("only through harness"),
+        "the violation names the workshop crate and the harness facade: {violations:?}"
     );
 }
 
 #[test]
 fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
-    let dep = "[dependencies]\nharness-api = { path = \"../harness-api\" }\n";
-    write_crate(root.path(), "harness-api", "harness-api", "");
+    let dep = "[dependencies]\nharness = { path = \"../harness\" }\n";
+    write_crate(root.path(), "harness", "harness", "");
     write_crate(root.path(), "promptforge", "promptforge", dep);
     write_crate(root.path(), "gateway-routing", "gateway-routing", dep);
     write_crate(root.path(), "shared-loopback", "shared-loopback", dep);
@@ -454,8 +454,8 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
         assert!(
             violations
                 .iter()
-                .any(|v| v.starts_with(&format!("{package} depends on harness-api:"))),
-            "{package} depending on the harness public crate is reported: {violations:?}"
+                .any(|v| v.starts_with(&format!("{package} depends on harness:"))),
+            "{package} depending on the harness facade is reported: {violations:?}"
         );
     }
 }
@@ -473,10 +473,10 @@ fn family_classification_follows_the_naming_rules() {
 }
 
 #[test]
-fn harness_family_classification_follows_the_name_prefix() {
-    assert_eq!(family("harness-api"), Family::Harness);
+fn the_bare_harness_package_belongs_to_the_harness_family() {
+    assert_eq!(family("harness"), Family::Harness);
     assert_eq!(family("harness-runner"), Family::Harness);
-    assert_eq!(family("harness"), Family::Unaffiliated);
+    assert_eq!(family("harnesses"), Family::Unaffiliated);
 }
 
 #[test]

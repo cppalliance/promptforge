@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use harness_api::Harness;
+use harness::Harness;
 
 use workshop_gateway::{GatewayBinding, GatewayHandles, GatewayHealth, ResolvedGateway};
 use workshop_menu::MenuHandles;

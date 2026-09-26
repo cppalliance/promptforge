@@ -5,7 +5,7 @@
 //! module so each stays under the 500-line ceiling.
 
 use axum::extract::ws::WebSocket;
-use harness_api::{Delta, DeltaKind, SessionEvent, WaitFrame};
+use harness::{Delta, DeltaKind, SessionEvent, WaitFrame};
 use promptforge::event::Event;
 use workshop_protocol::InputFrame;
 

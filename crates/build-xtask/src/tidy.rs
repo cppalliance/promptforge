@@ -1,16 +1,16 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
 //! the harness family, the sans-I/O engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
-//! `engine_guards`), the `promptforge` facade's source shape (run
-//! from `facade_shape`), and the `doc(hidden)` ban over the engine
+//! `engine_guards`), the `promptforge` and `harness` facades' source
+//! shape (run from `facade_shape`), and the `doc(hidden)` ban over the engine
 //! crates (run from `doc_hidden`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`
 //! enforces the architecture; `cargo xtask tidy` prints the same report
 //! on demand. The file ceiling and lint inheritance checks bind every
-//! `workshop-*` and `harness-*` crate (plus `harness-api`, minus the
-//! `workshop` desktop app) by package name, every other crate whose crate
+//! `workshop-*` and `harness-*` crate (minus the `workshop` desktop app)
+//! by package name, every other crate whose crate
 //! docs have the `## Invariants` marker, and every crate directory whose
 //! manifest the shared walk could not read, parse, or find a package name
 //! in - a crate with no readable name cannot be shown exempt. Those read
@@ -65,8 +65,7 @@ pub(crate) fn all_violations(root: &Path) -> Vec<String> {
     violations.extend(walled_tier_violations(root));
     violations.extend(crate::product::product_boundary_violations(root));
     violations.extend(crate::harness_bans::harness_clippy_bans(
-        &root.join("crates").join("harness"),
-        &root.join("crates").join("harness-api"),
+        &root.join("crates").join("harness-internal"),
     ));
     violations.extend(crate::engine_guards::engine_guard_violations(root));
     violations.extend(crate::facade_shape::facade_shape_violations(root));
@@ -269,8 +268,9 @@ pub(crate) fn marker_violations(root: &Path) -> Vec<String> {
 }
 
 /// Whether a package name places the crate in a family that must have the
-/// marker: `workshop-*` and `harness-*` (which covers `harness-api`). The
-/// Tauri desktop app (the `workshop` package) is exempt.
+/// marker: `workshop-*` and `harness-*`. The Tauri desktop app (the
+/// `workshop` package) and the `harness` facade fall outside both prefixes,
+/// so they are exempt.
 fn family_requires_marker(name: &str) -> bool {
     name != "workshop" && (name.starts_with("workshop-") || name.starts_with("harness-"))
 }

@@ -61,7 +61,7 @@ fn guarded_root() -> tempfile::TempDir {
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness/runner",
+        "harness-internal/runner",
         "harness-runner",
         "[features]\ntest-support = []\n",
     );
@@ -83,7 +83,7 @@ fn a_dependencies_table_enabling_an_engine_test_support_feature_is_reported() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness/capabilities",
+        "harness-internal/capabilities",
         "harness-capabilities",
         "[dependencies]\n\
          promptforge-engine = { workspace = true, features = [\"test-support\"] }\n",
@@ -103,7 +103,7 @@ fn a_dev_dependencies_table_enabling_an_engine_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness/capabilities",
+        "harness-internal/capabilities",
         "harness-capabilities",
         "[dependencies]\npromptforge-engine = { workspace = true }\n\
          [dev-dependencies]\n\
@@ -123,7 +123,7 @@ fn build_and_target_tables_are_scanned_renames_resolved_and_non_engine_features_
     let root = engine_root();
     write_crate(
         root.path(),
-        "harness/runner",
+        "harness-internal/runner",
         "harness-runner",
         "[build-dependencies]\n\
          rt = { package = \"promptforge-engine\", features = [\"test-support\"] }\n\
@@ -261,7 +261,7 @@ fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness/models",
+        "harness-internal/models",
         "harness-models",
         "[dependencies]\n\
          harness-runner = { workspace = true, features = [\"test-support\"] }\n",
@@ -281,7 +281,7 @@ fn a_dev_dependencies_table_enabling_a_harness_test_support_feature_passes() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness/models",
+        "harness-internal/models",
         "harness-models",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [dev-dependencies]\n\
@@ -299,7 +299,7 @@ fn a_harness_crate_forwarding_its_own_test_support_feature_passes() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness/sessions",
+        "harness-internal/sessions",
         "harness-sessions",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [features]\ntest-support = [\"harness-runner/test-support\"]\n",
@@ -316,7 +316,7 @@ fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported()
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness/models",
+        "harness-internal/models",
         "harness-models",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [features]\ndefault = [\"harness-runner/test-support\"]\n\
@@ -337,7 +337,7 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness/models",
+        "harness-internal/models",
         "harness-models",
         "[dependencies]\npromptforge-lua = { workspace = true }\n\
          [features]\ntest-support = [\"promptforge-lua/test-support\"]\n",

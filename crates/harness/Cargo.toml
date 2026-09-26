@@ -1,0 +1,20 @@
+[package]
+name = "harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge harness public API: the surface through which Workshop and other clients configure the harness, push the gateway binding, and drive agent sessions"
+documentation = "https://cppalliance.github.io/promptforge/harness/harness/index.html"
+
+# Every crate that defines a re-exported item: each `pub use` names the
+# defining crate's path.
+[dependencies]
+harness-runner.workspace = true
+harness-sessions.workspace = true
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

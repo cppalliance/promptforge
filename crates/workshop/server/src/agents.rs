@@ -7,7 +7,7 @@
 //! two share only [`crate::websocket`].
 //!
 //! Agent sessions run in the harness. The composition root constructs a
-//! [`Harness`] from `harness-api` and registers it like every other
+//! [`Harness`] from `harness` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
 //! every session through it. Everything the harness knows about the server
 //! arrives as data pushed through its public API ([`bindings`]): the
@@ -33,7 +33,7 @@ mod wire;
 use std::fmt;
 use std::sync::Arc;
 
-use harness_api::{Harness, HarnessConfig, LaunchError, LaunchRequest, Session, SessionId};
+use harness::{Harness, HarnessConfig, LaunchError, LaunchRequest, Session, SessionId};
 use workshop_registry::Registry;
 use workshop_support::{Config, ReconnectBackoff};
 
@@ -191,7 +191,7 @@ impl AgentSessions {
         id: &str,
         response: workshop_protocol::InputResponse,
         after_acceptance: impl FnOnce(),
-    ) -> Option<Result<(), harness_api::WaitError>> {
+    ) -> Option<Result<(), harness::WaitError>> {
         let session = self.get(id)?;
         Some(session.send_input(&response.token, response.text, after_acceptance))
     }

@@ -1,8 +1,8 @@
 //! `test-support` leak guard: no non-dev dependency table anywhere in the
 //! workspace enables a promptforge or harness crate's `test-support`
 //! feature. The promptforge family is the facade plus every
-//! `crates/promptforge-internal/` member; the harness family is every
-//! `crates/harness/` member plus `crates/harness-api`.
+//! `crates/promptforge-internal/` member; the harness family is the
+//! `crates/harness` facade plus every `crates/harness-internal/` member.
 //!
 //! The engine manifest guard (`engine_deps`) lets an engine crate keep an
 //! optional forbidden dependency that only its `test-support` feature
@@ -26,8 +26,8 @@
 //! the crate's own dependency entries and their `package` renames. One
 //! shape is exempt, within each family: a crate's own `test-support`
 //! feature forwarding to another `test-support` in its family (one
-//! container crate forwarding a sibling's; the guard counts the facade and
-//! `harness-api` as members of their families), because that forwarding
+//! container crate forwarding a sibling's; the guard counts both facades
+//! as members of their families), because that forwarding
 //! is gated by a feature this guard already confines to dev tables.
 //! Forwarding into the other family is reported.
 //!
@@ -208,8 +208,8 @@ fn guarded_families(root: &Path) -> [Vec<String>; 2] {
     [
         package_names(&crate::engine_guards::engine_crates(root)),
         package_names(&crate::harness_bans::harness_crates(
+            &crates_dir.join("harness-internal"),
             &crates_dir.join("harness"),
-            &crates_dir.join("harness-api"),
         )),
     ]
 }

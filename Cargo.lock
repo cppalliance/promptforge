@@ -2590,7 +2590,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-api"
+name = "harness"
 version = "0.3.0"
 dependencies = [
  "harness-runner",
@@ -8568,7 +8568,7 @@ dependencies = [
  "build-ui",
  "futures-util",
  "gateway-api-discovery",
- "harness-api",
+ "harness",
  "promptforge",
  "reqwest",
  "rust-embed",

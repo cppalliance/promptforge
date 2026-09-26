@@ -1,8 +1,9 @@
 //! The facade shape check, live: every `.rs` file under the `promptforge`
-//! facade's `src/` holds only grouping `pub mod` blocks with doc comments,
-//! single-item `pub use internal_crate::path::Item;` re-exports, and doc
-//! attributes, so every surface item is defined in an internal crate. Runs
-//! as part of `cargo test -p build-xtask` and `cargo xtask tidy`.
+//! and `harness` facades' `src/` holds only grouping `pub mod` blocks with
+//! doc comments, single-item `pub use internal_crate::path::Item;`
+//! re-exports, and doc attributes, so every surface item is defined in an
+//! internal crate. Runs as part of `cargo test -p build-xtask` and
+//! `cargo xtask tidy`.
 //!
 //! A re-export's path must start at a crate the facade manifest declares
 //! under `[dependencies]`. Uniform paths resolve any other head, such as a
@@ -22,22 +23,37 @@ use syn::spanned::Spanned;
 use syn::{Attribute, Item, ItemMod, ItemUse, Meta};
 use syn::{UseTree, Visibility};
 
-/// The facade's crate directory, relative to the workspace root.
+/// The `promptforge` facade's crate directory, relative to the workspace
+/// root.
 pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
+
+/// Every facade the shape check covers, relative to the workspace root.
+const FACADE_DIRS: [[&str; 2]; 2] = [FACADE_DIR, ["crates", "harness"]];
 
 const REEXPORT: &str = "a single-item re-export `pub use internal_crate::path::Item;`";
 const FACADE_ITEMS: &str = "only grouping `pub mod` blocks and single-item `pub use` re-exports";
 const FACADE_ATTRIBUTES: &str = "only doc attributes";
 
-/// Runs the shape check over every `.rs` file under the facade's `src/`.
-/// A missing crate root, an unreadable manifest, or an unreadable file is
-/// reported, not skipped: a file that was never parsed cannot be shown
-/// clean.
+/// Runs the shape check over every facade in [`FACADE_DIRS`], in order.
 #[must_use]
 pub(crate) fn facade_shape_violations(root: &Path) -> Vec<String> {
-    let dir = FACADE_DIR
+    FACADE_DIRS
         .iter()
-        .fold(root.to_path_buf(), |dir, part| dir.join(part));
+        .flat_map(|parts| {
+            facade_violations(
+                &parts
+                    .iter()
+                    .fold(root.to_path_buf(), |dir, part| dir.join(part)),
+            )
+        })
+        .collect()
+}
+
+/// Runs the shape check over every `.rs` file under the facade crate
+/// `dir`'s `src/`. A missing crate root, an unreadable manifest, or an
+/// unreadable file is reported, not skipped: a file that was never parsed
+/// cannot be shown clean.
+fn facade_violations(dir: &Path) -> Vec<String> {
     let src = dir.join("src");
     let lib = src.join("lib.rs");
     if !lib.is_file() {

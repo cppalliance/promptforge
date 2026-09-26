@@ -3,7 +3,7 @@
 //! shapes, and the cursor and wire-index bookkeeping behind every
 //! durable `agent_event` frame.
 
-use harness_api::{Delta, SessionEvent, WaitFrame};
+use harness::{Delta, SessionEvent, WaitFrame};
 use promptforge::event::Event;
 use promptforge::ids::{ChainId, Provenance, TaskId};
 use workshop_protocol::InputFrame;

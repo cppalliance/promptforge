@@ -7,7 +7,7 @@
 //! itself when the harness lets the session go and the last socket
 //! detaches: the channels close, and the loop returns.
 
-use harness_api::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
+use harness::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};
 use promptforge::event::Event;
 use tokio::sync::broadcast;
 use workshop_protocol::Activity;
@@ -16,11 +16,7 @@ use workshop_support::ReconnectBackoff;
 
 /// Spawns the reporter for `session`, reporting through `push` and resetting
 /// `backoff` on completed replies.
-pub(super) fn spawn_reporter(
-    session: &harness_api::Session,
-    push: Push,
-    backoff: ReconnectBackoff,
-) {
+pub(super) fn spawn_reporter(session: &harness::Session, push: Push, backoff: ReconnectBackoff) {
     let events = session.subscribe_events();
     let deltas = session.subscribe_deltas();
     let errors = session.subscribe_errors();

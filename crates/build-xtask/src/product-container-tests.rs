@@ -257,35 +257,41 @@ fn an_outside_crate_depending_into_the_harness_container_is_reported() {
         root.path(),
         "workshop/server",
         "workshop-server",
-        "[dependencies]\nharness-runner = { path = \"../../harness/runner\" }\n",
+        "[dependencies]\nharness-runner = { path = \"../../harness-internal/runner\" }\n",
     );
-    write_crate(root.path(), "harness/runner", "harness-runner", "");
+    write_crate(root.path(), "harness-internal/runner", "harness-runner", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("workshop-server depends on harness-runner")
-            && violations[0].contains("crates/harness is private to its family")
-            && violations[0].contains("harness-api"),
+            && violations[0].contains(
+                "crates/harness-internal is private to its family; only harness may depend into it"
+            ),
         "the violation includes the harness container privacy message: {violations:?}"
     );
 }
 
 #[test]
-fn the_public_harness_crate_depending_into_the_harness_container_passes() {
+fn the_harness_facade_depending_into_the_harness_container_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-api",
-        "harness-api",
-        "[dependencies]\nharness-runner = { path = \"../harness/runner\" }\n\
-         harness-sessions = { path = \"../harness/sessions\" }\n",
+        "harness",
+        "harness",
+        "[dependencies]\nharness-runner = { path = \"../harness-internal/runner\" }\n\
+         harness-sessions = { path = \"../harness-internal/sessions\" }\n",
     );
-    write_crate(root.path(), "harness/runner", "harness-runner", "");
-    write_crate(root.path(), "harness/sessions", "harness-sessions", "");
+    write_crate(root.path(), "harness-internal/runner", "harness-runner", "");
+    write_crate(
+        root.path(),
+        "harness-internal/sessions",
+        "harness-sessions",
+        "",
+    );
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "harness-api is the one outside crate permitted into crates/harness: {violations:?}"
+        "harness is the one outside crate permitted into crates/harness-internal: {violations:?}"
     );
 }
 
@@ -294,13 +300,13 @@ fn harness_container_siblings_may_depend_on_each_other() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness/sessions",
+        "harness-internal/sessions",
         "harness-sessions",
         "[dependencies]\nharness-capabilities = { path = \"../capabilities\" }\n",
     );
     write_crate(
         root.path(),
-        "harness/capabilities",
+        "harness-internal/capabilities",
         "harness-capabilities",
         "",
     );

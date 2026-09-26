@@ -339,7 +339,7 @@ The existing workspace gates cover this change: the build, the build-xtask archi
 
 <step-3>
 
-### Step 3: Rename the facade to harness and move the private crates to harness-internal
+### Step 3: Rename the facade to harness and move the private crates to harness-internal [completed]
 
 - Component: harness facade
 - Piece: restructure. It comes before the public-surface piece (Step 4), because that piece edits the facade `lib.rs` and `crates/harness-internal/sessions`, which exist only after this one.
