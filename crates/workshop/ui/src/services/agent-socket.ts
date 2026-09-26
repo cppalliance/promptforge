@@ -31,35 +31,21 @@
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type {
-  AgentCancelFrame,
-  AgentDeltaFrame,
-  AgentEventFrame,
-  AgentSessionFrame,
-  AttachFrame,
-  InputResponseFrame,
-  LaunchFrame,
+import {
+  AGENT_FRAME_GUARDS,
+  type AgentCancelFrame,
+  type AgentDeltaFrame,
+  type AgentEventFrame,
+  type AgentSessionFrame,
+  type AttachFrame,
+  type InputResponseFrame,
+  type LaunchFrame,
+  narrowFrame,
 } from "./protocol";
 import { ReconnectBackoff } from "./reconnect-backoff";
 
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/agents/ws`;
-}
-
-/**
- * The loosely-typed inbound frame: exactly the fields routing reads,
- * narrowed per `type` before delivery. The full payloads are delivered as
- * their protocol.ts types once the envelope checks pass.
- */
-interface AgentServerFrame {
-  type?: unknown;
-  agents?: unknown;
-  session?: unknown;
-  agent?: unknown;
-  index?: unknown;
-  content?: unknown;
-  token?: unknown;
-  message?: unknown;
 }
 
 /**
@@ -224,62 +210,51 @@ export class AgentSocket extends Disposable {
   }
 
   private route(event: MessageEvent): void {
-    let frame: AgentServerFrame;
+    let parsed: unknown;
     try {
-      frame = JSON.parse(String(event.data)) as AgentServerFrame;
+      parsed = JSON.parse(String(event.data));
     } catch {
       // A non-JSON frame is ignored; keep reading.
       return;
     }
-    if (frame.type === "agents") {
-      this._onAgents.fire(Array.isArray(frame.agents) ? (frame.agents as string[]) : []);
-      return;
-    }
-    if (
-      frame.type === "agent_session" &&
-      typeof frame.session === "string" &&
-      typeof frame.agent === "string"
-    ) {
-      // A different session's log starts over at index zero, so the cursor
-      // resets with it - otherwise a launch after a refused reattach (the
-      // session died while disconnected) would silently swallow the new
-      // log's head. A reattach to the same session keeps the cursor: that
-      // dedup is the replay contract.
-      if (this.acknowledged !== null && this.acknowledged.session !== frame.session) {
-        this.nextIndex = 0;
-      }
-      this.acknowledged = frame as unknown as AgentSessionFrame;
-      this._onSession.fire(this.acknowledged);
-      return;
-    }
-    if (frame.type === "agent_event" && typeof frame.index === "number") {
-      // The durable cursor: an attach replays the log from index zero, so
-      // everything below the cursor was already delivered and drops here.
-      if (frame.index < this.nextIndex) {
+    const frame = narrowFrame(AGENT_FRAME_GUARDS, parsed, "/agents/ws");
+    switch (frame?.type) {
+      case "agents":
+        this._onAgents.fire(frame.agents);
         return;
-      }
-      this.nextIndex = frame.index + 1;
-      this._onEvent.fire(frame as unknown as AgentEventFrame);
-      return;
-    }
-    if (frame.type === "agent_delta" && typeof frame.content === "string") {
-      this._onDelta.fire(frame as unknown as AgentDeltaFrame);
-      return;
-    }
-    if (frame.type === "input_required" && typeof frame.token === "string") {
-      this._onInputRequired.fire(frame.token);
-      return;
-    }
-    if (frame.type === "input_cancelled" && typeof frame.token === "string") {
-      this._onInputCancelled.fire(frame.token);
-      return;
-    }
-    if (frame.type === "error") {
-      this._onError.fire(
-        typeof frame.message === "string" && frame.message !== ""
-          ? frame.message
-          : "the agent session failed",
-      );
+      case "agent_session":
+        // A different session's log starts over at index zero, so the cursor
+        // resets with it - otherwise a launch after a refused reattach (the
+        // session died while disconnected) would silently swallow the new
+        // log's head. A reattach to the same session keeps the cursor: that
+        // dedup is the replay contract.
+        if (this.acknowledged !== null && this.acknowledged.session !== frame.session) {
+          this.nextIndex = 0;
+        }
+        this.acknowledged = frame;
+        this._onSession.fire(frame);
+        return;
+      case "agent_event":
+        // The durable cursor: an attach replays the log from index zero, so
+        // everything below the cursor was already delivered and drops here.
+        if (frame.index < this.nextIndex) {
+          return;
+        }
+        this.nextIndex = frame.index + 1;
+        this._onEvent.fire(frame);
+        return;
+      case "agent_delta":
+        this._onDelta.fire(frame);
+        return;
+      case "input_required":
+        this._onInputRequired.fire(frame.token);
+        return;
+      case "input_cancelled":
+        this._onInputCancelled.fire(frame.token);
+        return;
+      case "error":
+        this._onError.fire(frame.message !== "" ? frame.message : "the agent session failed");
+        return;
     }
   }
 }

@@ -5,7 +5,10 @@
 // (client-to-server). The Rust half is the fixture test in
 // crates/workshop/server/src/agents/wire-tests.rs; both suites pin the same
 // case list, so a wire drift or
-// a case added on one side fails the other.
+// a case added on one side fails the other. Every inbound fixture frame also
+// passes its protocol.ts guard, and a copy missing any required field is
+// dropped with one warning. The `error` frame is pinned by
+// workshop-frames.json, since both sockets share its shape.
 // Run: node test/agent-wire-fixtures.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -22,6 +25,7 @@ const bundle = await esbuild.build({
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { AgentSocket } from "./src/services/agent-socket.ts";
+      export { AGENT_FRAME_GUARDS } from "./src/services/protocol.ts";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",
@@ -36,11 +40,19 @@ const bundle = await esbuild.build({
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-agent-wire-fixtures-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, AgentSocket } = await import(pathToFileURL(bundlePath).href);
+const { lifecycle, AgentSocket, AGENT_FRAME_GUARDS } = await import(
+  pathToFileURL(bundlePath).href
+);
 
 const fixture = JSON.parse(
   await readFile(
     path.join(testDir, "..", "..", "..", "workshop", "server", "tests", "fixtures", "agent-frames.json"),
+    "utf8",
+  ),
+);
+const workshopFixture = JSON.parse(
+  await readFile(
+    path.join(testDir, "..", "..", "..", "workshop", "protocol", "tests", "fixtures", "workshop-frames.json"),
     "utf8",
   ),
 );
@@ -101,6 +113,44 @@ class FakeWebSocket {
 }
 globalThis.WebSocket = FakeWebSocket;
 
+const warnings = [];
+console.warn = (...args) => warnings.push(args.join(" "));
+
+// --- Guards: the inbound frames /agents/ws handles -----------------------
+
+// Each inbound case and the fields it may omit; every other field except
+// `type` is required.
+const INBOUND = {
+  agents: [],
+  agent_session: [],
+  agent_event_minimal: [],
+  agent_event_stamped: ["reply"],
+  agent_delta_text: [],
+  agent_delta_reasoning: [],
+  input_required: [],
+  input_cancelled: [],
+};
+const inbound = Object.entries(INBOUND).map(([name, optional]) => [name, fixture[name], optional]);
+inbound.push(["error (workshop-frames.json)", workshopFixture.error, ["id"]]);
+
+const fixtureTypes = new Set(
+  [...Object.values(fixture), ...Object.values(workshopFixture)].map((frame) => frame.type),
+);
+check(
+  "every inbound type the agent socket handles appears in one of the two fixtures",
+  Object.keys(AGENT_FRAME_GUARDS).every((type) => fixtureTypes.has(type)),
+);
+check(
+  "the agent socket guards exactly the inbound cases' types",
+  isDeepStrictEqual(
+    Object.keys(AGENT_FRAME_GUARDS).sort(),
+    [...new Set(inbound.map(([, frame]) => frame.type))].sort(),
+  ),
+);
+for (const [name, frame] of inbound) {
+  check(`the ${name} fixture frame passes its guard`, AGENT_FRAME_GUARDS[frame.type](frame) === true);
+}
+
 await assertNoLeaks(lifecycle, async () => {
   // --- Server-to-client: each fixture frame routes through unchanged ------
 
@@ -117,6 +167,8 @@ await assertNoLeaks(lifecycle, async () => {
   socket.onDelta((frame) => deltas.push(frame));
   socket.onInputRequired((token) => required.push(token));
   socket.onInputCancelled((token) => cancelled.push(token));
+  const errors = [];
+  socket.onError((message) => errors.push(message));
   socket.connect();
   const wire = fakeSockets[0];
   wire.open();
@@ -161,6 +213,52 @@ await assertNoLeaks(lifecycle, async () => {
     "the input_cancelled fixture frame delivers its token",
     isDeepStrictEqual(cancelled, [fixture.input_cancelled.token]),
   );
+  wire.message(workshopFixture.error);
+  check(
+    "the error fixture frame delivers its message",
+    isDeepStrictEqual(errors, [workshopFixture.error.message]),
+  );
+  check("well-formed frames warn about nothing", warnings.length === 0);
+
+  // Every required field of every inbound frame, plus the nested required
+  // fields of an event: a copy without it fails its guard and is dropped,
+  // with one warning naming its type.
+  const handled = [agents, sessions, events, deltas, required, cancelled, errors];
+  const handledCounts = () => handled.map((calls) => calls.length);
+  const before = handledCounts();
+  const removals = [];
+  for (const [name, frame, optional] of inbound) {
+    for (const field of Object.keys(frame)) {
+      if (field !== "type" && !optional.includes(field)) removals.push([name, frame, [field]]);
+    }
+  }
+  for (const field of ["kind", "section", "turn", "content"]) {
+    removals.push(["agent_event_minimal", fixture.agent_event_minimal, ["event", field]]);
+  }
+  for (const nested of [
+    ["usage", "prompt_tokens"],
+    ["llama", "draft_n"],
+    ["client", "e2e_ms"],
+  ]) {
+    removals.push(["agent_event_stamped", fixture.agent_event_stamped, ["event", "metrics", ...nested]]);
+  }
+  for (const [name, frame, fieldPath] of removals) {
+    const copy = structuredClone(frame);
+    const parent = fieldPath.slice(0, -1).reduce((node, key) => node[key], copy);
+    delete parent[fieldPath.at(-1)];
+    const missing = `a ${name} frame missing ${fieldPath.join(".")}`;
+    warnings.length = 0;
+    wire.message(copy);
+    check(`${missing} fails its guard`, AGENT_FRAME_GUARDS[frame.type](copy) === false);
+    check(
+      `${missing} is dropped without a handler call`,
+      isDeepStrictEqual(handledCounts(), before),
+    );
+    check(
+      `${missing} warns once, naming ${frame.type}`,
+      warnings.length === 1 && warnings[0].includes(frame.type),
+    );
+  }
 
   // --- Client-to-server: each send matches its fixture entry --------------
 

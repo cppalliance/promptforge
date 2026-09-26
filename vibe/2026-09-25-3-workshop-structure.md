@@ -1002,7 +1002,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-20>
 
-### Step 20: Guard every inbound frame
+### Step 20: Guard every inbound frame [completed]
 
 - Component: UI wire guards
 - Component placement: tenth, because the guards read both fixtures at their final paths (Step 13) and sit in service files that Steps 18 and 19 left settled.

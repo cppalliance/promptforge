@@ -209,10 +209,7 @@ await assertNoLeaks(lifecycle, async () => {
   noisy.message({ type: "agent_event", event: {} });
   noisy.message({ type: "input_required" });
   noisy.message({ type: "agents", agents: "not a list" });
-  check(
-    "malformed frames are skipped; a listless agents push degrades to empty",
-    isDeepStrictEqual(heard, [["agents", []]]),
-  );
+  check("malformed frames are skipped, a listless agents push included", heard.length === 0);
 
   // --- Error frames deliver their message, with a fallback -----------------
 
@@ -220,7 +217,7 @@ await assertNoLeaks(lifecycle, async () => {
   noisy.message({ type: "error", message: "" });
   check(
     "error frames deliver the server's message, or the fallback when empty",
-    isDeepStrictEqual(heard.slice(1), [
+    isDeepStrictEqual(heard, [
       ["error", "unknown agent session"],
       ["error", "the agent session failed"],
     ]),

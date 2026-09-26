@@ -331,7 +331,7 @@ const statusFrame = {
   label: "Working",
   description: "",
   severity: "info",
-  activity: null,
+  activity: "general",
   busy: false,
 };
 fakeSockets[0].message(statusFrame);

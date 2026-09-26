@@ -1,7 +1,8 @@
 // The pure wire types of the workshop protocol: the JSON frame and payload
-// shapes exchanged with the server over /ws, /agents/ws, and /v1/models.
-// Types only - the socket logic that sends and routes these frames stays
-// in workshop-socket.ts and agent-socket.ts. The
+// shapes exchanged with the server over /ws, /agents/ws, and /v1/models,
+// plus the guards that narrow parsed inbound frames to them. The socket
+// logic that sends and routes these frames stays in workshop-socket.ts and
+// agent-socket.ts. The
 // Rust half of this contract is
 // crates/workshop/protocol/src plus, for the agent-session frame family,
 // crates/workshop/server/src/agents/wire.rs; the files
@@ -74,6 +75,28 @@ export interface WorkbenchFrame {
 export interface SelectModelFrame {
   type: "select_model";
   model: string;
+}
+
+/**
+ * The client frame selecting a gateway profile:
+ * `{"type":"switch_profile","name":"..."}`, with an explicit `null` name
+ * selecting no profile. The key is required; an absent `name` is refused.
+ */
+export interface SwitchProfileFrame {
+  type: "switch_profile";
+  name: string | null;
+}
+
+/**
+ * A failure report answered to one inbound frame: `message` plus the
+ * request's `id`, echoed verbatim when the request had one. The
+ * agent-session socket also pushes id-less error frames for session-level
+ * failures.
+ */
+export interface ErrorFrame {
+  type: "error";
+  message: string;
+  id?: unknown;
 }
 
 // --- Agent-session frames (/agents/ws) --------------------------------------
@@ -274,4 +297,170 @@ export interface InputResponseFrame {
  */
 export interface AgentCancelFrame {
   type: "cancel";
+}
+
+// --- Inbound frame guards ---------------------------------------------------
+// Each guard checks every field its type declares: required fields must be
+// present, and optional fields, when present, must hold their type (absent
+// optionals are omitted keys, never `null`). Extra fields pass, so the
+// server may add fields without breaking older UIs.
+
+type Check = (value: unknown) => boolean;
+type Guard<T> = (value: unknown) => value is T;
+type Checks<T> = { readonly [K in keyof T]-?: Check };
+
+const isString: Check = (value) => typeof value === "string";
+const isNumber: Check = (value) => typeof value === "number";
+const isBoolean: Check = (value) => typeof value === "boolean";
+const isAnything: Check = () => true;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optional(check: Check): Check {
+  return (value) => value === undefined || check(value);
+}
+
+function nullable(check: Check): Check {
+  return (value) => value === null || check(value);
+}
+
+function oneOf(...labels: readonly string[]): Check {
+  return (value) => typeof value === "string" && labels.includes(value);
+}
+
+function arrayOf(check: Check): Check {
+  return (value) => Array.isArray(value) && value.every(check);
+}
+
+function shape<T>(checks: Checks<T>): Guard<T> {
+  const entries: [string, Check][] = Object.entries(checks);
+  return (value): value is T =>
+    isRecord(value) && entries.every(([key, check]) => check(value[key]));
+}
+
+function frame<T extends { type: string }>(
+  type: T["type"],
+  checks: Omit<Checks<T>, "type">,
+): Guard<T> {
+  return shape<T>({ ...checks, type: (value: unknown) => value === type } as Checks<T>);
+}
+
+const isCatalogModel = shape<CatalogModel>({ id: isString, description: optional(isString) });
+
+const isUsage = shape<Usage>({
+  prompt_tokens: isNumber,
+  completion_tokens: isNumber,
+  total_tokens: isNumber,
+  cached_tokens: optional(isNumber),
+  reasoning_tokens: optional(isNumber),
+});
+
+const isLlamaTimings = shape<LlamaTimings>({
+  prompt_n: isNumber,
+  prompt_ms: isNumber,
+  prompt_per_second: isNumber,
+  predicted_n: isNumber,
+  predicted_ms: isNumber,
+  predicted_per_second: isNumber,
+  draft_n: isNumber,
+  draft_n_accepted: isNumber,
+});
+
+const isVllmMetrics = shape<VllmMetrics>({
+  time_to_first_token_ms: optional(isNumber),
+  generation_time_ms: optional(isNumber),
+  queue_time_ms: optional(isNumber),
+  mean_itl_ms: optional(isNumber),
+  tokens_per_second: optional(isNumber),
+});
+
+const isClientTiming = shape<ClientTiming>({
+  ttft_ms: optional(isNumber),
+  mean_itl_ms: optional(isNumber),
+  e2e_ms: isNumber,
+});
+
+const isCallMetrics = shape<CallMetrics>({
+  usage: optional(isUsage),
+  llama: optional(isLlamaTimings),
+  vllm: optional(isVllmMetrics),
+  client: optional(isClientTiming),
+});
+
+// `kind` stays an open string: future event kinds arrive as labels outside
+// `AgentEventKind`, and renderers tolerate them.
+const isAgentEvent = shape<AgentEvent>({
+  kind: isString,
+  section: isString,
+  turn: isNumber,
+  content: isString,
+  model: optional(isString),
+  tool_call_id: optional(isString),
+  finish_reason: optional(isString),
+  metrics: optional(isCallMetrics),
+});
+
+/** Guards for the frames /ws delivers, keyed by `type`. */
+export const WORKSHOP_FRAME_GUARDS = {
+  status: frame<StatusFrame>("status", {
+    label: isString,
+    description: isString,
+    severity: oneOf("info", "debug", "error"),
+    activity: oneOf("general", "thinking", "generating"),
+    busy: isBoolean,
+  }),
+  models: frame<ModelsFrame>("models", { models: arrayOf(isCatalogModel) }),
+  workbench: frame<WorkbenchFrame>("workbench", {
+    profiles: arrayOf(isString),
+    active: nullable(isString),
+    switching: nullable(isString),
+    switch_in_flight: isBoolean,
+    selected: nullable(isString),
+    chat_ready: isBoolean,
+  }),
+};
+
+/** Guards for the frames /agents/ws delivers, keyed by `type`. */
+export const AGENT_FRAME_GUARDS = {
+  agents: frame<AgentsFrame>("agents", { agents: arrayOf(isString) }),
+  agent_session: frame<AgentSessionFrame>("agent_session", { session: isString, agent: isString }),
+  agent_event: frame<AgentEventFrame>("agent_event", {
+    index: isNumber,
+    reply: optional(isNumber),
+    event: isAgentEvent,
+  }),
+  agent_delta: frame<AgentDeltaFrame>("agent_delta", {
+    kind: oneOf("text", "reasoning"),
+    content: isString,
+    reply: isNumber,
+  }),
+  input_required: frame<InputRequiredFrame>("input_required", { token: isString }),
+  input_cancelled: frame<InputCancelledFrame>("input_cancelled", { token: isString }),
+  error: frame<ErrorFrame>("error", { message: isString, id: isAnything }),
+};
+
+type GuardedFrame<G> = { [K in keyof G]: G[K] extends Guard<infer T> ? T : never }[keyof G];
+
+/**
+ * Narrows one parsed inbound frame through the guard its `type` selects.
+ * A frame of a guarded type that fails its guard is dropped with one
+ * console warning naming the type; a frame of any other type, or JSON that
+ * is no frame at all, is dropped silently.
+ */
+export function narrowFrame<G extends Record<string, Guard<{ type: string }>>>(
+  guards: G,
+  value: unknown,
+  socket: string,
+): GuardedFrame<G> | null {
+  if (!isRecord(value) || typeof value.type !== "string" || !Object.hasOwn(guards, value.type)) {
+    return null;
+  }
+  const guard = guards[value.type];
+  if (guard?.(value)) {
+    return value as GuardedFrame<G>;
+  }
+  console.warn(`${socket}: dropped a malformed ${value.type} frame`);
+  return null;
 }

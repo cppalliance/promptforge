@@ -5,7 +5,8 @@
 // JSON (client-to-server). The Rust half is the fixture test in
 // crates/workshop/protocol/tests/it/workshop_frames.rs; both suites pin the
 // same case list, so a wire drift or a case added on one side fails the
-// other.
+// other. Every inbound fixture frame also passes its protocol.ts guard, and
+// a copy missing any required field is dropped with one warning.
 // Run: node test/workshop-wire-fixtures.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -22,6 +23,7 @@ const bundle = await esbuild.build({
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { WorkshopSocket } from "./src/services/workshop-socket.ts";
+      export { WORKSHOP_FRAME_GUARDS } from "./src/services/protocol.ts";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",
@@ -36,7 +38,9 @@ const bundle = await esbuild.build({
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-workshop-wire-fixtures-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, WorkshopSocket } = await import(pathToFileURL(bundlePath).href);
+const { lifecycle, WorkshopSocket, WORKSHOP_FRAME_GUARDS } = await import(
+  pathToFileURL(bundlePath).href
+);
 
 const fixture = JSON.parse(
   await readFile(
@@ -95,6 +99,28 @@ class FakeWebSocket {
 }
 globalThis.WebSocket = FakeWebSocket;
 
+const warnings = [];
+console.warn = (...args) => warnings.push(args.join(" "));
+
+// --- Guards: the inbound frames /ws handles ------------------------------
+
+const INBOUND = ["models", "status", "workbench"];
+const fixtureTypes = new Set(Object.values(fixture).map((frame) => frame.type));
+check(
+  "every inbound type the workshop socket handles appears in the fixture",
+  Object.keys(WORKSHOP_FRAME_GUARDS).every((type) => fixtureTypes.has(type)),
+);
+check(
+  "the workshop socket guards exactly the inbound cases",
+  isDeepStrictEqual(Object.keys(WORKSHOP_FRAME_GUARDS).sort(), INBOUND),
+);
+for (const type of INBOUND) {
+  check(
+    `the ${type} fixture frame passes its guard`,
+    WORKSHOP_FRAME_GUARDS[type](fixture[type]) === true,
+  );
+}
+
 await assertNoLeaks(lifecycle, async () => {
   // --- Server-to-client: each fixture frame routes through unchanged ------
 
@@ -135,6 +161,30 @@ await assertNoLeaks(lifecycle, async () => {
     "an error fixture frame does not surface as a push",
     statuses.length === 1 && models.length === 1 && workbenches.length === 1,
   );
+  check("an error fixture frame on /ws warns about nothing", warnings.length === 0);
+
+  // Every required field of every inbound frame: a copy without it fails
+  // its guard and is dropped, with one warning naming its type.
+  for (const type of INBOUND) {
+    for (const field of Object.keys(fixture[type]).filter((key) => key !== "type")) {
+      const copy = structuredClone(fixture[type]);
+      delete copy[field];
+      warnings.length = 0;
+      wire.message(copy);
+      check(
+        `a ${type} frame missing ${field} fails its guard`,
+        WORKSHOP_FRAME_GUARDS[type](copy) === false,
+      );
+      check(
+        `a ${type} frame missing ${field} is dropped without a handler call`,
+        statuses.length === 1 && models.length === 1 && workbenches.length === 1,
+      );
+      check(
+        `a ${type} frame missing ${field} warns once, naming ${type}`,
+        warnings.length === 1 && warnings[0].includes(type),
+      );
+    }
+  }
 
   // --- Client-to-server: each send matches its fixture entry --------------
 

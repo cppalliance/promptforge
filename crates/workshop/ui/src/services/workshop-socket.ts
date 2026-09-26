@@ -7,13 +7,16 @@
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type { CatalogModel, SelectModelFrame, StatusFrame, WorkbenchFrame } from "./protocol";
+import {
+  type CatalogModel,
+  narrowFrame,
+  type SelectModelFrame,
+  type StatusFrame,
+  type SwitchProfileFrame,
+  WORKSHOP_FRAME_GUARDS,
+  type WorkbenchFrame,
+} from "./protocol";
 import { ReconnectBackoff } from "./reconnect-backoff";
-
-interface ServerFrame {
-  type?: unknown;
-  models?: unknown;
-}
 
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
@@ -169,7 +172,7 @@ export class WorkshopSocket extends Disposable {
    * down, nothing sent.
    */
   switchProfile(name: string | null): boolean {
-    return this.sendFrame({ type: "switch_profile", name });
+    return this.sendFrame({ type: "switch_profile", name } satisfies SwitchProfileFrame);
   }
 
   /** Sends one JSON frame; false when the socket is down or the send threw. */
@@ -189,27 +192,23 @@ export class WorkshopSocket extends Disposable {
   }
 
   private route(event: MessageEvent): void {
-    let frame: ServerFrame;
+    let parsed: unknown;
     try {
-      frame = JSON.parse(String(event.data)) as ServerFrame;
+      parsed = JSON.parse(String(event.data));
     } catch {
       // A non-JSON frame is ignored; keep reading.
       return;
     }
-    if (frame.type === "status") {
-      this.deliverPush({ kind: "status", frame: frame as unknown as StatusFrame });
-      return;
-    }
-    if (frame.type === "models") {
-      const models = Array.isArray(frame.models) ? (frame.models as CatalogModel[]) : [];
-      this.deliverPush({ kind: "models", models });
-      return;
-    }
-    if (frame.type === "workbench") {
-      this.deliverPush({ kind: "workbench", frame: frame as unknown as WorkbenchFrame });
-    }
     // Error frames answer menu events; the server's status frames report
-    // the user-visible outcome, so they need no local routing.
+    // the user-visible outcome, so they have no guard and drop silently.
+    const frame = narrowFrame(WORKSHOP_FRAME_GUARDS, parsed, "/ws");
+    if (frame?.type === "status") {
+      this.deliverPush({ kind: "status", frame });
+    } else if (frame?.type === "models") {
+      this.deliverPush({ kind: "models", models: frame.models });
+    } else if (frame?.type === "workbench") {
+      this.deliverPush({ kind: "workbench", frame });
+    }
   }
 
   /** Queues a push before `ready()`, dropping the oldest at the cap. */
