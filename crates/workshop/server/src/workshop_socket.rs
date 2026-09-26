@@ -52,8 +52,10 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 
 use workshop_menu::{CatalogBus, MenuBus, MenuHandles};
+use workshop_protocol::{CatalogPush, StatusBarUpdate, WorkbenchSnapshot};
 use workshop_registry::{Registration, Registry, RouteRegistrarAdapter};
 use workshop_support::recv_or_pending;
 
@@ -224,7 +226,7 @@ async fn run_connection(mut socket: WebSocket, state: WorkshopSocketState) {
     // spinning the loop on `Closed`. An unregistered bus has no receiver
     // from the start, so its branch never runs.
     loop {
-        tokio::select! {
+        let open = tokio::select! {
             // Biased, buses first: draining them ahead of inbound bounds
             // their staleness at one frame, and the client sends at human
             // pace, so inbound can never starve.
@@ -233,52 +235,118 @@ async fn run_connection(mut socket: WebSocket, state: WorkshopSocketState) {
             // skips ahead to the retained window, which is a resync
             // because every status and catalog frame is a complete
             // snapshot.
-            received = recv_or_pending(&mut status_rx) => match received {
-                Ok(update) => {
-                    if !send_frame(&mut socket, &update.frame()).await {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(connection, skipped, "status receiver lagged; skipped updates");
-                }
-                Err(broadcast::error::RecvError::Closed) => status_rx = None,
-            },
-            received = recv_or_pending(&mut catalog_rx) => match received {
-                Ok(catalog) => {
-                    if !send_frame(&mut socket, &catalog.frame()).await {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(connection, skipped, "catalog receiver lagged; skipped pushes");
-                }
-                Err(broadcast::error::RecvError::Closed) => catalog_rx = None,
-            },
-            received = recv_or_pending(&mut menu_rx) => match received {
-                Ok(snapshot) => {
-                    if !send_frame(&mut socket, &snapshot.frame()).await {
-                        break;
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(connection, skipped, "menu receiver lagged; skipped snapshots");
-                }
-                Err(broadcast::error::RecvError::Closed) => menu_rx = None,
-            },
-            inbound = socket.recv() => match inbound {
-                Some(Ok(Message::Text(text))) => {
-                    handle_frame(&state, &text, &mut socket).await;
-                }
-                // Binary frames are ignored here; pings and pongs are
-                // answered by axum itself.
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Err(error)) => {
-                    tracing::warn!(connection, %error, "workshop socket failed");
-                    break;
-                }
-            },
+            received = recv_or_pending(&mut status_rx) => {
+                forward_status(connection, received, &mut status_rx, &mut socket).await
+            }
+            received = recv_or_pending(&mut catalog_rx) => {
+                forward_catalog(connection, received, &mut catalog_rx, &mut socket).await
+            }
+            received = recv_or_pending(&mut menu_rx) => {
+                forward_snapshot(connection, received, &mut menu_rx, &mut socket).await
+            }
+            inbound = socket.recv() => on_inbound(connection, &state, inbound, &mut socket).await,
+        };
+        if !open {
+            break;
+        }
+    }
+}
+
+/// Forwards one status-bus delivery. A `false` return means the client
+/// is gone.
+async fn forward_status(
+    connection: u64,
+    received: Result<StatusBarUpdate, RecvError>,
+    status_rx: &mut Option<broadcast::Receiver<StatusBarUpdate>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(update) => send_frame(socket, &update.frame()).await,
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::debug!(
+                connection,
+                skipped,
+                "status receiver lagged; skipped updates"
+            );
+            true
+        }
+        Err(RecvError::Closed) => {
+            *status_rx = None;
+            true
+        }
+    }
+}
+
+/// Forwards one catalog-bus delivery. A `false` return means the client
+/// is gone.
+async fn forward_catalog(
+    connection: u64,
+    received: Result<CatalogPush, RecvError>,
+    catalog_rx: &mut Option<broadcast::Receiver<CatalogPush>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(catalog) => send_frame(socket, &catalog.frame()).await,
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::debug!(
+                connection,
+                skipped,
+                "catalog receiver lagged; skipped pushes"
+            );
+            true
+        }
+        Err(RecvError::Closed) => {
+            *catalog_rx = None;
+            true
+        }
+    }
+}
+
+/// Forwards one menu-bus delivery. A `false` return means the client is
+/// gone.
+async fn forward_snapshot(
+    connection: u64,
+    received: Result<WorkbenchSnapshot, RecvError>,
+    menu_rx: &mut Option<broadcast::Receiver<WorkbenchSnapshot>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(snapshot) => send_frame(socket, &snapshot.frame()).await,
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::debug!(
+                connection,
+                skipped,
+                "menu receiver lagged; skipped snapshots"
+            );
+            true
+        }
+        Err(RecvError::Closed) => {
+            *menu_rx = None;
+            true
+        }
+    }
+}
+
+/// Handles one inbound socket read. A `false` return means the socket
+/// closed or failed.
+async fn on_inbound(
+    connection: u64,
+    state: &WorkshopSocketState,
+    inbound: Option<Result<Message, axum::Error>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match inbound {
+        Some(Ok(Message::Text(text))) => {
+            handle_frame(state, &text, socket).await;
+            true
+        }
+        // Binary frames are ignored here; pings and pongs are answered by
+        // axum itself.
+        Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => true,
+        Some(Ok(Message::Close(_))) | None => false,
+        Some(Err(error)) => {
+            tracing::warn!(connection, %error, "workshop socket failed");
+            false
         }
     }
 }

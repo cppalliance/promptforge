@@ -815,7 +815,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-12>
 
-### Step 12: Split the socket loops and move the `/ws` integration tests
+### Step 12: Split the socket loops and move the `/ws` integration tests [completed]
 
 - Component: Server
 - Artifacts:

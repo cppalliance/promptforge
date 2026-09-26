@@ -14,6 +14,6 @@ mod heartbeat;
 mod heartbeat_loop;
 mod realtime_relay;
 mod save_timeout;
-mod session;
 mod user_state;
+mod workshop_socket;
 mod workspace_shutdown;

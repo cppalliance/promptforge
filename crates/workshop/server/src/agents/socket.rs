@@ -31,6 +31,7 @@ use harness_api::{
     Delta, Session, SessionEvent, SessionFailure, WaitError, WaitFrame, display_chain,
 };
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 
 use workshop_protocol::{
     Activity, AgentSessionFrame, AgentsFrame, ErrorFrame, InputFrame, InputResponse,
@@ -92,7 +93,7 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
     let mut errors_rx: Option<broadcast::Receiver<SessionFailure>> = None;
 
     loop {
-        tokio::select! {
+        let open = tokio::select! {
             // Biased, in this order: error reports first - one-off and
             // causally ahead of the wait that follows a failed round, so
             // the error frame precedes the re-ask on the wire; the wait
@@ -104,96 +105,138 @@ async fn run_socket(mut socket: WebSocket, state: SessionsState) {
             // event drain last loses nothing, because the cursor
             // delivers everything past it whenever it runs.
             biased;
-            // Session errors: ephemeral - a lagged receiver misses only
-            // what the durable transcript shows as a turn with no reply.
             received = recv_or_pending(&mut errors_rx) => {
-                match received {
-                    Ok(failure) => {
-                        if !send_frame(&mut socket, &ErrorFrame::new(failure.message, None)).await {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(skipped, "agent error receiver lagged; reports dropped");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => errors_rx = None,
-                }
+                forward_error(received, &mut errors_rx, &mut socket).await
             }
-            // Durable wait frames: the registry retains unresolved waits,
-            // so a lagged receiver repairs by re-announcing them.
             received = recv_or_pending(&mut input_rx) => {
-                match received {
-                    Ok(frame) => {
-                        if !send_frame(&mut socket, &input_frame(frame)).await {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        if let Some(attached) = attached.as_ref()
-                            && !resend_unresolved(attached, &mut socket).await
-                        {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => input_rx = None,
-                }
+                forward_wait(received, &mut input_rx, attached.as_ref(), &mut socket).await
             }
-            inbound = socket.recv() => match inbound {
-                Some(Ok(Message::Text(text))) => {
-                    let outcome = handle_frame(
-                        &state,
-                        &text,
-                        &mut attached,
-                        (&mut events_rx, &mut deltas_rx, &mut input_rx, &mut errors_rx),
-                        &mut socket,
-                    )
-                    .await;
-                    if !outcome {
-                        break;
-                    }
-                }
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
-                Some(Ok(Message::Close(_))) | None => break,
-                Some(Err(error)) => {
-                    tracing::warn!(%error, "agent session socket failed");
-                    break;
-                }
-            },
-            // Ephemeral deltas: a lagged client skips chunks and the
-            // superseding durable event repairs the transcript.
+            inbound = socket.recv() => {
+                let subscriptions = (&mut events_rx, &mut deltas_rx, &mut input_rx, &mut errors_rx);
+                on_inbound(&state, inbound, &mut attached, subscriptions, &mut socket).await
+            }
             received = recv_or_pending(&mut deltas_rx) => {
-                match received {
-                    Ok(delta) => {
-                        if let Some(frame) = delta_frame(delta)
-                            && !send_frame(&mut socket, &frame).await
-                        {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(skipped, "agent delta receiver lagged; chunks dropped");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => deltas_rx = None,
-                }
+                forward_delta(received, &mut deltas_rx, &mut socket).await
             }
-            // Durable events: the broadcast is only the wakeup - a live
-            // entry at the cursor frames directly, and anything else
-            // (a gap, a lag, even a closed receiver) drains the transcript
-            // from the cursor, so no entry is ever lost.
-            received = recv_or_pending(&mut events_rx) => match received {
-                Err(broadcast::error::RecvError::Closed) => events_rx = None,
-                received => {
-                    if let Some(attached) = attached.as_mut()
-                        && !on_event_wake(attached, received.ok(), &mut socket).await
-                    {
-                        break;
-                    }
-                }
-            },
+            received = recv_or_pending(&mut events_rx) => {
+                forward_event(received, &mut events_rx, attached.as_mut(), &mut socket).await
+            }
+        };
+        if !open {
+            break;
         }
     }
     // The socket detaches; the session lives on. Reconnecting replays the
     // transcript and re-announces unresolved waits.
+}
+
+/// Forwards one session error report. Errors are ephemeral: a lagged
+/// receiver misses only what the durable transcript shows as a turn with
+/// no reply. A `false` return means the client is gone.
+async fn forward_error(
+    received: Result<SessionFailure, RecvError>,
+    errors_rx: &mut Option<broadcast::Receiver<SessionFailure>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(failure) => send_frame(socket, &ErrorFrame::new(failure.message, None)).await,
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::debug!(skipped, "agent error receiver lagged; reports dropped");
+            true
+        }
+        Err(RecvError::Closed) => {
+            *errors_rx = None;
+            true
+        }
+    }
+}
+
+/// Forwards one wait frame. Wait frames are durable: the registry retains
+/// unresolved waits, so a lagged receiver repairs by re-announcing them.
+/// A `false` return means the client is gone.
+async fn forward_wait(
+    received: Result<WaitFrame, RecvError>,
+    input_rx: &mut Option<broadcast::Receiver<WaitFrame>>,
+    attached: Option<&Attached>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(frame) => send_frame(socket, &input_frame(frame)).await,
+        Err(RecvError::Lagged(_)) => match attached {
+            Some(attached) => resend_unresolved(attached, socket).await,
+            None => true,
+        },
+        Err(RecvError::Closed) => {
+            *input_rx = None;
+            true
+        }
+    }
+}
+
+/// Handles one inbound socket read. A `false` return means the socket
+/// closed or failed, or the client is gone.
+async fn on_inbound(
+    state: &SessionsState,
+    inbound: Option<Result<Message, axum::Error>>,
+    attached: &mut Option<Attached>,
+    subscriptions: Subscriptions<'_>,
+    socket: &mut WebSocket,
+) -> bool {
+    match inbound {
+        Some(Ok(Message::Text(text))) => {
+            handle_frame(state, &text, attached, subscriptions, socket).await
+        }
+        Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => true,
+        Some(Ok(Message::Close(_))) | None => false,
+        Some(Err(error)) => {
+            tracing::warn!(%error, "agent session socket failed");
+            false
+        }
+    }
+}
+
+/// Forwards one delta. Deltas are ephemeral: a lagged client skips chunks
+/// and the superseding durable event repairs the transcript. A `false`
+/// return means the client is gone.
+async fn forward_delta(
+    received: Result<Delta, RecvError>,
+    deltas_rx: &mut Option<broadcast::Receiver<Delta>>,
+    socket: &mut WebSocket,
+) -> bool {
+    match received {
+        Ok(delta) => match delta_frame(delta) {
+            Some(frame) => send_frame(socket, &frame).await,
+            None => true,
+        },
+        Err(RecvError::Lagged(skipped)) => {
+            tracing::debug!(skipped, "agent delta receiver lagged; chunks dropped");
+            true
+        }
+        Err(RecvError::Closed) => {
+            *deltas_rx = None;
+            true
+        }
+    }
+}
+
+/// Handles one event wakeup. The broadcast is only the wakeup: a live
+/// entry at the cursor frames directly, and anything else (a gap, a lag,
+/// even a closed receiver) drains the transcript from the cursor, so no
+/// entry is ever lost. A `false` return means the client is gone.
+async fn forward_event(
+    received: Result<SessionEvent, RecvError>,
+    events_rx: &mut Option<broadcast::Receiver<SessionEvent>>,
+    attached: Option<&mut Attached>,
+    socket: &mut WebSocket,
+) -> bool {
+    match (received, attached) {
+        (Err(RecvError::Closed), _) => {
+            *events_rx = None;
+            true
+        }
+        (received, Some(attached)) => on_event_wake(attached, received.ok(), socket).await,
+        (_, None) => true,
+    }
 }
 
 /// The four channel subscriptions an attachment holds, passed as one
