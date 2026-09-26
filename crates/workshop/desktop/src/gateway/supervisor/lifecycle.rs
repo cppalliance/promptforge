@@ -8,7 +8,7 @@ use gateway_api_discovery::CancellationToken;
 use super::signals::{Completion, StopSignal};
 
 /// Maximum designed supervisor shutdown latency.
-pub(crate) const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
+pub(in crate::gateway) const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 
 /// The running local-sidecar supervisor.
 #[derive(Debug)]
@@ -36,13 +36,13 @@ pub(crate) enum SupervisorShutdown {
 impl GatewaySupervisor {
     /// Spawns one owned supervisor thread.
     #[cfg(test)]
-    pub(crate) fn spawn(
+    pub(in crate::gateway) fn spawn(
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
         Self::spawn_inner(None, SUPERVISOR_SHUTDOWN_BUDGET, supervise)
     }
 
-    pub(crate) fn spawn_with_publication(
+    pub(in crate::gateway) fn spawn_with_publication(
         publication: workshop_server_api::GatewayUpdater,
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
@@ -50,7 +50,7 @@ impl GatewaySupervisor {
     }
 
     #[cfg(test)]
-    pub(crate) fn spawn_with_budget(
+    pub(in crate::gateway) fn spawn_with_budget(
         shutdown_budget: Duration,
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
@@ -140,7 +140,7 @@ impl GatewaySupervisor {
     }
 
     #[cfg(test)]
-    pub(crate) fn completion_waker_for_test(&self) -> impl Fn() + Send + 'static {
+    pub(in crate::gateway) fn completion_waker_for_test(&self) -> impl Fn() + Send + 'static {
         let completion = self.completion.clone();
         move || completion.wake()
     }

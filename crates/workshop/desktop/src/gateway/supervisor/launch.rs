@@ -33,7 +33,7 @@ pub(super) fn launch_and_attach_cancellable(
 }
 
 /// Recovery launch with each blocking phase injected.
-pub(crate) fn launch_and_attach_cancellable_with<Settle, Spawn, Wait>(
+pub(in crate::gateway) fn launch_and_attach_cancellable_with<Settle, Spawn, Wait>(
     run_dir: &Path,
     exe: &Path,
     cancellation: &CancellationToken,
@@ -71,7 +71,7 @@ where
 }
 
 /// Linearizes one externally visible recovery effect with cancellation.
-pub(crate) fn run_effect_if_active<T>(
+pub(in crate::gateway) fn run_effect_if_active<T>(
     cancellation: &CancellationToken,
     phase: &'static str,
     operation: impl FnOnce(&CancellationToken) -> anyhow::Result<T>,
@@ -98,7 +98,7 @@ fn wait_for_launched_file_cancellable(
 }
 
 /// Recovery readiness wait with health and validation injected.
-pub(crate) fn wait_for_launched_file_cancellable_with<Health, Resolve>(
+pub(in crate::gateway) fn wait_for_launched_file_cancellable_with<Health, Resolve>(
     run_dir: &Path,
     timeout: Duration,
     cancellation: &CancellationToken,

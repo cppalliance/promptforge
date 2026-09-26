@@ -912,7 +912,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-16>
 
-### Step 16: Tidy the desktop gateway module and its tests
+### Step 16: Tidy the desktop gateway module and its tests [completed]
 
 - Component: Desktop
 - Component placement: eighth, after the gateway steps that gate `replace_sidecar` and fix the root paths the desktop app imports, and after the build check that guards its dependencies.

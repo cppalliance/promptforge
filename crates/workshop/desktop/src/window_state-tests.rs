@@ -1,14 +1,15 @@
 //! Window geometry without a window: the physical-to-logical mapping the
 //! saver applies under a scale factor, the maximized merge that keeps the
-//! normal rectangle, the debounce that turns a drag's burst of events into
-//! one save, and the wire shape the server's workspace-file routes speak.
+//! normal rectangle, the empty-size guard on a saved geometry, the debounce
+//! that turns a drag's burst of events into one save, and the wire shape
+//! the server's workspace-file routes speak.
 
 use std::sync::mpsc;
 use std::time::Duration;
 
 use tauri::{PhysicalPosition, PhysicalSize};
 
-use super::{CurrentResponse, Debouncer, SavedResponse, WindowState, geometry, merge};
+use super::{CurrentResponse, Debouncer, SavedResponse, WindowState, geometry, merge, usable};
 
 /// How long a test waits for the debouncer to deliver a coalesced save.
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -75,6 +76,26 @@ fn a_maximized_snapshot_keeps_the_last_normal_rectangle() {
     assert_eq!(merge(Some(state(1280, 800, 100, 50, true)), moved), moved);
     // With nothing remembered, the maximized rectangle is all there is.
     assert_eq!(merge(None, maximized_rect), maximized_rect);
+}
+
+#[test]
+fn a_saved_geometry_with_an_empty_side_is_not_applied() {
+    assert!(
+        !usable(state(0, 800, 100, 50, false)),
+        "a zero width is empty"
+    );
+    assert!(
+        !usable(state(1280, 0, 100, 50, false)),
+        "a zero height is empty"
+    );
+    assert!(
+        !usable(state(0, 0, 0, 0, true)),
+        "a zero size is empty even when maximized"
+    );
+    assert!(
+        usable(state(1, 1, -32_000, -32_000, false)),
+        "any nonzero size is usable; the position is checked against the monitors separately"
+    );
 }
 
 #[test]

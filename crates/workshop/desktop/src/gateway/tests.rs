@@ -4,15 +4,64 @@ use std::io::{Read, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use gateway_api_discovery::{GatewayDiscoveryFile, Resolution, SidecarError};
+use gateway_api_discovery::{GatewayDiscoveryFile, Resolution, SidecarError, ValidatedConnection};
 
 use super::boot as gateway_boot;
+use super::supervisor::{
+    GatewaySupervisor, RecoveryCandidate, RecoveryOwnership, SupervisedGatewayIdentity,
+    SupervisorShutdown,
+};
 
 mod boot;
+mod cancellation;
 mod identity;
 mod recovery;
 mod shutdown;
+
+/// A supervised identity whose boot token the test chooses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TestIdentity {
+    file: GatewayDiscoveryFile,
+    process_boot: u64,
+}
+
+impl SupervisedGatewayIdentity for TestIdentity {
+    fn same_boot(&self, other: &Self) -> bool {
+        self.process_boot == other.process_boot
+            && self.file.pid == other.file.pid
+            && self.file.epoch == other.file.epoch
+            && self.file.started_at == other.file.started_at
+    }
+}
+
+fn test_identity(file: GatewayDiscoveryFile) -> TestIdentity {
+    TestIdentity {
+        process_boot: u64::from(file.pid),
+        file,
+    }
+}
+
+/// Claims ownership of a validated child through its own pid.
+fn owned_candidate(identity: ValidatedConnection) -> RecoveryCandidate {
+    match RecoveryCandidate::authenticate(identity.pid(), identity) {
+        RecoveryOwnership::Owned(candidate) => candidate,
+        RecoveryOwnership::Unowned(_) => panic!("the validated child pid authenticates ownership"),
+    }
+}
+
+fn assert_bounded_supervisor_shutdown(supervisor: GatewaySupervisor, finished: &AtomicBool) {
+    assert_eq!(
+        supervisor.shutdown(),
+        SupervisorShutdown::Joined,
+        "Workshop exit joins the cancelled supervisor within its budget"
+    );
+    assert!(
+        finished.load(Ordering::SeqCst),
+        "shutdown returns only after the supervisor thread exits"
+    );
+}
 
 /// Resolves against the test process's own image.
 fn probe_own_image(run_dir: &Path) -> Result<Resolution, SidecarError> {

@@ -32,7 +32,7 @@ impl GatewayAttachment {
             (Self::Launched(mut candidate), Some(published))
                 if candidate.validated().same_boot(&published) =>
             {
-                candidate.published();
+                candidate.mark_published();
                 Self::Launched(candidate)
             }
             (_, Some(published)) => Self::Sidecar(published),

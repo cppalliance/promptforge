@@ -18,14 +18,14 @@ pub(crate) struct RecoveryCandidate {
     published: bool,
 }
 
-pub(crate) enum RecoveryOwnership {
+pub(in crate::gateway) enum RecoveryOwnership {
     Owned(RecoveryCandidate),
     Unowned(ValidatedConnection),
 }
 
 impl RecoveryCandidate {
     /// Claims cleanup authority only when validation names the spawned pid.
-    pub(crate) fn authenticate(
+    pub(in crate::gateway) fn authenticate(
         child_pid: u32,
         validated: ValidatedConnection,
     ) -> RecoveryOwnership {
@@ -39,11 +39,11 @@ impl RecoveryCandidate {
         })
     }
 
-    pub(crate) fn validated(&self) -> &ValidatedConnection {
+    pub(in crate::gateway) fn validated(&self) -> &ValidatedConnection {
         &self.validated
     }
 
-    pub(crate) fn published(&mut self) {
+    pub(in crate::gateway) fn mark_published(&mut self) {
         self.published = true;
     }
 
@@ -54,7 +54,7 @@ impl RecoveryCandidate {
     /// a detached thread. The drop signal is disarmed either way: the
     /// caller receives the outcome, so a failed delivery is reported here
     /// rather than retried silently.
-    pub(crate) fn shutdown(mut self) -> Result<(), ShutdownError> {
+    pub(in crate::gateway) fn shutdown(mut self) -> Result<(), ShutdownError> {
         if self.published {
             return Ok(());
         }
@@ -101,7 +101,7 @@ impl SupervisedGatewayIdentity for ValidatedConnection {
 }
 
 #[derive(Debug)]
-pub(crate) enum RecoveryIdentity {
+pub(in crate::gateway) enum RecoveryIdentity {
     Stable(ValidatedConnection),
     Candidate(RecoveryCandidate),
 }
@@ -122,7 +122,7 @@ impl SupervisedGatewayIdentity for RecoveryIdentity {
 
     fn publication_succeeded(&mut self) {
         if let Self::Candidate(candidate) = self {
-            candidate.published();
+            candidate.mark_published();
         }
     }
 
