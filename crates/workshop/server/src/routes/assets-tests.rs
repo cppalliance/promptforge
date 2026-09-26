@@ -4,8 +4,8 @@ use axum::body::Body;
 use axum::http::{Request, Response, StatusCode, header};
 use tower::ServiceExt;
 
-use crate::app::fixtures::{body_bytes, state_for};
 use crate::app::router;
+use crate::app::test_helpers::{body_bytes, state_for};
 
 /// Performs one GET against the router and returns the response.
 async fn get(uri: &str) -> Response<Body> {

@@ -64,8 +64,6 @@ gateway-api-discovery = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
-# The save-timeout test drives the workspace router directly.
-workshop-workspace.workspace = true
 
 # The build script bundles the UI with esbuild into OUT_DIR through the
 # shared helper; nothing UI-built lands in the repository.

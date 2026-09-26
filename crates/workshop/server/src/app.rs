@@ -11,7 +11,7 @@
 
 mod compose;
 #[cfg(any(test, feature = "test-fixtures"))]
-pub(crate) mod fixtures;
+pub(crate) mod test_helpers;
 #[cfg(test)]
 mod tests;
 
@@ -23,7 +23,8 @@ use axum::Router;
 #[cfg(test)]
 use workshop_gateway::GatewayBinding;
 use workshop_gateway::{
-    GatewayError, GatewayHandles, GatewayHealth, GatewaySnapshot, GatewayUpdater, ResolvedGateway,
+    GatewayClient, GatewayError, GatewayHandles, GatewayHealth, GatewaySnapshot, GatewayUpdater,
+    ResolvedGateway,
 };
 use workshop_menu::MenuHandles;
 use workshop_menu::catalog::CatalogBus;
@@ -35,9 +36,6 @@ use workshop_workspace::Workspace;
 
 use crate::agents::AgentSessions;
 use crate::routes;
-
-/// Address the server binds to when no override is given.
-pub use workshop_support::DEFAULT_ADDR;
 
 /// Shared handler state: the subsystem registry, the server's runtime
 /// infrastructure, and the registration guards. Subsystem handles - the
@@ -87,9 +85,9 @@ impl AppState {
     /// directory wins over explicit `[gateway]` config.
     ///
     /// # Errors
-    /// Returns [`StateError::Resolution`] when no live gateway discovery file
+    /// Returns `StateError::Resolution` when no live gateway discovery file
     /// exists and the config has no explicit gateway, and
-    /// [`StateError::Gateway`] if the HTTP client cannot be built.
+    /// `StateError::Gateway` if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
         let gateway = workshop_gateway::resolve(&config.gateway).map_err(StateError::Resolution)?;
         state_with_gateway(config, &gateway)
@@ -100,13 +98,11 @@ impl AppState {
     ///
     /// # Panics
     /// Panics when the composition root never registered the bus - a bug
-    /// boot already refuses: [`state_with_gateway`] requires every
+    /// boot already refuses: `state_with_gateway` requires every
     /// contribution before sharing state.
     #[must_use]
     pub fn status(&self) -> StatusBus {
-        self.registry
-            .require::<StatusBus>()
-            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
+        self.required::<StatusBus>()
     }
 
     /// The push facade over the status, catalog, and menu sinks, held
@@ -116,18 +112,26 @@ impl AppState {
         self.registry.push()
     }
 
+    /// A clone of the handle set a subsystem registered as `T`.
+    ///
+    /// # Panics
+    /// Panics when the composition root never registered `T` - a bug
+    /// boot already refuses: [`state_with_gateway`] requires every
+    /// contribution before sharing state.
+    fn required<T: Clone + Send + Sync + 'static>(&self) -> T {
+        self.registry
+            .require::<T>()
+            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
+    }
+
     /// The gateway subsystem's registered handles.
     fn gateway_handles(&self) -> GatewayHandles {
-        self.registry
-            .require::<GatewayHandles>()
-            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
+        self.required::<GatewayHandles>()
     }
 
     /// The menu subsystem's registered handles.
     fn menu_handles(&self) -> MenuHandles {
-        self.registry
-            .require::<MenuHandles>()
-            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
+        self.required::<MenuHandles>()
     }
 
     /// One atomic Gateway endpoint and credential generation.
@@ -137,7 +141,7 @@ impl AppState {
 
     /// A clone of the currently published Gateway HTTP client.
     #[must_use]
-    pub fn gateway_client(&self) -> crate::GatewayClient {
+    pub fn gateway_client(&self) -> GatewayClient {
         self.gateway_snapshot().client().clone()
     }
 
@@ -202,17 +206,15 @@ impl AppState {
     /// The agent-session opener: discovery, launch, and the running
     /// sessions behind the `/agents/ws` socket, every one of them run in
     /// the harness. Sessions outlive sockets, so an embedding host ends
-    /// one through [`AgentSessions::close`].
+    /// one through `AgentSessions::close`.
     ///
     /// # Panics
     /// Panics when the composition root never registered the opener - a
-    /// bug boot already refuses: [`state_with_gateway`] requires every
+    /// bug boot already refuses: `state_with_gateway` requires every
     /// contribution before sharing state.
     #[must_use]
     pub fn agents(&self) -> AgentSessions {
-        self.registry
-            .require::<AgentSessions>()
-            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone())
+        self.required::<AgentSessions>()
     }
 
     /// Reopens the workspace file that was open when the server last
@@ -224,20 +226,23 @@ impl AppState {
     ///
     /// # Panics
     /// Panics when the composition root never registered the workspace -
-    /// a bug boot already refuses: [`state_with_gateway`] requires every
+    /// a bug boot already refuses: `state_with_gateway` requires every
     /// contribution before sharing state.
     pub async fn reopen_last_workspace(&self) -> bool {
-        let workspace = self
-            .registry
-            .require::<Workspace>()
-            .map_or_else(|error| panic!("{error}"), |handles| (*handles).clone());
-        workspace.reopen_last().await
+        self.required::<Workspace>().reopen_last().await
     }
 }
 
 /// One subsystem's `register` call, named so a boot-composition test can
 /// omit it and watch startup refuse to share state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(any(test, feature = "test-fixtures")),
+    expect(
+        unreachable_pub,
+        reason = "the gated `fixtures` module is its only public path"
+    )
+)]
 pub enum Omit {
     /// `workshop_status::register`.
     Status,
@@ -250,6 +255,8 @@ pub enum Omit {
     /// `agents::register`: the agent-sessions routes, the harness, and
     /// the agent-session opener.
     AgentSessions,
+    /// `workshop_user_state::register`.
+    UserState,
 }
 
 /// Builds shared state against an already-resolved gateway endpoint: the
@@ -265,6 +272,13 @@ pub enum Omit {
 /// Returns [`StateError::Gateway`] if the HTTP client cannot be built,
 /// and [`StateError::Composition`] when a required contribution is
 /// absent after every subsystem has registered.
+#[cfg_attr(
+    not(any(test, feature = "test-fixtures")),
+    expect(
+        unreachable_pub,
+        reason = "the gated `fixtures` module is its only public path"
+    )
+)]
 pub fn state_with_gateway(
     config: &Config,
     gateway: &ResolvedGateway,
@@ -297,6 +311,7 @@ pub fn state_with_gateway_and_restart_bound(
 /// Returns [`StateError::Gateway`] if the HTTP client cannot be built,
 /// and [`StateError::Composition`] naming the omitted subsystem's
 /// contribution.
+#[cfg(any(test, feature = "test-fixtures"))]
 pub fn state_with_gateway_omitting(
     config: &Config,
     gateway: &ResolvedGateway,

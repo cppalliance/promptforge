@@ -3,18 +3,18 @@
 #[cfg(feature = "test-fixtures")]
 pub use crate::app::state_with_gateway_and_restart_bound;
 pub use crate::app::{Omit, state_with_gateway, state_with_gateway_omitting};
-pub use crate::push::Push;
 pub use workshop_gateway::{GatewayHealth, Heartbeat};
 pub use workshop_menu::catalog::CatalogBus;
 pub use workshop_menu::menu::{MenuBus, MenuRefusal};
 pub use workshop_protocol::{Activity, Severity, StatusBarUpdate};
+pub use workshop_registry::Push;
 pub use workshop_status::status::StatusBus;
 pub use workshop_support::ReconnectBackoff;
 
 #[cfg(feature = "test-fixtures")]
-pub use crate::app::fixtures::spawn_gateway;
+pub use crate::app::test_helpers::spawn_gateway;
 #[cfg(feature = "test-fixtures")]
-pub use crate::test_gateway::{ValidatedGateway, run_validated_gateway_fixture_process};
+pub use workshop_gateway::test_gateway::{ValidatedGateway, run_validated_gateway_fixture_process};
 
 /// Returns the host-only Gateway publisher from fixture state.
 #[cfg(feature = "test-fixtures")]
@@ -56,8 +56,8 @@ pub fn spawn_bindings_forwarder(state: &crate::AppState) {
 #[cfg(feature = "test-fixtures")]
 #[must_use]
 pub fn spawn_heartbeat(
-    client: crate::GatewayClient,
-    push: crate::Push,
+    client: workshop_gateway::GatewayClient,
+    push: Push,
     health: GatewayHealth,
     interval: std::time::Duration,
     backoff: ReconnectBackoff,

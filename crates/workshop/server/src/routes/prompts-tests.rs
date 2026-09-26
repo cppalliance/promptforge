@@ -5,8 +5,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
 
-use crate::app::fixtures::{body_bytes, state_for};
 use crate::app::router;
+use crate::app::test_helpers::{body_bytes, state_for};
 
 /// Posts `body` to `/prompts/contract` on the assembled server router and
 /// returns the status with the decoded JSON body.

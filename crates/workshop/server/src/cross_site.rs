@@ -36,7 +36,7 @@ use crate::error::AppError;
 /// non-loopback `Host` answers 403; a POST, PUT, or PATCH whose
 /// `Content-Type` is not `application/json` answers 415. Everything else
 /// passes through.
-pub async fn guard(request: Request, next: Next) -> Response {
+pub(crate) async fn guard(request: Request, next: Next) -> Response {
     if request
         .headers()
         .get("sec-fetch-site")
@@ -88,7 +88,7 @@ fn declares_json(headers: &HeaderMap) -> bool {
 /// Whether a WebSocket upgrade's `Origin` is acceptable: absent (a native
 /// client), or a loopback http(s) origin - the desktop app webview and the
 /// workshop's own browser-tab origin are both loopback.
-pub fn origin_allowed(headers: &HeaderMap) -> bool {
+pub(crate) fn origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else {
         return true;
     };
@@ -122,8 +122,8 @@ mod tests {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tower::ServiceExt;
 
-    use crate::app::fixtures::{body_bytes, config_for, state_for};
     use crate::app::router;
+    use crate::app::test_helpers::{body_bytes, config_for, state_for};
 
     #[test]
     fn loopback_origins_are_allowed() {

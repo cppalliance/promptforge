@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
-use super::fixtures::{body_bytes, config_for, spawn_gateway, state_for};
+use super::test_helpers::{body_bytes, config_for, spawn_gateway, state_for};
 use workshop_gateway::GatewayClient;
 
 /// The `last-workspace` pointer file inside `state_dir`.
@@ -150,7 +150,7 @@ async fn empty_api_key_sends_no_authorization_header() {
 
 #[test]
 fn default_bind_is_loopback_port_7910() {
-    assert_eq!(DEFAULT_ADDR, "127.0.0.1:7910");
+    assert_eq!(workshop_support::DEFAULT_ADDR, "127.0.0.1:7910");
 }
 
 #[test]
@@ -159,6 +159,21 @@ fn the_relay_deadline_outlasts_the_gateway_request_timeout() {
         workshop_support::RELAY_DEADLINE > workshop_gateway::REQUEST_TIMEOUT,
         "the route deadline must let the gateway client time out first, \
          so the caller sees the relay's 502 rather than a blunt 408"
+    );
+}
+
+#[test]
+fn boot_without_the_user_state_subsystem_fails_naming_its_store() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let config = config_for("http://127.0.0.1:1", dir.path());
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let error = state_with_gateway_omitting(&config, &gateway, Omit::UserState)
+        .expect_err("boot fails when the user-state subsystem never registers");
+    let cause = std::error::Error::source(&error)
+        .expect("the composition failure reports the registry's cause");
+    assert!(
+        cause.to_string().contains("UserStateStore"),
+        "the failure's cause names the missing store: {error}: {cause}"
     );
 }
 

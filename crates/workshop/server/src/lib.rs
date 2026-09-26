@@ -2,7 +2,7 @@
 //!
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
 //! and the axum router. Start at
-//! [`Config::load`] for configuration, [`AgentSessions`] for the
+//! [`Config::load`] for configuration, `AgentSessions` for the
 //! agent-session opener behind `/agents/ws` (every session runs in the
 //! harness, reached through `harness-api`), and [`router`] for the HTTP
 //! API; [`spawn`] runs the whole server in-process on its own thread for
@@ -46,7 +46,7 @@
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
 //! - Every WebSocket upgrade checks its `Origin`: `/ws` and `/agents/ws`
-//!   admit any loopback origin through [`origin_allowed`], and
+//!   admit any loopback origin through `cross_site::origin_allowed`, and
 //!   `/v1/realtime` applies a stricter same-origin check that requires a
 //!   browser `Origin` to match the request's own authority. The
 //!   cross-site guard stays the security boundary.
@@ -65,41 +65,19 @@ mod serve;
 mod websocket;
 mod workshop_socket;
 
-/// The intent-named push facade over the registry's producer sink slots:
-/// business code reports what happened and never chooses a severity or
-/// builds a bus payload.
-pub mod push {
-    pub use workshop_registry::Push;
-}
-
-#[cfg(any(test, feature = "test-fixtures"))]
-pub use workshop_gateway::test_gateway;
-
 /// Crate-internal test seams, re-exported to the integration-test binary.
 /// The socket behavior tests drive the status, catalog, and menu buses,
 /// the health flag, the backoff, and the heartbeat directly, so those
-/// types surface here; Rust visibility cannot be feature-gated, so these
-/// re-exports are present in every build and hidden from the docs. The
-/// fixture helpers with test-only dependencies stay behind the
-/// `test-fixtures` feature, which the crate's own dev-dependency enables
-/// for every test build while production builds do not.
+/// types surface here, hidden from the docs. The module exists only in
+/// test builds and under the `test-fixtures` feature, which the crate's
+/// own dev-dependency enables for every test build while production
+/// builds do not.
+#[cfg(any(test, feature = "test-fixtures"))]
 #[doc(hidden)]
 pub mod fixtures;
 
-pub use agents::AgentSessions;
-pub use app::{AppState, DEFAULT_ADDR, StateError, router};
-pub use cross_site::{guard as cross_site_guard, origin_allowed};
-/// The refusal an answered input wait returns when its token names no
-/// unresolved wait: the harness's own, named here so an embedding host
-/// keeps one import path.
-pub use harness_api::WaitError;
-pub use push::Push;
+pub use app::{AppState, router};
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
-pub use workshop_gateway::{
-    GatewayClient, GatewayError, GatewayPublicationError, GatewayResponse, GatewaySource,
-    GatewayUpdater, ResolveError, ResolvedGateway, SwitchProfileBody, SwitchResponse,
-};
-pub use workshop_protocol::{Activity, InputFrame, InputResponse};
-pub use workshop_support::{
-    AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,
-};
+pub use workshop_gateway::{GatewayPublicationError, GatewayUpdater, ResolvedGateway};
+pub use workshop_protocol::InputResponse;
+pub use workshop_support::{AgentsConfig, Config, GatewayConfig, ServerConfig};

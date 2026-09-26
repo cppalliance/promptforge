@@ -25,8 +25,8 @@ mod tests {
     use axum::http::{Request, StatusCode, header};
     use tower::ServiceExt;
 
-    use crate::app::fixtures::{body_bytes, state_for};
     use crate::app::router;
+    use crate::app::test_helpers::{body_bytes, state_for};
 
     #[tokio::test]
     async fn health_returns_serving() {

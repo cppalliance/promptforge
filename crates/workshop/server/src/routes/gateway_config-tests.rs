@@ -8,8 +8,8 @@ use axum::response::IntoResponse;
 use axum::routing::{get as axum_get, put as axum_put};
 use tower::ServiceExt;
 
-use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
 use crate::app::router;
+use crate::app::test_helpers::{body_bytes, spawn_gateway, state_for};
 
 #[path = "gateway_config-tests-recovery.rs"]
 mod recovery;

@@ -51,7 +51,7 @@ pub(super) fn compose(
     let push = registry.push();
     let backoff = register_gateway(&registry, &mut registrations, gateway, &push, omit)?;
     register_workspace(&registry, &mut registrations, state_dir, omit);
-    register_user_state(&registry, &mut registrations, state_dir);
+    register_user_state(&registry, &mut registrations, state_dir, omit);
     register_sessions(&registry, &mut registrations, config, &backoff, omit);
     register_workshop_socket(&registry, &mut registrations, restart_bound);
     // The boot contract: every subsystem's handle set is present before
@@ -174,14 +174,17 @@ fn register_user_state(
     registry: &Registry,
     registrations: &mut Registrations,
     state_dir: &std::path::Path,
+    omit: Option<Omit>,
 ) {
-    // The account-scoped UI state lives beside the menu memory in the
-    // state directory; a bad or missing file costs the state, never
-    // startup.
-    let user_state = Arc::new(UserStateStore::new(state_dir));
-    let regs = workshop_user_state::register(registry, user_state);
-    registrations.hold(regs.routes);
-    registrations.hold(regs.state);
+    if omit != Some(Omit::UserState) {
+        // The account-scoped UI state lives beside the menu memory in the
+        // state directory; a bad or missing file costs the state, never
+        // startup.
+        let user_state = Arc::new(UserStateStore::new(state_dir));
+        let regs = workshop_user_state::register(registry, user_state);
+        registrations.hold(regs.routes);
+        registrations.hold(regs.state);
+    }
 }
 
 /// The harness (agent-sessions) subsystem: the harness, the agent-session

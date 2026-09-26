@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use tokio_tungstenite::tungstenite::Error as SocketError;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
-use crate::app::fixtures::config_for;
+use crate::app::test_helpers::config_for;
 
 /// Builds a `/v1/realtime` upgrade request with an optional `Origin` and an
 /// optional requested subprotocol.

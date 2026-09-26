@@ -257,7 +257,7 @@ fn server_shutdown_permanently_closes_every_host_updater_clone() {
 #[test]
 fn server_handle_reports_the_identity_initially_published_into_state() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let gateway = crate::test_gateway::ValidatedGateway::spawn_in(
+    let gateway = workshop_gateway::test_gateway::ValidatedGateway::spawn_in(
         "initial-key",
         "fixtures::validated_gateway_fixture_process",
     );

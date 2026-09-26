@@ -139,7 +139,7 @@ mod tests {
 
     use std::io;
 
-    use crate::app::fixtures::body_bytes;
+    use crate::app::test_helpers::body_bytes;
 
     /// A distinctive injected cause for leak-boundary assertions.
     fn injected_io() -> io::Error {

@@ -20,6 +20,7 @@ use axum::routing::{any, get};
 
 use crate::app::AppState;
 use crate::error::AppError;
+use workshop_gateway::ForwardedResponse;
 use workshop_support::{DEFAULT_DEADLINE, with_deadline};
 
 /// The gateway-config panel routes. The origin probe is local and
@@ -58,10 +59,7 @@ pub(crate) fn routes(state: AppState) -> Router {
 /// them into slashes). A forwarded `/admin/` path the gateway does not
 /// serve is the gateway's 404 or 405 to answer.
 fn forward_allowed(method: &Method, path: &str) -> bool {
-    if path
-        .split('/')
-        .any(|segment| segment == "." || segment == ".." || segment.contains('\\'))
-    {
+    if has_normalizing_segment(path) {
         return false;
     }
     if path.starts_with("/admin/") {
@@ -74,6 +72,33 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
         }),
         _ => false,
     }
+}
+
+/// Whether `path` holds a `.` or `..` segment or a backslash: parts the
+/// forwarding URL parse would normalize, letting a path escape the prefix
+/// it was admitted under.
+fn has_normalizing_segment(path: &str) -> bool {
+    path.split('/')
+        .any(|segment| segment == "." || segment == ".." || segment.contains('\\'))
+}
+
+/// Relays a forwarded gateway response - status, content type, and body
+/// byte-for-byte - adding `cache_control` when given.
+fn relay(forwarded: ForwardedResponse, cache_control: Option<&'static str>) -> Response {
+    let status = StatusCode::from_u16(forwarded.status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut builder = Response::builder().status(status);
+    if let Some(content_type) = &forwarded.content_type {
+        builder = builder.header(header::CONTENT_TYPE, content_type);
+    }
+    if let Some(cache_control) = cache_control {
+        builder = builder.header(header::CACHE_CONTROL, cache_control);
+    }
+    // The parts are valid by construction (the status came off the wire,
+    // the content type round-tripped a valid header), so the build
+    // cannot fail; a failure would be a bug, answered as a plain 502.
+    builder
+        .body(Body::from(forwarded.body))
+        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
 
 /// Answers the gateway's base URL, so the workshop UI can point the
@@ -101,10 +126,7 @@ async fn gateway_config_assets(
     Path(path): Path<String>,
 ) -> Result<Response, AppError> {
     let path = format!("/config/{path}");
-    if path
-        .split('/')
-        .any(|segment| segment == "." || segment == ".." || segment.contains('\\'))
-    {
+    if has_normalizing_segment(&path) {
         return Err(AppError::ForwardDenied);
     }
     proxy_config_asset(&state, &path).await
@@ -118,17 +140,9 @@ async fn proxy_config_asset(state: &AppState, path: &str) -> Result<Response, Ap
         .forward(reqwest::Method::GET, path, None)
         .await
         .map_err(AppError::Gateway)?;
-    let status = StatusCode::from_u16(forwarded.status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let mut builder = Response::builder().status(status);
-    if let Some(content_type) = &forwarded.content_type {
-        builder = builder.header(header::CONTENT_TYPE, content_type);
-    }
     // The relayed SPA assets are unversioned; force revalidation so the
     // panel never runs a cached script against a newer gateway.
-    builder = builder.header(header::CACHE_CONTROL, "no-cache");
-    Ok(builder
-        .body(Body::from(forwarded.body))
-        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response()))
+    Ok(relay(forwarded, Some("no-cache")))
 }
 
 /// Forwards one admitted request to the gateway with the bearer key
@@ -163,17 +177,7 @@ async fn gateway_forward(
         )
         .await
         .map_err(AppError::Gateway)?;
-    let status = StatusCode::from_u16(forwarded.status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let mut builder = Response::builder().status(status);
-    if let Some(content_type) = &forwarded.content_type {
-        builder = builder.header(header::CONTENT_TYPE, content_type);
-    }
-    // The parts are valid by construction (the status came off the wire,
-    // the content type round-tripped a valid header), so the build
-    // cannot fail; a failure would be a bug, answered as a plain 502.
-    Ok(builder
-        .body(Body::from(forwarded.body))
-        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response()))
+    Ok(relay(forwarded, None))
 }
 
 #[cfg(test)]

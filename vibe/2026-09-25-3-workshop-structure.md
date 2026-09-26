@@ -866,7 +866,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-14>
 
-### Step 14: Trim the server's surface and share its require check
+### Step 14: Trim the server's surface and share its require check [completed]
 
 - Component: Server
 - Artifacts:

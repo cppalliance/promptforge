@@ -6,8 +6,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-use crate::app::fixtures::state_for;
 use crate::app::router;
+use crate::app::test_helpers::state_for;
 
 #[tokio::test]
 async fn the_asset_routes_answer_not_found() {

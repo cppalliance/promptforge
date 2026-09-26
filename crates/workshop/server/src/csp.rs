@@ -65,8 +65,8 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::app::fixtures::state_for;
     use crate::app::router;
+    use crate::app::test_helpers::state_for;
 
     /// Fetches `uri` against the composed router and returns the response.
     async fn get(uri: &str) -> axum::response::Response {
