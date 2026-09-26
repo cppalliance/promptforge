@@ -15,6 +15,14 @@ mod ui_state_memory;
 #[cfg(feature = "test-fixtures")]
 mod write_stall;
 
+/// A memory-only revoke of `path`: the key it resolves to, then that
+/// key's removal.
+fn revoke(workspace: &Workspace, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    let key = workspace.revoke_key(path)?;
+    workspace.remove_root(&key)?;
+    Ok(key)
+}
+
 #[test]
 fn a_folder_grant_grants_the_folder_itself() {
     let workspace = Workspace::new();
@@ -358,7 +366,7 @@ fn the_roots_listing_flags_a_deleted_root_as_missing() {
 #[test]
 fn a_revoke_removes_the_granted_root() {
     let (workspace, dir) = granted_dir();
-    let revoked = workspace.revoke(dir.path()).expect("revoke the grant");
+    let revoked = revoke(&workspace, dir.path()).expect("revoke the grant");
     assert_eq!(revoked, simplified(dir.path()));
     assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
 }
@@ -367,9 +375,7 @@ fn a_revoke_removes_the_granted_root() {
 fn revoking_an_unknown_root_errors() {
     let workspace = Workspace::new();
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let error = workspace
-        .revoke(dir.path())
-        .expect_err("an ungranted root must not revoke");
+    let error = revoke(&workspace, dir.path()).expect_err("an ungranted root must not revoke");
     assert!(
         matches!(error, WorkspaceError::NotGranted),
         "expected NotGranted, got {error:?}"
@@ -381,7 +387,7 @@ fn a_deleted_root_can_still_be_revoked() {
     let (workspace, dir) = granted_dir();
     let root = simplified(dir.path());
     dir.close().expect("delete the granted directory");
-    let revoked = workspace.revoke(&root).expect("revoke the deleted root");
+    let revoked = revoke(&workspace, &root).expect("revoke the deleted root");
     assert_eq!(revoked, root);
     assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
 }
@@ -394,9 +400,7 @@ fn a_spelling_variant_revokes_the_same_root() {
         dir.path().display(),
         std::path::MAIN_SEPARATOR
     ));
-    let revoked = workspace
-        .revoke(&variant)
-        .expect("a trailing separator names the same root");
+    let revoked = revoke(&workspace, &variant).expect("a trailing separator names the same root");
     assert_eq!(revoked, simplified(dir.path()));
     assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
 }
@@ -408,7 +412,7 @@ fn reads_and_writes_under_a_revoked_root_are_rejected() {
     let written = workspace
         .write_file(&file, "hello", None)
         .expect("write before the revoke");
-    workspace.revoke(dir.path()).expect("revoke the grant");
+    revoke(&workspace, dir.path()).expect("revoke the grant");
     let error = workspace
         .read_file(&file)
         .expect_err("a read under a revoked root must be rejected");
@@ -435,7 +439,7 @@ fn a_nested_grant_survives_its_parents_revoke() {
     fs::write(child.join("inner.txt"), "inner").expect("seed the child");
     workspace.grant(parent.path()).expect("grant the parent");
     workspace.grant(&child).expect("grant the child");
-    workspace.revoke(parent.path()).expect("revoke the parent");
+    revoke(&workspace, parent.path()).expect("revoke the parent");
     assert_eq!(workspace.granted_roots(), vec![simplified(&child)]);
     let read = workspace
         .read_file(&child.join("inner.txt"))

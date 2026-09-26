@@ -140,9 +140,7 @@ async fn reopening_the_current_file_reapplies_its_grants() {
         .await
         .expect("the grant lands");
     // Memory only: the file still holds the grant.
-    workspace
-        .revoke(dir.path())
-        .expect("the memory revoke lands");
+    revoke(&workspace, dir.path()).expect("the memory revoke lands");
     assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
 
     workspace

@@ -88,21 +88,32 @@ impl Workspace {
     /// persist that fails is logged, and the revoke still returns
     /// success.
     ///
+    /// The path resolves to its grant key before the switch guard is
+    /// taken, so a slow canonicalize never holds up a switch and a revoke
+    /// cancelled while resolving changes nothing. The removal and its
+    /// mirror hold the guard, so the revoke lands whole in the workspace
+    /// open when it completes, and is refused after the shutdown close.
+    ///
     /// # Errors
     /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
     /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when
-    /// canonicalization fails for a reason other than absence, and
-    /// [`WorkspaceError::NotGranted`] when the resolved path is not a
-    /// granted root; persistence never fails the call.
+    /// canonicalization fails for a reason other than absence,
+    /// [`WorkspaceError::WorkspaceFileFailed`] when the workspace has been
+    /// closed for shutdown, and [`WorkspaceError::NotGranted`] when the
+    /// resolved path is not a granted root; persistence never fails the
+    /// call.
     pub async fn revoke_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
-        // The revoke canonicalizes the path: blocking-pool work.
+        // Resolving may canonicalize the path: blocking-pool work.
         let workspace = self.clone();
         let requested = path.to_path_buf();
         let root = try_blocking(
-            move || workspace.revoke(&requested),
+            move || workspace.revoke_key(&requested),
             |source| WorkspaceError::ResolveGrant { source },
         )
         .await?;
+        let _switch = self.switches.lock().await;
+        self.refuse_if_closed("revoke")?;
+        self.remove_root(&root)?;
         if let Some(file) = self.backing_file()
             && let Err(error) = file.remove_grant(&root).await
         {

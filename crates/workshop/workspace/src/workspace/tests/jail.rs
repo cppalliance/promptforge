@@ -35,7 +35,7 @@ fn without_ci_a_skip_prints_and_returns() {
 /// Links `link` to the directory `target`: a symlink on Unix, a junction
 /// on Windows, which needs no symlink privilege. Returns whether the link
 /// was made.
-fn link_dir(target: &Path, link: &Path) -> bool {
+pub(super) fn link_dir(target: &Path, link: &Path) -> bool {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(target, link).is_ok()

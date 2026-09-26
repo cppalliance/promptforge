@@ -5,7 +5,8 @@
 //! swap's close unlinks the WAL the survivor writes to), cross-apply
 //! another file's grants after the backing moved on, or install a
 //! backing after the shutdown close took the previous one. A grant takes
-//! the same guard, so it cannot straddle a switch.
+//! the same guard, so it cannot straddle a switch; a revoke resolves its
+//! path first and then takes the guard for its removal and mirror.
 
 use std::pin::{Pin, pin};
 use std::task::Poll;
@@ -209,6 +210,130 @@ async fn a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_th
         in_memory, in_b,
         "memory and b's file disagree about the grant"
     );
+}
+
+#[tokio::test]
+async fn a_revoke_racing_a_workspace_open_leaves_memory_and_the_open_file_agreeing() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let b = home.path().join("b.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    file_with_grants(&b, &[dir.path()]).await;
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+    let root = workspace
+        .grant_and_persist(dir.path())
+        .await
+        .expect("the grant lands");
+
+    // Drive the revoke until its root leaves memory, then run the open as
+    // far as the switch guard allows before the revoke resumes: to
+    // completion when nothing holds the guard, not at all when the revoke
+    // does. A revoke that straddles the open has its removal undone by
+    // the grants the open loads and then mirrored into the file the open
+    // installed. The mirror waits on the file actor, a task on this
+    // runtime, so the revoke cannot finish inside one poll.
+    let mut revoke = pin!(workspace.revoke_and_persist(&root));
+    let mut open = pin!(workspace.open_file(&b));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while workspace.granted_roots().contains(&root) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the revoke never removed its root from memory"
+        );
+        if let Poll::Ready(outcome) = poll_once(revoke.as_mut()).await {
+            panic!("the revoke answered before mirroring its removal: {outcome:?}");
+        }
+        tokio::task::yield_now().await;
+    }
+    let open_ran_first = workspace.switches.try_lock().is_ok();
+    if open_ran_first {
+        open.as_mut().await.expect("b opens");
+        revoke.await.expect("the revoke succeeds");
+    } else {
+        revoke.await.expect("the revoke succeeds");
+        open.await.expect("b opens");
+    }
+
+    let in_memory = workspace.granted_roots().contains(&root);
+    workspace.close_backing().await;
+    let in_a = grants_on_disk(&a).await.contains(&root);
+    let in_b = grants_on_disk(&b).await.contains(&root);
+    if open_ran_first {
+        assert!(
+            !in_memory && !in_b,
+            "the revoke answered success after b opened, but b still holds the root in memory: {in_memory}, on disk: {in_b}"
+        );
+    } else {
+        assert!(
+            !in_a,
+            "the revoke answered success while a was open, but a's file still holds the root"
+        );
+    }
+    assert_eq!(
+        in_memory, in_b,
+        "memory and b's file disagree about the root"
+    );
+}
+
+#[tokio::test]
+async fn a_revoke_after_close_backing_is_refused_and_keeps_the_root_granted() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let a = home.path().join("a.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let workspace = Workspace::new();
+    workspace.save_as(&a).await.expect("save as creates");
+    let root = workspace
+        .grant_and_persist(dir.path())
+        .await
+        .expect("the grant lands");
+
+    workspace.close_backing().await;
+
+    let refused = workspace.revoke_and_persist(&root).await;
+    assert!(
+        matches!(refused, Err(WorkspaceError::WorkspaceFileFailed { .. })),
+        "a revoke after the shutdown close must answer the closed mapping, got {refused:?}"
+    );
+    assert_eq!(
+        workspace.granted_roots(),
+        vec![root.clone()],
+        "the refused revoke removed the root from memory"
+    );
+    assert_eq!(
+        grants_on_disk(&a).await,
+        vec![root],
+        "the file closed at shutdown keeps the root"
+    );
+}
+
+#[tokio::test]
+async fn a_revoke_by_the_stored_key_lands_after_the_folder_becomes_a_link_elsewhere() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let folder = home.path().join("granted");
+    let elsewhere = home.path().join("elsewhere");
+    fs::create_dir(&folder).expect("create the granted folder");
+    fs::create_dir(&elsewhere).expect("create the link target");
+    let workspace = Workspace::new();
+    let root = workspace.grant(&folder).expect("grant the folder");
+
+    fs::remove_dir(&folder).expect("remove the granted folder");
+    if !jail::link_dir(&elsewhere, &folder) {
+        jail::symlink_unavailable(
+            std::env::var_os("CI").is_some(),
+            "directory link creation failed",
+        );
+        return;
+    }
+
+    // The stored key now canonicalizes to the link's target, which is not
+    // granted; only the literal key names the grant the listing shows.
+    let revoked = workspace
+        .revoke_and_persist(&root)
+        .await
+        .expect("the stored key revokes its grant");
+    assert_eq!(revoked, root);
+    assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
 }
 
 #[tokio::test]

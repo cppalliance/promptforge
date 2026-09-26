@@ -179,14 +179,15 @@ pub struct Workspace {
     /// in the order they reached memory; see [`Workspace::put_ui_state`].
     ui_state_puts: Arc<tokio::sync::Mutex<()>>,
     /// Serializes the switch operations (open, save-as, duplicate, and
-    /// the shutdown close) and grants. Each switch is two phases, open or
-    /// create a handle and then swap it in, with awaits between them, and
-    /// the same-file guard in [`Workspace::open_file`] reads state a
-    /// concurrent switch would change. One guard held across the whole
-    /// switch keeps two openers of one file from ever existing (turso
-    /// shares one WAL handle per file process-wide, so the second swap's
-    /// close would unlink the sidecar the survivor writes to) and keeps a
-    /// reload of the current file from landing after the backing moved on.
+    /// the shutdown close), grants, and revokes. Each switch is two
+    /// phases, open or create a handle and then swap it in, with awaits
+    /// between them, and the same-file guard in [`Workspace::open_file`]
+    /// reads state a concurrent switch would change. One guard held
+    /// across the whole switch keeps two openers of one file from ever
+    /// existing (turso shares one WAL handle per file process-wide, so the
+    /// second swap's close would unlink the sidecar the survivor writes
+    /// to) and keeps a reload of the current file from landing after the
+    /// backing moved on.
     switches: Arc<tokio::sync::Mutex<()>>,
     /// Set once by [`Workspace::close_backing`] and never cleared: after
     /// the shutdown close no switch may install a backing nobody would
@@ -285,42 +286,57 @@ impl Workspace {
         Ok((root, meta))
     }
 
-    /// Removes `path` from the granted roots in memory only, by exact
-    /// canonical match; handlers use [`Workspace::revoke_and_persist`].
-    /// A root deleted from disk stays revocable by the literal stored
-    /// key. Nested grants are independent: revoking a parent leaves a
-    /// separately granted child intact, and files under the child stay
-    /// reachable while everything else under the parent loses access on
-    /// its next operation.
+    /// The grant key a revoke of `path` removes, changing nothing; the
+    /// removal is [`Workspace::remove_root`], and handlers use
+    /// [`Workspace::revoke_and_persist`]. A path that is itself a stored
+    /// key names that grant with no filesystem call, so a root deleted
+    /// from disk or replaced by a link stays revocable by the key the
+    /// roots listing handed the client. Any other path resolves by exact
+    /// canonical match, and one that no longer exists is its own key.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
-    /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when
-    /// canonicalization fails for a reason other than absence, and
-    /// [`WorkspaceError::NotGranted`] when the resolved path is not a
-    /// granted root.
-    pub(crate) fn revoke(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    /// a `..` or stream name, and [`WorkspaceError::ResolveGrant`] when
+    /// canonicalization fails for a reason other than absence.
+    pub(crate) fn revoke_key(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
-        // A root deleted from disk no longer canonicalizes, but its grant
-        // must stay removable: fall back to the literal path, which matches
-        // the stored canonical key the roots listing handed the client.
-        let canonical = match canonicalize_simplified(path) {
-            Ok(canonical) => canonical,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => path.to_path_buf(),
-            Err(source) => return Err(WorkspaceError::ResolveGrant { source }),
-        };
+        let stored = self
+            .grants
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_key_value(path)
+            .map(|(key, _)| key.clone());
+        if let Some(key) = stored {
+            return Ok(key);
+        }
+        match canonicalize_simplified(path) {
+            Ok(canonical) => Ok(canonical),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+            Err(source) => Err(WorkspaceError::ResolveGrant { source }),
+        }
+    }
+
+    /// Removes the grant stored under `key`, as [`Workspace::revoke_key`]
+    /// resolved it, from memory only. Nested grants are independent:
+    /// revoking a parent leaves a separately granted child intact, and
+    /// files under the child stay reachable while everything else under
+    /// the parent loses access on its next operation.
+    ///
+    /// # Errors
+    /// Returns [`WorkspaceError::NotGranted`] when `key` is not a granted
+    /// root.
+    pub(crate) fn remove_root(&self, key: &Path) -> Result<(), WorkspaceError> {
         let removed = self
             .grants
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .remove(&canonical)
+            .remove(key)
             .is_some();
-        if removed {
-            self.bump_roots();
-            Ok(canonical)
-        } else {
-            Err(WorkspaceError::NotGranted)
+        if !removed {
+            return Err(WorkspaceError::NotGranted);
         }
+        self.bump_roots();
+        Ok(())
     }
 
     /// The granted roots in canonical (path) order. Grant order is kept

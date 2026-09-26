@@ -15,13 +15,15 @@ isProject: false
   - Repository root `C:\Users\Vinnie\cursor\promptforge`, branch `master`. All paths are relative to that root.
   - Target: the 43 commits in `3e31cd23..11da61d8` (baseline `upstream/master` at `3e31cd23`, "Close plan: multi-product-docs-site"; endpoint `master` at `11da61d8`, "Close plan: workshop structure"). They carry two plans: `vibe/2026-09-25-2-workshop-fixes.md` (21 commits through `42edc053`) and `vibe/2026-09-25-3-workshop-structure.md` (22 commits after it). This is the content of [cppalliance/promptforge#75](https://github.com/cppalliance/promptforge/pull/75).
   - Disposition checked at `11da61d8`. Every accepted debt below is still present there.
+  - Operator addition (2026-09-26): the pre-existing revoke race, DEBT-FIX-X01, is brought into scope as Step 5, placed before the plan's close.
 - Cleanup goals:
   - The workspace tree listing never opens or reads a link's target outside the grants to decide how to list it, and never reports a target's size or modified time.
   - The desktop app's gateway readiness wait can be driven by tests without wall-clock time, and its tests stop relying on sleeping writer threads, elapsed-time assertions, and released ephemeral ports.
   - `crates/workshop/ui/src/services/protocol.ts` names the right Rust files for the agent frames.
+  - A revoke lands whole in the workspace that is open when it completes, the same rule grants follow, and a revoke after the shutdown close is refused instead of answering success. A revoke by the stored grant key does no filesystem work.
 - Non-goals:
-  - No change to any wire frame shape, route, persisted format, or public API.
-  - No fix for the pre-existing revoke race (see Exposed pre-existing debt).
+  - No change to any wire frame shape, route, persisted format, or public API. The revoke refusal reuses an error the workspace routes already answer.
+  - No change to how grants behave after the shutdown close (see Deferred and Out of Scope).
   - No new structural checks or retired-string gates.
   - No edits outside `crates/workshop/**` and this plan's repository copy under `vibe/`.
 - Success criteria:
@@ -58,9 +60,11 @@ isProject: false
   - Impact: the file contradicts itself and sends a maintainer to the wrong crate first. `agent-frames.json` still catches drift in the wire shape.
   - Reversal cost: one comment.
   - Target state: the comment names `wire.rs` for the session frames, `protocol/src/input.rs` for the input-wait frames, and `server/src/agents/socket.rs` for the routing.
-- **Exposed pre-existing debt (reported separately, not counted, not in scope):**
+- **Exposed pre-existing debt (reported separately and not counted as debt added; brought into scope by the operator as Step 5):**
   - DEBT-FIX-X01: revokes aren't serialized with workspace switches. `revoke_and_persist` in `crates/workshop/workspace/src/workspace/backing.rs` (line 97) never takes `switches`, and it reads `backing_file()` only after awaiting the blocking removal (line 106). So a revoke racing an open, Save As, or the shutdown close can mirror into the wrong workspace file or into none. A revoked folder can then come back on the next open.
   - `0ee7d67d` fixed the same race for grants and recorded this gap in its message. The function body is identical at the baseline, so the target didn't add it. The analyst classed it as exposed and the challenger as unrelated pre-existing. The code facts are confirmed.
+  - A likelier variant needs no race: revoking a root on an unreachable share stalls in canonicalization past the route's 10 second deadline. The handler answers 408, but the blocking task can still remove the root from memory, and the file mirror never runs, so the root comes back on the next open.
+  - Target state: a revoke resolves its key without changing anything, then removes the key from memory and mirrors the removal under the switch guard. A revoke that finds the workspace closed for shutdown is refused. A revoke of a stored key never touches the filesystem.
 - **Rejected candidates: 55.**
   - 22 residual-but-acceptable: seams, parameter clusters, and private mirrors that compile-time exhaustiveness or existing tests already protect.
   - 14 weak or speculative: no demonstrated consequence. Examples are the boot probe attempt budget dropping from 2 s to 100 ms, and non-finite metrics.
@@ -85,6 +89,16 @@ isProject: false
   - Visibility stays `pub(in crate::gateway)`. Update every caller: the production wrapper, `launch_wait_with` in `tests/boot.rs`, and any recovery test that calls the wait directly. Find them with `rg -n "wait_for_launched_file_cancellable_with" crates/workshop/desktop`.
   - The desktop crate is exempt from the 500-line limit.
 - **Comment (DEBT-STRUCT-02):** replace lines 103 to 105 of `crates/workshop/ui/src/services/protocol.ts` with: "The Rust half of this family is the session frame structs in crates/workshop/server/src/agents/wire.rs, the input-wait frames in crates/workshop/protocol/src/input.rs, and the routing in crates/workshop/server/src/agents/socket.rs."
+- **Revoke serialization (DEBT-FIX-X01)**, in `crates/workshop/workspace/src/workspace/backing.rs` and `crates/workshop/workspace/src/workspace.rs`:
+  - `Workspace::revoke_and_persist` runs in this order:
+    1. Resolve the key without mutating anything. Run `reject_forbidden` first. When the literal requested path is a stored grant key, use it with no filesystem call. Otherwise canonicalize on the blocking pool, keeping today's fallback to the literal path when canonicalization fails with `NotFound`.
+    2. Take `self.switches.lock().await`.
+    3. Call the existing `refuse_if_closed("revoke")`, which answers `WorkspaceFileError::Closed` (HTTP 500, code `workspace_file_failed`) after the shutdown close, as open, Save As, and duplicate already do.
+    4. Remove the key from memory and bump the roots generation, answering `NotGranted` when it's absent. Then mirror the removal into the backing file as today, where a failed persist is logged and doesn't fail the call.
+  - Split today's `Workspace::revoke` (`workspace.rs` line 302) into a non-mutating resolve and a synchronous removal, both in `workspace.rs`, and keep its documented errors. Update every caller that `rg -n "\.revoke\(" crates/workshop` finds.
+  - Resolution runs before the guard, so a slow canonicalize never holds up a switch or the shutdown close. A handler cancelled at the route deadline during resolution leaves memory and the file unchanged.
+  - Docs: the `revoke_and_persist` doc says the revoke lands whole in the workspace open when it completes and is refused after the shutdown close. The `switches` field doc (`workspace.rs` line 181) lists revokes beside grants. The `revoke` docs describe the key lookup.
+  - Keep `backing.rs` (485 physical lines at `bb6bb7cb`) and `workspace.rs` (440) at or under 500. If `backing.rs` would pass 500, first move `grant_and_persist` and `revoke_and_persist` into a new `crates/workshop/workspace/src/workspace/persist.rs` in the same commit.
 - No module, interface, data, protocol, or lifecycle change beyond these.
 
 </implementation-contract>
@@ -104,6 +118,11 @@ isProject: false
   - `dead_port()` is deleted.
   - `rg -n "thread::sleep|elapsed\(\)|dead_port" crates/workshop/desktop/src/gateway/tests/boot.rs` finds no hit in those three tests.
 - DEBT-STRUCT-02: `rg -n "frame structs in" crates/workshop/ui/src/services/protocol.ts` shows the new wording. `npm run typecheck` and `npm test` pass in `crates/workshop/ui`.
+- DEBT-FIX-X01, in `crates/workshop/workspace/src/workspace/tests/switch.rs` beside `a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant` (line 152), run with `cargo nextest run --locked -p workshop-workspace --all-features`:
+  - A revoke racing a workspace open, driven the same way as the grant race test with the `hold_switches_for_test` seam, ends with memory and the open workspace file agreeing about the root. It fails before the fix.
+  - A revoke after `close_backing` answers the `Closed`-derived error and leaves the root granted in memory. It fails before the fix, which answers success.
+  - A revoke by the literal stored key succeeds even when that path no longer canonicalizes to itself, for example after the granted folder is replaced by a directory link to another folder. It fails before the fix, which answers `NotGranted`. It keeps the existing `symlink_unavailable` CI guard.
+  - The existing revoke tests pass unchanged, including the one where a root deleted from disk stays revocable, and so does the server's revoke integration test in `crates/workshop/server/tests/it/agents/revoke.rs` under `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
 - Exit commands, each at least as green as the structure plan's exit record in `vibe/2026-09-25-3-workshop-structure.md` Step 21:
   - `cargo nextest run --locked -p workshop-workspace --all-features` (Windows)
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
@@ -128,7 +147,11 @@ isProject: false
   - **DEBT-FIX-01: keep the type-only stat on Unix.** A Unix link has no type flag, and a `stat` sends no credentials. The dead-NFS stall stays as residual risk.
   - **DEBT-STRUCT-01: one seam covering both the clock and the pause.** Chosen over a pause alone, because a pause alone leaves the budget test on the wall clock through `Instant::now()`. It's one private seam, not two more closure generics, so the parameter cluster doesn't grow.
   - **DEBT-STRUCT-02: reword the comment and add no gate.** A widened retired-string search wouldn't generalize to the next move.
-- User-resolved architecture choices: none were needed. Every remedy is local, private, and reversible, with no public, persisted, wire, ownership, dependency-direction, or trust-boundary change.
+  - **DEBT-FIX-X01: resolve first, then take the guard.** Chosen over holding the guard across canonicalization, as grants do, because a slow network canonicalize would then hold up every switch and the shutdown close. A cancelled revoke also leaves nothing half-applied. Consequence: a switch between resolution and removal makes the revoke apply to the newly open workspace, which is the rule grants already follow.
+  - **DEBT-FIX-X01: refuse a revoke after the shutdown close with the existing `refuse_if_closed` error.** Without it, a revoke that waits out the close would change memory only and answer success, and the next launch would re-grant the root from the file. The error is one the switch operations already answer, so no new wire code appears.
+  - **DEBT-FIX-X01: look up the stored key before canonicalizing.** The UI sends the canonical key the roots listing gave it, so the common revoke does no I/O and can't stall on a dead share. The literal key lookup only ever removes an exact stored grant, and `reject_forbidden` still runs first.
+- User-resolved architecture choices:
+  - The operator chose to fix DEBT-FIX-X01 in this plan as a fifth step, inserted before the plan's close commit. None of the remedies needed an architecture decision: every one is local, private, and reversible, with no public, persisted, wire, ownership, dependency-direction, or trust-boundary change.
 - Rejected alternatives:
   - DEBT-FIX-01: refuse UNC-prefixed link targets after `fs::read_link`. Rejected because `read_link` returns only the first hop, so a relative link to an in-tree UNC link still gets followed. It would also have to recognize `\\?\UNC\`, `\??\UNC\`, `GLOBALROOT` device paths, and mapped drives.
   - DEBT-FIX-01: follow only when the target is lexically inside a grant. Rejected for the same chain problem, unless every hop is checked.
@@ -140,13 +163,10 @@ isProject: false
 
 ### Deferred and Out of Scope
 
-- DEBT-FIX-X01, the revoke race with workspace switches. It's pre-existing, not added by the target. Revisit as its own fix:
-  - Look up the literal request path as a stored grant key before canonicalizing.
-  - Take `switches` for the whole of `revoke_and_persist`, the way `0ee7d67d` did for grants.
-  - Add a race test beside `a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant` in `crates/workshop/workspace/src/workspace/tests/switch.rs`.
+- Grants after the shutdown close still change memory only and answer success, so the grant is lost at the next launch. Revisit by adding the same `refuse_if_closed` call to `grant_and_persist`.
 - The Unix dead-NFS stall in the tree listing. Revisit if Workshop starts supporting network-mounted grants.
 - Boot's per-attempt probe budget dropping from 2 s to 100 ms in `4b8fec5a` (weak, no demonstrated consequence). Revisit if a boot ever fails with `ProofInterrupted` against a live gateway. A fixture gateway whose `/v1/models` answers after 150 ms would settle it.
-- A slow grant canonicalize holding up the shutdown close (weak). Revisit together with DEBT-FIX-X01, whose fuller remedy canonicalizes before taking the guard.
+- A slow grant canonicalize holding up the shutdown close (weak). Revisit by giving `grant_and_persist` the same resolve-then-guard shape Step 5 gives revokes.
 - The `models` UI guard rejecting a `null` description from non-PromptForge upstreams (weak). Revisit if a third-party catalog upstream is supported.
 
 </decision-record>
@@ -331,5 +351,32 @@ isProject: false
   - Scope: no structural check or retired-string gate was added: holds, since nothing under `crates/build-xtask/` changed
 
 </step-4>
+
+<step-5>
+
+### Step 5: Serialize revokes with workspace switches [completed]
+
+- Component: Revoke serialization
+- Debt: DEBT-FIX-X01.
+- Component placement: fifth, after the exit record, because the operator added it after Steps 1 to 4 were committed and asked for it just before the plan's close. It depends on no earlier step's code. It changes `backing.rs`, so it supersedes Step 4's scope check that `backing.rs` is untouched, which was true when Step 4 ran. Its own verification is the plan's final full run.
+- Pieces: the resolve-then-guard revoke in `backing.rs` and `workspace.rs` with its docs, and the three tests in `workspace/tests/switch.rs`. Built jointly, because splitting `Workspace::revoke` breaks its callers at compile time and the race tests are the change's only proof.
+- Artifacts:
+  - `crates/workshop/workspace/src/workspace/backing.rs`, `Workspace::revoke_and_persist` (line 97): the four-phase order from Technical Design, which is resolve, guard, `refuse_if_closed("revoke")`, then remove and mirror. Update its doc.
+  - `crates/workshop/workspace/src/workspace.rs`, `Workspace::revoke` (line 302): split it into a non-mutating resolve, with the literal stored-key lookup before canonicalization and today's `NotFound` fallback, and a synchronous removal that bumps the roots generation. Keep the documented errors. Update the `switches` field doc (line 181) to list revokes.
+  - Every other caller of `Workspace::revoke` that `rg -n "\.revoke\(" crates/workshop` finds. At `bb6bb7cb` they are in `workspace/tests.rs`, `workspace/tests/reopen.rs`, `workspace/tests/grants.rs`, and `workspace/tests/backing.rs`.
+  - Keep `backing.rs` (485 physical lines) and `workspace.rs` (440) at or under 500. If `backing.rs` would pass 500, move `grant_and_persist` and `revoke_and_persist` into a new `crates/workshop/workspace/src/workspace/persist.rs` in this commit.
+- Tests, in `crates/workshop/workspace/src/workspace/tests/switch.rs`, beside `a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant`:
+  - A revoke racing a workspace open ends with memory and the open file agreeing about the root.
+  - A revoke after `close_backing` is refused and leaves the root granted in memory.
+  - A revoke by the literal stored key succeeds after the granted folder is replaced by a directory link to another folder. It keeps the `symlink_unavailable` CI guard, and it reaches the link helper in `tests/jail.rs` by widening that helper to `pub(super)`.
+  - Each new test fails before the change.
+- Verify:
+  - `cargo nextest run --locked -p workshop-workspace --all-features` on Windows, and on Linux through CI.
+  - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` with the staged sidecar, for the server's revoke integration test.
+  - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`.
+- Dependencies: none.
+- Commit: the revoke change, its docs, and its tests.
+
+</step-5>
 
 </execution-plan>
