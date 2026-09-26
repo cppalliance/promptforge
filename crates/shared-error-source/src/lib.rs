@@ -4,8 +4,9 @@
 //! Every product family had grown its own copy of the same newtype, so the
 //! same wrapper existed under the same name in crates that could not see
 //! each other. This crate depends on no workspace crate, which is what lets
-//! the harness, workshop, and gateway families all use it without a
-//! cross-family edge.
+//! the workshop and gateway families both use it without a cross-family
+//! edge. The harness owns its wrappers so that `promptforge` stays its only
+//! outside dependency.
 //!
 //! `#[error(transparent)]` delegates both `Display` and `source()` to the
 //! wrapped error, so the wrapper is invisible in a rendered chain. That

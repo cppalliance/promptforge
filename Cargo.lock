@@ -2617,7 +2617,6 @@ version = "0.3.0"
 dependencies = [
  "promptforge",
  "serde_json",
- "shared-error-source",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",

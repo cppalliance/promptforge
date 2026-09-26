@@ -16,7 +16,7 @@ The PromptForge API: the one promptforge crate outside crates may name. A facade
 
 ## shared-error-source
 
-The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSource`, one crate-owned newtype per third-party error (`serde_json`, `reqwest`, `turso`) a public error surface would otherwise name. Each sits behind its own feature (`json`, `http`, `database`) so a consumer takes only the third-party dependency it already has. The harness, workshop, and gateway families all wrap their causes through it. No workspace dependencies - that independence is what keeps it off the cross-family edge.
+The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSource`, one crate-owned newtype per third-party error (`serde_json`, `reqwest`, `turso`) a public error surface would otherwise name. Each sits behind its own feature (`json`, `http`, `database`) so a consumer takes only the third-party dependency it already has. The workshop and gateway families wrap their causes through it; the harness owns its own wrappers so `promptforge` stays its only outside dependency. No workspace dependencies - that independence is what keeps it off the cross-family edge.
 
 ## shared-loopback
 

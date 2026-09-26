@@ -17,7 +17,7 @@ workspace-hack.workspace = true
 
 # One wrapper per feature, so a consumer takes only the third-party
 # dependency it already has: gateway-api-discovery does not acquire turso
-# and harness-log does not acquire reqwest.
+# and workshop-workspace does not acquire reqwest.
 [features]
 json = ["dep:serde_json"]
 http = ["dep:reqwest"]
