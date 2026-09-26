@@ -6,28 +6,8 @@ use axum::body::Body;
 use axum::http::Request;
 use tower::ServiceExt as _;
 
+use crate::test_support::{body_bytes, granted_dir, simplified};
 use crate::workspace::Workspace;
-
-/// Collects a response body already buffered in memory.
-async fn body_bytes(response: Response) -> axum::body::Bytes {
-    axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("the body is in memory already")
-}
-
-/// A workspace with one granted tempdir, returned alongside so the
-/// directory outlives the test.
-fn granted_dir() -> (Workspace, tempfile::TempDir) {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let workspace = Workspace::new();
-    workspace.grant(dir.path()).expect("grant the tempdir");
-    (workspace, dir)
-}
-
-/// The canonical, verbatim-prefix-free form grants are stored in.
-fn simplified(path: &Path) -> std::path::PathBuf {
-    dunce::simplified(&path.canonicalize().expect("canonical")).to_path_buf()
-}
 
 /// Percent-encodes a path once for a query string, as the UI does.
 fn query_encoded(path: &Path) -> String {

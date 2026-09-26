@@ -12,15 +12,8 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
 
 use crate::handlers::routes;
+use crate::test_support::{json_body, simplified};
 use crate::workspace_file::open_database;
-
-/// Collects a response body already buffered in memory and parses it.
-async fn json_body(response: Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("the body is in memory already");
-    serde_json::from_slice(&bytes).expect("the body is JSON")
-}
 
 /// Builds a request with a raw JSON body.
 fn json_request(method: &str, uri: &str, body: String) -> Request<Body> {
@@ -51,11 +44,6 @@ async fn send(workspace: &Workspace, request: Request<Body>) -> Response {
         .oneshot(request)
         .await
         .expect("the router is infallible")
-}
-
-/// The canonical, verbatim-prefix-free form grants are stored in.
-fn simplified(path: &Path) -> PathBuf {
-    dunce::simplified(&path.canonicalize().expect("canonical")).to_path_buf()
 }
 
 /// A window geometry distinguished by `width`, as the desktop app would send it.
@@ -102,6 +90,94 @@ async fn current_on_an_ephemeral_workspace_reports_no_file_and_its_grants() {
     assert_eq!(
         json["grants"],
         serde_json::json!([{ "path": root, "exists": true }])
+    );
+}
+
+/// Pins the whole `GET /workspace/file/current` body, ephemeral and
+/// file-backed: exactly these four keys, each in this wire shape.
+#[tokio::test]
+async fn current_answers_the_pinned_json_shape() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let file_path = home.path().join("pinned.pfwork");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let workspace = Workspace::new();
+    let root = workspace.grant(dir.path()).expect("grant the tempdir");
+
+    assert_eq!(
+        json_body(send(&workspace, current_request()).await).await,
+        serde_json::json!({
+            "path": null,
+            "name": "Untitled",
+            "grants": [{ "path": root, "exists": true }],
+            "window_state": null,
+        }),
+        "the ephemeral body"
+    );
+
+    workspace
+        .save_as(&file_path)
+        .await
+        .expect("save as creates");
+    let saved = send(
+        &workspace,
+        json_request("PUT", "/workspace/file/window-state", window_body(1111)),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(send(&workspace, current_request()).await).await,
+        serde_json::json!({
+            "path": file_path.to_string_lossy(),
+            "name": "pinned",
+            "grants": [{ "path": root, "exists": true }],
+            "window_state": {
+                "width": 1111,
+                "height": 700,
+                "x": 5,
+                "y": 6,
+                "maximized": false,
+            },
+        }),
+        "the file-backed body"
+    );
+}
+
+/// A path that is not valid Unicode: a lone `0xff` byte.
+#[cfg(unix)]
+fn non_unicode_path() -> PathBuf {
+    use std::os::unix::ffi::OsStrExt as _;
+    PathBuf::from(std::ffi::OsStr::from_bytes(b"/home/lost-\xff.pfwork"))
+}
+
+/// A path that is not valid Unicode: an unpaired surrogate.
+#[cfg(windows)]
+fn non_unicode_path() -> PathBuf {
+    use std::os::windows::ffi::OsStringExt as _;
+    let mut wide: Vec<u16> = "C:\\lost-".encode_utf16().collect();
+    wide.push(0xd800);
+    wide.extend(".pfwork".encode_utf16());
+    PathBuf::from(std::ffi::OsString::from_wide(&wide))
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn a_non_unicode_workspace_path_serializes_lossily() {
+    let path = non_unicode_path();
+    let summary = WorkspaceSummary {
+        path: Some(path.clone()),
+        name: "lost".to_owned(),
+        grants: Vec::new(),
+        window_state: None,
+    };
+
+    let json = serde_json::to_value(&summary).expect("a non-Unicode path still serializes");
+
+    assert_eq!(json["path"], path.to_string_lossy().as_ref());
+    assert!(
+        json["path"]
+            .as_str()
+            .is_some_and(|text| text.contains('\u{fffd}')),
+        "the invalid part is replaced, not dropped: {json}"
     );
 }
 

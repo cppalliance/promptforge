@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::test_support::{granted_dir, simplified};
+
 mod backing;
 mod close;
 mod grants;
@@ -10,20 +12,8 @@ mod pointer;
 mod reopen;
 mod switch;
 mod ui_state_memory;
-
-/// A workspace with one granted tempdir, returned alongside so the
-/// directory outlives the test.
-fn granted_dir() -> (Workspace, tempfile::TempDir) {
-    let dir = tempfile::TempDir::new().expect("tempdir");
-    let workspace = Workspace::new();
-    workspace.grant(dir.path()).expect("grant the tempdir");
-    (workspace, dir)
-}
-
-/// The canonical, verbatim-prefix-free form grants are stored in.
-fn simplified(path: &Path) -> PathBuf {
-    canonicalize_simplified(path).expect("canonical")
-}
+#[cfg(feature = "test-fixtures")]
+mod write_stall;
 
 #[test]
 fn a_folder_grant_grants_the_folder_itself() {
@@ -458,6 +448,28 @@ fn a_nested_grant_survives_its_parents_revoke() {
         matches!(error, WorkspaceError::OutsideGrants),
         "expected OutsideGrants, got {error:?}"
     );
+}
+
+#[test]
+fn a_directory_is_neither_read_nor_written_as_a_file() {
+    let (workspace, dir) = granted_dir();
+    let nested = dir.path().join("nested");
+    fs::create_dir(&nested).expect("create the nested directory");
+    let error = workspace
+        .read_file(&nested)
+        .expect_err("a directory cannot be read as a file");
+    assert!(
+        matches!(error, WorkspaceError::NotAFile),
+        "expected NotAFile from the read, got {error:?}"
+    );
+    let error = workspace
+        .write_file(&nested, "text", None)
+        .expect_err("a directory cannot be written as a file");
+    assert!(
+        matches!(error, WorkspaceError::NotAFile),
+        "expected NotAFile from the write, got {error:?}"
+    );
+    assert!(nested.is_dir(), "the refused write leaves the directory");
 }
 
 #[test]

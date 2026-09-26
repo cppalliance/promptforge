@@ -143,17 +143,17 @@ pub(crate) struct GrantRow {
 
 /// The kv 'window' value: the desktop app's saved geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WindowState {
+pub(crate) struct WindowState {
     /// Logical width.
-    pub width: u32,
+    pub(crate) width: u32,
     /// Logical height.
-    pub height: u32,
+    pub(crate) height: u32,
     /// Logical x position.
-    pub x: i32,
+    pub(crate) x: i32,
     /// Logical y position.
-    pub y: i32,
+    pub(crate) y: i32,
     /// Whether the window is maximized.
-    pub maximized: bool,
+    pub(crate) maximized: bool,
 }
 
 /// A handle to an open workspace file: a clone-cheap sender into the

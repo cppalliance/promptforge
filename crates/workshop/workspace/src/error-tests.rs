@@ -2,12 +2,7 @@
 
 use super::*;
 
-/// Collects a response body already buffered in memory.
-pub(super) async fn body_bytes(response: Response) -> axum::body::Bytes {
-    axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("the body is in memory already")
-}
+use crate::test_support::body_bytes;
 
 /// A distinctive injected cause for leak-boundary assertions.
 fn injected_io() -> io::Error {

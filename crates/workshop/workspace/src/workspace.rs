@@ -50,7 +50,7 @@ const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// Whether a tree entry is a directory or a regular file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum EntryKind {
+pub(crate) enum EntryKind {
     /// A directory.
     Directory,
     /// A regular file.
@@ -59,7 +59,7 @@ pub enum EntryKind {
 
 /// One entry in a directory listing.
 #[derive(Debug, Serialize)]
-pub struct TreeEntry {
+pub(crate) struct TreeEntry {
     /// The entry's file name (lossy for non-Unicode names).
     name: String,
     /// The entry's full path, ready to pass back to the API.
@@ -79,7 +79,7 @@ pub struct TreeEntry {
 
 /// One level of a workspace directory tree.
 #[derive(Debug, Serialize)]
-pub struct TreeListing {
+pub(crate) struct TreeListing {
     /// The listed directory; `None` when the listing is the granted roots.
     path: Option<PathBuf>,
     /// Directories before files, each group ordered by name.
@@ -88,7 +88,7 @@ pub struct TreeListing {
 
 /// A file's text plus the metadata a writer needs to detect conflicts.
 #[derive(Debug, Serialize)]
-pub struct FileContents {
+pub(crate) struct FileContents {
     /// The canonical file path.
     path: PathBuf,
     /// Byte length.
@@ -102,26 +102,43 @@ pub struct FileContents {
 
 /// One granted root as the workspace reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct GrantEntry {
+pub(crate) struct GrantEntry {
     /// The canonical granted root.
-    pub path: PathBuf,
+    pub(crate) path: PathBuf,
     /// Whether the root is on disk right now. A vanished root stays
     /// granted and listed so the user can see it and revoke it.
-    pub exists: bool,
+    pub(crate) exists: bool,
 }
 
 /// The workspace as a whole: its file, if any, and what it holds; built
-/// by [`Workspace::current`] in the backing module.
+/// by [`Workspace::current`] in the backing module. It is the JSON body
+/// of `GET /workspace/file/current` and of every successful switch.
 #[derive(Debug, Clone, Serialize)]
-pub struct WorkspaceSummary {
+pub(crate) struct WorkspaceSummary {
     /// The backing file; `None` while the workspace is ephemeral.
-    pub path: Option<PathBuf>,
+    #[serde(serialize_with = "lossy_path")]
+    pub(crate) path: Option<PathBuf>,
     /// The display name: the file's own, or `Untitled` while ephemeral.
-    pub name: String,
+    pub(crate) name: String,
     /// The granted roots in canonical order.
-    pub grants: Vec<GrantEntry>,
+    pub(crate) grants: Vec<GrantEntry>,
     /// The saved window geometry; `None` while ephemeral or never saved.
-    pub window_state: Option<WindowState>,
+    pub(crate) window_state: Option<WindowState>,
+}
+
+/// Serializes a path as its lossy UTF-8 text, so a path that is not
+/// valid Unicode still reaches the wire instead of failing the body.
+#[expect(
+    clippy::ref_option,
+    reason = "serde's serialize_with hands the field over by reference"
+)]
+fn lossy_path<S: serde::Serializer>(
+    path: &Option<PathBuf>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    path.as_deref()
+        .map(Path::to_string_lossy)
+        .serialize(serializer)
 }
 
 /// What memory keeps beside each granted root so the file holds the
@@ -282,7 +299,7 @@ impl Workspace {
     /// canonicalization fails for a reason other than absence, and
     /// [`WorkspaceError::NotGranted`] when the resolved path is not a
     /// granted root.
-    pub fn revoke(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    pub(crate) fn revoke(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
         // A root deleted from disk no longer canonicalizes, but its grant
         // must stay removable: fall back to the literal path, which matches
@@ -309,7 +326,7 @@ impl Workspace {
     /// The granted roots in canonical (path) order. Grant order is kept
     /// beside each root and reaches the file through save-as, not here.
     #[must_use]
-    pub fn granted_roots(&self) -> Vec<PathBuf> {
+    pub(crate) fn granted_roots(&self) -> Vec<PathBuf> {
         self.grants
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -322,7 +339,7 @@ impl Workspace {
     /// and workspace switch bumps, so a subscriber re-reads
     /// [`Workspace::granted_roots`] when it changes.
     #[must_use]
-    pub fn subscribe_roots(&self) -> watch::Receiver<u64> {
+    pub(crate) fn subscribe_roots(&self) -> watch::Receiver<u64> {
         self.roots_generation.subscribe()
     }
 
@@ -341,7 +358,7 @@ impl Workspace {
     /// Returns [`WorkspaceError`] when the path is forbidden, outside every
     /// grant, missing, not a regular file, binary, not UTF-8, oversized, or
     /// cannot be read.
-    pub fn read_file(&self, path: &Path) -> Result<FileContents, WorkspaceError> {
+    pub(crate) fn read_file(&self, path: &Path) -> Result<FileContents, WorkspaceError> {
         let canonical = self.confine_existing(path)?;
         let metadata =
             fs::metadata(&canonical).map_err(|source| WorkspaceError::InspectPath { source })?;
@@ -377,7 +394,7 @@ impl Workspace {
     /// stale, absent, or underivable for the existing file, and otherwise
     /// [`WorkspaceError`] when the path is forbidden, outside every grant,
     /// not a regular file, or cannot be written.
-    pub fn write_file(
+    pub(crate) fn write_file(
         &self,
         path: &Path,
         text: &str,

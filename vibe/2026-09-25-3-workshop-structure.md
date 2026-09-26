@@ -733,7 +733,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-9>
 
-### Step 9: Replace the workspace response type, trim its surface, and close its test gaps
+### Step 9: Replace the workspace response type, trim its surface, and close its test gaps [completed]
 
 - Component: Workspace
 - Artifacts:

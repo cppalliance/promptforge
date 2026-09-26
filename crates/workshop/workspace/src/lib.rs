@@ -29,19 +29,18 @@ mod blocking;
 mod error;
 mod handlers;
 mod handles;
+#[cfg(test)]
+mod test_support;
 mod workspace;
 mod workspace_file;
 
 pub use error::WorkspaceError;
-pub use handlers::routes;
 #[cfg(feature = "test-fixtures")]
 pub use handlers::routes_with_deadline;
 pub use handles::{WorkspaceRegistrations, register, register_tasks};
+pub use workspace::Workspace;
 #[cfg(feature = "test-fixtures")]
 pub use workspace::WriteStallHandle;
-pub use workspace::{
-    EntryKind, FileContents, GrantEntry, TreeEntry, TreeListing, Workspace, WorkspaceSummary,
-};
+pub use workspace_file::WorkspaceFileError;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub use workspace_file::create_alien_database_for_test;
-pub use workspace_file::{WindowState, WorkspaceFileError};

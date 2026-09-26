@@ -18,7 +18,7 @@ impl Workspace {
     /// # Errors
     /// Returns [`WorkspaceError`] when the path is forbidden, outside every
     /// grant, missing, not a directory, or cannot be listed.
-    pub fn tree(&self, path: Option<&Path>) -> Result<TreeListing, WorkspaceError> {
+    pub(crate) fn tree(&self, path: Option<&Path>) -> Result<TreeListing, WorkspaceError> {
         match path {
             None => Ok(self.grants_listing()),
             Some(path) if path.as_os_str().is_empty() => Ok(self.grants_listing()),

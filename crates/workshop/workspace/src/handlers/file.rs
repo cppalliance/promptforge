@@ -19,7 +19,7 @@ use axum::routing::{get, post, put};
 use serde::{Deserialize, Serialize};
 
 use crate::error::WorkspaceError;
-use crate::workspace::{GrantEntry, Workspace, WorkspaceSummary};
+use crate::workspace::{Workspace, WorkspaceSummary};
 use crate::workspace_file::WindowState;
 
 use super::respond;
@@ -33,31 +33,6 @@ pub(super) fn routes() -> axum::Router<Workspace> {
         .route("/workspace/file/save-as", post(save_as_file))
         .route("/workspace/file/duplicate", post(duplicate_file))
         .route("/workspace/file/window-state", put(put_window_state))
-}
-
-/// The JSON body of `GET /workspace/file/current` and of every
-/// successful switch: the workspace as it stands.
-#[derive(Debug, Serialize)]
-pub(crate) struct WorkspaceFileResponse {
-    /// The backing file; `null` while the workspace is ephemeral.
-    path: Option<String>,
-    /// The display name: the file's own, or `Untitled` while ephemeral.
-    name: String,
-    /// The granted roots in canonical order.
-    grants: Vec<GrantEntry>,
-    /// The saved window geometry; `null` while ephemeral or never saved.
-    window_state: Option<WindowState>,
-}
-
-impl From<WorkspaceSummary> for WorkspaceFileResponse {
-    fn from(summary: WorkspaceSummary) -> Self {
-        Self {
-            path: summary.path.map(|path| path.to_string_lossy().into_owned()),
-            name: summary.name,
-            grants: summary.grants,
-            window_state: summary.window_state,
-        }
-    }
 }
 
 /// The JSON body of `POST /workspace/file/{open,save-as,duplicate}`.
@@ -79,9 +54,7 @@ pub(crate) struct SavedResponse {
 /// Reports the workspace as it stands: its file, name, grants, and
 /// saved window geometry.
 pub(crate) async fn current_file(State(workspace): State<Workspace>) -> Response {
-    respond(Ok::<_, WorkspaceError>(WorkspaceFileResponse::from(
-        workspace.current().await,
-    )))
+    respond(Ok::<_, WorkspaceError>(workspace.current().await))
 }
 
 /// Opens a workspace file, replacing every grant with its contents, and
@@ -134,10 +107,8 @@ pub(crate) async fn put_window_state(
 /// success, the failure's envelope otherwise.
 async fn after_switch(workspace: &Workspace, result: Result<(), WorkspaceError>) -> Response {
     match result {
-        Ok(()) => respond(Ok::<_, WorkspaceError>(WorkspaceFileResponse::from(
-            workspace.current().await,
-        ))),
-        Err(error) => respond(Err::<WorkspaceFileResponse, _>(error)),
+        Ok(()) => respond(Ok::<_, WorkspaceError>(workspace.current().await)),
+        Err(error) => respond(Err::<WorkspaceSummary, _>(error)),
     }
 }
 

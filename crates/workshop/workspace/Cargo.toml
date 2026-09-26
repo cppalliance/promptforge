@@ -11,8 +11,9 @@ description = "Workshop workspace subsystem: the jailed filesystem behind /works
 [features]
 default = []
 # Exposes test seams (`Workspace::close_backing_for_test`,
-# `Workspace::stall_next_write_for_test`, `routes_with_deadline`, and
-# `create_alien_database_for_test`) to the dependent crates' tests.
+# `Workspace::stall_next_write_for_test` and its `WriteStallHandle`,
+# `routes_with_deadline`, and `create_alien_database_for_test`) to the
+# dependent crates' tests.
 test-fixtures = []
 
 [dependencies]

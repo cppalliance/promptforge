@@ -11,15 +11,8 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt as _;
 
 use crate::handlers::routes;
+use crate::test_support::json_body;
 use crate::workspace_file::ui_state_kv::UI_STATE_VALUE_CAP;
-
-/// Collects a response body already buffered in memory and parses it.
-async fn json_body(response: Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("the body is in memory already");
-    serde_json::from_slice(&bytes).expect("the body is JSON")
-}
 
 /// Builds a `GET /workspace/file/state` request.
 fn get_request() -> Request<Body> {

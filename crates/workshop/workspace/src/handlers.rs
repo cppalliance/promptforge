@@ -26,7 +26,7 @@ mod file_state;
 /// `/workspace/file/*` document routes from the `file` module, and the
 /// `/workspace/file/state` ui-state bucket from `file_state`. Every
 /// route runs under the default deadline tier.
-pub fn routes(state: Workspace) -> axum::Router {
+pub(crate) fn routes(state: Workspace) -> axum::Router {
     build(state, DEFAULT_DEADLINE)
 }
 

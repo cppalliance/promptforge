@@ -89,8 +89,11 @@ impl Workspace {
     /// success.
     ///
     /// # Errors
-    /// The same as [`Workspace::revoke`]; persistence never fails the
-    /// call.
+    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path contains
+    /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when
+    /// canonicalization fails for a reason other than absence, and
+    /// [`WorkspaceError::NotGranted`] when the resolved path is not a
+    /// granted root; persistence never fails the call.
     pub async fn revoke_and_persist(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         // The revoke canonicalizes the path: blocking-pool work.
         let workspace = self.clone();
@@ -133,7 +136,7 @@ impl Workspace {
     /// at a supported version, and [`WorkspaceError::WorkspaceFileFailed`]
     /// when it cannot be read or the workspace has been closed for
     /// shutdown.
-    pub async fn open_file(&self, path: &Path) -> Result<(), WorkspaceError> {
+    pub(crate) async fn open_file(&self, path: &Path) -> Result<(), WorkspaceError> {
         let _switch = self.switches.lock().await;
         self.refuse_if_closed("open")?;
         // A second opener of the current file must never exist. turso
@@ -228,7 +231,7 @@ impl Workspace {
     /// the destination folder, and [`WorkspaceError::WorkspaceFileFailed`]
     /// when the copy cannot be made or opened or the workspace has been
     /// closed for shutdown.
-    pub async fn duplicate(&self, path: &Path) -> Result<(), WorkspaceError> {
+    pub(crate) async fn duplicate(&self, path: &Path) -> Result<(), WorkspaceError> {
         let _switch = self.switches.lock().await;
         self.refuse_if_closed("duplicate")?;
         let Some(previous) = self.backing_file() else {
@@ -247,7 +250,10 @@ impl Workspace {
     /// # Errors
     /// Returns [`WorkspaceError::WorkspaceFileFailed`] when the write
     /// fails.
-    pub async fn put_window_state(&self, state: WindowState) -> Result<bool, WorkspaceError> {
+    pub(crate) async fn put_window_state(
+        &self,
+        state: WindowState,
+    ) -> Result<bool, WorkspaceError> {
         let Some(file) = self.backing_file() else {
             return Ok(false);
         };
@@ -259,7 +265,7 @@ impl Workspace {
     /// confinement source of truth; the name and window state come from
     /// the file. A file that cannot be read degrades to its stem and no
     /// window state rather than failing the call.
-    pub async fn current(&self) -> WorkspaceSummary {
+    pub(crate) async fn current(&self) -> WorkspaceSummary {
         // One blocking-pool trip stats every root; a worker that cannot
         // report degrades to no grants listed rather than failing the call.
         let roots = self.granted_roots();

@@ -18,7 +18,7 @@ impl Workspace {
     /// each `None` until put or read from the file at open. An ephemeral
     /// workspace has nowhere to keep them and reports every key as `None`.
     #[must_use]
-    pub fn ui_state(&self) -> BTreeMap<&'static str, Option<Value>> {
+    pub(crate) fn ui_state(&self) -> BTreeMap<&'static str, Option<Value>> {
         self.backing
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -43,7 +43,11 @@ impl Workspace {
     /// allow-list and [`WorkspaceError::UiStateTooLarge`] for a value
     /// whose JSON text exceeds the cap; both are refused before anything
     /// changes, ephemeral or not. Persistence never fails the call.
-    pub async fn put_ui_state(&self, key: &str, value: Value) -> Result<bool, WorkspaceError> {
+    pub(crate) async fn put_ui_state(
+        &self,
+        key: &str,
+        value: Value,
+    ) -> Result<bool, WorkspaceError> {
         let key = ui_state_key(key)?;
         let json_text = value.to_string();
         check_ui_state_cap(json_text.len())?;
