@@ -28,7 +28,7 @@ use syn::{UseTree, Visibility};
 pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
 
 /// Every facade the shape check covers, relative to the workspace root.
-const FACADE_DIRS: [[&str; 2]; 2] = [FACADE_DIR, ["crates", "harness"]];
+pub(crate) const FACADE_DIRS: [[&str; 2]; 2] = [FACADE_DIR, ["crates", "harness"]];
 
 const REEXPORT: &str = "a single-item re-export `pub use internal_crate::path::Item;`";
 const FACADE_ITEMS: &str = "only grouping `pub mod` blocks and single-item `pub use` re-exports";

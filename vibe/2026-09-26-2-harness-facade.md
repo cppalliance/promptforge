@@ -422,7 +422,7 @@ The existing workspace gates cover this change: the build, the build-xtask archi
 
 <step-5>
 
-### Step 5: Tighten the harness boundary rules
+### Step 5: Tighten the harness boundary rules [completed]
 
 - Component: harness boundary rules
 - Piece: boundary rules, the component's only piece.

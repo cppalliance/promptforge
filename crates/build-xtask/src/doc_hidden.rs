@@ -1,6 +1,7 @@
-//! The `doc(hidden)` ban, live: no `.rs` file under the `promptforge`
-//! facade or the `crates/promptforge-internal/` container carries a
-//! `doc(hidden)` attribute. An engine item is either on the facade's
+//! The `doc(hidden)` ban, live: no `.rs` file under a facade in
+//! `facade_shape::FACADE_DIRS` (`promptforge`, `harness`) or under their
+//! containers (`crates/promptforge-internal/`, `crates/harness-internal/`)
+//! carries a `doc(hidden)` attribute. An item is either on a facade's
 //! surface and documented, or off it: private, or a free function in a
 //! `detail` module the facade never re-exports. Runs as part of
 //! `cargo test -p build-xtask` and `cargo xtask tidy`.
@@ -19,23 +20,27 @@ use std::path::{Path, PathBuf};
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
 const RULE: &str = "doc(hidden) attribute";
-const REQUIRED: &str = "no hidden item in the engine crates: document it, or make it private \
-    or a `detail` function";
+const REQUIRED: &str = "no hidden item in a facade or its container: document it, or make it \
+    private or a `detail` function";
 
-/// The directories the ban covers: the facade crate and the engine
-/// container, whether or not they exist.
-fn banned_dirs(root: &Path) -> [PathBuf; 2] {
-    let facade = crate::facade_shape::FACADE_DIR
-        .iter()
-        .fold(root.to_path_buf(), |dir, part| dir.join(part));
-    let container = root
-        .join("crates")
-        .join(crate::engine_guards::ENGINE_CONTAINER);
-    [facade, container]
+/// The harness facade's container, relative to `crates/`.
+const HARNESS_CONTAINER: &str = "harness-internal";
+
+/// The directories the ban covers: every facade crate, then the engine and
+/// harness containers, whether or not they exist.
+fn banned_dirs(root: &Path) -> Vec<PathBuf> {
+    let facades = crate::facade_shape::FACADE_DIRS.iter().map(|parts| {
+        parts
+            .iter()
+            .fold(root.to_path_buf(), |dir, part| dir.join(part))
+    });
+    let containers = [crate::engine_guards::ENGINE_CONTAINER, HARNESS_CONTAINER]
+        .map(|container| root.join("crates").join(container));
+    facades.chain(containers).collect()
 }
 
-/// Runs the ban over every `.rs` file under the facade and the engine
-/// container. A missing directory, an unreadable file, or an unparseable
+/// Runs the ban over every `.rs` file under the facades and their
+/// containers. A missing directory, an unreadable file, or an unparseable
 /// file is reported, not skipped: a file that was never scanned cannot be
 /// shown clean.
 #[must_use]
@@ -44,8 +49,8 @@ pub(crate) fn doc_hidden_violations(root: &Path) -> Vec<String> {
     for dir in banned_dirs(root) {
         if !dir.is_dir() {
             violations.push(format!(
-                "{}: the engine directory is missing, so its sources cannot be shown free of \
-                 doc(hidden)",
+                "{}: the facade or container directory is missing, so its sources cannot be \
+                 shown free of doc(hidden)",
                 dir.display()
             ));
             continue;

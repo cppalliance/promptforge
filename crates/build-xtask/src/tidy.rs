@@ -2,8 +2,8 @@
 //! the harness family, the sans-I/O engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
 //! `engine_guards`), the `promptforge` and `harness` facades' source
-//! shape (run from `facade_shape`), and the `doc(hidden)` ban over the engine
-//! crates (run from `doc_hidden`).
+//! shape (run from `facade_shape`), and the `doc(hidden)` ban over both
+//! facades and their containers (run from `doc_hidden`).
 //!
 //! Each check returns a list of human-readable violations. The `#[test]`
 //! wrappers assert the lists are empty, so `cargo test -p build-xtask`

@@ -10,13 +10,16 @@
 //!   workshop, or harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
 //!   except the family's public pair (`gateway-api-types`,
-//!   `gateway-api-discovery`), and may depend on the harness family only
-//!   through `harness`.
-//! - `harness`/`harness-*` crates must not depend on workshop crates, and
-//!   may depend on gateway crates only through the public pair.
+//!   `gateway-api-discovery`).
+//! - `harness`/`harness-*` crates must not depend on gateway, shared, or
+//!   workshop crates; outside their own family, `promptforge` is the one
+//!   product crate they may name. `workspace-hack` belongs to no family,
+//!   so it stays legal.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
-//!   the family only through `promptforge`.
+//!   the family only through `promptforge`, and a crate outside the
+//!   harness family on that family only through `harness`. The `build-*`
+//!   crates are bound too.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
@@ -131,7 +134,7 @@ const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
-/// The harness family's facade: the only harness crate workshop crates may
+/// The harness family's facade: the only harness crate outside crates may
 /// name, and the one outside crate permitted into
 /// `crates/harness-internal/`.
 const PUBLIC_HARNESS: &str = "harness";
@@ -192,15 +195,15 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         (Family::Workshop, Family::Gateway) if !public_gateway => {
             Some("workshop crates must not depend on gateway crates")
         }
-        (Family::Workshop, Family::Harness) if dep.package != PUBLIC_HARNESS => {
-            Some("workshop crates may depend on harness crates only through harness")
-        }
         (Family::Harness, Family::Workshop) => {
             Some("harness crates must not depend on workshop crates")
         }
-        (Family::Harness, Family::Gateway) if !public_gateway => Some(
-            "harness crates may depend on gateway-* only through gateway-api-types and gateway-api-discovery",
-        ),
+        (Family::Harness, Family::Gateway) => {
+            Some("harness crates must not depend on gateway crates")
+        }
+        (Family::Harness, Family::Shared) => {
+            Some("harness crates must not depend on shared crates")
+        }
         (
             Family::Shared,
             Family::Promptforge | Family::Gateway | Family::Workshop | Family::Harness,
@@ -216,6 +219,9 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
                 "outside crates may depend on the promptforge family only through promptforge"
                     .to_owned(),
             )
+        } else if from != Family::Harness && to == Family::Harness && dep.package != PUBLIC_HARNESS
+        {
+            Some("outside crates may depend on the harness family only through harness".to_owned())
         } else {
             None
         }
@@ -406,6 +412,9 @@ fn collect_deps(table: &toml::map::Map<String, toml::Value>, names: &mut Vec<Str
 #[cfg(test)]
 #[path = "product-container-tests.rs"]
 mod container_tests;
+#[cfg(test)]
+#[path = "product-harness-tests.rs"]
+mod harness_tests;
 #[cfg(test)]
 #[path = "product-test-support.rs"]
 pub(crate) mod test_support;

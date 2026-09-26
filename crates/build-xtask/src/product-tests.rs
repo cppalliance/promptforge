@@ -321,29 +321,19 @@ fn a_workshop_crate_depending_on_the_public_gateway_pair_passes() {
 }
 
 #[test]
-fn a_harness_crate_depending_on_the_public_doors_and_shared_passes() {
+fn a_harness_crate_depending_on_the_promptforge_facade_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "harness-internal/runner",
         "harness-runner",
-        "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n\
-         gateway-api-types = { path = \"../../gateway-api-types\" }\n\
-         gateway-api-discovery = { path = \"../../gateway-api-discovery\" }\n\
-         shared-loopback = { path = \"../../shared-loopback\" }\n",
+        "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n",
     );
-    for name in [
-        "promptforge",
-        "gateway-api-types",
-        "gateway-api-discovery",
-        "shared-loopback",
-    ] {
-        write_crate(root.path(), name, name, "");
-    }
+    write_crate(root.path(), "promptforge", "promptforge", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the promptforge facade, the gateway public pair, and shared-* are legal for harness crates: {violations:?}"
+        "the promptforge facade is legal for harness crates: {violations:?}"
     );
 }
 
@@ -380,9 +370,8 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("harness-models depends on gateway-routing:")
-            && violations[0].contains("gateway-api-types")
-            && violations[0].contains("gateway-api-discovery"),
-        "the violation names the harness crate and the public pair: {violations:?}"
+            && violations[0].contains("harness crates must not depend on gateway crates"),
+        "the violation names the harness crate and the gateway ban: {violations:?}"
     );
 }
 

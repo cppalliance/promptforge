@@ -1,6 +1,6 @@
-//! The `doc(hidden)` ban over this workspace's engine crates, plus
-//! fixtures that each hiding form fails at its line and each doc form
-//! that hides nothing passes.
+//! The `doc(hidden)` ban over this workspace's facades and their
+//! containers, plus fixtures that each hiding form fails at its line and
+//! each doc form that hides nothing passes.
 
 use std::path::{Path, PathBuf};
 
@@ -48,14 +48,38 @@ fn tree(files: &[(&str, &[u8])]) -> tempfile::TempDir {
 }
 
 const HIDDEN: &[u8] = b"#[doc(hidden)]\npub struct Seam;\n";
-const FACADE_LIB: (&str, &[u8]) = ("crates/promptforge/src/lib.rs", b"pub use x::Y;\n");
-const CONTAINER_LIB: (&str, &[u8]) = (
-    "crates/promptforge-internal/lua/src/lib.rs",
-    b"pub struct Plain;\n",
-);
+/// One clean source under each directory the ban covers, so none is
+/// reported missing.
+const BANNED_DIR_LIBS: [(&str, &[u8]); 4] = [
+    ("crates/promptforge/src/lib.rs", b"pub use x::Y;\n"),
+    ("crates/harness/src/lib.rs", b"pub use x::Y;\n"),
+    (
+        "crates/promptforge-internal/lua/src/lib.rs",
+        b"pub struct Plain;\n",
+    ),
+    (
+        "crates/harness-internal/runner/src/lib.rs",
+        b"pub struct Plain;\n",
+    ),
+];
+
+/// Asserts a hidden item in `path`, beside a clean source under every
+/// banned directory, is the scan's one violation.
+fn assert_scanned(path: &str) {
+    let mut files = BANNED_DIR_LIBS.to_vec();
+    files.push((path, HIDDEN));
+    let root = tree(&files);
+    let violations = doc_hidden_violations(root.path());
+    let file = at(root.path(), path);
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].starts_with(&format!("{}:1: {RULE}: ", file.display())),
+        "{path} was not scanned: {violations:?}"
+    );
+}
 
 #[test]
-fn the_real_engine_crates_carry_no_doc_hidden() {
+fn the_real_facades_and_containers_carry_no_doc_hidden() {
     let violations = doc_hidden_violations(&workspace_root());
     assert!(
         violations.is_empty(),
@@ -235,7 +259,7 @@ fn every_rs_file_under_the_facade_and_the_container_is_scanned() {
         "crates/promptforge-internal/model-client/src/client/wire.rs",
         "crates/promptforge-internal/stray.rs",
     ];
-    let mut files = vec![FACADE_LIB, CONTAINER_LIB];
+    let mut files = BANNED_DIR_LIBS.to_vec();
     files.extend(hidden.iter().map(|path| (*path, HIDDEN)));
     let root = tree(&files);
     let violations = doc_hidden_violations(root.path());
@@ -252,27 +276,45 @@ fn every_rs_file_under_the_facade_and_the_container_is_scanned() {
 }
 
 #[test]
-fn files_outside_the_engine_crates_are_not_scanned() {
-    let root = tree(&[
-        FACADE_LIB,
-        CONTAINER_LIB,
+fn a_doc_hidden_under_the_harness_facade_is_rejected() {
+    assert_scanned("crates/harness/src/log.rs");
+}
+
+#[test]
+fn a_doc_hidden_under_a_harness_internal_crate_is_rejected() {
+    assert_scanned("crates/harness-internal/sessions/src/environment.rs");
+}
+
+#[test]
+fn files_outside_the_facades_and_containers_are_not_scanned() {
+    let mut files = BANNED_DIR_LIBS.to_vec();
+    files.extend([
         ("crates/workshop/server/src/lib.rs", HIDDEN),
         ("crates/gateway-api-discovery/src/lib.rs", HIDDEN),
         ("crates/promptforge-internal-old/src/lib.rs", HIDDEN),
+        ("crates/harness-internal-old/src/lib.rs", HIDDEN),
         ("crates/promptforge-internal/target/debug/out.rs", HIDDEN),
         ("crates/promptforge/src/notes.md", HIDDEN),
     ]);
+    let root = tree(&files);
     let violations = doc_hidden_violations(root.path());
     assert!(violations.is_empty(), "{violations:?}");
 }
 
 #[test]
-fn a_missing_engine_directory_is_reported_not_skipped() {
-    for (present, missing) in [
-        (FACADE_LIB, "crates/promptforge-internal"),
-        (CONTAINER_LIB, "crates/promptforge"),
+fn a_missing_facade_or_container_directory_is_reported_not_skipped() {
+    for missing in [
+        "crates/promptforge",
+        "crates/harness",
+        "crates/promptforge-internal",
+        "crates/harness-internal",
     ] {
-        let root = tree(&[present]);
+        let present: Vec<_> = BANNED_DIR_LIBS
+            .into_iter()
+            .filter(|(path, _)| !path.starts_with(&format!("{missing}/")))
+            .collect();
+        assert_eq!(present.len(), BANNED_DIR_LIBS.len() - 1, "{missing}");
+        let root = tree(&present);
         let violations = doc_hidden_violations(root.path());
         let dir = at(root.path(), missing);
         assert_eq!(violations.len(), 1, "{violations:?}");
@@ -295,7 +337,9 @@ fn an_unreadable_or_unparseable_source_is_reported_not_skipped() {
         (b"pub struct Seam {\n".as_slice(), ": unparseable source: "),
     ] {
         let path = "crates/promptforge-internal/lua/src/broken.rs";
-        let root = tree(&[FACADE_LIB, CONTAINER_LIB, (path, text)]);
+        let mut files = BANNED_DIR_LIBS.to_vec();
+        files.push((path, text));
+        let root = tree(&files);
         let file = at(root.path(), path);
         let violations = doc_hidden_violations(root.path());
         assert_eq!(violations.len(), 1, "{violations:?}");
