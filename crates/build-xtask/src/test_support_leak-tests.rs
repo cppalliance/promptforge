@@ -1,6 +1,6 @@
 //! Fixture tests for the `test-support` leak guard, plus the live check
-//! over this workspace: no non-dev dependency table anywhere enables an
-//! engine crate's `test-support` feature.
+//! over this workspace: no non-dev dependency table anywhere enables a
+//! promptforge or harness crate's `test-support` feature.
 
 use std::path::{Path, PathBuf};
 
@@ -51,6 +51,19 @@ fn engine_root() -> tempfile::TempDir {
         "promptforge-internal/lua",
         "promptforge-lua",
         features,
+    );
+    root
+}
+
+/// `engine_root` plus one container harness crate, `harness-runner`,
+/// exposing a `test-support` feature.
+fn guarded_root() -> tempfile::TempDir {
+    let root = engine_root();
+    write_crate(
+        root.path(),
+        "harness/runner",
+        "harness-runner",
+        "[features]\ntest-support = []\n",
     );
     root
 }
@@ -240,5 +253,114 @@ fn an_engine_crate_enabling_a_sibling_test_support_feature_outside_dev_is_report
     assert!(
         violations[0].contains("promptforge-lua/test-support"),
         "{violations:?}"
+    );
+}
+
+#[test]
+fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
+    let root = guarded_root();
+    write_crate(
+        root.path(),
+        "harness/models",
+        "harness-models",
+        "[dependencies]\n\
+         harness-runner = { workspace = true, features = [\"test-support\"] }\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("[dependencies]")
+            && violations[0].contains("harness-runner/test-support")
+            && violations[0].contains("models"),
+        "the leak names the table, the feature, and the consuming crate: {violations:?}"
+    );
+}
+
+#[test]
+fn a_dev_dependencies_table_enabling_a_harness_test_support_feature_passes() {
+    let root = guarded_root();
+    write_crate(
+        root.path(),
+        "harness/models",
+        "harness-models",
+        "[dependencies]\nharness-runner = { workspace = true }\n\
+         [dev-dependencies]\n\
+         harness-runner = { workspace = true, features = [\"test-support\"] }\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "dev-dependencies may enable a harness crate's test-support: {violations:?}"
+    );
+}
+
+#[test]
+fn a_harness_crate_forwarding_its_own_test_support_feature_passes() {
+    let root = guarded_root();
+    write_crate(
+        root.path(),
+        "harness/sessions",
+        "harness-sessions",
+        "[dependencies]\nharness-runner = { workspace = true }\n\
+         [features]\ntest-support = [\"harness-runner/test-support\"]\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert!(
+        violations.is_empty(),
+        "a harness crate's own test-support forwarding a harness sibling's is gated: {violations:?}"
+    );
+}
+
+#[test]
+fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported() {
+    let root = guarded_root();
+    write_crate(
+        root.path(),
+        "harness/models",
+        "harness-models",
+        "[dependencies]\nharness-runner = { workspace = true }\n\
+         [features]\ndefault = [\"harness-runner/test-support\"]\n\
+         test-support = [\"harness-runner/test-support\"]\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].contains("[features] default")
+            && violations[0].contains("harness-runner/test-support")
+            && violations[0].contains("models"),
+        "only a crate's own test-support feature is exempt when forwarding a sibling's: {violations:?}"
+    );
+}
+
+#[test]
+fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
+    let root = guarded_root();
+    write_crate(
+        root.path(),
+        "harness/models",
+        "harness-models",
+        "[dependencies]\npromptforge-lua = { workspace = true }\n\
+         [features]\ntest-support = [\"promptforge-lua/test-support\"]\n",
+    );
+    write_crate(
+        root.path(),
+        "promptforge-internal/engine",
+        "promptforge-engine",
+        "[dependencies]\nharness-runner = { workspace = true }\n\
+         [features]\ntest-support = [\"harness-runner/test-support\"]\n",
+    );
+    let violations = test_support_leak_violations(root.path());
+    assert_eq!(violations.len(), 2, "{violations:?}");
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("models") && v.contains("promptforge-lua/test-support")),
+        "a harness crate forwarding a promptforge crate's test-support is reported: {violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("engine") && v.contains("harness-runner/test-support")),
+        "a promptforge crate forwarding a harness crate's test-support is reported: {violations:?}"
     );
 }

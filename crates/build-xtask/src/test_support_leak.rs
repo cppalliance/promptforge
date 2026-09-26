@@ -1,10 +1,14 @@
 //! `test-support` leak guard: no non-dev dependency table anywhere in the
-//! workspace enables an engine crate's `test-support` feature.
+//! workspace enables a promptforge or harness crate's `test-support`
+//! feature. The promptforge family is the facade plus every
+//! `crates/promptforge-internal/` member; the harness family is every
+//! `crates/harness/` member plus `crates/harness-api`.
 //!
 //! The engine manifest guard (`engine_deps`) lets an engine crate keep an
 //! optional forbidden dependency that only its `test-support` feature
-//! enables (`promptforge-engine`'s tokio test driver). That exemption
-//! is safe only while `test-support` is enabled from `[dev-dependencies]`
+//! enables (`promptforge-engine`'s tokio test driver), and harness crates
+//! keep test fixtures behind theirs (`harness-runner`'s). Both are safe
+//! only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
 //! `promptforge-engine = { workspace = true, features = ["test-support"] }`
 //! would pull the test drivers back into a shipping binary. This guard closes
@@ -20,11 +24,12 @@
 //! dev-dependencies), so `default = ["promptforge-engine/test-support"]`
 //! is the same leak spelled through a feature. `<dep>` is resolved through
 //! the crate's own dependency entries and their `package` renames. One
-//! shape is exempt: an engine crate's own `test-support` feature forwarding
-//! to another engine crate's `test-support` (one container crate
-//! forwarding a sibling's; the guard counts the facade as an engine crate
-//! too), because that forwarding is gated by a feature this guard already
-//! confines to dev tables.
+//! shape is exempt, within each family: a crate's own `test-support`
+//! feature forwarding to another `test-support` in its family (one
+//! container crate forwarding a sibling's; the guard counts the facade and
+//! `harness-api` as members of their families), because that forwarding
+//! is gated by a feature this guard already confines to dev tables.
+//! Forwarding into the other family is reported.
 //!
 //! The check reads declared dependencies, not the resolved graph, so
 //! `workspace-hack` unification is irrelevant to it. Manifests that cannot
@@ -32,20 +37,21 @@
 //! engine manifest guard already report them.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The dependency tables the guard scans, directly and under `[target]`.
 const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 
-/// The feature no non-dev table may enable on an engine crate.
+/// The feature no non-dev table may enable on a guarded crate.
 const GUARDED_FEATURE: &str = crate::engine_deps::EXEMPTING_FEATURE;
 
 /// Scans the workspace for non-dev dependency tables, and `[features]`
-/// values, that enable an engine crate's `test-support` feature.
+/// values, that enable a promptforge or harness crate's `test-support`
+/// feature.
 #[must_use]
 pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
-    let engine_names = engine_package_names(root);
-    if engine_names.is_empty() {
+    let families = guarded_families(root);
+    if families.iter().all(Vec::is_empty) {
         return Vec::new();
     }
     let mut violations = Vec::new();
@@ -60,7 +66,7 @@ pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
             &root_manifest,
             "workspace.dependencies",
             table,
-            &engine_names,
+            &families,
             &mut violations,
         );
     }
@@ -73,49 +79,37 @@ pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
         };
         let tables = crate::manifest::dependency_tables(&manifest, &CHECKED_KINDS);
         for (table, entries) in &tables {
-            scan_table(
-                &manifest_path,
-                table,
-                entries,
-                &engine_names,
-                &mut violations,
-            );
+            scan_table(&manifest_path, table, entries, &families, &mut violations);
         }
         scan_features(
             &manifest_path,
             &manifest,
             &tables,
-            &engine_names,
+            &families,
             &mut violations,
         );
     }
     violations
 }
 
-/// Reports every `[features]` value that enables the guarded feature on an
-/// engine crate through a dependency-feature reference.
+/// Reports every `[features]` value that enables the guarded feature on a
+/// guarded crate through a dependency-feature reference.
 fn scan_features(
     manifest_path: &Path,
     manifest: &toml::Value,
     tables: &[(String, &toml::map::Map<String, toml::Value>)],
-    engine_names: &[String],
+    families: &[Vec<String>],
     violations: &mut Vec<String>,
 ) {
     let Some(features) = manifest.get("features").and_then(toml::Value::as_table) else {
         return;
     };
-    let self_name = manifest
+    let self_family = manifest
         .get("package")
         .and_then(|p| p.get("name"))
-        .and_then(toml::Value::as_str);
-    let self_is_engine = self_name.is_some_and(|name| engine_names.iter().any(|e| e == name));
+        .and_then(toml::Value::as_str)
+        .and_then(|name| family_of(name, families));
     for (feature, values) in features {
-        // An engine crate's own `test-support` forwarding to a sibling's is
-        // gated by a feature the dependency-table scan already confines to
-        // dev tables; only a feature outside that gate leaks.
-        if self_is_engine && feature == GUARDED_FEATURE {
-            continue;
-        }
         let Some(values) = values.as_array() else {
             continue;
         };
@@ -125,11 +119,19 @@ fn scan_features(
             .filter_map(guarded_dependency_reference)
         {
             let package = resolve_package(dep, tables);
-            if !engine_names.iter().any(|name| name == package) {
+            let Some(family) = family_of(package, families) else {
+                continue;
+            };
+            // A crate's own `test-support` forwarding to a family sibling's
+            // is gated by a feature the dependency-table scan already
+            // confines to dev tables, so any other feature leaks.
+            // Cross-family forwarding is reported because the exemption
+            // applies within each family only.
+            if feature == GUARDED_FEATURE && self_family == Some(family) {
                 continue;
             }
             violations.push(format!(
-                "{}: [features] {feature} enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable an engine crate's {GUARDED_FEATURE} feature",
+                "{}: [features] {feature} enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {GUARDED_FEATURE} feature",
                 manifest_path.display()
             ));
         }
@@ -156,13 +158,13 @@ fn resolve_package<'a>(
         .unwrap_or(key)
 }
 
-/// Reports every entry in `table` that names an engine crate and lists the
+/// Reports every entry in `table` that names a guarded crate and lists the
 /// guarded feature.
 fn scan_table(
     manifest: &Path,
     table: &str,
     entries: &toml::map::Map<String, toml::Value>,
-    engine_names: &[String],
+    families: &[Vec<String>],
     violations: &mut Vec<String>,
 ) {
     for (key, entry) in entries {
@@ -170,7 +172,7 @@ fn scan_table(
             .get("package")
             .and_then(toml::Value::as_str)
             .unwrap_or(key);
-        if !engine_names.iter().any(|name| name == package) {
+        if family_of(package, families).is_none() {
             continue;
         }
         let enables = entry
@@ -184,17 +186,37 @@ fn scan_table(
             });
         if enables {
             violations.push(format!(
-                "{}: [{table}] enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable an engine crate's {GUARDED_FEATURE} feature",
+                "{}: [{table}] enables {package}/{GUARDED_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {GUARDED_FEATURE} feature",
                 manifest.display()
             ));
         }
     }
 }
 
-/// The package names of every engine crate whose manifest parses.
-fn engine_package_names(root: &Path) -> Vec<String> {
-    crate::engine_guards::engine_crates(root)
+/// The index of the family in `families` that names `package`, or `None`
+/// when no guarded family does.
+fn family_of(package: &str, families: &[Vec<String>]) -> Option<usize> {
+    families
         .iter()
+        .position(|names| names.iter().any(|name| name == package))
+}
+
+/// The package names of each guarded family's crates whose manifests
+/// parse: the promptforge crates, then the harness crates.
+fn guarded_families(root: &Path) -> [Vec<String>; 2] {
+    let crates_dir = root.join("crates");
+    [
+        package_names(&crate::engine_guards::engine_crates(root)),
+        package_names(&crate::harness_bans::harness_crates(
+            &crates_dir.join("harness"),
+            &crates_dir.join("harness-api"),
+        )),
+    ]
+}
+
+/// The package names of every crate in `dirs` whose manifest parses.
+fn package_names(dirs: &[PathBuf]) -> Vec<String> {
+    dirs.iter()
         .filter_map(|dir| parse_manifest(&dir.join("Cargo.toml")))
         .filter_map(|manifest| {
             manifest

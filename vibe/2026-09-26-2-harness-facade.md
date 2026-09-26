@@ -317,7 +317,7 @@ The existing workspace gates cover this change: the build, the build-xtask archi
 
 <step-2>
 
-### Step 2: The test-support leak guard covers harness crates
+### Step 2: The test-support leak guard covers harness crates [completed]
 
 - Component: harness leak guard
 - Piece: leak guard, the component's only piece.
