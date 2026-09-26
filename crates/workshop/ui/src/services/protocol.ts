@@ -100,8 +100,9 @@ export interface ErrorFrame {
 }
 
 // --- Agent-session frames (/agents/ws) --------------------------------------
-// The Rust half of this family is the frame structs in
-// crates/workshop/protocol/src and the routing in
+// The Rust half of this family is the session frame structs in
+// crates/workshop/server/src/agents/wire.rs, the input-wait frames in
+// crates/workshop/protocol/src/input.rs, and the routing in
 // crates/workshop/server/src/agents/socket.rs. Delivery classes mirror the Rust docs:
 // durable frames deliver exactly (the event log's per-client cursor and the
 // wait registry's resend-on-attach are the repair paths), ephemeral frames

@@ -267,7 +267,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Point the agent-frame comment at the right files
+### Step 3: Point the agent-frame comment at the right files [completed]
 
 - Component: UI agent-frame comment
 - Debt: DEBT-STRUCT-02.
