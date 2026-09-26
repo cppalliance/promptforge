@@ -56,8 +56,12 @@ impl Workspace {
         }
     }
 
-    /// Lists one level of an existing confined directory. A link to a folder
-    /// lists as that folder, any other link as itself; opening either confines.
+    /// Lists one level of an existing confined directory. A link may be
+    /// classified as a folder or a file from its own attributes (Windows) or
+    /// from a type-only stat (Unix), but listing never opens it and never
+    /// reports its target's size or time; opening a link still confines.
+    /// Opening a Windows link target can stall on, or authenticate to, the
+    /// remote host of a UNC link.
     fn directory_listing(&self, path: &Path) -> Result<TreeListing, WorkspaceError> {
         let canonical = self.confine_existing(path)?;
         let metadata =
@@ -73,29 +77,34 @@ impl Workspace {
             let own = entry
                 .metadata()
                 .map_err(|source| WorkspaceError::InspectPath { source })?;
-            let metadata = if own.is_symlink() {
-                fs::metadata(entry.path())
-                    .ok()
-                    .filter(fs::Metadata::is_dir)
-                    .unwrap_or(own)
+            let is_link = own.is_symlink();
+            let is_dir = if is_link {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::FileTypeExt;
+                    own.file_type().is_symlink_dir()
+                }
+                #[cfg(unix)]
+                {
+                    fs::metadata(entry.path()).is_ok_and(|target| target.is_dir())
+                }
             } else {
-                own
-            };
-            let kind = if metadata.is_dir() {
-                EntryKind::Directory
-            } else {
-                EntryKind::File
+                own.is_dir()
             };
             entries.push(TreeEntry {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 path: entry.path(),
-                kind,
-                size: if metadata.is_file() {
-                    metadata.len()
+                kind: if is_dir {
+                    EntryKind::Directory
+                } else {
+                    EntryKind::File
+                },
+                size: if !is_link && own.is_file() {
+                    own.len()
                 } else {
                     0
                 },
-                modified_ms: modified_ms(&metadata),
+                modified_ms: modified_ms(&own),
                 exists: true,
             });
         }

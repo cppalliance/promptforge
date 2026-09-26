@@ -17,7 +17,10 @@
 //!   NTFS alternate data stream names) and then canonicalized and
 //!   prefix-matched against the canonical grants before any filesystem
 //!   operation, so traversal, symlink escapes, and UNC aliases cannot
-//!   reach outside a grant.
+//!   reach outside a grant. Listing a directory may classify a link in it
+//!   from the link's own attributes (Windows) or from a type-only stat
+//!   (Unix), but never opens the link and never reports its target's size
+//!   or time; opening the link still confines.
 //! - The in-memory grant set is the confinement source of truth; an
 //!   optional workspace file (a single Turso database) mirrors it between
 //!   sessions and is never consulted on a request path. A persist that

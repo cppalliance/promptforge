@@ -51,6 +51,26 @@ fn link_dir(target: &Path, link: &Path) -> bool {
     }
 }
 
+/// Sets the directory `dir`'s modified time to `time`. A Unix directory
+/// never opens for writing; a Windows directory opens only with
+/// `FILE_FLAG_BACKUP_SEMANTICS`, and setting its time needs
+/// `FILE_WRITE_ATTRIBUTES`.
+fn age_dir(dir: &Path, time: std::time::SystemTime) -> std::io::Result<()> {
+    #[cfg(unix)]
+    let file = fs::File::open(dir)?;
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        fs::File::options()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir)?
+    };
+    file.set_modified(time)
+}
+
 /// The entry named `name` in `listing`.
 fn listed<'a>(listing: &'a TreeListing, name: &str) -> &'a TreeEntry {
     listing
@@ -93,6 +113,11 @@ fn a_linked_folder_inside_a_grant_lists_as_a_directory_and_opens() {
 fn a_linked_folder_pointing_outside_the_grant_lists_as_a_directory_but_never_opens() {
     let (workspace, dir) = granted_dir();
     let outside = tempfile::TempDir::new().expect("outside tempdir");
+    age_dir(
+        outside.path(),
+        std::time::UNIX_EPOCH + std::time::Duration::from_hours(24),
+    )
+    .expect("age the link target");
     let link = dir.path().join("escape");
     if !link_dir(outside.path(), &link) {
         symlink_unavailable(
@@ -102,7 +127,12 @@ fn a_linked_folder_pointing_outside_the_grant_lists_as_a_directory_but_never_ope
         return;
     }
     let listing = workspace.tree(Some(dir.path())).expect("list the grant");
-    assert_eq!(listed(&listing, "escape").kind, EntryKind::Directory);
+    let entry = listed(&listing, "escape");
+    assert_eq!(entry.kind, EntryKind::Directory);
+    assert_eq!(entry.size, 0);
+    let own = fs::symlink_metadata(&link).expect("inspect the link itself");
+    assert_eq!(entry.modified_ms, modified_ms(&own));
+    assert_ne!(entry.modified_ms, 86_400_000, "the target's mtime leaked");
     let error = workspace
         .tree(Some(&link))
         .expect_err("opening a link out of the grant must be rejected");
@@ -131,6 +161,9 @@ fn a_dangling_link_lists_as_its_own_entry() {
         .expect("a dangling link must not fail the listing");
     assert_eq!(listing.entries.len(), 1);
     let entry = listed(&listing, "dangling");
+    #[cfg(windows)]
+    assert_eq!(entry.kind, EntryKind::Directory);
+    #[cfg(unix)]
     assert_eq!(entry.kind, EntryKind::File);
     assert_eq!(entry.size, 0);
     assert!(
