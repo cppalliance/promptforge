@@ -1,10 +1,10 @@
 # Contributing to the guide
 
-The guide has four documentation sets, one per audience: `src/gateway/`, `src/workshop/`, `src/language/`, and `src/agent/`. Chapters inside a set start with a numeric prefix that fixes the reading order.
+The guide has three documentation sets, one per audience: `src/gateway/`, `src/workshop/`, and `src/language/`. Each set builds as its own book. Chapters inside a set start with a numeric prefix that fixes the reading order.
 
 ## Ownership
 
-- Each book's `SUMMARY.md` and the per-part `<set>/index.md` files belong to the assembler, which writes them only into the staged books under `target/site-books/`. Do not add them to `src/`; build the books with `cargo xtask site --books-only`.
+- Each book's `SUMMARY.md` and overview `index.md` belong to the assembler, which writes them only into the staged books under `target/site-books/`. Do not add them to `src/`; build the books with `cargo xtask site --books-only`.
 - Chapters and `src/introduction.md` are hand-edited. Fixes land directly in the file.
 
 ## Freshness

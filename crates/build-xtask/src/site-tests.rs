@@ -19,6 +19,13 @@ fn site_with(files: &[&str]) -> tempfile::TempDir {
     site
 }
 
+/// Writes `content` to the `/`-separated path `file` under `site`.
+fn write_page(site: &Path, file: &str, content: &str) {
+    let path = site.join(file);
+    fs::create_dir_all(path.parent().expect("a file has a parent")).expect("mkdir");
+    fs::write(&path, content).expect("write page");
+}
+
 /// A page with one anchor per href.
 fn page(hrefs: &[&str]) -> String {
     let mut html = String::new();
@@ -114,17 +121,13 @@ fn copy_dir_names_a_missing_source() {
 
 #[test]
 fn a_page_whose_links_all_resolve_passes() {
-    let site = site_with(&[
-        "style.css",
-        "gateway/index.html",
-        "language/agent/index.html",
-    ]);
+    let site = site_with(&["style.css", "gateway/index.html", "language/index.html"]);
     let html = format!(
         "<link rel=\"stylesheet\" href=\"style.css\">\n{}",
-        page(&["gateway/index.html#setup", "language/agent/index.html"])
+        page(&["gateway/index.html#setup", "language/index.html"])
     );
     assert_eq!(
-        broken_links(site.path(), &html, false),
+        broken_links(site.path(), "index.html", &html, false),
         Vec::<String>::new()
     );
 }
@@ -133,7 +136,7 @@ fn a_page_whose_links_all_resolve_passes() {
 fn a_missing_target_fails_and_is_named() {
     let site = site_with(&["gateway/index.html"]);
     let html = page(&["gateway/index.html", "workshop/index.html"]);
-    let broken = broken_links(site.path(), &html, false);
+    let broken = broken_links(site.path(), "index.html", &html, false);
     assert_eq!(broken.len(), 1, "{broken:?}");
     assert!(broken[0].contains("workshop/index.html"), "{broken:?}");
 }
@@ -142,7 +145,7 @@ fn a_missing_target_fails_and_is_named() {
 fn every_broken_link_is_listed() {
     let site = site_with(&[]);
     let html = page(&["a.html", "b/c.html"]);
-    let broken = broken_links(site.path(), &html, false);
+    let broken = broken_links(site.path(), "index.html", &html, false);
     assert_eq!(broken.len(), 2, "{broken:?}");
     assert!(broken[0].contains("a.html") && broken[1].contains("b/c.html"));
 }
@@ -151,7 +154,7 @@ fn every_broken_link_is_listed() {
 fn a_folder_link_fails_even_when_the_folder_exists() {
     let site = site_with(&["gateway/index.html"]);
     let html = page(&["gateway/", "gateway"]);
-    let broken = broken_links(site.path(), &html, false);
+    let broken = broken_links(site.path(), "index.html", &html, false);
     assert_eq!(broken.len(), 2, "{broken:?}");
 }
 
@@ -163,8 +166,102 @@ fn a_link_that_leaves_the_site_fails() {
     fs::write(site.join("index.html"), "").expect("landing");
     fs::write(temp.path().join("outside.html"), "").expect("outside file");
     let html = page(&["../outside.html", "/index.html"]);
-    let broken = broken_links(&site, &html, false);
+    let broken = broken_links(&site, "index.html", &html, false);
     assert_eq!(broken.len(), 2, "{broken:?}");
+}
+
+#[test]
+fn a_nested_page_resolves_links_from_its_own_folder() {
+    let site = site_with(&["gateway/01-install.html", "gateway/css/chrome.css"]);
+    let html = page(&["01-install.html", "css/chrome.css", "02-missing.html"]);
+    let broken = broken_links(site.path(), "gateway/index.html", &html, false);
+    assert_eq!(broken, ["02-missing.html: no such file"]);
+}
+
+#[test]
+fn a_parent_link_that_stays_inside_the_site_passes() {
+    let site = site_with(&["index.html", "gateway/css/chrome.css"]);
+    let html = page(&[
+        "../css/chrome.css",
+        "../../index.html",
+        "./../../index.html",
+    ]);
+    assert_eq!(
+        broken_links(site.path(), "gateway/sub/page.html", &html, false),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_parent_link_that_escapes_the_site_fails() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let site = temp.path().join("site");
+    fs::create_dir_all(site.join("gateway")).expect("site dir");
+    fs::write(temp.path().join("outside.html"), "").expect("outside file");
+    let html = page(&["../../outside.html"]);
+    let broken = broken_links(&site, "gateway/index.html", &html, false);
+    assert_eq!(broken, ["../../outside.html: leaves the site folder"]);
+}
+
+#[test]
+fn every_book_page_is_checked_and_named_in_the_error() {
+    let site = tempfile::tempdir().expect("tempdir");
+    write_page(site.path(), "index.html", &page(&["gateway/index.html"]));
+    write_page(
+        site.path(),
+        "gateway/index.html",
+        &page(&["01-missing.html"]),
+    );
+    write_page(
+        site.path(),
+        "gateway/nested/page.html",
+        &page(&["../gone.html"]),
+    );
+    let error = check_links(site.path(), false).expect_err("two broken links");
+    assert!(error.contains("has 2 broken links"), "{error}");
+    assert!(
+        error.contains("gateway/index.html: 01-missing.html: no such file"),
+        "{error}"
+    );
+    assert!(
+        error.contains("gateway/nested/page.html: ../gone.html: no such file"),
+        "{error}"
+    );
+}
+
+#[test]
+fn rustdoc_pages_are_not_checked() {
+    let site = tempfile::tempdir().expect("tempdir");
+    write_page(site.path(), "index.html", "");
+    write_page(site.path(), "promptforge/index.html", &page(&["gone.html"]));
+    write_page(
+        site.path(),
+        "harness/harness_api/index.html",
+        &page(&["gone.html"]),
+    );
+    write_page(
+        site.path(),
+        "gateway/promptforge/page.html",
+        &page(&["gone.html"]),
+    );
+    let error = check_links(site.path(), false).expect_err("only the book page is read");
+    assert!(error.contains("has 1 broken links"), "{error}");
+    assert!(error.contains("gateway/promptforge/page.html"), "{error}");
+}
+
+#[test]
+fn a_books_404_page_is_not_checked() {
+    let site = tempfile::tempdir().expect("tempdir");
+    write_page(site.path(), "index.html", "");
+    write_page(
+        site.path(),
+        "gateway/404.html",
+        &format!(
+            "<base href=\"/promptforge/gateway/\">\n{}",
+            page(&["print.html"])
+        ),
+    );
+    assert_eq!(check_links(site.path(), false), Ok(()));
 }
 
 #[test]
@@ -177,7 +274,7 @@ fn external_mail_and_fragment_links_are_ignored() {
         "#top",
     ]);
     assert_eq!(
-        broken_links(site.path(), &html, false),
+        broken_links(site.path(), "index.html", &html, false),
         Vec::<String>::new()
     );
 }
@@ -191,13 +288,30 @@ fn books_only_skips_only_the_rustdoc_folders() {
         "gateway/index.html",
         "promptforge-extra/index.html",
     ]);
-    assert_eq!(broken_links(site.path(), &html, false).len(), 4);
-    let broken = broken_links(site.path(), &html, true);
+    assert_eq!(
+        broken_links(site.path(), "index.html", &html, false).len(),
+        4
+    );
+    let broken = broken_links(site.path(), "index.html", &html, true);
     assert_eq!(broken.len(), 2, "{broken:?}");
     assert!(broken[0].contains("gateway/index.html"), "{broken:?}");
     assert!(
         broken[1].contains("promptforge-extra/index.html"),
         "{broken:?}"
+    );
+}
+
+#[test]
+fn books_only_skips_a_book_pages_link_into_the_rustdoc_folders() {
+    let site = site_with(&[]);
+    let html = page(&["../promptforge/index.html", "../harness/index.html"]);
+    assert_eq!(
+        broken_links(site.path(), "gateway/index.html", &html, false).len(),
+        2
+    );
+    assert_eq!(
+        broken_links(site.path(), "gateway/index.html", &html, true),
+        Vec::<String>::new()
     );
 }
 

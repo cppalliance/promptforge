@@ -1,7 +1,10 @@
 //! Stage mode: builds one mdBook source tree per book under an absolute
 //! output folder, `<out>/<book>/` with `book.toml`, `back-link.js`, and
-//! `src/` holding the book's set folders, each set's `index.md`, and the
-//! book's `SUMMARY.md`. The checked-in guide tree is only read.
+//! `src/` holding the book's chapters, its rendered `index.md`, and its
+//! `SUMMARY.md` side by side. Chapters sit at the top of `src/`, so the
+//! built book serves them at `<book>/<chapter>.html` and the overview's
+//! relative links still resolve once mdBook copies it to the book root.
+//! The checked-in guide tree is only read.
 
 use std::fs;
 use std::path::Path;
@@ -25,7 +28,7 @@ pub(crate) fn stage(guide: &Path, out: &Path) -> Result<(), AssembleError> {
     let src = guide.join("src");
     check_removed_workshop_stt_claims(&src)?;
 
-    for (book, sets) in BOOKS {
+    for (book, part_title) in BOOKS {
         let book_out = out.join(book);
         let book_src = book_out.join("src");
         create_dir(&book_src)?;
@@ -38,19 +41,14 @@ pub(crate) fn stage(guide: &Path, out: &Path) -> Result<(), AssembleError> {
             &book_out.join("back-link.js"),
         )?;
 
-        let mut parts = Vec::new();
-        for (set, part_title) in *sets {
-            let set_src = src.join(set);
-            let set_out = book_src.join(set);
-            copy_dir(&set_src, &set_out)?;
-            let chapters = read_chapters(&set_src)?;
-            write_file(
-                &set_out.join("index.md"),
-                &render_index(part_title, &chapters),
-            )?;
-            parts.push((*set, *part_title, chapters));
-        }
-        let summary = render_summary(&parts);
+        let set_src = src.join(book);
+        copy_dir(&set_src, &book_src)?;
+        let chapters = read_chapters(&set_src)?;
+        write_file(
+            &book_src.join("index.md"),
+            &render_index(part_title, &chapters),
+        )?;
+        let summary = render_summary(part_title, &chapters);
         write_file(&book_src.join("SUMMARY.md"), &summary)?;
         check_links(&summary, &book_src).map_err(|e| AssembleError(format!("{book} book: {e}")))?;
     }

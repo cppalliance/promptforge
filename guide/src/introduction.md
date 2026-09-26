@@ -28,5 +28,3 @@ If you operate the gateway, read [the Gateway set](gateway/index.md). It teaches
 
 If you write prompts, read [the Prompt Language set](language/index.md). It teaches the .md prompt syntax: frontmatter, sections and blocks, Lua globals, prose substitution, models, tools, control flow, and fanout.
 
-If you write agent programs, read [the Agent Programs set](agent/index.md). It teaches the .md agent surface: the agent loop, chat rounds, tool calls, the event log, host state, the sandbox, and the full loop.
-

@@ -1,5 +1,5 @@
-//! Tests for stage mode: one tree per book with its config, back-link
-//! script, set folders, rendered overviews, and SUMMARY; a relative output
+//! Tests for stage mode: one flat tree per book with its config, back-link
+//! script, chapters, rendered overview, and SUMMARY; a relative output
 //! path and a broken SUMMARY link are rejected; output is deterministic and
 //! the guide tree is only read.
 
@@ -35,6 +35,31 @@ fn read(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
+/// The entry names directly inside `dir`, sorted.
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// The link targets of a SUMMARY, in order.
+fn summary_targets(summary: &str) -> Vec<&str> {
+    summary
+        .lines()
+        .filter_map(|line| line.split_once("](").map(|(_, rest)| rest))
+        .filter_map(|rest| rest.strip_suffix(')'))
+        .collect()
+}
+
 #[test]
 fn stage_writes_one_tree_per_book() {
     let guide = fake_guide();
@@ -45,75 +70,53 @@ fn stage_writes_one_tree_per_book() {
     let out = tempfile::tempdir().expect("tempdir");
     stage(guide.path(), out.path()).expect("stage");
 
-    let mut staged: Vec<String> = fs::read_dir(out.path())
-        .expect("read out")
-        .map(|entry| {
-            entry
-                .expect("entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    staged.sort_unstable();
     let mut books: Vec<&str> = BOOKS.iter().map(|(book, _)| *book).collect();
     books.sort_unstable();
-    assert_eq!(staged, books);
+    assert_eq!(names(out.path()), books);
 
-    for (book, sets) in BOOKS {
+    for (book, title) in BOOKS {
         let root = out.path().join(book);
         let config = guide.path().join("books").join(book).join("book.toml");
         assert_eq!(read(&root.join("book.toml")), read(&config), "{book}");
         assert_eq!(read(&root.join("back-link.js")), "// All docs link.\n");
-        let summary = read(&root.join("src").join("SUMMARY.md"));
-        let mut entries: Vec<String> = vec!["SUMMARY.md".to_owned()];
-        for (set, title) in *sets {
-            entries.push((*set).to_owned());
-            let index = read(&root.join("src").join(set).join("index.md"));
-            assert!(
-                index.starts_with(&format!("# {title}\n")),
-                "{book}/{set}: {index}"
-            );
-            assert!(
-                summary.contains(&format!("({set}/index.md)")),
-                "{book}: {summary}"
-            );
-        }
+        let index = read(&root.join("src").join("index.md"));
+        assert!(
+            index.starts_with(&format!("# {title}\n")),
+            "{book}: {index}"
+        );
+        let mut entries = names(&src.join(book));
+        entries.extend(["SUMMARY.md".to_owned(), "index.md".to_owned()]);
         entries.sort_unstable();
-        let mut listed: Vec<String> = fs::read_dir(root.join("src"))
-            .expect("read book src")
-            .map(|entry| {
-                entry
-                    .expect("entry")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-        listed.sort_unstable();
-        assert_eq!(listed, entries, "{book} stages only its own sets");
+        entries.dedup();
+        assert_eq!(
+            names(&root.join("src")),
+            entries,
+            "{book} stages its own chapters flat, with no set folder"
+        );
     }
 
-    let workshop = out.path().join("workshop").join("src").join("workshop");
+    let workshop = out.path().join("workshop").join("src");
     assert!(workshop.join("01-the-window.md").is_file());
     assert!(workshop.join("02-the-editor.md").is_file());
-    let gateway = out.path().join("gateway").join("src").join("gateway");
+    let gateway = out.path().join("gateway").join("src");
     assert_eq!(read(&gateway.join("img").join("flow.svg")), "<svg/>");
 }
 
 #[test]
-fn each_book_opens_on_its_first_set_overview() {
+fn each_summary_opens_on_the_overview_and_links_only_sibling_files() {
     let guide = fake_guide();
     let out = tempfile::tempdir().expect("tempdir");
     stage(guide.path(), out.path()).expect("stage");
-    for (book, sets) in BOOKS {
-        let summary = read(&out.path().join(book).join("src").join("SUMMARY.md"));
+    for (book, _) in BOOKS {
+        let book_src = out.path().join(book).join("src");
+        let summary = read(&book_src.join("SUMMARY.md"));
         assert!(!summary.contains("introduction.md"), "{book}: {summary}");
-        let first = summary
-            .lines()
-            .find_map(|line| line.split_once("](").map(|(_, rest)| rest))
-            .expect("a link");
-        assert_eq!(first, format!("{}/index.md)", sets[0].0), "{book}");
+        let targets = summary_targets(&summary);
+        assert_eq!(targets.first(), Some(&"index.md"), "{book}: {summary}");
+        for target in targets {
+            assert!(!target.contains('/'), "{book}: {target} is not a sibling");
+            assert!(book_src.join(target).is_file(), "{book}: {target}");
+        }
     }
 }
 
@@ -139,7 +142,7 @@ fn stage_rejects_a_summary_link_that_does_not_resolve() {
     let out = tempfile::tempdir().expect("tempdir");
     let error = stage(guide.path(), out.path()).expect_err("must reject");
     let message = error.to_string();
-    assert!(message.contains("gateway/02-proxy (draft"), "{message}");
+    assert!(message.contains("02-proxy (draft"), "{message}");
     assert!(message.contains("gateway book"), "{message}");
 }
 

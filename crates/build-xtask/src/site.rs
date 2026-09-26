@@ -14,9 +14,12 @@
 //!    is untouched. Each page carries the `guide/chrome/banner.html` bar,
 //!    and each site folder gets an `index.html` redirect to its crate.
 //! 5. Copies `guide/landing/` into `target/site/`.
-//! 6. Checks the landing links: every relative `href` in
-//!    `target/site/index.html` must name a file under `target/site/`. With
-//!    `--books-only`, links into the rustdoc folders are skipped.
+//! 6. Checks the links on every built page: each relative `href` in an
+//!    `.html` file under `target/site/`, resolved from the page's own
+//!    folder, must name a file under `target/site/`. The rustdoc folders,
+//!    which rustdoc checks itself, and the books' `404.html` pages are not
+//!    read. With `--books-only`, links into the rustdoc folders are
+//!    skipped.
 //!
 //! Every path passed to a child process is absolute, built from the
 //! workspace root.
@@ -35,7 +38,7 @@ const USAGE: &str = "usage: cargo xtask site [--books-only]";
 const RUSTDOC_SITES: [(&str, &str); 2] =
     [("promptforge", "promptforge"), ("harness", "harness-api")];
 
-/// Link targets the landing check never resolves.
+/// Link targets the link check never resolves.
 const IGNORED_PREFIXES: [&str; 4] = ["http:", "https:", "mailto:", "#"];
 
 /// What `cargo xtask site` was asked to build.
@@ -99,7 +102,7 @@ fn build(root: &Path, options: Options) -> Result<PathBuf, String> {
     }
 
     copy_dir(&root.join("guide").join("landing"), &site)?;
-    check_landing(&site, options.books_only)?;
+    check_links(&site, options.books_only)?;
     Ok(site)
 }
 
@@ -225,44 +228,98 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Fails with every broken link on the landing page at `site/index.html`.
-fn check_landing(site: &Path, skip_rustdoc: bool) -> Result<(), String> {
-    let page = site.join("index.html");
-    let html = fs::read_to_string(&page)
-        .map_err(|error| format!("site: cannot read {}: {error}", page.display()))?;
-    let broken = broken_links(site, &html, skip_rustdoc);
+/// Fails with every broken link on every page [`checked_pages`] names,
+/// each message led by its page.
+fn check_links(site: &Path, skip_rustdoc: bool) -> Result<(), String> {
+    let mut broken = Vec::new();
+    for page in checked_pages(site)? {
+        let path = site.join(&page);
+        let html = fs::read_to_string(&path)
+            .map_err(|error| format!("site: cannot read {}: {error}", path.display()))?;
+        broken.extend(
+            broken_links(site, &page, &html, skip_rustdoc)
+                .into_iter()
+                .map(|link| format!("{page}: {link}")),
+        );
+    }
     if broken.is_empty() {
         return Ok(());
     }
     Err(format!(
         "site: {} has {} broken links:\n{}",
-        page.display(),
+        site.display(),
         broken.len(),
         broken.join("\n")
     ))
 }
 
-/// Every `href="..."` value in `html` that does not name a file under
-/// `site`, one message each, in page order.
+/// The `/`-separated paths, relative to `site`, of every page the link
+/// check reads, sorted: each `.html` file except those under the rustdoc
+/// folders, which rustdoc checks itself, and every `404.html`, whose
+/// `<base href>` resolves its links against the published URL rather than
+/// its own folder.
+fn checked_pages(site: &Path) -> Result<Vec<String>, String> {
+    fn walk(dir: &Path, prefix: &str, pages: &mut Vec<String>) -> Result<(), String> {
+        let read_error =
+            |error: std::io::Error| format!("site: cannot read {}: {error}", dir.display());
+        for entry in fs::read_dir(dir).map_err(read_error)? {
+            let entry = entry.map_err(read_error)?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let relative = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if entry.file_type().map_err(read_error)?.is_dir() {
+                if !(prefix.is_empty() && is_rustdoc_folder(&name)) {
+                    walk(&entry.path(), &relative, pages)?;
+                }
+            } else if Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+                && !name.eq_ignore_ascii_case("404.html")
+            {
+                pages.push(relative);
+            }
+        }
+        Ok(())
+    }
+    let mut pages = Vec::new();
+    walk(site, "", &mut pages)?;
+    pages.sort();
+    Ok(pages)
+}
+
+fn is_rustdoc_folder(name: &str) -> bool {
+    RUSTDOC_SITES.iter().any(|(dir, _)| *dir == name)
+}
+
+/// Every `href="..."` value in `html`, the page at the `/`-separated path
+/// `page` under `site`, that does not name a file under `site`, one
+/// message each, in page order.
 ///
 /// `http:`, `https:`, `mailto:`, and `#` targets are ignored, and so are
-/// links into the rustdoc folders when `skip_rustdoc` is set. A `#`
-/// fragment or `?` query after the file name is not part of the file.
+/// links into the rustdoc folders when `skip_rustdoc` is set.
 #[must_use]
-fn broken_links(site: &Path, html: &str, skip_rustdoc: bool) -> Vec<String> {
+fn broken_links(site: &Path, page: &str, html: &str, skip_rustdoc: bool) -> Vec<String> {
     hrefs(html)
         .filter(|href| {
             !IGNORED_PREFIXES
                 .iter()
                 .any(|prefix| href.starts_with(prefix))
         })
-        .filter(|href| {
-            !(skip_rustdoc
-                && RUSTDOC_SITES
-                    .iter()
-                    .any(|(dir, _)| *dir == first_segment(href)))
+        .filter_map(|href| {
+            let reason = match resolve(page, href) {
+                Err(reason) => reason,
+                Ok(segments) => {
+                    if skip_rustdoc && segments.first().is_some_and(|dir| is_rustdoc_folder(dir)) {
+                        return None;
+                    }
+                    unresolved(site, &segments)?
+                }
+            };
+            Some(format!("{href}: {reason}"))
         })
-        .filter_map(|href| unresolved(site, href).map(|reason| format!("{href}: {reason}")))
         .collect()
 }
 
@@ -273,25 +330,39 @@ fn hrefs(html: &str) -> impl Iterator<Item = &str> {
         .filter_map(|rest| rest.split_once('"').map(|(href, _)| href))
 }
 
-fn first_segment(href: &str) -> &str {
-    href.split_once('/').map_or(href, |(first, _)| first)
-}
-
-/// Why `href` does not name a file under `site`, or `None` when it does.
-fn unresolved(site: &Path, href: &str) -> Option<&'static str> {
+/// Resolves `href` from the folder of `page` into the target's path
+/// segments under the site root, or says why it names nothing there. A
+/// `#` fragment or `?` query after the file name is not part of the file.
+fn resolve<'a>(page: &'a str, href: &'a str) -> Result<Vec<&'a str>, &'static str> {
     let path = href.split(['#', '?']).next().unwrap_or(href);
     if path.starts_with('/') || path.contains([':', '\\']) {
-        return Some("is not a relative file path");
+        return Err("is not a relative file path");
     }
-    if path.split('/').any(|segment| segment == "..") {
-        return Some("leaves the site folder");
+    let mut segments: Vec<&str> = page.split('/').collect();
+    segments.pop();
+    for segment in path.split('/') {
+        match segment {
+            "." => {}
+            ".." => {
+                if segments.pop().is_none() {
+                    return Err("leaves the site folder");
+                }
+            }
+            _ => segments.push(segment),
+        }
     }
-    let target = path
-        .split('/')
+    Ok(segments)
+}
+
+/// Why the resolved `segments` do not name a file under `site`, or `None`
+/// when they do.
+fn unresolved(site: &Path, segments: &[&str]) -> Option<&'static str> {
+    let target = segments
+        .iter()
         .fold(site.to_path_buf(), |dir, segment| dir.join(segment));
     if target.is_file() {
         None
-    } else if path.is_empty() || path.ends_with('/') || target.is_dir() {
+    } else if target.is_dir() || segments.last().is_none_or(|last| last.is_empty()) {
         Some("names a folder, not a file")
     } else {
         Some("no such file")

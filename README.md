@@ -104,7 +104,7 @@ flowchart LR
 
 ## Documentation
 
-- [PromptForge Guide](https://cppalliance.github.io/promptforge/) - three documentation sets: the gateway, the prompt language, and agent programs
+- [PromptForge documentation](https://cppalliance.org/promptforge/) - a landing page linking one site per product: the Gateway, Workshop, and Prompt Language guides, and the PromptForge and Harness API references
 
 Build the guide locally with `cargo xtask site --books-only`.
 
