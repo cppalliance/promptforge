@@ -831,7 +831,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
 <step-13>
 
-### Step 13: Move the agent frames into the server
+### Step 13: Move the agent frames into the server [completed]
 
 - Component: Server
 - Artifacts:

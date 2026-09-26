@@ -33,14 +33,13 @@ use harness_api::{
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 
-use workshop_protocol::{
-    Activity, AgentSessionFrame, AgentsFrame, ErrorFrame, InputFrame, InputResponse,
-};
+use workshop_protocol::{Activity, ErrorFrame, InputFrame, InputResponse};
 use workshop_support::recv_or_pending;
 
 use super::LaunchRefusal;
 use super::socket_frames::{delta_frame, drain_events, frame_entry, input_frame};
 use super::state::SessionsState;
+use crate::agents::wire::{AgentSessionFrame, AgentsFrame, RequestRefusal, SessionRequest};
 use crate::websocket::{cross_site_refusal, send_error, send_frame};
 
 /// Upgrades a `GET /agents/ws` request to an agent-session socket. A
@@ -264,43 +263,15 @@ async fn handle_frame(
             return true;
         }
     };
-    match frame.get("type").and_then(serde_json::Value::as_str) {
-        Some(kind @ ("launch" | "attach")) => {
-            handle_open(state, kind, &frame, attached, subscriptions, socket).await
-        }
+    let request = match frame.get("type").and_then(serde_json::Value::as_str) {
         Some("input_response") => {
-            let Some(attached) = attached.as_ref() else {
-                send_error(socket, None, "input_response before a session is attached").await;
-                return true;
-            };
-            let response: InputResponse = match serde_json::from_value(frame.clone()) {
-                Ok(response) => response,
-                Err(error) => {
-                    send_error(socket, None, format!("invalid input_response: {error}")).await;
-                    return true;
-                }
-            };
-            let session = &attached.session;
-            match session.send_input(&response.token, response.text, || {}) {
-                // The wait completed: the turn is dispatched.
-                Ok(()) => state.push().push_status_update(
-                    "Running agent turn",
-                    format!("agent `{}` is thinking", session.agent()),
-                    Activity::Thinking,
-                ),
-                // A response racing a turn-cancel is normal: the dead wait
-                // already announced its `input_cancelled`, and the
-                // relaunched agent re-asks.
-                Err(WaitError::UnknownToken) => {
-                    tracing::debug!(
-                        session = %session.id(),
-                        "input_response for a dead wait; wait gone"
-                    );
-                }
-            }
-            true
+            answer_input(state, frame, attached.as_ref(), socket).await;
+            return true;
         }
-        Some("cancel") => {
+        _ => SessionRequest::parse(&frame),
+    };
+    let open = match request {
+        Ok(SessionRequest::Cancel) => {
             if let Some(attached) = attached.as_ref() {
                 // Cancellation is a stop reason: no reply frame of any
                 // kind. Pending waits announce their own deaths and the
@@ -313,29 +284,76 @@ async fn handle_frame(
             } else {
                 send_error(socket, None, "cancel before a session is attached").await;
             }
-            true
+            return true;
         }
-        _ => {
-            send_error(
-                socket,
-                None,
-                "unknown frame type; expected \"launch\", \"attach\", \"input_response\", \
-                 or \"cancel\"",
-            )
-            .await;
-            true
+        Ok(SessionRequest::Launch { agent }) => Ok(OpenRequest::Launch { agent }),
+        Ok(SessionRequest::Attach { session }) => Ok(OpenRequest::Attach { session }),
+        Err(refusal @ RequestRefusal::UnknownType) => {
+            send_error(socket, None, refusal.to_string()).await;
+            return true;
+        }
+        Err(
+            refusal @ (RequestRefusal::LaunchWithoutAgent | RequestRefusal::AttachWithoutSession),
+        ) => Err(refusal),
+    };
+    handle_open(state, open, attached, subscriptions, socket).await
+}
+
+/// A [`SessionRequest`] that opens a session.
+enum OpenRequest {
+    /// Start a session running `agent`.
+    Launch { agent: String },
+    /// Reattach to the running `session`.
+    Attach { session: String },
+}
+
+/// Handles an `input_response` frame: answers the attached session's
+/// wait and, when the wait completes, reports the dispatched turn.
+async fn answer_input(
+    state: &SessionsState,
+    frame: serde_json::Value,
+    attached: Option<&Attached>,
+    socket: &mut WebSocket,
+) {
+    let Some(attached) = attached else {
+        send_error(socket, None, "input_response before a session is attached").await;
+        return;
+    };
+    let response: InputResponse = match serde_json::from_value(frame) {
+        Ok(response) => response,
+        Err(error) => {
+            send_error(socket, None, format!("invalid input_response: {error}")).await;
+            return;
+        }
+    };
+    let session = &attached.session;
+    match session.send_input(&response.token, response.text, || {}) {
+        // The wait completed: the turn is dispatched.
+        Ok(()) => state.push().push_status_update(
+            "Running agent turn",
+            format!("agent `{}` is thinking", session.agent()),
+            Activity::Thinking,
+        ),
+        // A response racing a turn-cancel is normal: the dead wait
+        // already announced its `input_cancelled`, and the relaunched
+        // agent re-asks.
+        Err(WaitError::UnknownToken) => {
+            tracing::debug!(
+                session = %session.id(),
+                "input_response for a dead wait; wait gone"
+            );
         }
     }
 }
 
-/// Handles a `launch` or `attach` frame: resolves the session it names
-/// and attaches the socket to it. One socket serves one session - agent
-/// windows are modal - so a second open on an attached socket is
-/// refused. A `false` return means the client is gone.
+/// Handles a `launch` or `attach` request, or the refusal of a malformed
+/// one: resolves the session it names and attaches the socket to it. One
+/// socket serves one session - agent windows are modal - so a second open
+/// on an attached socket is refused, before the frame's own shape is.
+/// A `false` return means the client is gone.
 async fn handle_open(
     state: &SessionsState,
-    kind: &str,
-    frame: &serde_json::Value,
+    open: Result<OpenRequest, RequestRefusal>,
     attached: &mut Option<Attached>,
     subscriptions: Subscriptions<'_>,
     socket: &mut WebSocket,
@@ -353,28 +371,25 @@ async fn handle_open(
         send_error(socket, None, "agent sessions are unavailable").await;
         return true;
     };
-    let session = if kind == "launch" {
-        let Some(agent) = frame.get("agent").and_then(serde_json::Value::as_str) else {
-            send_error(socket, None, "launch frame without an agent name").await;
-            return true;
-        };
-        match agents.launch(agent).await {
+    let session = match open {
+        Ok(OpenRequest::Launch { agent }) => match agents.launch(&agent).await {
             Ok(session) => session,
             Err(refusal) => {
                 send_error(socket, None, refusal_text(&refusal)).await;
                 return true;
             }
+        },
+        Ok(OpenRequest::Attach { session: id }) => {
+            let Some(session) = agents.get(&id) else {
+                send_error(socket, None, "unknown agent session").await;
+                return true;
+            };
+            session
         }
-    } else {
-        let Some(id) = frame.get("session").and_then(serde_json::Value::as_str) else {
-            send_error(socket, None, "attach frame without a session id").await;
+        Err(refusal) => {
+            send_error(socket, None, refusal.to_string()).await;
             return true;
-        };
-        let Some(session) = agents.get(id) else {
-            send_error(socket, None, "unknown agent session").await;
-            return true;
-        };
-        session
+        }
     };
     attach(session, attached, subscriptions, socket).await
 }

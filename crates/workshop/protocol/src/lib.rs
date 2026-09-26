@@ -1,5 +1,5 @@
-//! workshop-protocol - the wire protocol of the workshop sockets: every
-//! JSON frame the server exchanges with the UI, typed in one place, with
+//! workshop-protocol - the wire protocol of the workshop sockets: the
+//! `/ws` frames and the input-wait frames of `/agents/ws`, typed with
 //! zero I/O.
 //!
 //! Frames are grouped by direction - inbound (client to server) first,
@@ -7,13 +7,9 @@
 //! plain tests in `tests/it`. The TypeScript half of this contract is
 //! `crates/workshop/ui/src/services/protocol.ts`; the two files
 //! cross-cite each other so a shape change touches both or neither. The
-//! agent-session frame family is additionally pinned by the shared
-//! fixture `tests/fixtures/agent-frames.json`, asserted as the same JSON
-//! by the fixture test here and by the SPA suite's
-//! `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift on either
-//! side fails that side's tests. The workshop-socket frame family is
-//! pinned the same way by `tests/fixtures/workshop-frames.json`, asserted
-//! by the `workshop_frames` test here and by the SPA suite's
+//! workshop-socket frame family is additionally pinned by the shared
+//! fixture `tests/fixtures/workshop-frames.json`, asserted by the
+//! `workshop_frames` test here and by the SPA suite's
 //! `crates/workshop/ui/test/workshop-wire-fixtures.mjs`. The wire shapes
 //! are additionally frozen end to end by the characterization tests in
 //! `workshop-server`'s `tests/it`.
@@ -44,33 +40,6 @@
 //!
 //! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
-//!
-//! # Agent-session frames
-//!
-//! The `/agents/ws` socket speaks its own frame family. On connect the
-//! server pushes [`AgentsFrame`], the discovered agent list. The client
-//! opens a session with `{"type":"launch","agent":"..."}` or reattaches
-//! with `{"type":"attach","session":"..."}`; either is answered with
-//! [`AgentSessionFrame`] naming the session id. A running session streams
-//! [`AgentEventFrame`]s - the durable event log, each frame holding its
-//! log index, replayed from the top on attach - and [`AgentDeltaFrame`]s,
-//! the ephemeral live chunks, each stamped with the `reply` id of the
-//! durable event that will supersede it. `{"type":"cancel"}` fires the
-//! session's turn-cancel: cancellation is a stop reason, never an error -
-//! no error frame follows, pending waits die as `input_cancelled`, and
-//! the relaunched agent returns to waiting. Frames already in flight
-//! from the cancelled run may still arrive between the cancel and the
-//! relaunch: a defined grace window, absorbed by the reply-id
-//! coalescing (the cancelled round never settles, so its deltas fall to
-//! the round that eventually does), never a protocol violation.
-//!
-//! A session-level failure is pushed as an id-less [`ErrorFrame`]: a
-//! model round that failed while the program survived it (the built-in
-//! chat `pcall`s `models.chat` and returns to waiting), or a run that
-//! ended in error. Delivery on this socket: ephemeral - the reports are
-//! sent on a bounded broadcast beside the deltas and may drop under lag; the
-//! durable transcript already shows the failed turn as one without a
-//! reply, and terminal failures also land on the status bus.
 //!
 //! # Agent-session input frames
 //!
@@ -128,7 +97,6 @@
 //!   every new session, so the UI boots with zero HTTP state fetches -
 //!   is that resend promise, not a third delivery class.
 
-mod agent;
 mod catalog;
 mod error;
 mod input;
@@ -136,10 +104,6 @@ mod menu;
 mod status;
 mod workbench;
 
-pub use agent::{
-    AgentDeltaFrame, AgentDeltaKind, AgentEvent, AgentEventFrame, AgentEventKind,
-    AgentSessionFrame, AgentsFrame,
-};
 pub use catalog::{CatalogFrame, CatalogPush, is_chat_capable};
 pub use error::{ErrorEnvelope, ErrorFrame};
 pub use input::{InputFrame, InputResponse};

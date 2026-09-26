@@ -1,9 +1,9 @@
 // The TS half of the agent-frame wire contract: every frame in the shared
-// fixture crates/workshop/protocol/tests/fixtures/agent-frames.json
+// fixture crates/workshop/server/tests/fixtures/agent-frames.json
 // routes through AgentSocket unchanged (server-to-client), and every frame
 // the socket sends matches its fixture entry byte-for-byte as parsed JSON
 // (client-to-server). The Rust half is the fixture test in
-// crates/workshop/protocol/tests/it/fixture.rs; both suites pin the same
+// crates/workshop/server/src/agents/wire-tests.rs; both suites pin the same
 // case list, so a wire drift or
 // a case added on one side fails the other.
 // Run: node test/agent-wire-fixtures.mjs
@@ -40,7 +40,7 @@ const { lifecycle, AgentSocket } = await import(pathToFileURL(bundlePath).href);
 
 const fixture = JSON.parse(
   await readFile(
-    path.join(testDir, "..", "..", "..", "workshop", "protocol", "tests", "fixtures", "agent-frames.json"),
+    path.join(testDir, "..", "..", "..", "workshop", "server", "tests", "fixtures", "agent-frames.json"),
     "utf8",
   ),
 );

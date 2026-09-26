@@ -1,6 +1,7 @@
 //! The agent-sessions subsystem of the server: the `/agents/ws`
-//! agent-session socket ([`socket`]), the `/v1/models` catalog relay
-//! ([`relay`]), their shared route state ([`state`]), and
+//! agent-session socket ([`socket`]) and its frames ([`wire`]), the
+//! `/v1/models` catalog relay ([`relay`]), their shared route state
+//! ([`state`]), and
 //! [`AgentSessions`], the server's opener of agent sessions in the
 //! harness. The `/ws` workshop socket sits outside this subsystem; the
 //! two share only [`crate::websocket`].
@@ -27,6 +28,7 @@ pub(crate) mod socket;
 pub(crate) mod socket_frames;
 pub(crate) mod state;
 mod status;
+mod wire;
 
 use std::fmt;
 use std::sync::Arc;

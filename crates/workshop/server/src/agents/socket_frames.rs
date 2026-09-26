@@ -7,9 +7,10 @@
 use axum::extract::ws::WebSocket;
 use harness_api::{Delta, DeltaKind, SessionEvent, WaitFrame};
 use promptforge::event::Event;
-use workshop_protocol::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame, InputFrame};
+use workshop_protocol::InputFrame;
 
 use super::socket::Attached;
+use crate::agents::wire::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame};
 use crate::websocket::send_frame;
 
 /// Renders a harness wait frame as the protocol's input frame: the one

@@ -10,8 +10,8 @@ use serde::Serialize;
 /// Delivery: durable on the workshop socket - a direct per-request reply
 /// sent by the loop that owns the socket. The agent-session socket
 /// additionally pushes id-less error frames for session-level failures;
-/// that delivery is ephemeral and documented in the agent-session
-/// section of the crate docs.
+/// that delivery is ephemeral and documented in `workshop-server`'s
+/// `agents::wire` module.
 #[derive(Debug, Serialize)]
 pub struct ErrorFrame {
     #[serde(rename = "type")]

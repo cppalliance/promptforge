@@ -5,9 +5,10 @@
 //! them end to end.
 
 use harness_api::{Delta, WaitFrame};
-use workshop_protocol::{AgentDeltaFrame, AgentDeltaKind, InputFrame};
+use workshop_protocol::InputFrame;
 
 use super::{delta_frame, input_frame};
+use crate::agents::wire::{AgentDeltaFrame, AgentDeltaKind};
 
 #[test]
 fn input_frames_map_harness_waits_to_wire_shapes() {

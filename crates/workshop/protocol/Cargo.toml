@@ -6,11 +6,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop wire protocol: every JSON frame exchanged over the workshop sockets, typed in one place, with zero I/O"
+description = "Workshop wire protocol: the /ws frames and the /agents/ws input-wait frames, typed with zero I/O"
 
 [dependencies]
-# The engine's public API: the events and metrics agent frames carry.
-promptforge.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 workspace-hack.workspace = true

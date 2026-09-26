@@ -3,12 +3,13 @@
 // Types only - the socket logic that sends and routes these frames stays
 // in workshop-socket.ts and agent-socket.ts. The
 // Rust half of this contract is
-// crates/workshop/protocol/src; the two files
+// crates/workshop/protocol/src plus, for the agent-session frame family,
+// crates/workshop/server/src/agents/wire.rs; the files
 // cross-cite each other so a shape change touches both or neither. The
 // agent-session frame family is additionally pinned by the shared fixture
-// crates/workshop/protocol/tests/fixtures/agent-frames.json,
+// crates/workshop/server/tests/fixtures/agent-frames.json,
 // asserted as the same JSON by both suites (test/agent-wire-fixtures.mjs
-// here, the workshop-protocol fixture test there), so drift on either side fails
+// here, the workshop-server wire tests there), so drift on either side fails
 // that side's tests. The workshop-socket frame family is pinned the same
 // way by crates/workshop/protocol/tests/fixtures/workshop-frames.json,
 // asserted by test/workshop-wire-fixtures.mjs here and the workshop_frames
@@ -86,10 +87,10 @@ export interface SelectModelFrame {
 
 /**
  * The kind of one agent event, following the Agent Client Protocol
- * `sessionUpdate` names. Mirrors `AgentEventKind` in workshop-protocol
- * (src/agent.rs). Future kinds (`plan`, tool-status updates) may arrive
- * as labels outside this union, so renderers matching on kinds tolerate
- * unknown labels through a wildcard arm.
+ * `sessionUpdate` names. Mirrors `AgentEventKind` in workshop-server
+ * (src/agents/wire.rs). Future kinds (`plan`, tool-status updates) may
+ * arrive as labels outside this union, so renderers matching on kinds
+ * tolerate unknown labels through a wildcard arm.
  */
 export type AgentEventKind =
   | "agent_message"
@@ -145,8 +146,8 @@ export interface CallMetrics {
 
 /**
  * One durable record of something that happened during an agent run,
- * mirroring `AgentEvent` in workshop-protocol (src/agent.rs): the engine's
- * content event projected onto the wire. `content` and every other
+ * mirroring `AgentEvent` in workshop-server (src/agents/wire.rs): the
+ * engine's content event projected onto the wire. `content` and every other
  * free-text field is untrusted model-, tool-, or user-authored data. Absent
  * optional fields are omitted keys on the wire, never `null`.
  */
