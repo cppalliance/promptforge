@@ -86,6 +86,9 @@ pub struct SectionVm {
     pub model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Set by Lua `jump` before it aborts the current chunk.
     jump_slot: Arc<Mutex<Option<String>>>,
+    /// How many local tool handlers are running on this VM; `jump` refuses
+    /// while it is above zero.
+    local_handler_depth: Arc<AtomicU32>,
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
@@ -227,6 +230,7 @@ impl SectionVm {
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             jump_slot: Arc::new(Mutex::new(None)),
+            local_handler_depth: Arc::new(AtomicU32::new(0)),
             sys_live: Arc::new(Mutex::new(None)),
             access: None,
             host_injected: false,
@@ -589,14 +593,26 @@ impl SectionVm {
         max_tool_iterations: usize,
         max_fanout_concurrency: usize,
     ) -> Result<()> {
-        install_shim_prelude(&self.lua, max_tool_iterations, max_fanout_concurrency)
+        install_shim_prelude(
+            &self.lua,
+            max_tool_iterations,
+            max_fanout_concurrency,
+            &self.local_handler_depth,
+        )
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {
         let jump_slot = Arc::clone(&self.jump_slot);
+        let local_handler_depth = Arc::clone(&self.local_handler_depth);
         let jump_fn = self
             .lua
             .create_function(move |_, target: Value| -> mlua::Result<()> {
+                if local_handler_depth.load(Ordering::Relaxed) > 0 {
+                    return Err(mlua::Error::external(
+                        "jump is unavailable inside a local tool handler: return a value from \
+                         the handler and call jump from the block after the tool call returns",
+                    ));
+                }
                 let heading = resolve_section_target(target)?;
                 let mut slot = jump_slot
                     .lock()

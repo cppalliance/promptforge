@@ -363,7 +363,7 @@ All paths are relative to the `promptforge` repository root.
 
 <step-3>
 
-### Step 3: Refuse `jump` inside a local tool handler
+### Step 3: Refuse `jump` inside a local tool handler [completed]
 
 - Component: handler jump guard (DEBT-LTC-X1)
 - Component order: second. It is independent of the batch turn component, but it edits `__impl_coro.lua` and `coro.rs` in different functions, so it lands after Step 2 to keep those edits sequential. It precedes the contract component because that component's new test sits in `local_tools.rs`, which this step also updates.

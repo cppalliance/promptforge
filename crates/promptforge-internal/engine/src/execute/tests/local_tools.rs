@@ -2,8 +2,8 @@
 //! the `models.loop` shim's local-tool rounds are driven at prompt level,
 //! so a model-issued call to a local tool runs its handler inside the
 //! block coroutine - store calls included - and its trusted result is sent
-//! back to the model verbatim. `jump` is withheld only while a handler
-//! runs.
+//! back to the model verbatim. `jump` is refused only while a handler
+//! runs, even through a saved reference.
 
 use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
 use super::run;
@@ -191,12 +191,103 @@ async fn a_handler_that_calls_jump_fails_the_run() {
     let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect_err("jump is withheld while the handler runs");
+        .expect_err("jump is refused while the handler runs");
     let message = error.to_string();
     assert!(
-        message.contains("jump") && message.contains("nil value"),
-        "the handler's call reaches a nil `jump`: {message}"
+        message.contains(JUMP_REFUSAL),
+        "the handler's call is refused with the guard's message: {message}"
     );
+}
+
+/// The start of the message `jump` fails with inside a local tool handler.
+const JUMP_REFUSAL: &str = "jump is unavailable inside a local tool handler";
+
+/// The `grab` registration whose handler calls a `jump` reference the
+/// block saved before registering it.
+const SAVED_JUMP_GRAB: &str = "local j = jump\n\
+     tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+       j('## Other')\n\
+     end)\n";
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_saved_jump_reference_is_refused_in_a_handler_the_script_calls() {
+    let prompt = parse(&jump_prompt(&format!(
+        "{SAVED_JUMP_GRAB}tools.call('grab', {{ value = 'hi' }})\n\
+         return 'no jump'"
+    )));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, None)
+        .drive()
+        .await
+        .expect_err("a saved reference to jump is refused inside the handler");
+    let message = error.to_string();
+    assert!(
+        message.contains(JUMP_REFUSAL),
+        "the refusal fails the run, and no jump lands: {message}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_saved_jump_reference_is_refused_in_a_handler_the_model_calls() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("unreachable"),
+    ])
+    .await;
+    let prompt = parse(&jump_prompt(&format!(
+        "{SAVED_JUMP_GRAB}local msgs = messages.new()\n\
+         msgs:user('Use the tool.')\n\
+         models.loop(msgs)\n\
+         return 'no jump'"
+    )));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect_err("a saved reference to jump is refused inside the handler");
+    let message = error.to_string();
+    assert!(
+        message.contains(JUMP_REFUSAL),
+        "the refusal fails the run, and no jump lands: {message}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_caller_that_catches_the_jump_refusal_continues_the_block() {
+    let prompt = parse(&jump_prompt(&format!(
+        "{SAVED_JUMP_GRAB}local ok, err = pcall(tools.call, 'grab', {{ value = 'hi' }})\n\
+         assert(not ok, 'the refusal reaches the call site')\n\
+         assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))\n\
+         return 'no jump'"
+    )));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, None)
+        .drive()
+        .await
+        .expect("the caller catches the refusal");
+    assert_eq!(out, "no jump");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
+    let prompt = parse(&jump_prompt(&format!(
+        "tools.add_local('inner', 'Inner', {{}}, function() return 'inner' end)\n\
+         tools.add_local('outer', 'Outer', {{}}, function()\n\
+           local inner = tools.call('inner', {{}})\n\
+           local ok, err = pcall(jump, '## Other')\n\
+           assert(not ok, 'jump is still refused in the outer handler')\n\
+           assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))\n\
+           return inner\n\
+         end)\n\
+         assert(tools.call('outer', {{}}) == 'inner', 'the outer handler returns')\n\
+         jump('## Other')"
+    )));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, host, None)
+        .drive()
+        .await
+        .expect("jump works in the block once the outer handler returns");
+    assert_eq!(out, "jumped");
 }
 
 #[tokio::test(flavor = "current_thread")]

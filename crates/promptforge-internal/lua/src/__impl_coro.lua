@@ -13,14 +13,15 @@
 -- block's raised value for the host before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
--- through unchanged, and `swap_jump(value)` raw-sets the global `jump` to
--- `value` and returns the old one, so a local tool's handler runs with
--- `jump` withheld. The `tasks` namespace and the `fanout` shim live in
+-- through unchanged, and `enter_local_handler()` and `leave_local_handler()`
+-- step the counter the host's `jump` reads, so `jump` refuses while a
+-- local tool's handler runs. The `tasks` namespace and the `fanout` shim live in
 -- their own chunks (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by
 -- the host right after this one over the failure helpers this chunk
 -- returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
-  error_value, stash_failure, normalize_failure, swap_jump = ...
+  error_value, stash_failure, normalize_failure, enter_local_handler,
+  leave_local_handler = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -116,16 +117,17 @@ end
 
 -- Runs a local tool's handler inside this block coroutine, so every
 -- suspending call the handler makes is an ordinary yield of the chain.
--- `jump` is withheld while the handler runs and restored on return or
--- raise. The raw pcall keeps a Rust callback's failure in mlua's own form.
+-- `jump` refuses while the handler runs; the raw pcall catches every
+-- failure, so the leave always follows the enter, and it keeps a Rust
+-- callback's failure in mlua's own form.
 -- The `local_tool_done` yield carries the handler's first return value
 -- (only when it returned) for the driver to report; afterward the
 -- handler's own failure is raised again unchanged, a rejected return
 -- raises the driver's error, and a returned value resumes as its text.
 local function run_local_tool(handler, args)
-  local saved_jump = swap_jump(nil)
+  enter_local_handler()
   local ok, value = raw_pcall(handler, args)
-  swap_jump(saved_jump)
+  leave_local_handler()
   local done = { op = "local_tool_done", ok = ok }
   if ok then done.value = value end
   local answered, result = yield(done)

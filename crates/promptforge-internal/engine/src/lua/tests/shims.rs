@@ -188,13 +188,15 @@ fn a_local_tool_handler_runs_inside_the_block_coroutine() {
     // `Local` answer handing over the handler, the handler's own `store`
     // yield from inside the same coroutine, the `local_tool_done` yield
     // carrying its return, and the block's return with the answered text.
-    // `jump` is withheld while the handler runs and back afterward.
+    // `jump` is refused while the handler runs and back afterward.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let (thread, yielded) = start(
         &vm,
         "local withheld\n\
          tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           withheld = jump == nil\n\
+           local ok, err = pcall(jump, '## Other')\n\
+           withheld = not ok\n\
+             and tostring(err):find('jump is unavailable inside a local tool handler', 1, true) ~= nil\n\
            store.write('grab.txt', args.value)\n\
            return 'stored ' .. args.value\n\
          end)\n\

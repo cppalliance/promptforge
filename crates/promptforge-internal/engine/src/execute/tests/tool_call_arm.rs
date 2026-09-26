@@ -340,8 +340,9 @@ async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
          tools.add_local('grab', 'Grab a value', {}, function() error(raised) end)\n\
          local ok, err = pcall(tools.call, 'grab', {})\n\
          assert(not ok, 'the handler raise reaches the call site')\n\
-         return tostring(err == raised) .. '|' .. tostring(err.kind) .. '|' .. type(jump)",
-    );
+         assert(err == raised and err.kind == 'custom', 'the caller catches the handler table')\n\
+         jump('## Other')",
+    ) + "\n## Other\n\n```lua\nreturn 'jumped'\n```\n";
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
     let (ctx, host) = tool_context(
@@ -354,8 +355,8 @@ async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
         .await
         .expect("the handler's raise is pcall-able at the call site");
     assert_eq!(
-        out, "true|custom|function",
-        "the caller catches the handler's own table with its kind, and `jump` is back"
+        out, "jumped",
+        "after the caught failure the block's `jump` transfers"
     );
     let lines = recorder.lines();
     assert!(

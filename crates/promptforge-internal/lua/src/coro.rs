@@ -16,12 +16,13 @@
 //! A local tool call is a two-yield handshake inside the calling block
 //! coroutine. The `tools.call` shim yields `tool_call`; for a local alias
 //! the driver resumes it with the handler instead of a result. The shim
-//! calls the handler under a yield-safe `pcall` with `jump` withheld, so
+//! calls the handler under a yield-safe `pcall` with `jump` refused, so
 //! the handler's own suspending calls are ordinary yields of the same
 //! coroutine, then yields `local_tool_done` with the outcome for the
 //! driver to report, and finally returns the text or raises.
 
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use mlua::{Function, Table, Value};
 
@@ -144,10 +145,11 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// raised failure into the same table. The chunk's `pcall` and `xpcall`
 /// replacements, which run every caught value through that capture, are
 /// installed over the base library's globals here, so a host callback that
-/// fails directly from Rust reaches author code in the one shape. A last
-/// capture, `swap_jump(value)`, raw-sets the global `jump` and returns the
-/// old value, so the shim withholds `jump` while a local tool's handler
-/// runs.
+/// fails directly from Rust reaches author code in the one shape. The last
+/// two captures, `enter_local_handler` and `leave_local_handler`, count up
+/// and down on `local_handler_depth`, the counter the VM's `jump` reads, so
+/// `jump` refuses while a local tool's handler runs, whatever reference
+/// the handler calls it through.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -156,6 +158,7 @@ pub(crate) fn install_shim_prelude(
     lua: &Lua,
     max_tool_iterations: usize,
     max_fanout_concurrency: usize,
+    local_handler_depth: &Arc<AtomicU32>,
 ) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
     let globals = lua.globals();
@@ -168,18 +171,10 @@ pub(crate) fn install_shim_prelude(
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
     let compactors: Table = globals.raw_get("compactors").map_err(Error::lua)?;
     let error_value = install_error_value(lua).map_err(Error::lua)?;
-    let stash_failure = lua
-        .create_function(|lua, failure: Value| {
-            // Called from the guard's message handler, so the failing
-            // frames are still on this coroutine's stack: level 1 starts
-            // the traceback at the handler, above this capture's own frame.
-            let traceback = lua.traceback(None, 1)?;
-            lua.set_named_registry_value(FAILURE_TRACEBACK_REGISTRY, traceback)?;
-            lua.set_named_registry_value(FAILURE_REGISTRY, failure)
-        })
-        .map_err(Error::lua)?;
+    let stash_failure = stash_failure_capture(lua)?;
     let normalize_failure = install_normalize_failure(lua).map_err(Error::lua)?;
-    let swap_jump = swap_jump_capture(lua)?;
+    let (enter_local_handler, leave_local_handler) =
+        local_handler_captures(lua, local_handler_depth)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -193,7 +188,8 @@ pub(crate) fn install_shim_prelude(
             error_value,
             stash_failure,
             normalize_failure,
-            swap_jump,
+            enter_local_handler,
+            leave_local_handler,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
@@ -264,16 +260,39 @@ pub(crate) fn install_shim_prelude(
     Ok(())
 }
 
-/// Builds the prelude's `swap_jump(value)` capture: a raw set of the global
-/// `jump` to `value` that returns the old value.
-fn swap_jump_capture(lua: &Lua) -> Result<Function> {
-    lua.create_function(|lua, value: Value| {
-        let globals = lua.globals();
-        let old: Value = globals.raw_get("jump")?;
-        globals.raw_set("jump", value)?;
-        Ok(old)
+/// Builds the prelude's `stash_failure(failure)` capture: records the
+/// block's raised value and its raise-point traceback for [`take_failure`].
+fn stash_failure_capture(lua: &Lua) -> Result<Function> {
+    lua.create_function(|lua, failure: Value| {
+        // Called from the guard's message handler, so the failing
+        // frames are still on this coroutine's stack: level 1 starts
+        // the traceback at the handler, above this capture's own frame.
+        let traceback = lua.traceback(None, 1)?;
+        lua.set_named_registry_value(FAILURE_TRACEBACK_REGISTRY, traceback)?;
+        lua.set_named_registry_value(FAILURE_REGISTRY, failure)
     })
     .map_err(Error::lua)
+}
+
+/// Builds the prelude's `enter_local_handler()` and `leave_local_handler()`
+/// captures over `depth`: one step up and one step down, so nested
+/// handlers balance.
+fn local_handler_captures(lua: &Lua, depth: &Arc<AtomicU32>) -> Result<(Function, Function)> {
+    let entered = Arc::clone(depth);
+    let enter = lua
+        .create_function(move |_, ()| {
+            entered.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    let left = Arc::clone(depth);
+    let leave = lua
+        .create_function(move |_, ()| {
+            left.fetch_sub(1, Ordering::Relaxed);
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    Ok((enter, leave))
 }
 
 /// Returns the shim's block guard for a VM whose shim prelude already ran.
