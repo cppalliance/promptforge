@@ -7,8 +7,8 @@ use crate::detail::{message_from_validated_parts, tool_schema_new};
 
 #[test]
 fn from_validated_parts_serializes_role_and_content_verbatim() {
-    // The agent-executor seam: a `system` role and a content-parts array must
-    // reach the wire exactly as validated, and the inherent constructors'
+    // The engine's chat-round seam: a `system` role and a content-parts array
+    // must reach the wire exactly as validated, and the inherent constructors'
     // string form must stay byte-identical to the pre-seam shape.
     let parts = serde_json::json!([
         { "type": "text", "text": "look at this" },

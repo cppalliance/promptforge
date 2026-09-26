@@ -1,4 +1,4 @@
-//! The mock-gateway session round trip: a model-backed agent program drives
+//! The mock-gateway session round trip: a model-backed agent prompt drives
 //! real inference- and chat-origin `assistant_reply` events through the
 //! harness, and the tool-less infer reproduction pins the reply between the
 //! completed turn and the section chunk success.

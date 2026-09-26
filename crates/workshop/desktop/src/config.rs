@@ -6,7 +6,7 @@
 //! OS-assigned port - a fixed port is a conflict class the
 //! single-instance handoff cannot close). A discovered `workshop.toml` still
 //! owns the `[gateway]` connection settings and the state and
-//! agent-program paths; the gateway endpoint itself resolves inside the
+//! agent prompt paths; the gateway endpoint itself resolves inside the
 //! server, gateway discovery file first, explicit config second.
 
 use std::path::{Path, PathBuf};
@@ -92,7 +92,7 @@ fn shape_for_desktop(config: &mut Config) {
 
 /// The no-file configuration: no explicit gateway (endpoint resolution
 /// attaches through the gateway discovery file or fails plainly), with the
-/// state and agent-program paths anchored at the profile directory.
+/// state and agent prompt paths anchored at the profile directory.
 fn default_config(home: Option<&Path>) -> Config {
     let mut config = Config {
         gateway: workshop_server_api::GatewayConfig {

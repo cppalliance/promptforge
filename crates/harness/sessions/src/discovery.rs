@@ -1,4 +1,4 @@
-//! Agent discovery: the `.md` agent programs under a configured directory,
+//! Agent discovery: the `.md` agent prompts under a configured directory,
 //! the built-in `chat` agent embedded at compile time, and the shadowing
 //! rule between them.
 
@@ -17,7 +17,7 @@ const BUILTIN_CHAT_NAME: &str = "chat";
 
 /// One agent's program source: a Markdown prompt document on the
 /// unified runtime. Directory agents and the embedded built-in chat are
-/// both Markdown; the standalone Lua agent path is retired.
+/// both Markdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentSource {
     /// A Markdown prompt document (the unified runtime).

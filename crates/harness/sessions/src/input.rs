@@ -3,7 +3,7 @@
 //! harness's `InputPerformer`), and the producer seam that completes a
 //! wait with the operator's text.
 //!
-//! An agent program asks its operator for input through the session's
+//! An agent prompt asks its operator for input through the session's
 //! input broker - session-supplied code, never advertised to a model. The
 //! engine issues the call as a `UserInput` effect; the broker performs it
 //! by registering a wait, announcing it with a durable

@@ -2,11 +2,11 @@
 
 ## Identity
 
-PromptForge is a Rust system for executing Markdown prompt pipelines and Lua agent programs. It ships a reusable sans-I/O executor, a harness that hosts it, a command line interface, an inference gateway, and a desktop workshop for developers who author and run prompts against local or remote models.
+PromptForge is a Rust system for executing Markdown prompt programs. It ships a reusable sans-I/O executor, a harness that hosts it, a command line interface, an inference gateway, and a desktop workshop for developers who author and run prompts against local or remote models.
 
 ## Components
 
-- executor: a deterministic state machine that parses and executes prompt pipelines and agent programs; given the same context and the same sequence of answers it produces the same effects, events, and ids; performs no I/O, reads no clock, and holds no host trait objects; its host interface is `Run::new`, `step`, `resume`, and `cancel`, exchanging effects and events as serializable values; depends on: store, Lua VM boundary, shared substrate
+- executor: a deterministic state machine that parses and executes Markdown prompt programs; given the same context and the same sequence of answers it produces the same effects, events, and ids; performs no I/O, reads no clock, and holds no host trait objects; its host interface is `Run::new`, `step`, `resume`, and `cancel`, exchanging effects and events as serializable values; depends on: store, Lua VM boundary, shared substrate
 - harness: the executor's only production host; owns the tokio runtime, one performer per effect kind, the model HTTP client, the capability registry and first-party capabilities, agent discovery and sessions with their input waits and supervisor, and the append-only Turso run log of every effect, answer, and event; its public surface is `harness-api`, and it receives the gateway binding as data pushed across that door; depends on: executor, gateway (public protocol and discovery crates only), store, shared substrate
 - gateway: independent server process that owns model routing, provider access, and local inference lifecycle; exposes protocol data and discovery; depends on: shared substrate
 - CLI: thin shell adapter that supplies inputs and host resources to the executor; depends on: executor, gateway, store, shared substrate

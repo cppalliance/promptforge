@@ -19,8 +19,9 @@ use crate::error::Error;
 /// `role` is one of the wire roles (`system`, `user`, `assistant`, `tool`).
 /// `content` is the raw wire content value - a string for a plain message
 /// or an `OpenAI` content-parts array for a multimodal one - and serializes
-/// into the request verbatim. The agent executor's protocol layer validates
-/// author-built message tables once and hands the validated parts here.
+/// into the request verbatim. For each chat round the engine sends, its Lua
+/// protocol layer validates the author-built message tables once and hands
+/// the validated parts here.
 #[must_use]
 pub fn message_from_validated_parts(
     role: impl Into<String>,

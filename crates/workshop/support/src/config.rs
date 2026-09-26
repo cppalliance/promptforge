@@ -28,7 +28,7 @@ pub struct Config {
     /// HTTP server settings.
     #[serde(default)]
     pub server: ServerConfig,
-    /// Agent-program discovery settings.
+    /// Agent prompt discovery settings.
     #[serde(default)]
     pub agents: AgentsConfig,
 }
@@ -154,7 +154,7 @@ impl Default for ServerConfig {
     }
 }
 
-/// Agent-program discovery settings.
+/// Agent prompt discovery settings.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default)]
 pub struct AgentsConfig {

@@ -272,7 +272,7 @@ The three runs show each path.
 
 Three rules limit where and how a prompt asks.
 
-- `user_input()` is a global only in the Lua state of a prompt section. It is simply absent from the Lua state of an agent program, so an agent program that calls it fails as an undefined global.
+- `user_input()` is a global in every prompt section, and the host must answer each [`Effect::UserInput`](crate::effect::Effect::UserInput) it issues.
 - `user_input()` takes no arguments. Calling it with any argument raises a Lua error with the message `user_input takes no arguments`.
 - The model has no direct way to ask the operator. The run advertises no `user_input` tool to the model, and a model loop offers only the tools the prompt adds. The [`tools`](crate::tools) module page covers how a prompt chooses those tools.
 

@@ -1,5 +1,5 @@
 //! The session's input broker: the harness's [`InputPerformer`], which
-//! suspends an agent program's `UserInput` effect until its operator
+//! suspends an agent prompt's `UserInput` effect until its operator
 //! answers, guarded so a dying wait is an outcome, never silence.
 
 use std::sync::Arc;

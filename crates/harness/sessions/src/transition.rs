@@ -114,9 +114,9 @@ pub struct RelaunchEffect {
 pub enum CloseReason {
     /// The owning session requested close.
     Requested,
-    /// The agent program returned normally.
+    /// The agent prompt returned normally.
     RunCompleted,
-    /// The agent program failed.
+    /// The agent prompt failed.
     RunFailed,
 }
 

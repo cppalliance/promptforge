@@ -21,7 +21,7 @@
 //! A session-level failure is pushed as an id-less
 //! [`ErrorFrame`](workshop_protocol::ErrorFrame): a model round that
 //! failed while the program survived it (the built-in chat `pcall`s
-//! `models.chat` and returns to waiting), or a run that ended in error.
+//! `models.loop` and returns to waiting), or a run that ended in error.
 //! Delivery on this socket: ephemeral - the reports are sent on a bounded
 //! broadcast beside the deltas and may drop under lag; the durable
 //! transcript already shows the failed turn as one without a reply, and

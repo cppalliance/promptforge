@@ -50,8 +50,8 @@ impl Origin {
         }
     }
 
-    /// Sets an explicit position: the executor and the agent substitute
-    /// the prompt's position for the Rust one, so every event's position
+    /// Sets an explicit position: the executor substitutes the prompt's
+    /// position for the Rust one, so every event's position
     /// is the most precise thing the caller knows. The label guidance of
     /// [`Origin::new`] applies unchanged.
     #[must_use]

@@ -8,13 +8,12 @@ fn discovery_lists_sorted_markdown_stems_and_tolerates_a_missing_dir() {
     std::fs::write(dir.path().join("zeta.md"), "# zeta").expect("seed zeta");
     std::fs::write(dir.path().join("alpha.md"), "# alpha").expect("seed alpha");
     std::fs::write(dir.path().join("notes.txt"), "not an agent").expect("seed noise");
-    std::fs::write(dir.path().join("legacy.lua"), "return 1").expect("seed a retired Lua program");
     std::fs::create_dir(dir.path().join("nested.md")).expect("seed a decoy directory");
     assert_eq!(
         discover_agents(dir.path()),
         vec!["alpha".to_owned(), "chat".to_owned(), "zeta".to_owned()],
         "discovery lists .md file stems plus the built-in chat, sorted, \
-         and skips everything else - a .lua file is never an agent"
+         and skips everything else"
     );
     assert_eq!(
         discover_agents(&dir.path().join("missing")),
@@ -47,14 +46,6 @@ fn the_built_in_chat_is_always_offered_and_a_dir_file_shadows_its_source() {
         agent_source(dir.path(), "chat").expect("the shadow reads"),
         AgentSource::Markdown("# shadowed".to_owned()),
         "a directory chat.md shadows the embedded source"
-    );
-
-    std::fs::remove_file(dir.path().join("chat.md")).expect("clear the shadow");
-    std::fs::write(dir.path().join("chat.lua"), "-- retired").expect("seed a retired shadow");
-    assert_eq!(
-        agent_source(dir.path(), "chat").expect("the built-in still serves"),
-        AgentSource::Markdown(BUILTIN_CHAT_SOURCE.to_owned()),
-        "a directory chat.lua shadows nothing: the Lua path is retired"
     );
 
     assert_eq!(
