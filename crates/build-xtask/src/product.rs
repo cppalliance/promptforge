@@ -12,9 +12,9 @@
 //!   except the family's public pair (`gateway-api-types`,
 //!   `gateway-api-discovery`).
 //! - `harness`/`harness-*` crates must not depend on gateway, shared, or
-//!   workshop crates; outside their own family, `promptforge` is the one
-//!   product crate they may name. `workspace-hack` belongs to no family,
-//!   so it stays legal.
+//!   workshop crates; outside their own family they may name only
+//!   `promptforge` and `workspace-hack`, which rules out `build-*` and
+//!   other unaffiliated crates.
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through `promptforge`, and a crate outside the
@@ -138,6 +138,9 @@ const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"]
 /// name, and the one outside crate permitted into
 /// `crates/harness-internal/`.
 const PUBLIC_HARNESS: &str = "harness";
+/// The hakari feature-unification crate: the one unaffiliated crate harness
+/// crates may name.
+const WORKSPACE_HACK: &str = "workspace-hack";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -204,6 +207,12 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
         (Family::Harness, Family::Shared) => {
             Some("harness crates must not depend on shared crates")
         }
+        (Family::Harness, Family::Build) => Some(
+            "harness crates must not depend on build-* crates; outside their family they may name only promptforge and workspace-hack",
+        ),
+        (Family::Harness, Family::Unaffiliated) if dep.package != WORKSPACE_HACK => Some(
+            "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge and workspace-hack",
+        ),
         (
             Family::Shared,
             Family::Promptforge | Family::Gateway | Family::Workshop | Family::Harness,
