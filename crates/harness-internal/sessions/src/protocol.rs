@@ -1,5 +1,5 @@
 //! The session vocabulary clients speak and render: ids, launch requests,
-//! durable events, and ephemeral deltas. `harness-api` re-exports every
+//! durable events, and ephemeral deltas. `harness` re-exports every
 //! type here; nothing in it names a client's wire shape.
 
 use std::fmt;

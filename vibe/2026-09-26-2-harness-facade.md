@@ -449,7 +449,7 @@ The existing workspace gates cover this change: the build, the build-xtask archi
 
 <step-6>
 
-### Step 6: Update the remaining docs and run the full gate
+### Step 6: Update the remaining docs and run the full gate [completed]
 
 - Component: documentation
 - Piece: docs and exit gate, the component's only piece.

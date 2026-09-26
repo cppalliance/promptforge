@@ -9,10 +9,10 @@
 //!
 //! This is the handle the engine's `RunContext` holds and the one
 //! `RunServices` hands a capability; the tokio-aware token a host selects
-//! over is defined in `harness-api` and bridges to this flag. A host that
-//! drives the engine and must wait on the flag itself awaits
-//! [`CancelHandle::cancelled`], a std-only future woken by the cancel, so
-//! no host has to poll the flag on a timer.
+//! over is `harness::cancel::CancelHandle`, defined in `harness-runner`,
+//! and it bridges to this flag. A host that drives the engine and must
+//! wait on the flag itself awaits [`CancelHandle::cancelled`], a std-only
+//! future woken by the cancel, so no host has to poll the flag on a timer.
 
 use std::fmt;
 use std::future::Future;

@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/harness-webfetch)](https://docs.rs/harness-webfetch)
 [![License](https://img.shields.io/crates/l/harness-webfetch)](LICENSE)
 
-A web-fetching tool for language models. Hand it a URL and it fetches the page, extracts the useful content, and returns it as markdown the model can cite - while enforcing an SSRF boundary that prevents the model from reaching your internal network no matter what URL it supplies. The security is layered and runs at DNS-resolution time on every hop, catching names that resolve inward, rebinding attacks, and redirect chains that point somewhere they should not.
+A web-fetching tool for language models. Hand it a URL and it fetches the page, extracts the useful content, and returns it as markdown the model can cite - while enforcing an SSRF boundary that prevents the model from reaching your internal network no matter what URL it supplies. The security is layered and runs at DNS-resolution time on every hop, catching names that resolve inward, rebinding attacks, and redirect chains that point somewhere they should not. Private to the harness family in `crates/harness-internal/`; clients reach it through the `harness` facade. Like every harness crate, it may depend only on `promptforge` and its container siblings.
 
 ## Usage
 

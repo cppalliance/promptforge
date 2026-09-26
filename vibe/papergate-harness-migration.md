@@ -1,8 +1,8 @@
-# Papergate migration to harness-api
+# Papergate migration to harness
 
 A note for the `wg21-paperflow` repository. Papergate (`crates/papergate`) is a command-line tool that runs the vendored `papergate.md` prompt against one WG21 paper and prints the report. It was written against `promptforge-core`, a crate that no longer exists, and against `promptforge-tool-picker`, which was removed with the tool picker. Its path dependencies are broken today, so this migration starts from a build that does not compile, not from a working one.
 
-The engine (`promptforge-api-runtime`) is now sans-I/O: it performs no network calls, reads no clock, and holds no host callbacks. Its only production host is the harness, whose public surface is `harness-api`. Papergate stops driving the engine itself and drives a harness session instead, the same way Workshop does. The harness owns the tokio performers, the model client, the run log, and the run's store; Papergate supplies the gateway binding as data and reads the run's events back.
+The engine (`promptforge-api-runtime`) is now sans-I/O: it performs no network calls, reads no clock, and holds no host callbacks. Its only production host is the harness, whose public surface is `harness`. Papergate stops driving the engine itself and drives a harness session instead, the same way Workshop does. The harness owns the tokio performers, the model client, the run log, and the run's store; Papergate supplies the gateway binding as data and reads the run's events back.
 
 ## Dependency change
 
@@ -10,10 +10,10 @@ Replace both path dependencies with one:
 
 ```toml
 [dependencies]
-harness-api = { path = "../../../promptforge/crates/harness-api" }
+harness = { path = "../../../promptforge/crates/harness" }
 ```
 
-`harness-api` is the one door into `crates/harness/`; nothing under that directory may be named directly. It re-exports every type Papergate needs. `promptforge-api-runtime` and `promptforge-api-types` remain public and may be added for the `Event` enum and `RunError` when typed access to event payloads is wanted; the session hands events over as `serde_json::Value`, so they are optional.
+`harness` is the one door into `crates/harness-internal/`; nothing under that directory may be named directly. It re-exports every type Papergate needs. `promptforge-api-runtime` and `promptforge-api-types` remain public and may be added for the `Event` enum and `RunError` when typed access to event payloads is wanted; the session hands events over as `serde_json::Value`, so they are optional.
 
 The `tokio` dependency stays. `Harness::launch` is async and the harness spawns its performers on the runtime the caller is already inside; the multi-threaded runtime is no longer a requirement of the engine (the engine blocks nothing), so `#[tokio::main]` may stay as it is or drop to `flavor = "current_thread"`.
 
@@ -21,7 +21,7 @@ The `tokio` dependency stays. `Harness::launch` is async and the harness spawns 
 
 Each row is one thing Papergate does today (`src/app.rs`, `src/main.rs`) and what replaces it.
 
-| Today (`promptforge-core`) | Replacement (`harness-api`) |
+| Today (`promptforge-core`) | Replacement (`harness`) |
 |---|---|
 | `Prompt::parse(&source, &execution, observer.as_ref())` returning `Result<Prompt>` and reporting parse events to the observer | Nothing: the harness parses at launch. The engine's own signature is now `Prompt::parse(input, execution) -> (Result<Prompt, ParseError>, Vec<Event>)`, with no observer parameter; the second element is the parse-time events for the host to log, and the harness records them in the run log ahead of the run's own events and replays them into the session's event stream. A parse failure surfaces as a `parse_failed` event in the transcript and a report on `Session::subscribe_errors`. |
 | `Arc<dyn Observer>` and the `StderrObserver` printing `[{execution}] {section}: {event}` per `Observation` | The `Observer` trait and `Observation` enum are gone. Subscribe to `Session::subscribe_events()` (a `broadcast::Receiver<SessionEvent>`; each carries `index`, an optional `reply` id, and `event`, the logged engine `Event` as JSON with a `kind` tag, `execution`, `section`, and `provenance`). Print `event["section"]` and `event["kind"]` for the same progress line. `Session::transcript(from)` reads the same sequence from the log after the fact. Live model text arrives separately on `Session::subscribe_deltas()`. |
@@ -29,7 +29,7 @@ Each row is one thing Papergate does today (`src/app.rs`, `src/main.rs`) and wha
 | `promptforge_tool_picker::{Catalog, Config, ToolPicker}` built over an empty catalog | Gone. The harness assembles the tool catalog from the prompt's `capabilities:` declarations against its capability registry. `papergate.md` declares no capabilities and defines its one tool with `tools.add_local`, so nothing replaces this. |
 | `RunConfig::new(execution).observer(observer).cancel(cancel)` and `execute::run(&parsed, "", resolution, &store, config).await` | `Harness::new(HarnessConfig { agents_path, state_dir })`, then `Harness::set_gateway(GatewayBinding { base_url, key, generation })`, then `Harness::launch(LaunchRequest { agent: "papergate".into(), args }).await -> Result<Session, LaunchError>`. The session runs the agent to completion; await `Session::subscribe_state()` reaching `SessionState::Closed`, or watch the transcript for `run_succeeded` or `run_failed`. |
 | `execution` id minted with `fastrand` as `papergate-<hex>` | The harness mints the session id (`SessionId::fresh()`, 128 random bits) and uses it as the run's `execution`. Read it back with `Session::id()`. Drop `fastrand` unless it is used elsewhere. |
-| `promptforge_core::CancelHandle::new()`, `.clone()`, `.cancel()` from the Ctrl-C task; `RunError::is_cancelled` for exit code 130 | `harness_api::cancel::CancelHandle` has the same `new`, `child`, `cancel`, `is_cancelled` and adds the awaitable `cancelled()`, plus the task-local helpers `scope`, `maybe_scope`, `current`, `wait_cancelled`, `is_cancelled`. It moved here from the engine because it is a host concern. For the session itself, Ctrl-C calls `Session::close()` (cancel for good: outstanding effects are answered `Dropped`, state drains to `Closed`), not `Session::cancel()` (a turn cancel that relaunches the program). The durable `run_failed` event carries no reason, so detect the cancelled ending in Papergate: close was requested and then `Closed` arrived. |
+| `promptforge_core::CancelHandle::new()`, `.clone()`, `.cancel()` from the Ctrl-C task; `RunError::is_cancelled` for exit code 130 | `harness::cancel::CancelHandle` has the same `new`, `child`, `cancel`, `is_cancelled` and adds the awaitable `cancelled()`, plus the task-local helpers `scope`, `maybe_scope`, `current`, `wait_cancelled`, `is_cancelled`. It moved here from the engine because it is a host concern. For the session itself, Ctrl-C calls `Session::close()` (cancel for good: outstanding effects are answered `Dropped`, state drains to `Closed`), not `Session::cancel()` (a turn cancel that relaunches the program). The durable `run_failed` event carries no reason, so detect the cancelled ending in Papergate: close was requested and then `Closed` arrived. |
 | `FileStore::new(temp_dir)`, `StoreRef`, `seed_store` writing `paper.md`, `read_report` reading `report.md`, `remove_dir_all` afterwards | No equivalent through the door today. See "The store gap" below; it is the one item that needs a decision. |
 | `PROMPTFORGE_GATEWAY_URL`, `PROMPTFORGE_GATEWAY_API_KEY` from the environment | Keep the variables; they populate `GatewayBinding { base_url, key, generation: 1 }`. Note `GatewayBinding::api_root()` appends `/v1` to `base_url`, so the URL variable must hold the gateway origin without the `/v1` suffix (or Papergate strips it). |
 | `Prompt` source read from `--prompt <PATH>` or the embedded `DEFAULT_PROMPT` | The harness launches agents by discovered name: the `.md` file stems under `HarnessConfig::agents_path`. Papergate writes its prompt source to `<agents_path>/papergate.md` (a temporary directory is fine) and launches `"papergate"`. `--prompt` writes the given file's contents to that path instead. |
@@ -50,7 +50,7 @@ where `model` is the catalog id Papergate wants the `writer` role bound to. Take
 
 Today Papergate seeds the run store with `paper.md` before the run and reads `report.md` from it afterwards, through the engine's `StoreRef` over a temporary directory. The prompt's frontmatter declares both paths as `input:` and `output:`.
 
-Through `harness-api` there is no store access in either direction. A session's run is prepared over an empty host VFS (`shared_vfs::VfsRef::builder().build()`) with a fresh store mount added per run, and nothing on `Harness` or `Session` reads or writes it. The run's return value (the `RunResult::Ok(final_text)`) is written to the run log's `runs` row as `final_text`, but the session supervisor discards it and the door exposes no log reader, so a client cannot obtain it either.
+Through `harness` there is no store access in either direction. A session's run is prepared over an empty host VFS (`shared_vfs::VfsRef::builder().build()`) with a fresh store mount added per run, and nothing on `Harness` or `Session` reads or writes it. The run's return value (the `RunResult::Ok(final_text)`) is written to the run log's `runs` row as `final_text`, but the session supervisor discards it and the door exposes no log reader, so a client cannot obtain it either.
 
 Two ways to close the gap, for Papergate's own plan to choose:
 
@@ -83,10 +83,10 @@ let transcript = session.transcript(0).await?;
 
 ## Checklist
 
-- Replace the two path dependencies with `harness-api`; drop `fastrand` if nothing else uses it.
+- Replace the two path dependencies with `harness`; drop `fastrand` if nothing else uses it.
 - Delete `StderrObserver`, `ResolutionContext`, `RunConfig`, `ToolCatalog`, and the tool-picker construction.
 - Write the prompt to `<agents_path>/papergate.md` and launch by name.
 - Push the gateway binding, a one-entry catalog, and the selected model before launch; strip `/v1` from the URL variable if present.
 - Move Ctrl-C to `Session::close()`; keep exit code 130 when close preceded `Closed`.
 - Decide the store gap (option 1 or 2) and, under option 1, update `papergate.md` and read the report from the transcript.
-- `CancelHandle` imports move from the engine to `harness_api::cancel`; `RunError::is_cancelled` is no longer on Papergate's path.
+- `CancelHandle` imports move from the engine to `harness::cancel`; `RunError::is_cancelled` is no longer on Papergate's path.

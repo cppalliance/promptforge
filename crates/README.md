@@ -1,6 +1,6 @@
 # crates/
 
-`crates/` is the workspace's public and shared layer - the family containers (`promptforge-internal/`, `gateway/`, `workshop/`, `harness/`) are private, and cross-family dependencies resolve only here.
+`crates/` is the workspace's public and shared layer - the family containers (`promptforge-internal/`, `gateway/`, `workshop/`, `harness-internal/`) are private, and cross-family dependencies resolve only here.
 
 ## gateway-api-types
 
