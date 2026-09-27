@@ -363,8 +363,9 @@ fn next_scope_id() -> ScopeId {
 }
 
 /// The bookkeeping of who touched what, shared by every scope of one
-/// storage view. Claims are never released during a scope's life: they
-/// are ignored once their scope ends and purged lazily.
+/// storage view. A claim holds for its scope's whole life - a prune only
+/// collapses the epochs its own scope has ordered - and is ignored once
+/// its scope ends and purged lazily.
 struct Claims {
     inner: Mutex<ClaimsTables>,
 }
@@ -399,6 +400,10 @@ struct ClaimsTables {
     scopes: HashMap<ScopeId, Weak<Scope>>,
     /// The approximate claim count, for the prune trigger.
     entries: usize,
+    /// The count past which the next prune runs: at least [`PRUNE_AT`],
+    /// and twice what survived the last prune, so a table of live claims
+    /// does not prune on every claim.
+    prune_at: usize,
 }
 
 impl ClaimsTables {
@@ -411,6 +416,7 @@ impl ClaimsTables {
             ancestors: HashMap::new(),
             scopes: HashMap::new(),
             entries: 0,
+            prune_at: PRUNE_AT,
         }
     }
 
@@ -458,17 +464,34 @@ impl Claims {
             .or_insert_with(|| Arc::downgrade(scope));
     }
 
-    /// Checks and records a write of `path` by `id` of `scope`: the path
-    /// claim, the may-create claims on its ancestors, and the checks
-    /// against the regions it overlaps - the path's own reads and writes,
-    /// its parent's children, every pattern that matches it, and every
-    /// subtree that covers it.
+    /// Checks and records a write of `path` by `id` of `scope`: every
+    /// check of [`Claims::check_write`] first, then the record, so a
+    /// refused write leaves no claim behind.
     fn claim_write(&self, scope: &Arc<Scope>, id: ExecId, path: &VfsPath) -> Result<(), VfsError> {
         let mut tables = self.tables();
         let view = scope.view(id);
+        Self::check_write(&tables, scope, &view, path)?;
+        Self::record_write(&mut tables, scope, &view, path);
+        Self::finish_claim(scope, id, &mut tables, view.own, 1);
+        Ok(())
+    }
+
+    /// The checks of a write of `path` by `view` of `scope` against the
+    /// regions it overlaps - the path's own reads and writes, the writes
+    /// that may create the path as a directory, its parent's children,
+    /// every pattern that matches it, and every subtree that covers it -
+    /// and of the ancestors it may create against their reads and
+    /// writes. Records nothing.
+    fn check_write(
+        tables: &ClaimsTables,
+        scope: &Scope,
+        view: &View,
+        path: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let id = view.id;
         if let Some(region) = tables.paths.get(path) {
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     path,
@@ -479,8 +502,21 @@ impl Claims {
                 ));
             }
             for (&other, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
                     return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
+                }
+            }
+        }
+        if let Some(region) = tables.ancestors.get(path) {
+            for (&other, &(other_scope, other_clock)) in &region.created {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
+                    return Err(conflict(
+                        path,
+                        id,
+                        ClaimKind::Write,
+                        other,
+                        ClaimKind::Write,
+                    ));
                 }
             }
         }
@@ -488,7 +524,7 @@ impl Claims {
             && let Some(region) = tables.children.get(&parent)
         {
             for (&other, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
                     return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
                 }
             }
@@ -498,7 +534,7 @@ impl Claims {
                 continue;
             }
             for (&other, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
                     return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
                 }
             }
@@ -508,7 +544,7 @@ impl Claims {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     path,
@@ -519,14 +555,45 @@ impl Claims {
                 ));
             }
         }
-        // The record: the last write replaces the standing one, and reads
-        // ordered before it clear (an access racing with one of them
-        // races with the write instead).
+        for ancestor in may_create(path) {
+            // An ancestor it may create is checked against the ancestor's
+            // own reads and writes: a read observes the entry this write
+            // may create under it, and a write or remove of the ancestor
+            // itself races with the creation, while another write may
+            // create alongside.
+            let Some(region) = tables.paths.get(&ancestor) else {
+                continue;
+            };
+            if let Some((other_scope, epoch)) = region.write
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
+            {
+                return Err(conflict(
+                    path,
+                    id,
+                    ClaimKind::Write,
+                    epoch.id,
+                    ClaimKind::Write,
+                ));
+            }
+            for (&other, &(other_scope, other_clock)) in &region.reads {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
+                    return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Records a checked write of `path` by `view` of `scope`: the last
+    /// write replaces the standing one, reads ordered before it clear (an
+    /// access racing with one of them races with the write instead), and
+    /// each ancestor it may create gains a may-create claim.
+    fn record_write(tables: &mut ClaimsTables, scope: &Scope, view: &View, path: &VfsPath) {
         let region = tables.paths.entry(path.clone()).or_default();
         region.write = Some((
             scope.id,
             Epoch {
-                id,
+                id: view.id,
                 clock: view.own,
             },
         ));
@@ -536,33 +603,36 @@ impl Claims {
                 other_scope != scope.id || other_clock > view.seen_clock(other)
             });
         for ancestor in may_create(path) {
-            // The ancestors it may create are checked against reads only:
-            // a read of the ancestor observes the entry this write may
-            // create under it, so it conflicts, while another write may
-            // create alongside.
-            if let Some(region) = tables.paths.get(&ancestor) {
-                for (&other, &(other_scope, other_clock)) in &region.reads {
-                    if tables.conflicts(scope, &view, other_scope, other, other_clock) {
-                        return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
-                    }
-                }
-            }
             let region = tables.ancestors.entry(ancestor).or_default();
-            region.created.insert(id, (scope.id, view.own));
+            region.created.insert(view.id, (scope.id, view.own));
         }
-        Self::finish_claim(scope, id, &mut tables, view.own);
-        Ok(())
     }
 
-    /// Checks and records a read of `path` by `id` of `scope`: the path's
-    /// last write, the may-create writes on the path itself, and every
-    /// subtree that covers it. Reads never conflict with reads.
+    /// Checks and records a read of `path` by `id` of `scope`: every
+    /// check of [`Claims::check_read`] first, then the record.
     fn claim_read(&self, scope: &Arc<Scope>, id: ExecId, path: &VfsPath) -> Result<(), VfsError> {
         let mut tables = self.tables();
         let view = scope.view(id);
+        Self::check_read(&tables, scope, &view, path)?;
+        Self::record_read(&mut tables, scope, &view, path);
+        Self::finish_claim(scope, id, &mut tables, view.own, 1);
+        Ok(())
+    }
+
+    /// The checks of a read of `path` by `view` of `scope`: the path's
+    /// last write, the may-create writes on the path itself, and every
+    /// subtree that covers it. Reads never conflict with reads. Records
+    /// nothing.
+    fn check_read(
+        tables: &ClaimsTables,
+        scope: &Scope,
+        view: &View,
+        path: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let id = view.id;
         if let Some(region) = tables.paths.get(path)
             && let Some((other_scope, epoch)) = region.write
-            && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+            && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
         {
             return Err(conflict(
                 path,
@@ -574,7 +644,7 @@ impl Claims {
         }
         if let Some(region) = tables.ancestors.get(path) {
             for (&other, &(other_scope, other_clock)) in &region.created {
-                if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
                     return Err(conflict(path, id, ClaimKind::Read, other, ClaimKind::Write));
                 }
             }
@@ -584,7 +654,7 @@ impl Claims {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     path,
@@ -595,10 +665,13 @@ impl Claims {
                 ));
             }
         }
-        let region = tables.paths.entry(path.clone()).or_default();
-        region.reads.insert(id, (scope.id, view.own));
-        Self::finish_claim(scope, id, &mut tables, view.own);
         Ok(())
+    }
+
+    /// Records a checked read of `path` by `view` of `scope`.
+    fn record_read(tables: &mut ClaimsTables, scope: &Scope, view: &View, path: &VfsPath) {
+        let region = tables.paths.entry(path.clone()).or_default();
+        region.reads.insert(view.id, (scope.id, view.own));
     }
 
     /// Checks and records a list of `dir`'s children by `id` of `scope`:
@@ -606,10 +679,10 @@ impl Claims {
     /// subtree that covers it.
     fn claim_list(&self, scope: &Arc<Scope>, id: ExecId, dir: &VfsPath) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = &scope.view(id);
         if let Some(region) = tables.ancestors.get(dir) {
             for (&other, &(other_scope, other_clock)) in &region.created {
-                if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
                     return Err(conflict(dir, id, ClaimKind::Read, other, ClaimKind::Write));
                 }
             }
@@ -619,7 +692,7 @@ impl Claims {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     dir,
@@ -632,7 +705,7 @@ impl Claims {
         }
         let region = tables.children.entry(dir.clone()).or_default();
         region.reads.insert(id, (scope.id, view.own));
-        Self::finish_claim(scope, id, &mut tables, view.own);
+        Self::finish_claim(scope, id, &mut tables, view.own, 1);
         Ok(())
     }
 
@@ -647,13 +720,13 @@ impl Claims {
         pattern: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
-        let view = scope.view(id);
+        let view = &scope.view(id);
         for (path, region) in &tables.paths {
             if !pattern_matches_path(pattern, path) {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     pattern,
@@ -667,7 +740,7 @@ impl Claims {
         for ancestor in pattern_base(pattern) {
             if let Some(region) = tables.ancestors.get(&ancestor) {
                 for (&other, &(other_scope, other_clock)) in &region.created {
-                    if tables.conflicts(scope, &view, other_scope, other, other_clock) {
+                    if tables.conflicts(scope, view, other_scope, other, other_clock) {
                         return Err(conflict(
                             pattern,
                             id,
@@ -684,7 +757,7 @@ impl Claims {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     pattern,
@@ -697,14 +770,13 @@ impl Claims {
         }
         let region = tables.patterns.entry(pattern.clone()).or_default();
         region.reads.insert(id, (scope.id, view.own));
-        Self::finish_claim(scope, id, &mut tables, view.own);
+        Self::finish_claim(scope, id, &mut tables, view.own, 1);
         Ok(())
     }
 
     /// Checks and records a whole-subtree claim on `path` by `id` of
-    /// `scope` (a recursive remove or a directory rename): the subtree's
-    /// own standing write, every path and listing under it, and every
-    /// pattern that overlaps it.
+    /// `scope` (a recursive remove): every check of
+    /// [`Claims::check_subtree`] first, then the record.
     fn claim_subtree(
         &self,
         scope: &Arc<Scope>,
@@ -713,9 +785,66 @@ impl Claims {
     ) -> Result<(), VfsError> {
         let mut tables = self.tables();
         let view = scope.view(id);
+        Self::check_subtree(&tables, scope, &view, path)?;
+        Self::record_subtree(&mut tables, scope, &view, path);
+        Self::finish_claim(scope, id, &mut tables, view.own, 1);
+        Ok(())
+    }
+
+    /// Checks and records a rename's two claims by `id` of `scope`: the
+    /// source as the whole subtree it moves and the destination as a
+    /// write. Both are checked under one tables lock before either is
+    /// recorded, so a refusal of either leaves neither behind.
+    fn claim_rename(
+        &self,
+        scope: &Arc<Scope>,
+        id: ExecId,
+        from: &VfsPath,
+        to: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let mut tables = self.tables();
+        let view = scope.view(id);
+        Self::check_subtree(&tables, scope, &view, from)?;
+        Self::check_write(&tables, scope, &view, to)?;
+        Self::record_subtree(&mut tables, scope, &view, from);
+        Self::record_write(&mut tables, scope, &view, to);
+        Self::finish_claim(scope, id, &mut tables, view.own, 2);
+        Ok(())
+    }
+
+    /// Checks and records a copy's two claims by `id` of `scope`: the
+    /// source as a read and the destination as a write, both checked
+    /// under one tables lock before either is recorded.
+    fn claim_copy(
+        &self,
+        scope: &Arc<Scope>,
+        id: ExecId,
+        from: &VfsPath,
+        to: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let mut tables = self.tables();
+        let view = scope.view(id);
+        Self::check_read(&tables, scope, &view, from)?;
+        Self::check_write(&tables, scope, &view, to)?;
+        Self::record_read(&mut tables, scope, &view, from);
+        Self::record_write(&mut tables, scope, &view, to);
+        Self::finish_claim(scope, id, &mut tables, view.own, 2);
+        Ok(())
+    }
+
+    /// The checks of a whole-subtree claim on `path` by `view` of
+    /// `scope`: the subtree's own standing write, every path and listing
+    /// under it, and every pattern that overlaps it. Records nothing.
+    fn check_subtree(
+        tables: &ClaimsTables,
+        scope: &Scope,
+        view: &View,
+        path: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let id = view.id;
         if let Some(region) = tables.subtrees.get(path)
             && let Some((other_scope, epoch)) = region.write
-            && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+            && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
         {
             return Err(conflict(
                 path,
@@ -730,7 +859,7 @@ impl Claims {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
-                && tables.conflicts(scope, &view, other_scope, epoch.id, epoch.clock)
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
             {
                 return Err(conflict(
                     path,
@@ -741,7 +870,7 @@ impl Claims {
                 ));
             }
             for (&reader, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, reader, other_clock) {
+                if tables.conflicts(scope, view, other_scope, reader, other_clock) {
                     return Err(conflict(
                         path,
                         id,
@@ -757,7 +886,7 @@ impl Claims {
                 continue;
             }
             for (&reader, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, reader, other_clock) {
+                if tables.conflicts(scope, view, other_scope, reader, other_clock) {
                     return Err(conflict(
                         path,
                         id,
@@ -773,7 +902,7 @@ impl Claims {
                 continue;
             }
             for (&reader, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, &view, other_scope, reader, other_clock) {
+                if tables.conflicts(scope, view, other_scope, reader, other_clock) {
                     return Err(conflict(
                         path,
                         id,
@@ -784,25 +913,35 @@ impl Claims {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Records a checked whole-subtree claim on `path` by `view` of
+    /// `scope`.
+    fn record_subtree(tables: &mut ClaimsTables, scope: &Scope, view: &View, path: &VfsPath) {
         let region = tables.subtrees.entry(path.clone()).or_default();
         region.write = Some((
             scope.id,
             Epoch {
-                id,
+                id: view.id,
                 clock: view.own,
             },
         ));
-        Self::finish_claim(scope, id, &mut tables, view.own);
-        Ok(())
     }
 
-    /// The shared tail of a successful claim: the identity's clock
-    /// advances past its recorded epoch, and a table that has grown
-    /// prunes.
-    fn finish_claim(scope: &Arc<Scope>, id: ExecId, tables: &mut ClaimsTables, tick: u64) {
+    /// The shared tail of a successful operation's `recorded` claims: the
+    /// identity's clock advances past its recorded epoch, and a table
+    /// that has grown past its threshold prunes.
+    fn finish_claim(
+        scope: &Arc<Scope>,
+        id: ExecId,
+        tables: &mut ClaimsTables,
+        tick: u64,
+        recorded: usize,
+    ) {
         scope.advance(id, tick);
-        tables.entries += 1;
-        if tables.entries > PRUNE_AT {
+        tables.entries += recorded;
+        if tables.entries > tables.prune_at {
             prune(tables);
         }
     }
@@ -928,18 +1067,29 @@ fn pattern_overlaps_subtree(pattern: &VfsPath, subtree: &VfsPath) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// Prunes claims that can never conflict again: every claim of an ended
-/// or dead scope, and - outside the pattern regions, which accumulate for
-/// the life of a run - every epoch that happens before every live
-/// identity of its scope. Runs under the tables lock.
+/// Prunes the tables: drops every claim of an ended or dead scope,
+/// collapses - outside the pattern regions, which accumulate for the
+/// life of a run - each live scope's epochs that happen before every one
+/// of its live identities, and removes every region left empty. The next
+/// prune waits for the tables to double what survived. Runs under the
+/// tables lock.
 fn prune(tables: &mut ClaimsTables) {
     prune_dead_scopes(tables);
     prune_ordered_epochs(tables);
+    let occupied = |_: &VfsPath, region: &mut RegionClaims| {
+        region.write.is_some() || !region.reads.is_empty() || !region.created.is_empty()
+    };
+    tables.paths.retain(occupied);
+    tables.children.retain(occupied);
+    tables.patterns.retain(occupied);
+    tables.subtrees.retain(occupied);
+    tables.ancestors.retain(occupied);
     tables.entries = tables.paths.len()
         + tables.children.len()
         + tables.patterns.len()
         + tables.subtrees.len()
         + tables.ancestors.len();
+    tables.prune_at = PRUNE_AT.max(2 * tables.entries);
 }
 
 /// Drops every claim of an ended or dead scope and the registry entries
@@ -984,9 +1134,13 @@ fn prune_dead_scopes(tables: &mut ClaimsTables) {
     tables.scopes.retain(|scope_id, _| !dead.contains(scope_id));
 }
 
-/// Drops every epoch that happens before every live identity of its
-/// scope: no future access can race with it. Pattern regions are exempt:
-/// they accumulate for the life of a run.
+/// Collapses, per region, each live scope's epochs that happen before
+/// every one of its live identities into one clock-0 epoch. No identity
+/// of the scope, present or forked later, can race with a clock-0 epoch,
+/// but every other live scope still conflicts with it, including one
+/// that registers after the prune, so the region's claim is never lost
+/// while its scope lives. Pattern regions are exempt: they accumulate
+/// for the life of a run.
 fn prune_ordered_epochs(tables: &mut ClaimsTables) {
     // One view per live scope of its live identities' clocks, then
     // each epoch checked against it.
@@ -1022,29 +1176,13 @@ fn prune_ordered_epochs(tables: &mut ClaimsTables) {
         })
     };
     let prune_region = |region: &mut RegionClaims| {
-        region.write = region
-            .write
-            .filter(|(scope_id, epoch)| !ordered_before_everyone(*scope_id, *epoch));
-        region.reads.retain(|&other, &mut (scope_id, other_clock)| {
-            !ordered_before_everyone(
-                scope_id,
-                Epoch {
-                    id: other,
-                    clock: other_clock,
-                },
-            )
-        });
-        region
-            .created
-            .retain(|&other, &mut (scope_id, other_clock)| {
-                !ordered_before_everyone(
-                    scope_id,
-                    Epoch {
-                        id: other,
-                        clock: other_clock,
-                    },
-                )
-            });
+        if let Some((scope_id, epoch)) = &mut region.write
+            && ordered_before_everyone(*scope_id, *epoch)
+        {
+            epoch.clock = 0;
+        }
+        collapse_ordered(&mut region.reads, &ordered_before_everyone);
+        collapse_ordered(&mut region.created, &ordered_before_everyone);
     };
     for region in tables.paths.values_mut() {
         prune_region(region);
@@ -1057,6 +1195,32 @@ fn prune_ordered_epochs(tables: &mut ClaimsTables) {
     }
     for region in tables.ancestors.values_mut() {
         prune_region(region);
+    }
+}
+
+/// Replaces each scope's `ordered` epochs in one per-identity epoch map
+/// with a single clock-0 epoch under the identity with the highest
+/// clock among them, which the conflict message names. Clocks are
+/// per-identity counters, so that identity is not necessarily the most
+/// recent.
+fn collapse_ordered(
+    epochs: &mut HashMap<ExecId, (ScopeId, u64)>,
+    ordered: &impl Fn(ScopeId, Epoch) -> bool,
+) {
+    let mut kept: HashMap<ScopeId, Epoch> = HashMap::new();
+    epochs.retain(|&id, &mut (scope_id, clock)| {
+        let epoch = Epoch { id, clock };
+        if !ordered(scope_id, epoch) {
+            return true;
+        }
+        let latest = kept.entry(scope_id).or_insert(epoch);
+        if epoch.clock > latest.clock {
+            *latest = epoch;
+        }
+        false
+    });
+    for (scope_id, epoch) in kept {
+        epochs.insert(epoch.id, (scope_id, 0));
     }
 }
 
@@ -1865,8 +2029,10 @@ impl Access {
         // Both paths gated, so the operation is admitted: the source
         // subtree and the destination are claimed, then one event per
         // canonical path.
-        self.admit(Claims::claim_subtree, &from)?;
-        self.admit(Claims::claim_write, &to)?;
+        self.admit(
+            |claims, scope, id, from| claims.claim_rename(scope, id, from, &to),
+            &from,
+        )?;
         self.fire(Op::Rename, &from);
         self.fire(Op::Rename, &to);
         self.inner().rename(&from, &to)
@@ -1882,8 +2048,10 @@ impl Access {
     pub fn copy(&self, from: &str, to: &str) -> Result<(), VfsError> {
         let from = self.gate(Op::Copy, from)?;
         let to = self.gate(Op::Copy, to)?;
-        self.admit(Claims::claim_read, &from)?;
-        self.admit(Claims::claim_write, &to)?;
+        self.admit(
+            |claims, scope, id, from| claims.claim_copy(scope, id, from, &to),
+            &from,
+        )?;
         self.fire(Op::Copy, &from);
         self.fire(Op::Copy, &to);
         self.inner().copy(&from, &to)
@@ -2260,7 +2428,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-    use super::{Access, VfsRef};
+    use super::{Access, PRUNE_AT, VfsRef};
     use crate::error::VfsError;
     use crate::observe::{OpEvent, Origin};
     use crate::path::VfsPath;
@@ -2847,6 +3015,82 @@ mod tests {
         let second = vfs.acquire(test_origin())?;
         let message = conflict_message(second.write("/shared.txt", b"2"));
         assert!(message.contains("/shared.txt"), "names the path: {message}");
+
+        // A prune in between keeps the write conflicting, for a scope
+        // acquired before the prune and for one acquired after it.
+        for acquired_before in [true, false] {
+            let vfs = handle(&StubFs::default());
+            let first = vfs.acquire(test_origin())?;
+            first.write("/shared.txt", b"1")?;
+            let early = if acquired_before {
+                Some(vfs.acquire(test_origin())?)
+            } else {
+                None
+            };
+            for n in 0..=PRUNE_AT {
+                first.exists(&format!("/other/{n}.txt"))?;
+            }
+            let second = match early {
+                Some(second) => second,
+                None => vfs.acquire(test_origin())?,
+            };
+            let message = conflict_message(second.write("/shared.txt", b"2"));
+            assert!(
+                message.contains("/shared.txt"),
+                "acquired before the prune: {acquired_before}: {message}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_prune_drops_emptied_regions_and_raises_its_threshold() -> Result<(), VfsError> {
+        // A dead scope's claims go at the next prune, and so do the
+        // regions they leave empty; the next threshold is measured from
+        // what survives.
+        let vfs = handle(&StubFs::default());
+        let spent = vfs.acquire(test_origin())?;
+        for n in 0..PRUNE_AT {
+            spent.exists(&format!("/p{n}"))?;
+        }
+        drop(spent);
+        let fresh = vfs.acquire(test_origin())?;
+        // The claim past the threshold, which prunes.
+        fresh.exists("/fresh")?;
+        let tables = vfs.volume.claims.tables();
+        assert_eq!(
+            tables.paths.len(),
+            1,
+            "only the live scope's region survives"
+        );
+        assert!(
+            tables.prune_at > tables.entries,
+            "the next prune waits for growth: threshold {}, entries {}",
+            tables.prune_at,
+            tables.entries
+        );
+        drop(tables);
+
+        // When more than half the threshold survives, the next prune
+        // waits for the survivors to double.
+        let vfs = handle(&StubFs::default());
+        let keeper = vfs.acquire(test_origin())?;
+        for n in 0..=PRUNE_AT / 2 {
+            keeper.exists(&format!("/keep{n}"))?;
+        }
+        let spent = vfs.acquire(test_origin())?;
+        for n in 0..PRUNE_AT - PRUNE_AT / 2 - 1 {
+            spent.exists(&format!("/p{n}"))?;
+        }
+        drop(spent);
+        keeper.exists("/trigger")?;
+        let tables = vfs.volume.claims.tables();
+        assert_eq!(tables.entries, PRUNE_AT / 2 + 2, "the live claims survive");
+        assert_eq!(
+            tables.prune_at,
+            2 * tables.entries,
+            "the threshold doubles the survivors"
+        );
         Ok(())
     }
 
@@ -2893,6 +3137,40 @@ mod tests {
             message.contains("/research"),
             "the write detects the probe: {message}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_write_into_a_directory_racing_a_siblings_write_or_remove_of_it_conflicts_in_either_order()
+    -> Result<(), VfsError> {
+        // A write into `/d` may create `/d`, so a sibling's write or
+        // plain remove of `/d` itself races with it, whichever lands
+        // first.
+        type Step = fn(&Access) -> Result<(), VfsError>;
+        let into: Step = |access| access.write("/d/f", b"f");
+        let on_directory: [(&str, Step); 2] = [
+            ("write", |access| access.write("/d", b"d")),
+            ("remove", |access| access.remove("/d", false).map(|_| ())),
+        ];
+        for (name, directory) in on_directory {
+            for into_first in [true, false] {
+                let vfs = handle(&StubFs::default());
+                let parent = vfs.acquire(test_origin())?;
+                let first = parent.spawn(test_origin())?;
+                let second = parent.spawn(test_origin())?;
+                let (lead, trail) = if into_first {
+                    (into, directory)
+                } else {
+                    (directory, into)
+                };
+                lead(&first)?;
+                let message = conflict_message(trail(&second));
+                assert!(
+                    message.contains("/d"),
+                    "{name}, the write into /d first: {into_first}: {message}"
+                );
+            }
+        }
         Ok(())
     }
 
@@ -2958,6 +3236,37 @@ mod tests {
         // would conflict with it.
         allowed.write("/f.txt", b"x")?;
         assert_eq!(allowed.read("/f.txt")?, b"x");
+        Ok(())
+    }
+
+    #[test]
+    fn a_refused_claim_never_registers_a_claim() -> Result<(), VfsError> {
+        let vfs = handle(&StubFs::seeded(&[("/src.txt", "s"), ("/copied.txt", "c")]));
+        let prober = vfs.acquire(test_origin())?;
+        prober.exists("/d")?;
+        // The write's may-create claim on `/d` races with the probe.
+        let refused = vfs.acquire(test_origin())?;
+        conflict_message(refused.write("/d/f", b"f"));
+        // Had the refused write registered its claim on `/d/f`, this
+        // read would conflict with it.
+        let reader = vfs.acquire(test_origin())?;
+        assert!(
+            matches!(reader.read("/d/f"), Err(VfsError::NotFound { .. })),
+            "the read reaches the backend"
+        );
+
+        // A rename refused on its destination leaves its source
+        // unclaimed.
+        let renamer = vfs.acquire(test_origin())?;
+        conflict_message(renamer.rename("/src.txt", "/d/g"));
+        assert_eq!(reader.read("/src.txt")?, b"s");
+
+        // A copy refused on its destination leaves no read claim on its
+        // source, so a later unordered write to the source goes through.
+        let copier = vfs.acquire(test_origin())?;
+        conflict_message(copier.copy("/copied.txt", "/d/h"));
+        let writer = vfs.acquire(test_origin())?;
+        writer.write("/copied.txt", b"w")?;
         Ok(())
     }
 

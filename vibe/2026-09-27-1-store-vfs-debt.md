@@ -390,7 +390,7 @@ Every regression test below must fail at `3088311d` and pass after its work item
 
 <step-3>
 
-### Step 3: Make the claims ledger exact (D1-1, D1-2, D1-5, D1-6)
+### Step 3: Make the claims ledger exact (D1-1, D1-2, D1-5, D1-6) [completed]
 
 - Component: Claims ledger
 
