@@ -3,8 +3,8 @@
    tokens in tokens.css. Styles the bar itself, the text/extras/right
    regions, the busy barberpole, and the generic status LED primitive
    (idle lens, lit modifiers, and the pulse/decay transitions). Rules
-   live in the components layer so a consumer's own rules (the gateway's
-   fixed positioning) override these. */
+   live in the components layer so a consumer's own rules override
+   these. */
 
 /* The status bar: a permanent full-width footer below the desk. The
    left text shows the current label; the extras region holds consumer

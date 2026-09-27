@@ -1,6 +1,6 @@
-// The inline progress bar shared by both UIs: a thin rounded track whose
-// fill scales by the --progress custom property, so updates are
-// compositor-only (transform, never width). Used for determinate
+// The inline progress bar for the Workshop family's UIs: a thin rounded
+// track whose fill scales by the --progress custom property, so updates
+// are compositor-only (transform, never width). Used for determinate
 // readings; a null fraction renders the track empty with no aria value.
 
 import "./progress.css";

@@ -1,10 +1,8 @@
-// The floating action menu shared by both UIs: a list of action buttons
-// anchored below (or, at the viewport's bottom edge, above) a trigger
-// element, rendered on the shared `.menu` / `.menu-item` surface from
-// dropdown.css. The gateway's select listboxes and profile switcher
-// consume the same surface classes with their own behavior; this class
-// is the action-menu behavior the workshop's mode chip and model picker
-// use.
+// The floating action menu for the Workshop family's UIs: a list of
+// action buttons anchored below (or, at the viewport's bottom edge,
+// above) a trigger element, rendered on the `.menu` / `.menu-item`
+// surface from dropdown.css. The workshop's mode chip and model picker
+// use it.
 //
 // Ported from the vendored murm-ui dropdown, cut to what the consumers
 // use: no disabled items, no alignment or width options, and the

@@ -1,11 +1,7 @@
-/* The shared menu surface (.menu, .menu-item) and the floating action
-   menu (.menu-popup) from dropdown.ts, on the Cursor Dark tokens. The
-   gateway's select listboxes and profile switcher consume the surface
-   classes with their own behavior; the workshop's action menus come from
-   dropdown.ts. Converged from the gateway's controls.css menu rules and
-   the workshop's murm-ui-derived dropdown stylesheet; the danger rows
-   keep the neutral hover wash because --danger-text is tuned to pass
-   4.5:1 on --bg-hover. All rules live in the components layer so a
+/* The menu surface (.menu, .menu-item) and the floating action menu
+   (.menu-popup) from dropdown.ts, on the Cursor Dark tokens. The danger
+   rows keep the neutral hover wash because --danger-text is tuned to
+   pass 4.5:1 on --bg-hover. All rules live in the components layer so a
    consumer's own rules override them.
 
    Derived from murm-ui 0.2.0 styles/dropdown.css, copyright (c) 2026

@@ -1,7 +1,6 @@
 // Bottom-right toast stack [Adapted: Open WebUI]: success/error/info
-// entries that dismiss themselves after four seconds. Shared by both
-// UIs: the gateway's composition root mounts one for desk and view
-// notifications, the workshop mounts one for update notifications.
+// entries that dismiss themselves after four seconds. For the Workshop
+// family's UIs: the workshop mounts one for update notifications.
 
 import "./toast.css";
 

@@ -1,9 +1,8 @@
-/* Button, input, and select base classes shared by both UIs, on the
-   Cursor Dark tokens from tokens.css. The rules live in the components
-   cascade layer: a consuming UI that declares its own layer order (the
-   gateway's base.css declares `reset, base, components, utilities`)
-   keeps its overrides winning on specificity, and a consuming UI with
-   no layers (the workshop) lets its unlayered rules override these.
+/* Button, input, and select base classes for the Workshop family's UIs,
+   on the Cursor Dark tokens from tokens.css. The rules live in the
+   components cascade layer: a consuming UI that declares its own layer
+   order keeps its overrides winning on specificity, and a consuming UI
+   with no layers (the workshop) lets its unlayered rules override these.
    Interactive classes inherit the consuming UI's focus convention - no
    focus frames are added here. */
 

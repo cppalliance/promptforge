@@ -1,14 +1,13 @@
-// The status bar view shared by both UIs: a permanent full-width footer
-// with a text region on the left and, on the right, a barberpole beside
-// the indicators group. The barberpole is an indeterminate busy signal:
-// it shows while work is in flight and hides otherwise, and it never
-// displaces the indicators - the LEDs stay visible either way. Each UI
-// populates the indicators group with its own LEDs (the workshop:
-// recording + activity; the gateway: per-endpoint capability) and the
-// extras region with its own controls (the gateway: the model summary,
-// the pending-queue count, and the cancel buttons). The view owns no
-// timers, listeners, or polling; the consumer drives it through setText
-// and setBusy and owns every lifecycle.
+// The status bar view for the Workshop family's UIs: a permanent
+// full-width footer with a text region on the left and, on the right, a
+// barberpole beside the indicators group. The barberpole is an
+// indeterminate busy signal: it shows while work is in flight and hides
+// otherwise, and it never displaces the indicators - the LEDs stay
+// visible either way. Each UI populates the indicators group with its own
+// LEDs (the workshop: recording + activity) and the extras region with
+// its own controls. The view owns no timers, listeners, or polling; the
+// consumer drives it through setText and setBusy and owns every
+// lifecycle.
 
 import "./status-bar.css";
 

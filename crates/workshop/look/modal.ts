@@ -1,9 +1,7 @@
-// The focus-trapped modal dialog shared by both UIs: an overlay inside a
-// host element, a role="dialog" (or "alertdialog") surface, an optional
-// labeled text field, a Tab focus trap, Escape dismissal, optional
-// backdrop dismissal, and focus return to the invoker. Merged from the
-// gateway's confirm-modal and the workshop's editor-dialog so the two
-// behaviors never diverge.
+// The focus-trapped modal dialog for the Workshop family's UIs: an overlay
+// inside a host element, a role="dialog" (or "alertdialog") surface, an
+// optional labeled text field, a Tab focus trap, Escape dismissal,
+// optional backdrop dismissal, and focus return to the invoker.
 //
 // Class contract: the overlay has `modal-overlay` plus
 // `${classPrefix}-overlay`; the dialog has `modal-dialog` plus

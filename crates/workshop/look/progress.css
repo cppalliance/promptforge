@@ -1,8 +1,7 @@
 /* The inline progress bar from progress.ts: a thin rounded track whose
    fill scales by --progress (transform, compositor-only). The fill reads
-   --progress-fill, so a consumer recolors by state with a modifier class
-   (the gateway's metric tiles use is-warning / is-danger). Rules live in
-   the components layer so consumer overrides win. */
+   --progress-fill, so a consumer recolors by state with its own modifier
+   class. Rules live in the components layer so consumer overrides win. */
 
 @layer components {
 	.progress {
