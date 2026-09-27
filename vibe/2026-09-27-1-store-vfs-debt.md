@@ -420,7 +420,7 @@ Every regression test below must fail at `3088311d` and pass after its work item
 
 <step-4>
 
-### Step 4: Make the store probe and store errors correct (D1-7, D1-8, D1-9)
+### Step 4: Make the store probe and store errors correct (D1-7, D1-8, D1-9) [completed]
 
 - Component: Store view
 

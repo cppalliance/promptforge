@@ -251,14 +251,14 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
         None => crate::lua::LuaProgram::empty()?,
     };
     // Every run and every store call needs a declared store: the probe
-    // derives the store view through a throwaway capability, so a handle
+    // stats the store root through a throwaway capability, so a handle
     // with no declaration fails here rather than on the first store call,
     // and a declared-but-failing backend's error fails the run.
     let probe = ctx
         .vfs
         .acquire(promptforge_vfs::Origin::new("store mount probe"))
         .map_err(Error::store)?;
-    let _ = promptforge_vfs::detail::store_view(&probe).map_err(Error::store)?;
+    promptforge_vfs::detail::probe_store(&probe).map_err(Error::store)?;
     Ok(RunState::new(prompt, args, &ctx.vfs, shared, ctx))
 }
 

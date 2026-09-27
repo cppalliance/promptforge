@@ -153,7 +153,7 @@ pub enum VfsError {
         /// The validation rule the path or pattern broke.
         reason: PathReason,
     },
-    /// A line range was rejected before any lines were read.
+    /// A line range was rejected.
     InvalidRange {
         /// The path the read targeted.
         path: String,

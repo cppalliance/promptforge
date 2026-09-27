@@ -56,6 +56,19 @@ pub fn store_view(access: &Access) -> Result<Access, VfsError> {
     access.store_view()
 }
 
+/// Probes the declared store before a run starts: derives the store
+/// view from `access` and stats the store root through it, which makes
+/// the view's router acquire the store backend. A root the backend
+/// reports [`VfsError::NotFound`] passes, so a host directory created
+/// lazily still runs.
+///
+/// # Errors
+/// Returns an error when the handle declares no store, or when the
+/// store backend refuses the session or fails the stat.
+pub fn probe_store(access: &Access) -> Result<(), VfsError> {
+    access.store_view()?.probe_root()
+}
+
 /// Returns the capability for a new concurrent thread of execution.
 ///
 /// The child gets a fresh [`ExecId`] in `parent`'s scope,
@@ -94,10 +107,13 @@ pub const fn access_id(access: &Access) -> ExecId {
 
 #[cfg(test)]
 mod tests {
-    use super::{access_spawn, end_scope, scope_handle, store_view};
+    use super::{access_spawn, end_scope, probe_store, scope_handle, store_view};
     use crate::grep::GrepQuery;
     use crate::path::canonicalize_absolute;
-    use crate::{Access, MemoryBackend, Origin, PathReason, VfsError, VfsPathBuf, VfsRef};
+    use crate::{
+        Access, AcquireContext, ExecId, MemoryBackend, Origin, PathReason, Vfs, VfsAccess,
+        VfsError, VfsPathBuf, VfsRef,
+    };
 
     /// A base at `/` beside a store declared at `/my/store`: the shape
     /// most store-view tests start from.
@@ -231,6 +247,120 @@ mod tests {
         // The raced write never landed.
         assert_eq!(view.read("f.txt")?, b"one");
         Ok(())
+    }
+
+    #[test]
+    fn a_backend_error_under_a_path_that_repeats_the_store_root_keeps_the_whole_path() {
+        let vfs = stock();
+        let (_access, view) = chain(&vfs);
+        // The backend names the mount-relative `/my/store/x.md`, which
+        // only looks like a path under the store root.
+        match view.read("my/store/x.md") {
+            Err(VfsError::NotFound { path }) => assert_eq!(path, "my/store/x.md"),
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_two_path_backend_error_keeps_a_destination_that_repeats_the_store_root()
+    -> Result<(), VfsError> {
+        let vfs = stock();
+        let (_access, view) = chain(&vfs);
+        view.write("x.md", b"source")?;
+        view.mkdir("my/store/x.md", true)?;
+        // The backend names the destination's mount-relative
+        // `/my/store/x.md`, which is also the source's canonical path.
+        for (op, result) in [
+            ("copy", view.copy("x.md", "my/store/x.md")),
+            ("rename", view.rename("x.md", "my/store/x.md")),
+        ] {
+            match result {
+                Err(VfsError::IsADirectory { path }) => assert_eq!(path, "my/store/x.md", "{op}"),
+                other => panic!("expected IsADirectory from {op}, got {other:?}"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_read_only_store_reports_its_denial_in_the_callers_relative_form() {
+        let vfs = VfsRef::builder()
+            .store("/my/store", ReadOnly(MemoryBackend::new()))
+            .build();
+        let (_access, view) = chain(&vfs);
+        // The router refuses before the backend, naming the canonical
+        // path; both spellings come back in the logical form.
+        for (path, expected) in [("x.md", "x.md"), ("my/store/x.md", "my/store/x.md")] {
+            match view.write(path, b"denied") {
+                Err(VfsError::PermissionDenied { path, reason }) => {
+                    assert_eq!(path, expected);
+                    assert!(
+                        reason.contains(&format!("so {expected} cannot")),
+                        "{reason}"
+                    );
+                }
+                other => panic!("expected a read-only denial for {path:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_store_probe_acquires_the_store_backend() {
+        let vfs = VfsRef::builder().store("/my/store", Refusing).build();
+        let access = vfs
+            .acquire(Origin::new("store view test"))
+            .expect("the router acquires lazily");
+        // Deriving the view alone never reaches the store backend.
+        assert!(store_view(&access).is_ok());
+        match probe_store(&access) {
+            Err(VfsError::Backend { message }) => assert!(message.contains("refuses"), "{message}"),
+            other => panic!("expected the backend's refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_store_probe_treats_a_missing_store_root_as_success() -> Result<(), VfsError> {
+        // A wrapped handle that mounts nothing at `/` reports the store
+        // root missing.
+        let inner = VfsRef::builder()
+            .mount("/data", MemoryBackend::new())
+            .build();
+        let vfs = VfsRef::builder().store("/", inner).build();
+        let access = vfs.acquire(Origin::new("store view test"))?;
+        assert!(matches!(access.stat("/"), Err(VfsError::NotFound { .. })));
+        probe_store(&access)
+    }
+
+    /// A backend whose sessions always refuse to open.
+    struct Refusing;
+
+    impl Vfs for Refusing {
+        fn acquire(&mut self, _cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+            Err(VfsError::Backend {
+                message: "the store backend refuses every session".to_owned(),
+            })
+        }
+
+        fn release(&mut self, _id: ExecId) -> Result<(), VfsError> {
+            Ok(())
+        }
+    }
+
+    /// A backend that forwards to `0` but reports itself read-only.
+    struct ReadOnly(MemoryBackend);
+
+    impl Vfs for ReadOnly {
+        fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+            self.0.acquire(cx)
+        }
+
+        fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
+            self.0.release(id)
+        }
+
+        fn read_only(&self) -> bool {
+            true
+        }
     }
 
     #[test]

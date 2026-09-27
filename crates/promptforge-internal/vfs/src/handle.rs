@@ -1308,14 +1308,25 @@ fn is_numbered_device(name: &str, prefix: &str) -> bool {
         .is_some_and(|n| (1..=9).contains(&n))
 }
 
-/// Re-spells an error's paths for a store view's caller: a canonical
-/// path under the store root and a mount-relative backend path both
-/// become the logical form the caller supplied, and prose fields that
-/// embed the path (a conflict's diagnosis, a denial's reason) follow.
+/// Re-spells an error's canonical paths for a store view's caller: a
+/// path under the store root becomes the logical form the caller
+/// supplied. A logical path is never absolute, so one already in that
+/// form passes unchanged.
 fn relativize_error(err: VfsError, root: &str) -> VfsError {
-    let logical = |path: &str| {
+    respell_error(err, |path| {
         strip_root(root, path).unwrap_or_else(|| path.trim_start_matches('/').to_owned())
-    };
+    })
+}
+
+/// Re-spells a store mount's mount-relative error paths into the
+/// logical form: only the leading `/` goes.
+fn trim_mount_error(err: VfsError) -> VfsError {
+    respell_error(err, |path| path.trim_start_matches('/').to_owned())
+}
+
+/// Re-spells every path in `err` through `logical`; prose fields that
+/// embed the path (a conflict's diagnosis, a denial's reason) follow.
+fn respell_error(err: VfsError, logical: impl Fn(&str) -> String) -> VfsError {
     match err {
         VfsError::NotFound { path } => VfsError::NotFound {
             path: logical(&path),
@@ -1721,7 +1732,10 @@ impl Access {
         // operations are confined to the store mount, so a store at
         // `/` never reaches a host directory mounted beneath it.
         let mut mounts = Mounts::new();
-        mounts.insert(store.root.to_buf(), Arc::clone(&store.mount));
+        mounts.insert(
+            store.root.to_buf(),
+            Arc::new(Mutex::new(Box::new(StoreMount(Arc::clone(&store.mount))))),
+        );
         let mut router = Router::new(mounts);
         // The view holds one more reference to the identity, like a
         // mount forward: the identity - and its scope - ends with its
@@ -1754,6 +1768,18 @@ impl Access {
                 inner,
             })),
         })
+    }
+
+    /// Stats this access's root straight through its backend session,
+    /// with no policy check, claim, or event, so a lazily acquiring
+    /// router opens the serving mount's session. A root the backend
+    /// reports missing passes. Crate-internal: backs
+    /// [`crate::detail::probe_store`].
+    pub(crate) fn probe_root(&self) -> Result<(), VfsError> {
+        match self.inner().stat(&self.root) {
+            Ok(_) | Err(VfsError::NotFound { .. }) => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     /// Reads the file at `path` as stored.
@@ -2314,9 +2340,119 @@ impl VfsAccess for HandleAccess {
     }
 }
 
+/// The store's mount as the store view's router sees it: the declared
+/// mount, whose sessions report error paths in the logical form. The
+/// backend names mount-relative paths, which differ from the canonical
+/// ones the router's own refusals name unless the store sits at `/`,
+/// so each spelling is re-spelled where it is produced.
+struct StoreMount(Arc<Mutex<Box<dyn Vfs>>>);
+
+impl StoreMount {
+    fn lock(&self) -> MutexGuard<'_, Box<dyn Vfs>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl Vfs for StoreMount {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+        let inner = self.lock().acquire(cx).map_err(trim_mount_error)?;
+        Ok(Box::new(StoreMountSession(inner)))
+    }
+
+    fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
+        self.lock().release(id).map_err(trim_mount_error)
+    }
+
+    fn read_only(&self) -> bool {
+        self.lock().read_only()
+    }
+}
+
+/// A store mount session: forwards every operation, trimming its
+/// error paths into the logical form.
+struct StoreMountSession(Box<dyn VfsAccess>);
+
+impl VfsAccess for StoreMountSession {
+    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
+        self.0.read(path).map_err(trim_mount_error)
+    }
+
+    fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
+        self.0
+            .read_range(path, offset, len)
+            .map_err(trim_mount_error)
+    }
+
+    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.0.write(path, contents).map_err(trim_mount_error)
+    }
+
+    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.0.append(path, contents).map_err(trim_mount_error)
+    }
+
+    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.0.remove(path, recursive).map_err(trim_mount_error)
+    }
+
+    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
+        self.0.exists(path).map_err(trim_mount_error)
+    }
+
+    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        self.0.glob(pattern).map_err(trim_mount_error)
+    }
+
+    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        self.0
+            .glob_kind(pattern, dirs_only)
+            .map_err(trim_mount_error)
+    }
+
+    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
+        self.0.list(path).map_err(trim_mount_error)
+    }
+
+    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
+        self.0.stat(path).map_err(trim_mount_error)
+    }
+
+    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.0.mkdir(path, recursive).map_err(trim_mount_error)
+    }
+
+    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.0.rename(from, to).map_err(trim_mount_error)
+    }
+
+    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.0.copy(from, to).map_err(trim_mount_error)
+    }
+
+    fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
+        self.0.str_replace(path, old, new).map_err(trim_mount_error)
+    }
+
+    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
+        self.0.grep(query).map_err(trim_mount_error)
+    }
+
+    fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
+        self.0.symlink(target, link).map_err(trim_mount_error)
+    }
+
+    fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
+        self.0.read_link(path).map_err(trim_mount_error)
+    }
+
+    fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
+        self.0.chmod(path, mode).map_err(trim_mount_error)
+    }
+}
+
 /// The store view's backend session: the store's own mount behind a
-/// one-mount router, whose error paths come back mount-relative and
-/// are re-spelled into the caller's logical form.
+/// one-mount router. The mount's errors arrive in the logical form;
+/// the router's own refusals name canonical paths, re-spelled here.
 struct StoreScoped {
     /// The declared store root, for re-spelling error paths.
     root: String,

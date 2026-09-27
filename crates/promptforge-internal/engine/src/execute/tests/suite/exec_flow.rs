@@ -2134,6 +2134,43 @@ async fn a_handle_without_a_declared_store_fails_the_run() {
     );
 }
 
+/// A store backend that refuses every session.
+struct RefusingStore;
+
+impl promptforge_vfs::Vfs for RefusingStore {
+    fn acquire(
+        &mut self,
+        _cx: &promptforge_vfs::AcquireContext,
+    ) -> std::result::Result<Box<dyn promptforge_vfs::VfsAccess>, VfsError> {
+        Err(VfsError::Backend {
+            message: "the store backend refuses every session".to_owned(),
+        })
+    }
+
+    fn release(&mut self, _id: promptforge_vfs::ExecId) -> std::result::Result<(), VfsError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
+    let md = flow_prompt!("# Test prompt\n\n## Only\n\n```lua\nreturn 'never runs'\n```\n");
+    let (prompt, _) = crate::parser::Prompt::parse(md, EXECUTION);
+    let vfs = VfsRef::builder().store("/", RefusingStore).build();
+    let mut run = crate::execute::run::Run::new(
+        Arc::new(prompt.expect("the fixture parses")),
+        "",
+        context(EXECUTION).vfs(vfs),
+    );
+    match run.step() {
+        crate::execute::run::Step::Done {
+            result: RunResult::Failure(error),
+            ..
+        } => assert_eq!(error.kind(), RunErrorKind::Store, "{error}"),
+        other => panic!("expected the first step to fail the run, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn default_environment_runs_a_capability_free_prompt() {
     // A prompt with no capability binds runs under the default
