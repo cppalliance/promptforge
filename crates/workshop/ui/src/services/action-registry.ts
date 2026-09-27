@@ -21,10 +21,11 @@
 //
 // Generic and DOM-free: nothing here may import from the app layers.
 
+import { err, ok, type Result } from "@workshop/platform/result";
+
 import { DisposableStore, type IDisposable } from "../base/lifecycle";
 import { Commands, type CommandRegistry } from "./command-registry";
 import { ContextKeyExpr, type ParseError } from "./context-key-expr";
-import { err, ok, type Result } from "./error-catalog";
 import { detectPlatform, parseKeybinding, type KeybindingPlatform } from "./keybinding-parser";
 import { KeybindingsRegistry, type KeybindingWeight } from "./keybinding-registry";
 import { MenuId, Menus, type MenuRegistry } from "./menu-registry";

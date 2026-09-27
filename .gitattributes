@@ -11,6 +11,7 @@
 crates/gateway/config-ui/ui/** text eol=lf
 crates/workshop/ui/** text eol=lf
 crates/workshop/look/** text eol=lf
+crates/workshop/platform/** text eol=lf
 # Images are not text; the blanket rules above must not convert them.
 crates/gateway/config-ui/ui/**/*.png binary
 crates/workshop/ui/**/*.png binary

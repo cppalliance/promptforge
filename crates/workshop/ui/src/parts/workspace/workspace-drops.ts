@@ -15,15 +15,10 @@
 // the dropped file - itself. Only drags of OS files are suppressed;
 // in-page drags (Dockview tabs) are untouched.
 
+import { err, ok } from "@workshop/platform/result";
+
 import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
-import {
-  CatalogError,
-  ErrorCatalog,
-  err,
-  errorText,
-  ok,
-  type Result,
-} from "../../services/error-catalog";
+import { CatalogError, ErrorCatalog, errorText, type Result } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
 import type { StatusBar } from "../../services/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";

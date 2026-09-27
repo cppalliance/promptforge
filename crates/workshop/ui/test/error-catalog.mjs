@@ -1,5 +1,6 @@
-// Unit test for the typed error catalog (src/services/error-catalog.ts) and
-// its adoption at the HTTP boundaries (src/services/workspace-api.ts,
+// Unit test for the typed error catalog (src/services/error-catalog.ts), the
+// Result constructors it builds on (@workshop/platform/result), and its
+// adoption at the HTTP boundaries (src/services/workspace-api.ts,
 // src/parts/workspace/workspace-drops.ts). Bundles the TS modules with esbuild
 // and imports them via a data URL. Covers: the Result constructors and the
 // CatalogError shape; the shared errorText narrowing; the workspace API
@@ -17,6 +18,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as catalog from "./src/services/error-catalog.ts";
+      export * as result from "@workshop/platform/result";
       export * as workspace from "./src/services/workspace-api.ts";
       export { grantPath } from "./src/parts/workspace/workspace-drops.ts";
     `,
@@ -31,7 +33,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 const code = bundle.outputFiles[0].text;
-const { catalog, workspace, grantPath } = await import(
+const { catalog, result, workspace, grantPath } = await import(
   `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
 );
 
@@ -66,10 +68,14 @@ const jsonResponse = (status, body) => ({
 // --- The Result constructors ------------------------------------------------
 
 {
-  const success = catalog.ok(42);
+  const success = result.ok(42);
   check("ok holds the value", success.ok === true && success.value === 42);
-  const failure = catalog.err(new CatalogError(ErrorCatalog.Transport, "down"));
+  const failure = result.err(new CatalogError(ErrorCatalog.Transport, "down"));
   check("err holds the error", failure.ok === false && failure.error.code === "transport");
+  check(
+    "the catalog leaves the Result constructors to platform",
+    !("ok" in catalog) && !("err" in catalog),
+  );
 }
 
 // --- The CatalogError shape ---------------------------------------------------

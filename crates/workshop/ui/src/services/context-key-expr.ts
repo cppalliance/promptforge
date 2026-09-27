@@ -12,7 +12,7 @@
 //
 // Generic and DOM-free: nothing here may import from the app layers.
 
-import { err, ok, type Result } from "./error-catalog";
+import { err, ok, type Result } from "@workshop/platform/result";
 
 /** A parse failure: what went wrong and where in the source string. */
 export interface ParseError {

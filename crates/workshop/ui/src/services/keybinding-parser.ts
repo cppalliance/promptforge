@@ -16,7 +16,8 @@
 //
 // Generic and DOM-free: nothing here may import from the app layers.
 
-import { err, ok, type Result } from "./error-catalog";
+import { err, ok, type Result } from "@workshop/platform/result";
+
 import type { ParseError } from "./context-key-expr";
 
 /** The platforms keybindings resolve against. */

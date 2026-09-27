@@ -5,10 +5,10 @@
 // match on. Both share the same stable codes, so a failure's meaning
 // survives the trip from the fetch boundary to the status bar.
 
+import type { Result as PlatformResult } from "@workshop/platform/result";
+
 /** The outcome of one fallible operation: a value, or a typed error. */
-export type Result<T, E = CatalogError> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: E };
+export type Result<T, E = CatalogError> = PlatformResult<T, E>;
 
 /**
  * The stable machine-readable failure codes. Callers match on these;
@@ -46,16 +46,6 @@ export class CatalogError extends Error {
     this.code = code;
     this.status = options?.status ?? null;
   }
-}
-
-/** Wraps a value in a successful Result. */
-export function ok<T>(value: T): Result<T, never> {
-  return { ok: true, value };
-}
-
-/** Wraps an error in a failed Result. */
-export function err<E>(error: E): Result<never, E> {
-  return { ok: false, error };
 }
 
 /** Narrows an unknown catch to a CatalogError, optionally of one code. */

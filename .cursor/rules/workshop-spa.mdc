@@ -1,6 +1,6 @@
 ---
 description: Workshop SPA conventions - feature directories, barrel exports, lazy loading, CSS colocation, token-only values
-globs: crates/workshop/ui/**
+globs: crates/workshop/ui/**,crates/workshop/look/**,crates/workshop/platform/**
 alwaysApply: false
 ---
 
