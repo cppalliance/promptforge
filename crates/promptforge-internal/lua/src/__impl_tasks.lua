@@ -14,7 +14,7 @@
 -- A Task handle is a plain methodless table `{ task = id }` (A9): every
 -- operation here is a namespace function that accepts the handle or the
 -- bare id string, so a handle stored in `var` survives the serde boundary
--- unchanged, and a `when_all` result entry (which includes `task`) is
+-- unchanged, and a `join` result entry (which includes `task`) is
 -- itself a handle.
 local yield, var_snapshot, helpers = ...
 
@@ -103,7 +103,7 @@ local function stop_timer(timer)
   if not ok then fail(result) end
 end
 
--- One when_any round over `ids` with an optional live timer appended
+-- One join_any round over `ids` with an optional live timer appended
 -- after the members, so a finished member wins over a fired timer. Returns
 -- the delivered id (or the timer's), ok, and result; a refused wait stops
 -- the timer before it raises, so no timer outlives its wait.
@@ -114,7 +114,7 @@ local function wait_round(ids, timer)
     for index, id in ipairs(ids) do set[index] = id end
     set[#set + 1] = timer
   end
-  local ok, task, task_ok, result = yield({ op = "when_any", tasks = set })
+  local ok, task, task_ok, result = yield({ op = "join_any", tasks = set })
   if not ok then
     if timer ~= nil then stop_timer(timer) end
     fail(task)
@@ -122,7 +122,7 @@ local function wait_round(ids, timer)
   return task, task_ok, result
 end
 
--- tasks.when_any(set, opts?) -> Task, ok, result: park until the first
+-- tasks.join_any(set, opts?) -> Task, ok, result: park until the first
 -- member of `set` ends (or return at once when one already has) and
 -- return which one, whether it succeeded, and its final text or error
 -- value. The one scheduler wait primitive; the error value is returned,
@@ -130,9 +130,9 @@ end
 -- raises task_not_owned; a member already delivered raises task_consumed.
 -- `opts.timeout` (seconds) returns nil when nothing finished in time; the
 -- members keep running. When a member wins, the timer is cancelled.
-local function tasks_when_any(set, opts)
-  local ids = task_set(set, "tasks.when_any")
-  local timeout = wait_timeout(opts, "tasks.when_any")
+local function tasks_join_any(set, opts)
+  local ids = task_set(set, "tasks.join_any")
+  local timeout = wait_timeout(opts, "tasks.join_any")
   local timer
   if timeout ~= nil then timer = start_timer(timeout) end
   local task, task_ok, result = wait_round(ids, timer)
@@ -143,7 +143,7 @@ local function tasks_when_any(set, opts)
   return { task = task }, task_ok, result
 end
 
--- tasks.when_all(set, opts?) -> results, timed_out: Lua over when_any.
+-- tasks.join(set, opts?) -> results, timed_out: Lua over join_any.
 -- Waits for every member and returns `{ task, ok, result }` per member in
 -- input order; each entry is itself a Task handle. It never raises
 -- because a member failed - the failed member's entry holds `ok = false`
@@ -154,9 +154,9 @@ end
 -- `opts.timeout` (seconds), one timer spans every round: when it fires,
 -- `timed_out` is true and the unfinished members' entries are absent;
 -- when every member finishes first, the timer is cancelled.
-local function tasks_when_all(set, opts)
-  local ids = task_set(set, "tasks.when_all")
-  local timeout = wait_timeout(opts, "tasks.when_all")
+local function tasks_join(set, opts)
+  local ids = task_set(set, "tasks.join")
+  local timeout = wait_timeout(opts, "tasks.join")
   local remaining, seen = {}, {}
   for _, id in ipairs(ids) do
     if not seen[id] then
@@ -264,8 +264,8 @@ end
 
 return {
   spawn = tasks_spawn,
-  when_any = tasks_when_any,
-  when_all = tasks_when_all,
+  join_any = tasks_join_any,
+  join = tasks_join,
   ready = tasks_ready,
   status = tasks_status,
   events = tasks_events,

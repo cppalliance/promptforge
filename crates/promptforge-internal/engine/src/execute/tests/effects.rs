@@ -237,7 +237,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
         ## Main\n\n\
         ```lua\n\
         local t = tasks.spawn('## Child')\n\
-        local first, ok, result = tasks.when_any({ t }, { timeout = 30 })\n\
+        local first, ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
         return result\n\
         ```\n\n\
         ## Child\n\n\

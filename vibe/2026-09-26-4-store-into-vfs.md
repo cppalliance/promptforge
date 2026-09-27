@@ -755,7 +755,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-4>
 
-### Step 4: Rename the task waits to join_any and join
+### Step 4: Rename the task waits to join_any and join [completed]
 
 - Component: Happens-before determinism
 - Placement: second of five components. Its claims code needs Step 2's roots and Step 3's errors, and the scheduler and store components both build on its fork and join edges.

@@ -1,6 +1,6 @@
 //! The wait, inspection, note, and cancel arms over the task arena.
 //!
-//! `when_any` is the one scheduler wait primitive: a chain names a set of
+//! `join_any` is the one scheduler wait primitive: a chain names a set of
 //! tasks it owns and is resumed with the first member that ends - at once
 //! when one already has, otherwise when a member's chain end delivers it.
 //! Delivery moves a `Done` slot to `Delivered` (its outcome is taken by
@@ -93,20 +93,20 @@ impl Scheduler {
         live
     }
 
-    /// Dispatches a `when_any` request: every member must be a task the
+    /// Dispatches a `join_any` request: every member must be a task the
     /// chain owns and none may be delivered already; the first terminal
     /// member in set order is delivered at once, otherwise the chain parks
     /// on the set until a member's chain end wakes it.
-    pub(super) fn dispatch_when_any(&mut self, id: ChainIndex, tasks: Vec<TaskId>) {
+    pub(super) fn dispatch_join_any(&mut self, id: ChainIndex, tasks: Vec<TaskId>) {
         match self.first_terminal(id, &tasks) {
             Ok(Some(task)) => {
                 let delivery = self.deliver(&task);
-                self.answer_inline(id, Answer::WhenAny(Ok(delivery)));
+                self.answer_inline(id, Answer::JoinAny(Ok(delivery)));
             }
             Ok(None) => {
                 self.chains[id.index()].waiting_on = tasks;
             }
-            Err(error) => self.answer_inline(id, Answer::WhenAny(Err(error))),
+            Err(error) => self.answer_inline(id, Answer::JoinAny(Err(error))),
         }
     }
 
@@ -177,7 +177,7 @@ impl Scheduler {
             return;
         }
         let delivery = self.deliver(task);
-        self.answer_inline(owner, Answer::WhenAny(Ok(delivery)));
+        self.answer_inline(owner, Answer::JoinAny(Ok(delivery)));
     }
 
     /// Dispatches a `ready` request: whether a task the chain owns has

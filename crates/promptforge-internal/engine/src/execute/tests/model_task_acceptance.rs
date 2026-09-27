@@ -232,7 +232,7 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
             "assert(#tasks.pending({ origin = 'author' }) == 0, 'the author started nothing')\n\
              local adopted = tasks.pending({ origin = 'model' })\n\
              assert(#adopted == 1, 'one model task is live: ' .. #adopted)\n\
-             local results = tasks.when_all(adopted)\n\
+             local results = tasks.join(adopted)\n\
              return tostring(results[1].ok) .. '|' .. results[1].result .. '|' .. #msgs",
         ),
         "user_input()\nreturn 'child result'",

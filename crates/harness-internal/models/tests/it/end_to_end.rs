@@ -44,7 +44,7 @@ const FIXTURE: &str = "---\nname: end-to-end\ndescription: the checkpoint fixtur
     # End to End\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\nstore.write('notes.md', 'kept')\n\
     local t = tasks.spawn('## Child')\n\
-    local _first, _ok, child = tasks.when_any({ t })\nvar.child = child\n```\n\n\
+    local _first, _ok, child = tasks.join_any({ t })\nvar.child = child\n```\n\n\
     Ask the model.\n\n```lua\nreturn models.infer(prose) .. '|' .. var.child\n```\n\n\
     ## Child\n\n```lua\nreturn 'child-done'\n```\n";
 

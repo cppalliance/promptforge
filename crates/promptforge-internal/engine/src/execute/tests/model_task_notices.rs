@@ -310,7 +310,7 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
               local msgs = messages.new()\n\
               msgs:user('go')\n\
               models.loop(msgs)\n\
-              local results = tasks.when_all({ s })\n\
+              local results = tasks.join({ s })\n\
               return results[1].result .. '|' .. msgs[5].content\n\
               ```\n\n\
               ## Child\n\n\

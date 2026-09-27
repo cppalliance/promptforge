@@ -75,7 +75,7 @@ fn call_without_input_yields_none() {
 
 #[test]
 fn a_fanout_op_is_no_longer_a_request() {
-    // The fanout shim is Lua over `spawn` and `when_any`; a yield naming
+    // The fanout shim is Lua over `spawn` and `join_any`; a yield naming
     // the retired op is a hand-built yield and fails as one.
     let lua = Lua::new();
     let table = request_table(&lua, "fanout");

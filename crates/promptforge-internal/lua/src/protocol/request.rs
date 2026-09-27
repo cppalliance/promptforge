@@ -85,10 +85,10 @@ pub enum Request {
         /// the parse.
         seconds: f64,
     },
-    /// `tasks.when_any(set)`: park the chain until the first task in `set`
+    /// `tasks.join_any(set)`: park the chain until the first task in `set`
     /// ends, or resume at once when one already has. The one scheduler
-    /// wait primitive: `tasks.when_all` is Lua over it.
-    WhenAny {
+    /// wait primitive: `tasks.join` is Lua over it.
+    JoinAny {
         /// The tasks to wait on, in the author's order: the first terminal
         /// member in this order is the one delivered when several are.
         /// Non-empty by the shim's check.

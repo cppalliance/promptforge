@@ -49,7 +49,7 @@
 //! author's `tasks.events` shares, `notices` the model-task notices
 //! (queued at a model task's end, drained into the owner's next round or
 //! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
-//! the chain-end rules for tasks, `waits` the `when_any` wait and the
+//! the chain-end rules for tasks, `waits` the `join_any` wait and the
 //! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
 //! `timer` the wait shims' internal timeout as an effect-backed slot, and
 //! `test_hooks` (test builds only) the seams the suites inspect the arena
@@ -215,12 +215,12 @@ struct Chain {
     /// A spawned chain's `item` and `sys.index` seeds, consumed by its
     /// first section entry; `None` afterward and on every other chain.
     seed: Option<TaskSeed>,
-    /// The tasks the chain is parked on in a `when_any` wait (or the
+    /// The tasks the chain is parked on in a `join_any` wait (or the
     /// model's `await_tasks`); empty while the chain is not waiting. A
     /// member's chain end delivers it and clears the set.
     waiting_on: Vec<TaskId>,
     /// The model's `await_tasks` call the chain is parked in, when
-    /// `waiting_on` is that call's set rather than an author `when_any`:
+    /// `waiting_on` is that call's set rather than an author `join_any`:
     /// the member's end answers the model's tool call with the drained
     /// notices instead of delivering the member to the shim. `None`
     /// otherwise.

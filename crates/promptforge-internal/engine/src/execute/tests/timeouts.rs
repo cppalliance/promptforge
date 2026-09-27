@@ -1,6 +1,6 @@
-//! Timeouts on the wait shims: `opts.timeout` on `tasks.when_any` returns
+//! Timeouts on the wait shims: `opts.timeout` on `tasks.join_any` returns
 //! `nil` when the internal timer wins and the members keep running (no
-//! `tasks_live` at chain end); on `tasks.when_all` it returns `results,
+//! `tasks_live` at chain end); on `tasks.join` it returns `results,
 //! timed_out` with the unfinished members absent. When a member wins the
 //! shim cancels the timer and its leaf work is dropped. The timer is an
 //! effect-backed slot the author never sees: `tasks.pending` and a status
@@ -18,19 +18,19 @@ use crate::execute::scheduler::test_hooks::TaskState;
 const SLOW: Duration = Duration::from_millis(400);
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running() {
+async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running() {
     // The child parks on a slow model round; a 50ms wait times out and
     // returns nil, the child is still running, and a second untimed wait
     // delivers it - so nothing leaks at chain end.
     let gateway = ScriptedGateway::start(vec![resp_delayed_text("slow answer", SLOW)]).await;
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
-         local first, ok, result = tasks.when_any({ t }, { timeout = 0.05 })\n\
+         local first, ok, result = tasks.join_any({ t }, { timeout = 0.05 })\n\
          log('timed out first=' .. tostring(first) .. ' ok=' .. tostring(ok) .. ' result=' .. tostring(result))\n\
          local s = tasks.status(t)\n\
          log('after state=' .. s.state .. ' blocked=' .. tostring(s.blocked))\n\
          assert(#tasks.pending() == 1, 'the child is the only pending task')\n\
-         local second, ok2, result2 = tasks.when_any({ t })\n\
+         local second, ok2, result2 = tasks.join_any({ t })\n\
          assert(second.task == t.task and ok2 and result2 == 'slow answer', tostring(result2))\n\
          return 'done'",
         &[("Child", "return models.infer('slow please')")],
@@ -71,13 +71,13 @@ async fn when_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_any_cancels_the_timer_when_a_member_wins() {
+async fn join_any_cancels_the_timer_when_a_member_wins() {
     // The child returns at once; the wait's 30s timer never fires: the
     // shim cancels it, its slot is `Cancelled`, and the run ends without
     // waiting on it or leaking it.
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
-         local first, ok, result = tasks.when_any({ t }, { timeout = 30 })\n\
+         local first, ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
          assert(first.task == t.task and ok and result == 'quick', tostring(result))\n\
          assert(#tasks.pending() == 0, 'nothing is pending')\n\
          return 'done'",
@@ -109,21 +109,21 @@ async fn when_any_cancels_the_timer_when_a_member_wins() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_all_returns_timed_out_with_the_unfinished_members_absent() {
+async fn join_returns_timed_out_with_the_unfinished_members_absent() {
     // Quick returns at once; Slow parks on a slow model round. A 50ms
-    // `when_all` returns Quick's entry, no entry for Slow, and
+    // `join` returns Quick's entry, no entry for Slow, and
     // `timed_out = true`; Slow keeps running and a second untimed
-    // `when_all` delivers it with `timed_out = false`.
+    // `join` delivers it with `timed_out = false`.
     let gateway = ScriptedGateway::start(vec![resp_delayed_text("slow answer", SLOW)]).await;
     let md = tasks_prompt(
         "local q = tasks.spawn('## Quick')\n\
          local s = tasks.spawn('## Slow')\n\
-         local results, timed_out = tasks.when_all({ q, s }, { timeout = 0.05 })\n\
+         local results, timed_out = tasks.join({ q, s }, { timeout = 0.05 })\n\
          log('timed_out=' .. tostring(timed_out) .. ' n=' .. #results\n\
            .. ' quick=' .. tostring(results[1] and results[1].result)\n\
            .. ' slow=' .. tostring(results[2]))\n\
          assert(tasks.status(s).state == 'running', 'slow keeps running')\n\
-         local rest, timed_out2 = tasks.when_all({ s })\n\
+         local rest, timed_out2 = tasks.join({ s })\n\
          log('rest timed_out=' .. tostring(timed_out2) .. ' slow=' .. tostring(rest[1].result))\n\
          return 'done'",
         &[
@@ -141,7 +141,7 @@ async fn when_all_returns_timed_out_with_the_unfinished_members_absent() {
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("a timed-out when_all leaks nothing");
+        .expect("a timed-out join leaks nothing");
     assert_eq!(out, "done");
     assert_eq!(
         recorder.logs("Main"),
@@ -153,14 +153,14 @@ async fn when_all_returns_timed_out_with_the_unfinished_members_absent() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_all_cancels_the_timer_when_every_member_finishes() {
+async fn join_cancels_the_timer_when_every_member_finishes() {
     // Both members return at once under a 30s timeout: every entry is
     // present, `timed_out` is false, and the timer (the owner's third
     // child) is cancelled rather than waited out or leaked.
     let md = tasks_prompt(
         "local a = tasks.spawn('## Alpha')\n\
          local b = tasks.spawn('## Beta')\n\
-         local results, timed_out = tasks.when_all({ a, b }, { timeout = 30 })\n\
+         local results, timed_out = tasks.join({ a, b }, { timeout = 30 })\n\
          assert(timed_out == false, 'no timeout')\n\
          assert(#results == 2 and results[1].result == 'alpha' and results[2].result == 'beta')\n\
          assert(#tasks.pending() == 0, 'nothing is pending')\n\
@@ -197,14 +197,14 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
          store.write('park', 'x')\n\
          local s = tasks.status(c)\n\
          log('child blocked=' .. tostring(s.blocked) .. ' tasks=' .. #s.tasks .. ' first=' .. tostring(s.tasks[1]))\n\
-         local _, ok, result = tasks.when_any({ c })\n\
+         local _, ok, result = tasks.join_any({ c })\n\
          assert(ok, tostring(result))\n\
          return result",
         &[
             (
                 "Child",
                 "local g = tasks.spawn('## Grandchild')\n\
-                 local first = tasks.when_any({ g }, { timeout = 30 })\n\
+                 local first = tasks.join_any({ g }, { timeout = 30 })\n\
                  assert(first.task == g.task, 'the grandchild wins')\n\
                  return 'child done'",
             ),
@@ -234,15 +234,15 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
 async fn the_timeout_option_is_validated_at_the_call_site() {
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
-         local ok1, e1 = pcall(tasks.when_any, { t }, { timeout = 'soon' })\n\
+         local ok1, e1 = pcall(tasks.join_any, { t }, { timeout = 'soon' })\n\
          assert(not ok1 and e1.kind == 'lua', tostring(e1))\n\
-         local ok2, e2 = pcall(tasks.when_all, { t }, { timeout = -1 })\n\
+         local ok2, e2 = pcall(tasks.join, { t }, { timeout = -1 })\n\
          assert(not ok2 and e2.kind == 'lua', tostring(e2))\n\
-         local ok3, e3 = pcall(tasks.when_any, { t }, 'opts')\n\
+         local ok3, e3 = pcall(tasks.join_any, { t }, 'opts')\n\
          assert(not ok3 and e3.kind == 'lua', tostring(e3))\n\
-         local ok4, e4 = pcall(tasks.when_any, { t }, { timeout = 0/0 })\n\
+         local ok4, e4 = pcall(tasks.join_any, { t }, { timeout = 0/0 })\n\
          assert(not ok4 and e4.kind == 'lua', tostring(e4))\n\
-         local _, ok, result = tasks.when_any({ t })\n\
+         local _, ok, result = tasks.join_any({ t })\n\
          assert(ok and result == 'quick', tostring(result))\n\
          return tostring(e1) .. '|' .. tostring(e2) .. '|' .. tostring(e3) .. '|' .. tostring(e4)",
         &[("Child", "return 'quick'")],

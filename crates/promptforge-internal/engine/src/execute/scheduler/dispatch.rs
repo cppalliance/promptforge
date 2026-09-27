@@ -88,7 +88,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
     match request {
         Request::Infer { .. } | Request::Chat { .. } => Some("chat"),
         Request::Call { .. } => Some("call"),
-        Request::WhenAny { .. } | Request::TaskEvents { .. } => Some("tasks"),
+        Request::JoinAny { .. } | Request::TaskEvents { .. } => Some("tasks"),
         Request::ToolCall { .. } => Some("tool_call"),
         Request::UserInput => Some("user_input"),
         Request::Store { .. } => Some("store"),
@@ -161,8 +161,8 @@ impl Scheduler {
                 self.dispatch_timer(id, seconds);
                 Ok(())
             }
-            Request::WhenAny { tasks } => {
-                self.dispatch_when_any(id, tasks);
+            Request::JoinAny { tasks } => {
+                self.dispatch_join_any(id, tasks);
                 Ok(())
             }
             Request::Ready { task } => {

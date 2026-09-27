@@ -21,7 +21,7 @@ const OWNER_READS_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n-
     ## Only\n\n\
     ```lua\n\
     local t = tasks.spawn('## Child')\n\
-    tasks.when_any({ t })\n\
+    tasks.join_any({ t })\n\
     local all = tasks.events(t)\n\
     local same = true\n\
     for _, e in ipairs(all) do same = same and e.provenance.task == t.task end\n\
@@ -91,7 +91,7 @@ fn a_task_may_read_itself_and_a_task_it_does_not_own_is_refused() {
         ```lua\n\
         local mine = #tasks.events(sys.taskid) > 0\n\
         local t = tasks.spawn('## Child')\n\
-        local _, ok, result = tasks.when_any({ t })\n\
+        local _, ok, result = tasks.join_any({ t })\n\
         assert(ok, tostring(result))\n\
         return tostring(mine) .. '|' .. result\n\
         ```\n\n\

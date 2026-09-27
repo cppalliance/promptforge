@@ -1,5 +1,5 @@
-//! The wait, status, note, and cancel arms: `tasks.when_any` is the one
-//! scheduler wait primitive and `tasks.when_all` is Lua over it (reporting
+//! The wait, status, note, and cancel arms: `tasks.join_any` is the one
+//! scheduler wait primitive and `tasks.join` is Lua over it (reporting
 //! a failed member without raising); `tasks.status` reads a parked and a
 //! finished task; `tasks.ready`, `tasks.pending`, `tasks.note`, and
 //! `tasks.cancel` round-trip; ownership is enforced (`task_not_owned`,
@@ -104,14 +104,14 @@ async fn drive(md: &str) -> (Result<String>, Arc<WaitRecorder>) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_all_reports_a_failed_member_without_raising() {
-    // One member returns, one raises: `when_all` returns both outcomes in
+async fn join_reports_a_failed_member_without_raising() {
+    // One member returns, one raises: `join` returns both outcomes in
     // input order and the caller decides; the failed member's result is
     // the error table, and nothing leaks at chain end.
     let md = tasks_prompt(
         "local a = tasks.spawn('## Alpha')\n\
          local b = tasks.spawn('## Beta')\n\
-         local results = tasks.when_all({ b, a })\n\
+         local results = tasks.join({ b, a })\n\
          assert(#results == 2, 'two results')\n\
          assert(results[1].task == b.task, 'input order: beta first')\n\
          assert(results[1].ok == false, 'beta failed')\n\
@@ -127,11 +127,11 @@ async fn when_all_reports_a_failed_member_without_raising() {
         ],
     );
     let (out, _) = drive(&md).await;
-    assert_eq!(out.expect("when_all never raises for a member"), "done");
+    assert_eq!(out.expect("join never raises for a member"), "done");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_all_fills_every_position_of_a_member_named_twice() {
+async fn join_fills_every_position_of_a_member_named_twice() {
     // A set naming one task twice: the task is waited on once and its
     // outcome lands at both positions, so the result sequence has no hole
     // and `#results` is the input's length; the second wait would have
@@ -139,7 +139,7 @@ async fn when_all_fills_every_position_of_a_member_named_twice() {
     let md = tasks_prompt(
         "local a = tasks.spawn('## Alpha')\n\
          local b = tasks.spawn('## Beta')\n\
-         local results = tasks.when_all({ a, b, a })\n\
+         local results = tasks.join({ a, b, a })\n\
          assert(#results == 3, 'three positions, got ' .. #results)\n\
          local count = 0\n\
          for _ in ipairs(results) do count = count + 1 end\n\
@@ -157,18 +157,18 @@ async fn when_all_fills_every_position_of_a_member_named_twice() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn when_any_returns_the_first_finished_member_and_the_rest_keep_running() {
-    // Alpha finishes at once; Beta parks on a store write. `when_any` over
+async fn join_any_returns_the_first_finished_member_and_the_rest_keep_running() {
+    // Alpha finishes at once; Beta parks on a store write. `join_any` over
     // both delivers Alpha and leaves Beta live, so the caller must still
     // wait on Beta before it ends - which it does.
     let md = tasks_prompt(
         "local a = tasks.spawn('## Alpha')\n\
          local b = tasks.spawn('## Beta')\n\
-         local first, ok, result = tasks.when_any({ a, b })\n\
+         local first, ok, result = tasks.join_any({ a, b })\n\
          assert(first.task == a.task, 'alpha finishes first, got ' .. first.task)\n\
          assert(ok and result == 'alpha', tostring(result))\n\
          assert(tasks.ready(a), 'alpha is ready')\n\
-         local second, ok2, result2 = tasks.when_any({ b })\n\
+         local second, ok2, result2 = tasks.join_any({ b })\n\
          assert(second.task == b.task and ok2 and result2 == 'beta', tostring(result2))\n\
          return 'done'",
         &[
@@ -202,7 +202,7 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
            .. ' ok=' .. tostring(s.ok) .. ' section=' .. tostring(s.section)\n\
            .. ' blocked=' .. tostring(s.blocked) .. ' turns=' .. s.turns\n\
            .. ' tasks=' .. #s.tasks .. ' depth=' .. s.depth .. ' note=' .. tostring(s.note))\n\
-         local _, ok, result = tasks.when_any({ t })\n\
+         local _, ok, result = tasks.join_any({ t })\n\
          assert(ok and result == 'slow answer', tostring(result))\n\
          local d = tasks.status(t)\n\
          log('done state=' .. d.state .. ' ok=' .. tostring(d.ok) .. ' section=' .. tostring(d.section)\n\
@@ -250,7 +250,7 @@ async fn a_non_owner_is_refused_with_task_not_owned() {
          local ok, err = pcall(tasks.cancel, '9.9')\n\
          assert(not ok and err.kind == 'task_not_owned', tostring(err))\n\
          assert(err.task == '9.9', tostring(err.task))\n\
-         local _, ok2, result = tasks.when_any({ t })\n\
+         local _, ok2, result = tasks.join_any({ t })\n\
          assert(ok2, tostring(result))\n\
          return result",
         &[(
@@ -261,7 +261,7 @@ async fn a_non_owner_is_refused_with_task_not_owned() {
              assert(s.note == 'hello from ' .. me, tostring(s.note))\n\
              local ok, err = pcall(tasks.cancel, me)\n\
              assert(not ok and err.kind == 'task_not_owned', tostring(err))\n\
-             local ok2, err2 = pcall(tasks.when_any, { me })\n\
+             local ok2, err2 = pcall(tasks.join_any, { me })\n\
              assert(not ok2 and err2.kind == 'task_not_owned', tostring(err2))\n\
              return 'refused:' .. tostring(err) .. '|' .. tostring(err2)",
         )],
@@ -282,10 +282,10 @@ async fn a_non_owner_is_refused_with_task_not_owned() {
 async fn waiting_on_a_delivered_task_raises_task_consumed() {
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
-         local _, ok, result = tasks.when_any({ t })\n\
+         local _, ok, result = tasks.join_any({ t })\n\
          assert(ok and result == 'once', tostring(result))\n\
          assert(tasks.ready(t), 'a delivered task is ready')\n\
-         local ok2, err = pcall(tasks.when_any, { t })\n\
+         local ok2, err = pcall(tasks.join_any, { t })\n\
          assert(not ok2, 'the second wait fails')\n\
          return err.kind .. '|' .. err.task .. '|' .. tostring(err)",
         &[("Child", "return 'once'")],
@@ -324,7 +324,7 @@ async fn cancel_ends_a_parked_task_idempotently_and_reports_task_cancelled_once(
          local s = tasks.status(t)\n\
          log('state=' .. s.state .. ' ok=' .. tostring(s.ok))\n\
          assert(tasks.ready(t), 'a cancelled task is ready')\n\
-         local _, ok, err = tasks.when_any({ t })\n\
+         local _, ok, err = tasks.join_any({ t })\n\
          assert(not ok and err.kind == 'cancelled', tostring(err))\n\
          assert(err.task == t.task, tostring(err.task))\n\
          assert(err.reason == nil, 'a cancelled delivery leaves reason nil')\n\
@@ -384,7 +384,7 @@ async fn pending_lists_the_callers_live_tasks_in_spawn_order() {
         "local a = tasks.spawn('## Parked')\n\
          local b = tasks.spawn('## Quick')\n\
          local c = tasks.spawn('## Parked')\n\
-         tasks.when_any({ b })\n\
+         tasks.join_any({ b })\n\
          local live = tasks.pending()\n\
          assert(#live == 2, 'two live tasks, got ' .. #live)\n\
          assert(live[1].task == a.task and live[2].task == c.task, live[1].task .. ',' .. live[2].task)\n\
@@ -405,11 +405,35 @@ async fn pending_lists_the_callers_live_tasks_in_spawn_order() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn the_waits_old_names_are_not_defined() {
+    // The waits were renamed to `join_any` and `join`: a prompt calling
+    // `tasks.when_any` or `tasks.when_all` reaches a nil field, so the
+    // call fails as a plain string error, never a shim's structured one.
+    // The spawned children are cancelled, so nothing stays live at chain
+    // end.
+    let md = tasks_prompt(
+        "local a = tasks.spawn('## Child')\n\
+         local b = tasks.spawn('## Child')\n\
+         local ok1, e1 = pcall(tasks.when_any, { a })\n\
+         local ok2, e2 = pcall(tasks.when_all, { b })\n\
+         tasks.cancel(a)\n\
+         tasks.cancel(b)\n\
+         return tostring(ok1) .. '|' .. tostring(ok2) .. '|' .. type(e1) .. '|' .. type(e2)",
+        &[("Child", "return 'child'")],
+    );
+    let (out, _) = drive(&md).await;
+    assert_eq!(
+        out.expect("the caught nil calls end the run normally"),
+        "false|false|string|string"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn the_wait_shims_validate_their_arguments_at_the_call_site() {
     let md = tasks_prompt(
-        "local ok1, e1 = pcall(tasks.when_any, {})\n\
+        "local ok1, e1 = pcall(tasks.join_any, {})\n\
          assert(not ok1 and e1.kind == 'lua', tostring(e1))\n\
-         local ok2, e2 = pcall(tasks.when_any, 'nope')\n\
+         local ok2, e2 = pcall(tasks.join_any, 'nope')\n\
          assert(not ok2 and e2.kind == 'lua', tostring(e2))\n\
          local ok3, e3 = pcall(tasks.cancel, 42)\n\
          assert(not ok3 and e3.kind == 'lua', tostring(e3))\n\

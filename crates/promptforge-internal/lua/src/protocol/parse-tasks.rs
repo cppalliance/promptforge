@@ -1,5 +1,5 @@
 //! The task-operation request parsers: the wait shims' internal `timer`
-//! and its author-supplied seconds, the `when_any` set, the single-task
+//! and its author-supplied seconds, the `join_any` set, the single-task
 //! `ready`, `status`, and `cancel`, the `task_events` id and `last`
 //! bound, the `pending` origin filter, and the `note` text. The shims
 //! resolve a `Task` handle to its bare id before yielding, so every task
@@ -61,11 +61,11 @@ pub(super) fn parse_timer(table: &mlua::Table) -> std::result::Result<Request, F
     Ok(Request::Timer { seconds })
 }
 
-/// Parses a `when_any` request: the shim-built `tasks` sequence of id
+/// Parses a `join_any` request: the shim-built `tasks` sequence of id
 /// strings. The shim has already rejected an empty or non-table set, so a
 /// missing or non-sequence field is a malformed yield; a member that is
 /// not a valid id is the author's argument error.
-pub(super) fn parse_when_any(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+pub(super) fn parse_join_any(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let Ok(Value::Table(set)) = table.raw_get::<Value>("tasks") else {
         return Err(FieldFailure::Malformed);
     };
@@ -82,7 +82,7 @@ pub(super) fn parse_when_any(table: &mlua::Table) -> std::result::Result<Request
     if tasks.is_empty() {
         return Err(FieldFailure::Malformed);
     }
-    Ok(Request::WhenAny { tasks })
+    Ok(Request::JoinAny { tasks })
 }
 
 /// Parses a `ready` request: the one task id.

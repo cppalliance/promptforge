@@ -60,7 +60,7 @@ pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
 /// A main section that parks on a 30-second timer beside its child: the
 /// child's own wait and the timer are two effects out at once.
 pub(crate) const TIMED_MAIN: &str = "local t = tasks.spawn('## Child')\n\
-     local _first, _ok, result = tasks.when_any({ t }, { timeout = 30 })\n\
+     local _first, _ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
      return result";
 
 /// A performer for every kind that no test here expects to be issued;

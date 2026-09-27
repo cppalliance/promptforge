@@ -134,14 +134,14 @@ fn an_err_answer_round_trips_and_retains_the_typed_error() {
 }
 
 #[test]
-fn a_when_any_delivery_of_a_failed_member_retains_the_members_typed_error() {
+fn a_join_any_delivery_of_a_failed_member_retains_the_members_typed_error() {
     // The wait succeeded, so the envelope is `(true, id, false, table)`,
     // but the member's failure is handed back typed as well: a shim that
     // re-raises it at once (`fanout` on a fatal arm) lets the driver
     // substitute the member's own error for the raised table.
     let lua = Lua::new();
     let task: TaskId = "0.1".parse().expect("a task id parses");
-    let (envelope, retained) = Answer::<Error>::WhenAny(Ok(TaskDelivery {
+    let (envelope, retained) = Answer::<Error>::JoinAny(Ok(TaskDelivery {
         task,
         outcome: Err(Error::LuaQuota {
             resource: "instruction",
@@ -170,10 +170,10 @@ fn a_when_any_delivery_of_a_failed_member_retains_the_members_typed_error() {
 }
 
 #[test]
-fn a_when_any_delivery_of_a_finished_member_retains_nothing() {
+fn a_join_any_delivery_of_a_finished_member_retains_nothing() {
     let lua = Lua::new();
     let task: TaskId = "0.1".parse().expect("a task id parses");
-    let (envelope, retained) = Answer::<Error>::WhenAny(Ok(TaskDelivery {
+    let (envelope, retained) = Answer::<Error>::JoinAny(Ok(TaskDelivery {
         task,
         outcome: Ok("done".to_owned()),
     }))

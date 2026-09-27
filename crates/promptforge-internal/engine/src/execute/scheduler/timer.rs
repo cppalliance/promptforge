@@ -5,7 +5,7 @@
 //! A timer is the one task backed by an in-flight leaf request rather than
 //! a chain: the request sleeps and posts back, and its slot sits in the
 //! task arena beside the chain-backed ones so one wait primitive serves
-//! both - the shim lists the timer's id in its `when_any` set, and the
+//! both - the shim lists the timer's id in its `join_any` set, and the
 //! timer's firing completes its slot and wakes the waiter exactly as a
 //! task chain's end does. Cancel is the ordinary cancel arm: the slot
 //! moves to `Cancelled` and the sleep is dropped through the shared
@@ -77,7 +77,7 @@ impl Scheduler {
     /// Applies a timer's firing: the slot backed by `effect` moves to
     /// `Done` with an empty outcome and its owner is woken if it is parked
     /// on a set containing the timer. Otherwise the slot holds until the
-    /// owner's next wait delivers it - the shim's `when_all` rounds may
+    /// owner's next wait delivers it - the shim's `join` rounds may
     /// be between waits when the timer fires.
     ///
     /// # Errors

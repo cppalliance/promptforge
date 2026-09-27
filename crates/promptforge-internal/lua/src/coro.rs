@@ -48,7 +48,7 @@ const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
 const FANOUT_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_fanout.lua";
 
 /// The `fanout` shim source: Lua over the task protocol (`spawn`,
-/// `when_any`, `cancel`), split from the prelude for the same file-ceiling
+/// `join_any`, `cancel`), split from the prelude for the same file-ceiling
 /// reason. It runs over the prelude's failure helpers plus the collection
 /// enumerator, the item renderer, and the run's arm-concurrency cap.
 const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");

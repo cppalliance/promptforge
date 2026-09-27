@@ -130,11 +130,11 @@ fn store_value(lua: &Lua, outcome: StoreOutcome) -> mlua::Result<Value> {
     })
 }
 
-/// Renders a `when_any` delivery's resume values after the `ok` flag: the
+/// Renders a `join_any` delivery's resume values after the `ok` flag: the
 /// member's id as its path text (the shim wraps it in a `Task` handle),
 /// then the member's own `(ok, result)` pair - its final text, or its
 /// failure rendered as the error table the shim hands back unraised, so
-/// `when_all` reports it without raising. The failure is also returned as
+/// `join` reports it without raising. The failure is also returned as
 /// the typed error to retain: a shim that re-raises the member's failure at
 /// once (`fanout` on a fatal arm) surfaces the member's own typed error.
 fn delivery_values<E: ErrorValue>(
@@ -159,7 +159,7 @@ impl<E: ErrorValue> Answer<E> {
     /// with `error(result, 0)`, so a printing author sees exactly the host's
     /// message and a branching one reads `kind` - and the typed error
     /// is returned alongside for the driver to retain. A successful
-    /// `when_any` whose member failed retains the member's error the same
+    /// `join_any` whose member failed retains the member's error the same
     /// way, since a shim may re-raise it at once.
     ///
     /// # Errors
@@ -178,7 +178,7 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Spawn(Ok(task)) | Answer::Timer(Ok(task)) => {
                 vec![Value::String(lua.create_string(task.to_string())?)]
             }
-            Answer::WhenAny(Ok(delivery)) => {
+            Answer::JoinAny(Ok(delivery)) => {
                 let (values, member_error) = delivery_values(lua, delivery)?;
                 retained = member_error;
                 values
@@ -222,7 +222,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Call(Err(error))
             | Answer::Spawn(Err(error))
             | Answer::Timer(Err(error))
-            | Answer::WhenAny(Err(error))
+            | Answer::JoinAny(Err(error))
             | Answer::Ready(Err(error))
             | Answer::Status(Err(error))
             | Answer::Pending(Err(error))

@@ -146,14 +146,14 @@ pub struct UserInputOutcome {
     pub available: bool,
 }
 
-/// One task's delivery to a `when_any` waiter: which member ended and how.
+/// One task's delivery to a `join_any` waiter: which member ended and how.
 ///
 /// `outcome` is the task's final text, or its failure as the error value
 /// the shim hands back (`ok = false`): the task chain's own error, or the
 /// `cancelled` value for a task that was cancelled or abandoned. The
 /// delivery itself succeeded; a wait that fails outright (a task the
 /// caller does not own, a result already delivered) is the outer
-/// [`Answer::WhenAny`] error instead. A delivered failure is also the
+/// [`Answer::JoinAny`] error instead. A delivered failure is also the
 /// envelope's retained typed error, so a shim that re-raises the member's
 /// failure at once (the `fanout` shim's fatal-arm path) hands the driver
 /// the member's own typed error rather than its rendering.
@@ -205,7 +205,7 @@ pub struct TaskStatus {
 /// and substitutes it when the shim-raised error surfaces as the
 /// coroutine's failure. This holds uniformly for leaf and structural
 /// answers: the enum owns the typed error until the envelope is rendered,
-/// so a `Call` or `WhenAny` failure round-trips with its structure intact.
+/// so a `Call` or `JoinAny` failure round-trips with its structure intact.
 ///
 /// The error type is the driver's: the Lua side produces
 /// `Answer<`[`Error`]`>` (argument-validation failures at the yield
@@ -224,8 +224,8 @@ pub enum Answer<E> {
     /// The started timer's task id for a `timer` request, resumed as its
     /// path text; the wait shim keeps it to wait on and cancel.
     Timer(std::result::Result<TaskId, E>),
-    /// The member delivered for a `when_any` request.
-    WhenAny(std::result::Result<TaskDelivery<E>, E>),
+    /// The member delivered for a `join_any` request.
+    JoinAny(std::result::Result<TaskDelivery<E>, E>),
     /// Whether the task has ended, for a `ready` request.
     Ready(std::result::Result<bool, E>),
     /// The task's status table for a `status` request. Boxed so the
@@ -267,7 +267,7 @@ impl<E> Answer<E> {
             Answer::Call(result) => Answer::Call(result.map_err(map)),
             Answer::Spawn(result) => Answer::Spawn(result.map_err(map)),
             Answer::Timer(result) => Answer::Timer(result.map_err(map)),
-            Answer::WhenAny(result) => Answer::WhenAny(match result {
+            Answer::JoinAny(result) => Answer::JoinAny(match result {
                 Ok(TaskDelivery { task, outcome }) => Ok(TaskDelivery {
                     task,
                     outcome: outcome.map_err(map),

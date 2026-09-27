@@ -1,5 +1,5 @@
 -- The `fanout` shim for a scheduler-mode section VM: Lua over the task
--- protocol (`spawn`, `when_any`, `cancel`), so every wait inside a fanout
+-- protocol (`spawn`, `join_any`, `cancel`), so every wait inside a fanout
 -- is an ordinary yield and the scheduler keeps no fanout state of its own.
 --
 -- The host installs this after the coroutine prelude (`__impl_coro.lua`)
@@ -61,7 +61,7 @@ end
 -- its `item`, its 1-based position as `sys.index`, and the `fanout` mark
 -- (so the spawn arm's depth-cap refusal is named after `fanout`, the name
 -- the cap always had on this path, and re-raises here as the retained
--- typed error), and `when_any` over the live set delivers the arms as
+-- typed error), and `join_any` over the live set delivers the arms as
 -- they end. A `tool_loop_exhausted` arm
 -- becomes the incomplete stub and the fanout continues; any other arm
 -- failure cancels the live arms and re-raises. No arm outlives the call:
@@ -81,7 +81,7 @@ local function fanout(worker, collection)
   local var = var_snapshot()
   local results = {}
   -- The live arms: `slot_of[id]` is the arm's collection index, `live`
-  -- the ids in spawn order (the `when_any` set, so an earlier arm wins a
+  -- the ids in spawn order (the `join_any` set, so an earlier arm wins a
   -- tie).
   local slot_of, live = {}, {}
   local next_index = 1
@@ -119,7 +119,7 @@ local function fanout(worker, collection)
     spawn_next()
   end
   while #live > 0 do
-    local ok, task, arm_ok, result = yield({ op = "when_any", tasks = live })
+    local ok, task, arm_ok, result = yield({ op = "join_any", tasks = live })
     if not ok then
       cancel_live()
       fail(task)

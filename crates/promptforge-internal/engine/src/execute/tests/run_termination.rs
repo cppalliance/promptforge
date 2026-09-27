@@ -26,7 +26,7 @@ const PARKED_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
     ## Spawner\n\n\
     ```lua\n\
     local t = tasks.spawn('## Child')\n\
-    tasks.when_any({ t })\n\
+    tasks.join_any({ t })\n\
     return 'unreachable'\n\
     ```\n\n\
     ## Child\n\n\

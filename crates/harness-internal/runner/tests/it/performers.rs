@@ -77,8 +77,8 @@ async fn a_timer_effect_is_answered_after_its_duration() {
     // The first wait times out at 50ms while the child is still parked on
     // its 400ms input; the second wait, without a timer, delivers it.
     let main = "local t = tasks.spawn('## Child')\n\
-        local first = tasks.when_any({ t }, { timeout = 0.05 })\n\
-        local _task, ok, result = tasks.when_any({ t })\n\
+        local first = tasks.join_any({ t }, { timeout = 0.05 })\n\
+        local _task, ok, result = tasks.join_any({ t })\n\
         return tostring(first == nil) .. '|' .. tostring(ok) .. '|' .. result";
     let outcome = drive_run(
         run_with_child(main, "return user_input()"),
@@ -219,7 +219,7 @@ async fn task_events_returns_the_tasks_slice_and_last_narrows_it_to_later_events
     // The owner reads the child's whole record, then everything after the
     // first event; every event names the child's task.
     let main = "local t = tasks.spawn('## Child')\n\
-        tasks.when_any({ t })\n\
+        tasks.join_any({ t })\n\
         local all = tasks.events(t)\n\
         local same = true\n\
         for _, e in ipairs(all) do same = same and e.provenance.task == t.task end\n\
