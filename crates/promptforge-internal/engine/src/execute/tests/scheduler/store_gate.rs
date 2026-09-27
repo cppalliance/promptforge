@@ -1,5 +1,13 @@
 //! The gated-backend test helpers for the scheduler suites: a one-shot gate on
 //! the first backend write or append beside the store and observer that open it.
+//!
+//! The gate no longer forces a conflict - claims are never released during a
+//! run, so an unordered second op conflicts however late it starts. It parks
+//! the first write-intent op so the cancel-wait suite can cancel a child
+//! while its write is still in flight: the cancel lands while the child is
+//! parked, whatever the blocking pool's timing. The parked wait is bounded:
+//! a cancel that stopped reporting would otherwise strand the run-end drain
+//! on the parked op, and the test must fail, never hang.
 
 use std::sync::Condvar;
 use std::sync::atomic::AtomicBool;
@@ -9,15 +17,12 @@ use super::*;
 use promptforge_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath};
 
 /// A one-shot gate for the first backend write or append: the first
-/// write-intent op the backend serves parks with its write claim held
-/// until a [`GateObserver`] opens the gate, so a test's outcome cannot
-/// depend on how late that op's blocking-pool thread starts. The
-/// arm-conflict tests park the winning arm until the losing arm's
-/// conflict observation; the cancel-wait suite parks a child until its
-/// owner's cancel is observed. The parked wait is bounded: a claims model
-/// that stopped conflicting (or a cancel that stopped reporting) would
-/// otherwise strand the run-end drain on the parked op, and the test must
-/// fail, never hang.
+/// write-intent op the backend serves parks until a [`GateObserver`]
+/// opens the gate, so a test's outcome cannot depend on how late that
+/// op's blocking-pool thread starts. The cancel-wait suite parks a child
+/// until its owner's cancel is observed. The parked wait is bounded: a
+/// cancel that stopped reporting would otherwise strand the run-end
+/// drain on the parked op, and the test must fail, never hang.
 #[derive(Default)]
 pub(in super::super) struct StoreGate {
     released: Mutex<bool>,
@@ -60,11 +65,10 @@ impl StoreGate {
     }
 }
 
-/// Opens the gate when the losing arm's write or append fails, or when a
-/// task is cancelled: either observation fires before the answer that
-/// ends the run posts, so the parked op completes ahead of the run-end
-/// drain that awaits it. Every observation also forwards to `inner`, so a
-/// test can keep its own recorder behind the gate.
+/// Opens the gate when a task is cancelled: the observation fires before
+/// the answer that ends the run posts, so the parked op completes ahead
+/// of the run-end drain that awaits it. Every observation also forwards
+/// to `inner`, so a test can keep its own recorder behind the gate.
 pub(in super::super) struct GateObserver {
     gate: Arc<StoreGate>,
     inner: Arc<dyn Observer>,
@@ -97,8 +101,8 @@ impl Observer for GateObserver {
 }
 
 /// A memory backend whose first `write` or `append` parks on the gate, so
-/// the first arm to reach the backend holds its write claim until the
-/// sibling's claim check has met it.
+/// a test can hold a child's write in flight until its owner's cancel is
+/// observed.
 struct GatedStore {
     inner: MemoryBackend,
     gate: Arc<StoreGate>,

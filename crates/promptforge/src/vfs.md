@@ -8,7 +8,7 @@ Before a run, the host decides what the run's filesystem holds. [`Environment::b
 
 During the run, every `store.*` call in a prompt reaches the host from [`Run::step`](crate::Run::step) inside [`Step::Pending`](crate::Step::Pending) as an [`Effect::Store`](crate::effect::Effect::Store). Its [`access`](crate::effect::Effect#variant.Store.field.access) field is an [`Arc`](std::sync::Arc) of an [`Access`] already scoped to the run's store, and its [`op`](crate::effect::Effect#variant.Store.field.op) field is a [`StoreOp`]. The host performs the operation with [`perform_store_op`] and hands the whole [`Result`] back through [`Run::resume`](crate::Run::resume) as an [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store). The crate page's host loop does exactly this.
 
-Three rules apply to the [`Access`] in a store effect. The host uses it as given and never derives or widens store scope from it. The host drops it after the operation and before resuming, because an [`Access`] keeps its hold on every path it touched until it is dropped. And because [`perform_store_op`] is synchronous, an async host runs it off its executor, for example on a blocking pool.
+Three rules apply to the [`Access`] in a store effect. The host uses it as given and never derives or widens store scope from it. Dropping the access when the operation completes is good hygiene, but it never affects correctness: claims follow happens-before within the run's scope and are ignored once the scope ends. And because [`perform_store_op`] is synchronous, an async host runs it off its executor, for example on a blocking pool.
 
 A [`StoreError`] in the answer is raised in the prompt at the `store.*` call when the answer is resumed, so the prompt author can handle it. The exception is [`StoreError::WriteRace`], which ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism). For a log, [`Effect::record`](crate::effect::Effect::record) keeps the [`StoreOp`] as [`EffectRecord::Store`](crate::effect::EffectRecord::Store) and drops the access, and [`EffectAnswer::record`](crate::effect::EffectAnswer::record) keeps the outcome as [`AnswerRecord::Store`](crate::effect::AnswerRecord::Store). The run also reports each store outcome on its [`Event`](crate::event::Event) stream, which the [`event`](crate::event) page lists.
 
@@ -83,17 +83,19 @@ assert!(matches!(access.read("/Drafts/plan/today.md"), Err(VfsError::NotFound { 
 
 # Identities and claims
 
-Each [`VfsRef::acquire`] vends a fresh [`ExecId`], a process-unique identity, and binds the new [`Access`] to it. Each operation through that access registers a *claim* on its canonical path under that identity. An operation that only looks registers a read claim, and one that changes the path registers a write claim. Claims keep concurrent work from interleaving on one path.
+Each [`VfsRef::acquire`] starts a *scope*: it vends a fresh [`ExecId`], a process-unique identity, and binds the new [`Access`] to it. A scope is one root identity together with every identity forked from it, and it is the happens-before state that keeps concurrent work from interleaving. An operation through an access claims what it touches: a read claims the path it observes (a file read, `exists`, `stat`, and a `str_replace`'s read of its target), the directory's children it lists, or the pattern it matches (a glob, or a grep's root and filter). A write claims its path, the ancestors it may create, and - for a recursive remove or a directory rename - the whole subtree it moves. Claims follow FastTrack-style happens-before (Flanagan and Freund, PLDI 2009): each identity holds a vector clock, and every access records an *epoch*, its identity paired with its own clock entry at that moment. Two epochs conflict exactly when neither is ordered before the other's identity.
 
-- A write conflicts with another identity's read or write claim on the path.
-- A read conflicts only with another identity's write claim.
-- Two reads never conflict, and an identity never conflicts with itself.
+- A spawn is the *fork*: the child shares a snapshot of the parent's clock, and the parent's entry advances, so everything the parent did before the spawn happens before the child's first step, and nothing after it does.
+- A delivery is the *join*: merging the child's final clock into the owner's orders everything the child did before the owner's next step. The engine joins every task at every delivery and at chain end.
+- Within one scope, a claim is ordered before an access exactly when the access's clock has seen the claim's epoch. Claims from another live scope always conflict, because nothing orders two scopes; a scope ends with its last identity, and its claims are then ignored.
 
-A conflicting operation fails with [`VfsError::Conflict`] and never reaches the backend. Its message names the path, both identities, and both claim kinds, in the form `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. Claims last for the life of the [`Access`], not for one call. So an identity that read a path blocks another live identity's write to it until the reader's [`Access`] is dropped. Clones of a [`VfsRef`] share one claims table, so a claim made through one clone conflicts with operations through another.
+A conflicting operation fails with [`VfsError::Conflict`] and never reaches the backend. Its message names the path, both identities, and both claim kinds, in the form `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. Claims are never released during a scope's life, so an unordered write to a path another identity claimed fails however the two interleave. Clones of a [`VfsRef`] share one claims table, so a claim made through one clone conflicts with operations through another.
 
-Dropping an [`Access`] releases every claim its identity holds, so cancellation, panics, and early returns cannot leak claims. The drop then calls the backend's [`Vfs::release`] and ignores its error.
+Dropping an [`Access`] drops one reference to its identity. The identity ends when its last access drops - cancellation, panics, and early returns cannot leak it - and the scope ends with its last identity. The drop then calls the backend's [`Vfs::release`] and ignores its error.
 
 The [`Origin`] passed to [`VfsRef::acquire`] is for observability only, and it never appears in a claim. [`Origin::new`] takes a label and records the Rust call site as the position. [`Origin::at`] takes a label, a file, and a line, and records exactly those. Use it when the host knows a more useful position, such as a section name, the prompt's name, and a line in the prompt. Use the most specific label available: a section name for a chain, a tool id for a tool, or a fixture name for a test.
+
+Anything that acquires its own [`Access`] from a run's [`VfsRef`] during the run is a separate scope, unordered with the run's, so its operations conflict with the run's claims. Seed before the run and extract after it, through separate acquires whose scopes have ended.
 
 ````
 use promptforge::vfs::{MemoryBackend, Origin, VfsError, VfsRef};
@@ -109,6 +111,8 @@ drop(writer);
 assert_eq!(reader.read("/plan.md")?, b"step one");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
+
+Scopes, fork and join are how one run orders its concurrent tasks; the engine performs the forks and joins, so a host that drives a run never calls them. The run's [`Access`] arrives inside an [`Effect::Store`](crate::effect::Effect::Store) as-is, and its scope is the run's.
 
 # Backends
 
@@ -175,7 +179,7 @@ assert!(matches!(reader.read("/scratch/tmp.txt"), Err(VfsError::NotFound { .. })
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-A [`VfsRef`] itself implements [`Vfs`], so one handle can be mounted inside another builder or overlay. The inner handle's policy and claims then apply under the caller's identity. For example, when an outer handle mounts a base handle at `/base`, a second identity reading `/base/f.txt` through the outer handle conflicts with a first identity's write to it.
+A [`VfsRef`] itself implements [`Vfs`], so one handle can be mounted inside another builder or overlay. The inner handle's policy and claims then apply under the caller's identity, which the mounted handle finds through a process-wide map keyed by [`ExecId`], consulted only at acquire time. For example, when an outer handle mounts a base handle at `/base`, a second identity reading `/base/f.txt` through the outer handle conflicts with a first identity's write to it.
 
 # Read-only mounts
 
@@ -322,7 +326,7 @@ assert_eq!(log[0].2, "observer example");
 
 # The run's store
 
-A run's store is a mount at `/_promptforge/store` inside the run's handle, and the prompt's `store` table is scoped to it. One handle serves every section of a run, so store files persist from section to section even though each section's Lua state does not. [`RunContext::new`](crate::RunContext::new) starts with a fresh memory backend at the store mount. [`Environment::run_vfs`](crate::Environment::run_vfs) builds a router with the environment's base mounted at `/` plus a fresh memory backend at the store mount, so every run shares the base and gets its own store. Several concurrent runs can share one host-backed base this way. When a second run writes a path such as `/shared.txt` while the first run's claim on it is live, the write fails with [`VfsError::Conflict`], and the file keeps the first run's contents.
+A run's store is a mount at `/_promptforge/store` inside the run's handle, and the prompt's `store` table is scoped to it. One handle serves every section of a run, so store files persist from section to section even though each section's Lua state does not. [`RunContext::new`](crate::RunContext::new) starts with a fresh memory backend at the store mount. [`Environment::run_vfs`](crate::Environment::run_vfs) builds a router with the environment's base mounted at `/` plus a fresh memory backend at the store mount, so every run shares the base and gets its own store. Several concurrent runs can share one host-backed base this way. Each run is its own scope, and two live scopes never order each other, so when a second run writes a path such as `/shared.txt` while the first run's claim on it is live, the write fails with [`VfsError::Conflict`], and the file keeps the first run's contents.
 
 A [`StoreOp`] names its paths logically, relative to the store mount. So `notes.md` means `/_promptforge/store/notes.md`, and a [`StoreOp`] can reach only files inside the run's store. The host seeds and extracts through the full virtual path. [`perform_store_op`] validates each logical path before any backend sees it, and reports a broken rule as [`StoreError::InvalidPath`] with a [`PathReason`]. The checks run in this order, and the first rule broken is reported:
 
@@ -503,7 +507,7 @@ This part covers every item in the module, grouped by task: handles and access f
 - [`VfsRef::with_policy`] takes `backend`, as for [`VfsRef::new`], and `policy`, any [`Policy`] that is also [`Sync`] and `'static`. It returns a handle with that policy, no op sink, and a fresh claims table.
 - [`VfsRef::builder`] returns an empty [`VfsRefBuilder`], with no mounts, no policy, and no sink.
 - [`VfsRef::overlay`] takes `&self`, a `prefix` of type [`&str`](str), and a `backend` that is any `'static` [`Vfs`]. The prefix is the absolute virtual path to mount the backend at. It returns a new handle whose namespace is this handle's namespace with the backend mounted at the prefix, sharing this handle's claims table, policy, and op sink. Operations outside the prefix route through this handle. It panics with "invalid overlay prefix {prefix:?}: {err}" when the prefix does not canonicalize, and with "an overlay at / would replace the base entirely; use VfsRef::new instead" for `/`. [`Environment::prepare`](crate::Environment::prepare) builds per-run stores with a fresh router instead of an overlay, because concurrent runs' stores are different storage.
-- [`VfsRef::acquire`] takes `&self` and an [`Origin`], and returns a new [`Access`] bound to a fresh [`ExecId`]. The origin labels every operation the access performs. It fails with the backend's own error when a directly wrapped backend's [`Vfs::acquire`] refuses the identity. A router acquires each mount lazily, so a mount's refusal surfaces from the first operation on that mount.
+- [`VfsRef::acquire`] takes `&self` and an [`Origin`], and returns a new [`Access`] bound to a fresh [`ExecId`]. It starts a *scope*: the acquired identity is the scope's root, and every identity forked from it joins the scope. Nothing orders two scopes, so two live scopes' claims always conflict. The origin labels every operation the access performs. It fails with the backend's own error when a directly wrapped backend's [`Vfs::acquire`] refuses the identity. A router acquires each mount lazily, so a mount's refusal surfaces from the first operation on that mount.
 
 [`VfsRef`] implements [`Vfs`], and its [`Vfs::read_only`] reports the wrapped backend's flag.
 
@@ -555,16 +559,16 @@ Each method canonicalizes its path arguments, consults the policy, registers a c
 **Looking around.**
 
 - [`Access::exists`] takes `path` and returns a [`bool`]: `true` when a file or directory exists there, and `false` only for a confirmed absence. A lookup that cannot decide is an error. For example, the host backend fails with [`VfsError::NotADirectory`] for a path through a file ancestor, and counts a dangling symlink as existing. It registers a read claim and reports [`Op::Exists`].
-- [`Access::glob`] takes `pattern`, a [`&str`](str) holding a glob over virtual paths, and returns the matching paths, sorted, as a [`Vec`] of [`String`]. It lists files, or only directories when the pattern ends in `/`, as in `"x/*/"`. A pattern holds literal bytes, `*` for zero or more bytes within one segment, and `**` for any number of whole segments. `**` must occupy a whole segment, as in `**`, `**/...`, `.../**`, or `.../**/...`. There are no escapes. The raw pattern is validated before canonicalization, and each broken rule fails with [`VfsError::InvalidPath`] naming the rule in its [`PathReason`]: an empty pattern is [`PathReason::Empty`], one over 1024 bytes is [`PathReason::TooLong`], a control character is [`PathReason::Control`], a backslash is [`PathReason::Backslash`], and malformed wildcard grammar is [`PathReason::Wildcard`]. A pattern without a leading `/` joins onto the access's root, and its results come back relative to that root. The claim, the policy check, and the op sink all use the canonicalized pattern as the path, with a read claim and [`Op::Glob`]. A router sends the pattern to the longest-prefix mount, strips the prefix, and joins it back onto each result.
+- [`Access::glob`] takes `pattern`, a [`&str`](str) holding a glob over virtual paths, and returns the matching paths, sorted, as a [`Vec`] of [`String`]. It lists files, or only directories when the pattern ends in `/`, as in `"x/*/"`. A pattern holds literal bytes, `*` for zero or more bytes within one segment, and `**` for any number of whole segments. `**` must occupy a whole segment, as in `**`, `**/...`, `.../**`, or `.../**/...`. There are no escapes. The raw pattern is validated before canonicalization, and each broken rule fails with [`VfsError::InvalidPath`] naming the rule in its [`PathReason`]: an empty pattern is [`PathReason::Empty`], one over 1024 bytes is [`PathReason::TooLong`], a control character is [`PathReason::Control`], a backslash is [`PathReason::Backslash`], and malformed wildcard grammar is [`PathReason::Wildcard`]. A pattern without a leading `/` joins onto the access's root, and its results come back relative to that root. The claim, the policy check, and the op sink all use the canonicalized pattern as the path, with a read claim and [`Op::Glob`]; the claim is the pattern itself, not each match, so a write to any path the pattern matches conflicts. A router sends the pattern to the longest-prefix mount, strips the prefix, and joins it back onto each result.
 - [`Access::list`] takes the `path` of a directory and returns its immediate children as a [`Vec`] of [`Entry`], sorted by name in the built-in backends. It registers a read claim and reports [`Op::List`]. It fails with [`VfsError::NotADirectory`] on a file and [`VfsError::NotFound`] when the path is absent.
 - [`Access::stat`] takes `path` and returns its [`Stat`]. It registers a read claim and reports [`Op::Stat`]. It fails with [`VfsError::NotFound`] when the path is absent. The host backend does not follow symlinks here, so a link reports [`FileType::Symlink`].
-- [`Access::grep`] takes `query`, a reference to a [`GrepQuery`], and returns a [`GrepResults`]. Through a router, each match's [`GrepMatch::path`] is the full virtual path. The query's [`GrepQuery::root`] is canonicalized, checked by the policy under [`Op::Grep`], and read-claimed. The claim and the op sink use the root only, not each searched file. It fails with [`VfsError::Unsupported`] when [`GrepQuery::is_regex`] is `true` and the backend uses the default body, and with any error from the backend's glob or reads. A host cannot build a [`GrepQuery`] of its own, as its entry explains, so in practice a host calls [`Access::grep`] only with a query it received and cloned.
+- [`Access::grep`] takes `query`, a reference to a [`GrepQuery`], and returns a [`GrepResults`]. Through a router, each match's [`GrepMatch::path`] is the full virtual path. The query's [`GrepQuery::root`] is canonicalized, checked by the policy under [`Op::Grep`], and read-claimed as the pattern the search observes: the root and the filter, as the default body composes them. The claim and the op sink use that pattern, not each searched file. It fails with [`VfsError::Unsupported`] when [`GrepQuery::is_regex`] is `true` and the backend uses the default body, and with any error from the backend's glob or reads. A host cannot build a [`GrepQuery`] of its own, as its entry explains, so in practice a host calls [`Access::grep`] only with a query it received and cloned.
 
-Dropping an [`Access`] releases its claims and its backend session, as [Identities and claims](#identities-and-claims) describes.
+Dropping an [`Access`] drops one reference to its identity and releases its backend session, as [Identities and claims](#identities-and-claims) describes.
 
 ## ExecId
 
-[`ExecId`] is the opaque identity of one serial thread of execution, and every operation and claim is attributed to one. The handle vends each one from a process-wide counter, so each is unique in the process. Hosts never build one. A backend receives it as the `id` argument of [`Vfs::acquire`] and [`Vfs::release`], and can use it to tell sessions apart. It is [`Copy`](std::marker::Copy) and [`Hash`](std::hash::Hash), so it works as a map key for per-identity state. Its [`Debug`](std::fmt::Debug) form appears in [`VfsError::Conflict`] messages.
+[`ExecId`] is the opaque identity of one serial thread of execution, and every operation and claim is attributed to one. The handle vends each one from a process-wide counter, so each is unique in the process. Hosts never build one. A backend receives it as the `id` argument of [`Vfs::acquire`] and [`Vfs::release`], and can use it to tell sessions apart. It is [`Copy`](std::marker::Copy) and [`Hash`](std::hash::Hash), so it works as a map key for per-identity state. Its [`Debug`](std::fmt::Debug) form appears in [`VfsError::Conflict`] messages. The engine forks an identity at each spawn and joins each task's identity back at delivery; a host never performs either.
 
 ## VfsError
 
@@ -598,9 +602,9 @@ Dropping an [`Access`] releases its claims and its backend session, as [Identiti
 - [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose detail is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", a regex grep against the default body, and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
   - [`VfsError::Unsupported::path`](VfsError#variant.Unsupported.field.path), a [`String`], is the path the operation targeted.
   - [`VfsError::Unsupported::detail`](VfsError#variant.Unsupported.field.detail), a [`String`], names what is unsupported and why.
-- [`VfsError::Conflict`]: the operation conflicts with another live identity's claim, and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path becomes [`StoreError::WriteRace`] and ends the run.
-  - [`VfsError::Conflict::path`](VfsError#variant.Conflict.field.path), a [`String`], is the canonical path both identities claimed.
-  - [`VfsError::Conflict::detail`](VfsError#variant.Conflict.field.detail), a [`String`], is the claims model's diagnosis, naming both identities and both claim kinds.
+- [`VfsError::Conflict`]: the operation conflicts with a claim unordered with its own - a claim by an identity in another live scope, or one in the same scope whose epoch the access's clock has not seen - and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path becomes [`StoreError::WriteRace`] and ends the run.
+  - [`VfsError::Conflict::path`](VfsError#variant.Conflict.field.path), a [`String`], is the canonical path or pattern both accesses claimed.
+  - [`VfsError::Conflict::detail`](VfsError#variant.Conflict.field.detail), a [`String`], is the happens-before diagnosis, naming both identities and both claim kinds.
 - [`VfsError::Backend`]: the serving backend failed for any other reason. That covers a backend refusing an identity, an unmapped host I/O error, and a byte-range read whose bounds exceed the addressable size.
   - [`VfsError::Backend::message`](VfsError#variant.Backend.field.message), a [`String`], is the backend's own diagnosis.
 
@@ -784,7 +788,7 @@ For a mutation, [`Mode::Agent`] returns [`Verdict::Allow`]. [`Mode::Ask`] return
 
 It returns a [`Result`] of a [`StoreOutcome`] or a [`StoreError`]. The outcome is [`StoreOutcome::Unit`] for [`StoreOp::Write`], [`StoreOp::Append`], [`StoreOp::StrReplace`], and [`StoreOp::Delete`], [`StoreOutcome::Text`] for [`StoreOp::Read`] and [`StoreOp::ReadNumbered`], [`StoreOutcome::Paths`] for [`StoreOp::Glob`], and [`StoreOutcome::Bool`] for [`StoreOp::Exists`]. Wrap the whole [`Result`] in [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store) and pass it to [`Run::resume`](crate::Run::resume).
 
-It is synchronous, so an async host runs it off its executor and drops the access after it returns, before resuming. Logical paths are joined onto the store mount `/_promptforge/store`. [`StoreOp::Delete`] of a missing file succeeds. [`StoreOp::Glob`] lists only files, as logical paths, and stats each match, which takes a read claim on each matched file.
+It is synchronous, so an async host runs it off its executor. Logical paths are joined onto the store mount `/_promptforge/store`. [`StoreOp::Delete`] of a missing file succeeds. [`StoreOp::Glob`] lists only files, as logical paths, and its read claim is the pattern itself.
 
 ## StoreOp
 
@@ -853,7 +857,7 @@ The read bounds are [`i64`] for compatibility with the prompt-facing call. [`Sto
 - [`StoreError::InvalidRange`]: a [`StoreOp::Read`] or [`StoreOp::ReadNumbered`] line range was rejected.
   - [`StoreError::InvalidRange::path`](StoreError#variant.InvalidRange.field.path), a [`String`], is the path the read targeted.
   - [`StoreError::InvalidRange::reason`](StoreError#variant.InvalidRange.field.reason), a [`&'static str`](str), is "start must be at least 1", "end must not be before start", or "start is required when end is given".
-- [`StoreError::WriteRace`]: two live identities touched the same path, and the losing operation never reached the backend. It ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism), which Lua cannot catch.
+- [`StoreError::WriteRace`]: two unordered accesses touched the same path, and the losing operation never reached the backend. It ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism), which Lua cannot catch.
   - [`StoreError::WriteRace::path`](StoreError#variant.WriteRace.field.path), a [`String`], is the path the conflicting operation targeted.
   - [`StoreError::WriteRace::detail`](StoreError#variant.WriteRace.field.detail), a [`String`], is the [`VfsError::Conflict`] message, naming the canonical virtual path, both identities, and both claim kinds.
 - [`StoreError::Backend`]: the backend failed for a reason of its own. Every filesystem error other than not-found and conflict lands here, including a policy denial, a read-only mount, and text that is not UTF-8.
@@ -876,7 +880,7 @@ The methods classify and inspect an error. None of them can fail.
 - [`StoreError::InvalidPath`]: "invalid path {path:?}: {reason}"
 - [`StoreError::InvalidPattern`]: "invalid glob pattern {pattern:?}: {reason}"
 - [`StoreError::InvalidRange`]: "invalid line range for {path}: {reason}"
-- [`StoreError::WriteRace`]: "write-write race on {path}: another live identity holds a claim on it"
+- [`StoreError::WriteRace`]: "write-write race on {path}: another unordered access holds a claim on it"
 - [`StoreError::Backend`]: "store backend failure"
 
 ## StoreErrorKind
@@ -889,7 +893,7 @@ The methods classify and inspect an error. None of them can fail.
 - [`StoreErrorKind::InvalidPath`]: a path failed validation.
 - [`StoreErrorKind::InvalidPattern`]: a glob pattern failed validation.
 - [`StoreErrorKind::InvalidRange`]: a line range failed validation.
-- [`StoreErrorKind::WriteRace`]: two live identities touched the same path.
+- [`StoreErrorKind::WriteRace`]: two unordered accesses touched the same path.
 - [`StoreErrorKind::Backend`]: the backend itself failed, including policy denials and read-only mounts surfaced through the store.
 
 ## PathReason
@@ -915,7 +919,7 @@ Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute"
 [`Vfs`] is one backend behind the virtual namespace. The only way to reach its storage is to acquire a per-identity session, a [`VfsAccess`]. A host implements it for a custom backend. The trait requires [`Send`] but not [`Sync`], because the handle serializes access. The crate implements it for [`MemoryBackend`], [`HostBackend`], and [`VfsRef`]. Pass an implementation to [`VfsRef::new`], [`VfsRef::with_policy`], [`VfsRefBuilder::mount`], or [`VfsRef::overlay`], all of which require `'static`.
 
 - [`Vfs::acquire`] is required. It takes `&mut self` and `id`, the [`ExecId`] that every operation on the new session is attributed to, and returns a [`Box`] of a [`VfsAccess`]. A backend that tracks who touches what keys on the id, and others ignore it. Return any [`VfsError`] when the backend cannot open a session, and the caller of [`VfsRef::acquire`] receives it, or the first operation on the mount through a router. It is called once per [`VfsRef::acquire`] for a directly wrapped backend, and lazily on first touch for a mounted one.
-- [`Vfs::release`] is required. It takes `&mut self` and the `id` being released, and returns `()` on success. Return a [`VfsError`] when the identity cannot be released, though the caller ignores it, because the release runs when the [`Access`] is dropped, after its claims are gone. So cancellation, panics, and early returns cannot skip it. Through a router, it is called at each mount the identity touched, after that mount's session is dropped.
+- [`Vfs::release`] is required. It takes `&mut self` and the `id` being released, and returns `()` on success. Return a [`VfsError`] when the identity cannot be released, though the caller ignores it, because the release runs when the [`Access`] is dropped. So cancellation, panics, and early returns cannot skip it. It ends the backend session only; the happens-before state lives and dies with the scope. Through a router, it is called at each mount the identity touched, after that mount's session is dropped.
 - [`Vfs::read_only`] has a default body that returns `false`. It takes `&self` and returns whether the backend rejects all mutations. On a read-only mount, a router refuses [`Access::write`], [`Access::append`], [`Access::remove`], [`Access::mkdir`], [`Access::str_replace`], the destination of [`Access::copy`], and either end of [`Access::rename`] before the backend is touched. A backend used alone through [`VfsRef::new`] must reject mutations itself.
 
 ## VfsAccess

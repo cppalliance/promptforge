@@ -74,12 +74,23 @@ impl Scheduler {
             task,
             &text,
         );
-        self.chains[owner.index()].task_notices.push(text);
+        self.chains[owner.index()]
+            .task_notices
+            .push((task.clone(), text));
     }
 
-    /// Takes every notice queued on `id`, in arrival order.
+    /// Takes every notice queued on `id`, in arrival order. Each notice
+    /// is its task's delivery to the model, so taking it joins the task:
+    /// everything the task did happens before the model's next step.
     pub(super) fn drain_task_notices(&mut self, id: ChainIndex) -> Vec<String> {
-        std::mem::take(&mut self.chains[id.index()].task_notices)
+        let notices = std::mem::take(&mut self.chains[id.index()].task_notices);
+        notices
+            .into_iter()
+            .map(|(task, text)| {
+                self.join_task(id, &task);
+                text
+            })
+            .collect()
     }
 
     /// Dispatches the loop shim's `drain_task_notices` request: the queued

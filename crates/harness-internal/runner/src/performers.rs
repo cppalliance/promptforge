@@ -93,9 +93,10 @@ pub trait InputPerformer: Send + Sync {
 /// Performs a `Store` effect: one store operation under the chain's
 /// access capability.
 ///
-/// Synchronous: the loop runs it on the blocking pool and drops the
-/// access after it returns, so the claims the operation held release
-/// before the answer reaches the run.
+/// Synchronous: the loop runs it on the blocking pool. Dropping the
+/// access when the operation completes is good hygiene, but it never
+/// affects correctness: claims follow happens-before within the run's
+/// scope.
 pub trait StorePerformer: Send + Sync {
     /// Performs `op` through `access`. The performer uses the capability
     /// as given and never derives, widens, or retains store scope from it.

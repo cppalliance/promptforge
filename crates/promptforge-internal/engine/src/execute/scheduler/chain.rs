@@ -103,9 +103,11 @@ impl Scheduler {
     /// Finishes one chain: the frame's teardown boundary when the chain
     /// ends mid-section, the chain-end rules for the tasks it owns (a live
     /// author task makes the outcome `tasks_live`; every live task is
-    /// abandoned), then the outcome's delivery - the run's result for
-    /// the root chain, the call answer for a child chain, the task slot's
-    /// outcome for a spawned chain.
+    /// abandoned), then the chain-end joins - every owned task's final
+    /// clock merges into this chain's own, so a waiting owner sees the
+    /// whole subtree transitively - and finally the outcome's delivery:
+    /// the run's result for the root chain, the call answer for a child
+    /// chain, the task slot's outcome for a spawned chain.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
     /// walk that ran off its slice's last section, or the chain's failure.
@@ -121,11 +123,10 @@ impl Scheduler {
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
-        // Taken now, dropped after the frame: the VM's store closures hold
-        // their own Arc clones of the capability, so the identity's claims
-        // release only when both are gone - at chain end, before a waiting
-        // owner is woken with the task's result. A call chain's slot is a
-        // borrowed clone, so its drop never releases the parent's identity.
+        // Taken now, dropped last: the VM's store closures hold their own
+        // Arc clones of the capability, so the identity's last reference
+        // drops only when both are gone. The chain-end joins run while
+        // this clone is still held.
         let access = chain.access.take();
         // The live H1 pass never arms completion: SECTION_FINISHED is a
         // walked section's boundary, not the setup pass's. Its completion
@@ -159,10 +160,17 @@ impl Scheduler {
         });
         // The frame drops here: the single teardown boundary.
         drop(frame);
-        drop(access);
         // The chain's tasks end with it: a live author task turns a
         // success into `tasks_live`, and every live task is abandoned.
         let outcome = self.settle_owned_tasks(id, outcome);
+        // The chain-end joins run after the settle - the abandoned tasks'
+        // identities ended there, so their final clocks are recorded -
+        // and before the access drops, so this chain's final clock
+        // transitively covers everything its tasks did.
+        if let Some(access) = &access {
+            self.join_owned_tasks(id, access);
+        }
+        drop(access);
         if is_task {
             // A missing slot is a scheduler bug: fail the run loudly rather
             // than lose the task's outcome.
@@ -225,26 +233,33 @@ impl Scheduler {
         if self.stack.last() == Some(&id) {
             self.stack.pop();
         }
-        let chain = &mut self.chains[id.index()];
-        chain.coroutine = None;
-        chain.incoming = None;
-        // A chain aborted mid-wait leaves its set: no member's end may wake
-        // a dead chain. The model's parked `await_tasks` goes with it; its
-        // timer was abandoned above with the chain's other owned slots.
-        chain.waiting_on.clear();
-        chain.awaiting = None;
-        chain.blocked = None;
-        chain.frame = None;
-        chain.access = None;
+        let access = {
+            let chain = &mut self.chains[id.index()];
+            chain.coroutine = None;
+            chain.incoming = None;
+            // A chain aborted mid-wait leaves its set: no member's end may
+            // wake a dead chain. The model's parked `await_tasks` goes
+            // with it; its timer was abandoned above with the chain's
+            // other owned slots.
+            chain.waiting_on.clear();
+            chain.awaiting = None;
+            chain.blocked = None;
+            chain.frame = None;
+            chain.access.take()
+        };
+        // The chain-end join: the aborted chain's final clock still
+        // transitively covers its tasks, for whoever joins the aborted
+        // chain itself.
+        if let Some(access) = &access {
+            self.join_owned_tasks(id, access);
+        }
     }
 
     /// Orphans one in-flight leaf effect whose chain is going away: the
     /// pending entry leaves, and the id is recorded so the host's answer,
     /// when it arrives, is discarded rather than failing the run. The host
-    /// still owes the answer: a store effect's access clone - and the
-    /// claims it holds - releases only when the host's performer finishes
-    /// and answers, and `Done` waits for it, so claim release stays
-    /// bounded to the run's lifetime on this path too.
+    /// still owes the answer: `Done` waits for every issued effect, so the
+    /// run ends only once the host has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
         self.pending.remove(&effect);
         self.orphaned.insert(effect);

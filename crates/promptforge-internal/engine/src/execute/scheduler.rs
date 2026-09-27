@@ -231,11 +231,12 @@ struct Chain {
     /// the chain. `None` while the chain runs or between blocks.
     blocked: Option<&'static str>,
     /// Model-task notices not yet delivered into the chain's next model
-    /// round, in arrival order: queued when a model task the chain owns
-    /// ends, drained by the loop shim's per-round request or by the
+    /// round, in arrival order: queued (with their task) when a model
+    /// task the chain owns ends, drained - each drain joining its task -
+    /// by the loop shim's per-round request or by the
     /// model's `await_tasks` answer. The H1 hand-off moves them to the
     /// walk with the pass's tasks.
-    task_notices: Vec<String>,
+    task_notices: Vec<(TaskId, String)>,
     /// The latest progress note published through `tasks.note` for the
     /// task this chain backs, reported by `tasks.status`.
     note: Option<String>,
@@ -243,15 +244,14 @@ struct Chain {
     /// chain, `with_args` for a call chain's input override.
     ctx: RunState,
     /// The chain's VFS access capability, installed into each section VM
-    /// the chain enters: the walk and the live H1 pass acquire their own,
-    /// a call chain borrows its parent's (a blocking child is the same
-    /// serial thread - no new identity, no false conflicts), and a task
-    /// chain spawns its own from its spawner's. `None` only after the
-    /// chain ends: the arena is append-only, so `finish` and
-    /// `abort_subtree` take the slot to release the identity's claims at
-    /// chain end rather than at scheduler drop - a fanout caller's merge
-    /// after its arms are delivered must not meet a finished arm's
-    /// lingering claims.
+    /// the chain enters: the walk and the live H1 pass share one root
+    /// identity, a call chain borrows its parent's (a blocking child is
+    /// the same serial thread - no new identity, no false conflicts), and
+    /// a task chain forks its own from its spawner's, joined back into
+    /// the spawner at every delivery and at chain end. `None` only after
+    /// the chain ends: the arena is append-only, so `finish` and
+    /// `abort_subtree` take the slot to drop the identity's last
+    /// reference at chain end rather than at scheduler drop.
     access: Option<Arc<Access>>,
     /// The per-section frame (VM, `sys`, conversation, counts): `Some`
     /// while a section is entered, `None` before the first entry and

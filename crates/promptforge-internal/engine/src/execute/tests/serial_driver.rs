@@ -113,7 +113,7 @@ const FANOUT: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 
 /// How a batched driver delivers a step's answers.
 #[derive(Clone, Copy, Debug)]
-enum Batching {
+pub(super) enum Batching {
     /// One answer per step: the oldest outstanding effect, then step.
     OnePerStep,
     /// Every outstanding effect answered in issue order, then step.
@@ -124,10 +124,10 @@ enum Batching {
 
 /// Everything one driven run produced, in the forms the properties
 /// compare.
-struct Outcome {
-    result: RunResult,
-    events: Vec<Event>,
-    effects: Vec<(Provenance, EffectRecord)>,
+pub(super) struct Outcome {
+    pub(super) result: RunResult,
+    pub(super) events: Vec<Event>,
+    pub(super) effects: Vec<(Provenance, EffectRecord)>,
 }
 
 impl Outcome {
@@ -161,7 +161,7 @@ impl Outcome {
 
 /// Drives `run` under `batching`, performing through [`perform_locally`]
 /// with `echo_chat` as the model, and records what it produced.
-fn drive_batched(mut run: Run, batching: Batching) -> Outcome {
+pub(super) fn drive_batched(mut run: Run, batching: Batching) -> Outcome {
     let mut events = Vec::new();
     let mut effects = Vec::new();
     let mut outstanding: Vec<(EffectId, Effect)> = Vec::new();

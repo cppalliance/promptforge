@@ -102,12 +102,12 @@ pub enum Effect {
         section: String,
     },
     /// One store operation under the chain's access capability. The
-    /// handle is minted by the engine from the chain's claims; a host
+    /// handle is minted by the engine under the chain's identity; a host
     /// performing the effect uses it as given and never derives, widens,
-    /// or retains store scope from it.
+    /// or retains store scope from it. Dropping it no longer affects
+    /// correctness: claims follow happens-before within the run's scope.
     Store {
-        /// The chain's access capability, released when the operation
-        /// completes.
+        /// The chain's access capability.
         access: Arc<Access>,
         /// The validated operation.
         op: StoreOp,

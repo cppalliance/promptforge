@@ -173,9 +173,10 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
     // entry is `0.K.0`, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence holds `.ok`
     // and `.item` with `__tostring` driving `table.concat`. The ids log is
-    // arm-scoped (the pattern the claims model teaches): every store op is
-    // a leaf yield now, so two arms appending one path would genuinely race
-    // and boom; the parent's post-join read merges the arm logs in order.
+    // arm-scoped (the pattern happens-before teaches): two arms appending
+    // one path are unordered and always boom; the parent's post-join read
+    // merges the arm logs in order, because the fanout's join_any rounds
+    // join every arm before it returns.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -724,31 +725,21 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
 
 #[tokio::test(flavor = "current_thread")]
 async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
-    // Restructured for the leaf-yield store path: each arm's write is a
-    // yield answered from the blocking pool, so two live arms writing one
-    // path race and the loser's op booms. The violation is fatal to the
-    // whole run at the answer boundary - the loser never resumes into Lua,
-    // so no author pcall can catch it - and every arm still parked when
-    // the fatal answer lands drops unarmed, reporting cancelled rather
-    // than failed.
+    // The arms write unordered: whichever op reaches the backend second
+    // meets the first's standing write claim, because claims are never
+    // released during a run, so the conflict cannot depend on timing.
+    // The violation is fatal to the whole run at the answer boundary -
+    // the loser never resumes into Lua, so no author pcall can catch it -
+    // and every arm still parked when the fatal answer lands drops
+    // unarmed, reporting cancelled rather than failed.
     //
-    // The gate makes the conflict deterministic: the first write to reach
-    // the backend parks with its claim held, so the second write's claim
-    // check meets it no matter how late the second blocking-pool thread
-    // starts. Without the gate the winner could write, return, and retire
-    // its claim before the loser's op ran, and the run would succeed.
-    //
-    // The gate does not order the two answers. It opens on the loser's
-    // failed observation, which fires before the loser posts its answer,
-    // so the winner's thread may complete its write and post first; the
-    // driver then resumes the winner into Lua and that arm succeeds before
-    // the fatal answer ends the run. Either interleaving satisfies the
-    // contract: both arms started, no arm fails on its own, and at most
-    // the winner reports a terminal - the loser is stranded mid-chain by
-    // the run's own failure, which is the record of how it ended.
+    // The winner's answer may land before or after the loser's: either
+    // interleaving satisfies the contract - both arms started, no arm
+    // fails on its own, and at most the winner reports a terminal (the
+    // loser is stranded mid-chain by the run's own failure, which is the
+    // record of how it ended).
     let recorder = Arc::new(Recorder::default());
-    let gate = Arc::new(StoreGate::default());
-    let store = gated_store(&gate);
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -763,11 +754,11 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         ```\n";
     let prompt = parse(md);
     let (ctx, host) =
-        scheduler_context_on(&prompt, &store, GateObserver::new(&gate, recorder.clone()));
+        scheduler_context_on(&prompt, &store, Arc::clone(&recorder) as Arc<dyn Observer>);
     let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
-        .expect_err("two live arms writing one path must terminate the run");
+        .expect_err("two arms writing one path must terminate the run");
 
     match &error {
         Error::Determinism(detail) => {
@@ -806,14 +797,12 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
 #[tokio::test(flavor = "current_thread")]
 async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation() {
     // The papergate case the WriteScope registry never caught: `append`
-    // claims write intent now, so two live arms appending to one path
-    // conflict exactly as two writes do - and under the leaf-yield store
-    // path the conflict is the fatal determinism violation, not a
-    // per-arm store error. The gate holds the first append's claim until
-    // the second append has met it, so the conflict cannot depend on
-    // blocking-pool timing.
-    let gate = Arc::new(StoreGate::default());
-    let store = gated_store(&gate);
+    // claims write intent, so two arms appending to one path conflict
+    // exactly as two writes do - and under happens-before the conflict is
+    // unconditional, because the arms never join each other before the
+    // fanout's own rounds deliver them. The conflict is the fatal
+    // determinism violation, not a per-arm store error.
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -827,15 +816,11 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(
-        &prompt,
-        &store,
-        GateObserver::new(&gate, Arc::new(NullObserver::default())),
-    );
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await
-        .expect_err("two live arms appending one path must terminate the run");
+        .expect_err("two arms appending one path must terminate the run");
 
     match &error {
         Error::Determinism(detail) => {

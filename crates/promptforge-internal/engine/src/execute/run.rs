@@ -266,8 +266,8 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
 /// `NotFound`. Only `NotFound` means "mount absent": any other error is the
 /// mounted backend's own failure and propagates, so a loud backend failure
 /// is never converted into the run silently reading and writing a
-/// throwaway overlay. The probe's identity and claim release with the
-/// access.
+/// throwaway overlay. The probe's access is a scope of its own, which
+/// ends with the access.
 fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, promptforge_vfs::VfsError> {
     match vfs
         .acquire(promptforge_vfs::Origin::new("store mount probe"))?

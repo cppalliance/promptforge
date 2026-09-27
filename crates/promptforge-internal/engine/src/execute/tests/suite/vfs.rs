@@ -73,8 +73,8 @@ fn extract_declared_output(store: &Store, prompt: &Prompt) -> Result<String, Str
 }
 
 /// Seeds the prompt's declared input through the run's prepared handle.
-/// The seeding access drops here - its claims release - so the run's own
-/// identity never meets the host's.
+/// The seeding access drops here - its scope ends - so the run's own
+/// scope never meets the host's.
 fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
     let input = prompt
         .frontmatter()

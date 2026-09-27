@@ -8,19 +8,12 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
-    // The store operation alone is the interleaving point now: every store
-    // op is a leaf yield, so the arms park live on their appends and the
-    // cross-arm append booms. Which arm's op executes first is the
-    // blocking pool's choice, and an op that runs to completion lets its
-    // arm finish and release its claims - so the test cannot rely on the
-    // second op starting while the first is still in flight. The gate
-    // parks the first op to reach the backend with its write claim held,
-    // and the second op's claim check meets that standing claim no matter
-    // how late its thread starts; the conflict's failed observation then
-    // opens the gate, so the winner's op completes ahead of the run-end
-    // drain that awaits it.
-    let gate = Arc::new(StoreGate::default());
-    let store = gated_store(&gate);
+    // The arms append unordered: neither joins the other before the
+    // fanout's own rounds, so the second append's claim check meets the
+    // first's standing write claim no matter how the blocking pool orders
+    // the two ops - claims are never released during a run, so the
+    // conflict cannot depend on timing.
+    let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -34,11 +27,7 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(
-        &prompt,
-        &store,
-        GateObserver::new(&gate, Arc::new(NullObserver::default())),
-    );
+    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let error = TokioDriver::new(&ctx, host, None)
         .drive()
         .await

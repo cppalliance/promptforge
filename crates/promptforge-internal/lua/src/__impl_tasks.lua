@@ -128,8 +128,11 @@ end
 -- value. The one scheduler wait primitive; the error value is returned,
 -- never raised, so the caller decides. A member the caller does not own
 -- raises task_not_owned; a member already delivered raises task_consumed.
--- `opts.timeout` (seconds) returns nil when nothing finished in time; the
--- members keep running. When a member wins, the timer is cancelled.
+-- The delivery is a join: everything the returned task did happens
+-- before the caller's next step, so its store writes are visible from
+-- the very next operation. `opts.timeout` (seconds) returns nil when
+-- nothing finished in time; the members keep running, and a later wait
+-- joins them. When a member wins, the timer is cancelled.
 local function tasks_join_any(set, opts)
   local ids = task_set(set, "tasks.join_any")
   local timeout = wait_timeout(opts, "tasks.join_any")
@@ -148,12 +151,15 @@ end
 -- input order; each entry is itself a Task handle. It never raises
 -- because a member failed - the failed member's entry holds `ok = false`
 -- and the error value - so no caller is forced into a cancel-or-leak
--- choice for the members still running. A member named twice is waited
--- on once and fills every position it was named at, so the result
+-- choice for the members still running. Every delivery is a join, so all
+-- of the members' store writes are visible after the wait. A member
+-- named twice is waited on once and fills every position it was named
+-- at, so the result
 -- sequence has no holes and `#results` is the input's length. With
 -- `opts.timeout` (seconds), one timer spans every round: when it fires,
--- `timed_out` is true and the unfinished members' entries are absent;
--- when every member finishes first, the timer is cancelled.
+-- `timed_out` is true and the unfinished members' entries are absent
+-- (a later wait joins them); when every member finishes first, the timer
+-- is cancelled.
 local function tasks_join(set, opts)
   local ids = task_set(set, "tasks.join")
   local timeout = wait_timeout(opts, "tasks.join")

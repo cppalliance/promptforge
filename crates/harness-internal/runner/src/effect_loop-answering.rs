@@ -56,13 +56,14 @@ impl Drop for Answering {
     }
 }
 
-/// Performs one store operation and releases its access before returning.
+/// Performs one store operation on the loop's behalf.
 ///
-/// Claims-release ordering: the access clone drops after the operation
-/// and before the answer posts, so the claims it holds release before a
-/// resumed chain can acquire overlapping claims. The access is this
-/// function's own parameter so the order holds on a panic too: the
-/// unwind drops it here, before the caller's [`Answering`] guard posts.
+/// The access is this function's own parameter, so it drops when the
+/// function returns - after the operation, before the caller's
+/// [`Answering`] guard posts. The ordering is no longer load-bearing
+/// (claims follow happens-before within the run's scope and are ignored
+/// once the scope ends), but the early drop keeps the run's identity
+/// count tidy.
 pub(super) fn perform_store(
     store: &dyn StorePerformer,
     access: Arc<Access>,

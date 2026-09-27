@@ -20,6 +20,7 @@ use crate::parser::Block;
 use crate::{Error, Result};
 
 use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
+use crate::store::Access;
 
 /// A heading resolved against a chain's visible set: the slice the walk or
 /// a contained chain continues on, the target's index in it, and whether
@@ -61,27 +62,39 @@ impl Scheduler {
             &serde_json::json!({}),
             0,
         )?;
-        self.install_root_slots(root)?;
+        self.install_root_slots(root, None)?;
         self.ready.push_back(root);
         Ok(())
     }
 
-    /// Seeds a fresh root walk chain's slot: its own access capability -
-    /// the walk is its own serial thread of execution, and a fresh acquire
-    /// (the H1 pass's identity ended with its chain) means nothing the pass
-    /// touched can false-conflict with the walk.
+    /// Seeds a fresh root walk chain's slot: its own access capability.
+    /// The root walk is its own serial thread of execution, so a prompt
+    /// without H1 blocks acquires it fresh; the walk that follows the H1
+    /// pass reuses the pass's capability instead - the root identity spans
+    /// the pass and the walk, so nothing the pass touched false-conflicts
+    /// with the walk.
     ///
     /// # Errors
     /// Returns [`Error::Store`] when the backend refuses acquisition.
-    pub(super) fn install_root_slots(&mut self, root: ChainIndex) -> Result<()> {
-        // The walk capability serves every section in turn, so its label
-        // is the prompt's own; the line is where the walk starts.
-        let prompt = self.ctx.prompt();
-        let blocks: &[Block] =
-            promptforge_parser::detail::entry(prompt).map_or(&[], |section| section.blocks());
-        let origin = prompt_origin(prompt, prompt.title(), blocks);
-        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
-        self.chains[root.index()].access = Some(Arc::new(access));
+    pub(super) fn install_root_slots(
+        &mut self,
+        root: ChainIndex,
+        existing: Option<Arc<Access>>,
+    ) -> Result<()> {
+        let access = if let Some(access) = existing {
+            // The H1 hand-off: the walk continues the pass's identity.
+            access
+        } else {
+            // The walk capability serves every section in turn, so its
+            // label is the prompt's own; the line is where the walk
+            // starts.
+            let prompt = self.ctx.prompt();
+            let blocks: &[Block] =
+                promptforge_parser::detail::entry(prompt).map_or(&[], |section| section.blocks());
+            let origin = prompt_origin(prompt, prompt.title(), blocks);
+            Arc::new(self.ctx.vfs().acquire(origin).map_err(Error::Store)?)
+        };
+        self.chains[root.index()].access = Some(access);
         Ok(())
     }
 

@@ -4,9 +4,12 @@
 //! tasks it owns and is resumed with the first member that ends - at once
 //! when one already has, otherwise when a member's chain end delivers it.
 //! Delivery moves a `Done` slot to `Delivered` (its outcome is taken by
-//! exactly one wait; a second wait raises `task_consumed`); a `Cancelled`
-//! slot delivers `ok = false` with the `cancelled` error value and stays
-//! as it is, since it holds no result to consume. An `Abandoned` slot is
+//! exactly one wait; a second wait raises `task_consumed`), and it joins
+//! the task: everything the task did happens before the owner's next
+//! step, so its store writes are visible from the very next operation. A
+//! `Cancelled` slot delivers `ok = false` with the `cancelled` error
+//! value and stays as it is, since it holds no result to consume - but
+//! its delivery still joins its partial writes. An `Abandoned` slot is
 //! never delivered: a task is abandoned because its owner ended, and only
 //! the owner may wait on it, so no wait can reach the slot.
 //!
@@ -135,8 +138,15 @@ impl Scheduler {
     /// outcome moves out and the slot to `Delivered`; a cancelled slot
     /// yields the `cancelled` error value and stays, having no result to
     /// consume. An abandoned slot has no live owner to wait on it, so its
-    /// delivery is a scheduler bug.
+    /// delivery is a scheduler bug. The delivery is the join: everything
+    /// the task did happens before the owner's next step, so its store
+    /// writes - a cancelled task's partial writes included - are visible
+    /// from the very next operation.
     fn deliver(&mut self, task: &TaskId) -> TaskDelivery<Error> {
+        if let Some(slot) = self.tasks.get(task) {
+            let owner = slot.owner;
+            self.join_task(owner, task);
+        }
         let outcome = match self.tasks.get_mut(task) {
             Some(slot) => match slot.state {
                 TaskState::Done => {

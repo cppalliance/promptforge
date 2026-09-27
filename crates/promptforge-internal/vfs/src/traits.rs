@@ -43,8 +43,11 @@ pub trait Vfs: Send {
     /// Returns an error when the backend cannot open a session.
     fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError>;
 
-    /// Releases `id`. Also called from the access object's Drop, so
-    /// teardown paths (cancel, panic, early return) cannot skip it.
+    /// Releases `id`. Called from the access object's Drop - through a
+    /// router, once per mount the identity touched - so teardown paths
+    /// (cancel, panic, early return) cannot skip it. It ends the backend
+    /// session only; the happens-before claims live and die with the
+    /// scope, never with a release.
     ///
     /// # Errors
     ///

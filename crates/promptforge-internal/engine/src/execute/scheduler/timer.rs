@@ -69,6 +69,7 @@ impl Scheduler {
                 state: TaskState::Running,
                 ok: None,
                 outcome: None,
+                exec: None,
             },
         );
         Ok(task)

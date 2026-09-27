@@ -146,11 +146,13 @@ pub enum VfsError {
         /// What is unsupported and why.
         detail: String,
     },
-    /// The operation conflicts with another live identity's claim.
+    /// The operation conflicts with a claim unordered with its own: a
+    /// claim by another live scope's identity, or one in the same scope
+    /// whose epoch the operation's clock has not seen.
     Conflict {
-        /// The canonical path both identities claimed.
+        /// The canonical path or pattern both accesses claimed.
         path: String,
-        /// The claims model's diagnosis, naming both identities and both
+        /// The happens-before diagnosis, naming both identities and both
         /// claim kinds.
         detail: String,
     },

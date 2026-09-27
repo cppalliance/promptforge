@@ -4,13 +4,13 @@
 //! and returns the effects the drain issued with the events it reported.
 //! An empty ready queue with an empty pending table is a stall, which
 //! fails loudly rather than hangs. The run's `Done` is withheld until
-//! every issued effect has its answer, so no store op's access clone
-//! outlives the run and every effect the host was handed has exactly one
-//! answer.
+//! every issued effect has its answer, so every effect the host was
+//! handed has exactly one answer.
 
 use crate::execute::RunResult;
 use crate::execute::error::RunError;
 use crate::execute::run::{EffectAnswer, EffectId, Step};
+use crate::execute::scheduler::ChainIndex;
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
@@ -171,10 +171,22 @@ impl Scheduler {
     /// coroutine, then the frame unarmed, then the access capability) and
     /// orphans every pending effect. The task slots keep their terminal
     /// state for inspection; every slot is terminal by now, `end` having
-    /// settled the live ones, so nothing here reports.
+    /// settled the live ones, so nothing here reports. Each chain joins
+    /// the tasks it owns before its access drops, closing the run's
+    /// happens-before record.
     fn teardown(&mut self) {
         self.ready.clear();
         self.stack.clear();
+        for (index, chain) in self.chains.iter().enumerate() {
+            let Some(access) = chain.access.as_ref() else {
+                continue;
+            };
+            let owner = ChainIndex(
+                u32::try_from(index)
+                    .unwrap_or_else(|_| panic!("the arena is u32-bounded at insertion")),
+            );
+            self.join_owned_tasks(owner, access);
+        }
         for chain in &mut self.chains {
             chain.coroutine = None;
             chain.incoming = None;

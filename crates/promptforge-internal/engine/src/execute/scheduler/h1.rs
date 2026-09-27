@@ -84,8 +84,8 @@ impl Scheduler {
     /// # Errors
     /// Returns [`Error::Lua`] when the final `var` read-back fails or H1
     /// left `argv` as non-JSON data,
-    /// [`Error::Store`] when the backend refuses the walk's acquisition,
-    /// or [`Error::Internal`] when the chain holds no frame.
+    /// or [`Error::Internal`] when the chain holds no frame. The walk
+    /// reuses the pass's capability, so the hand-off acquires nothing.
     pub(super) fn end_live_h1(
         &mut self,
         id: ChainIndex,
@@ -101,9 +101,11 @@ impl Scheduler {
         // or its repair - is what every walked section inherits, frozen.
         let argv = frame.read_argv()?;
         drop(frame);
-        // The pass's chain ends here: release its capability (and with it
-        // the identity's claims) before the walk acquires its own.
-        chain.access = None;
+        // The root identity spans the pass and the walk: the walk reuses
+        // the pass's capability, so nothing the pass wrote false-conflicts
+        // with the walk, and a task the pass spawned joins the one root
+        // identity.
+        let walk_access = Arc::clone(chain.access()?);
         // The walk is the same root chain as the pass, so it continues the
         // pass's counters: the pass took entry 0, the first walked section
         // takes entry 1, and a child the pass started keeps its index.
@@ -129,7 +131,7 @@ impl Scheduler {
             &var,
             0,
         )?;
-        self.install_root_slots(root)?;
+        self.install_root_slots(root, Some(walk_access))?;
         // The walk is the pass's continuation, so the tasks the pass
         // spawned are the walk's from here: it waits on, cancels, or leaks
         // them exactly as if it had spawned them.

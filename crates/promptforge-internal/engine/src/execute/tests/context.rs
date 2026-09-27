@@ -189,9 +189,9 @@ pub(super) struct RunOptions {
 /// The test stand-in for the old `StoreRef::memory()`: a stock VFS handle
 /// (the store mount preinstalled) whose `read`/`write` helpers each go
 /// through a fresh, immediately dropped access. A short-lived access per
-/// call is what keeps seeding and post-run assertions conflict-free: the
-/// claims model attributes every operation to a live identity, so a held
-/// seeder access would meet the run's own identities as a false race.
+/// call is what keeps seeding and post-run assertions conflict-free: each
+/// access is its own scope, and its claims die with it, so a held seeder
+/// access would meet the run's own scope as a false race.
 ///
 /// The handle is reconnectable: [`run`]'s prepare pass builds the run's
 /// own router (a fresh store backend per run), so the wrapper points the

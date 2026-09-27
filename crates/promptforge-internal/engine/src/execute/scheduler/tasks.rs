@@ -32,7 +32,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
-use promptforge_vfs::detail::access_spawn;
+use promptforge_vfs::detail::{access_id, access_spawn};
+use promptforge_vfs::{Access, ExecId};
 
 use crate::execute::protocol::Answer;
 use crate::execute::section_context::TaskSeed;
@@ -100,6 +101,11 @@ pub(super) struct TaskSlot {
     /// The chain's final text or failure, held from the chain's end until
     /// the owner takes it.
     pub(super) outcome: Option<Result<String>>,
+    /// The task's happens-before identity: the [`ExecId`] its access was
+    /// spawned under, recorded at spawn so a delivery can join the task
+    /// after its chain has dropped the access. `None` for the internal
+    /// timer, which has no identity to join.
+    pub(super) exec: Option<ExecId>,
 }
 
 impl TaskSlot {
@@ -153,8 +159,9 @@ impl Scheduler {
     /// spawner's visible set, the worker-template check (a list section is
     /// not a target), then the task chain one level deeper under the
     /// spawn's `args` and `var` snapshot, with its own access capability
-    /// (a concurrent thread of execution under the claims model, spawned
-    /// from the spawner's so the spawn is the happens-before edge) and a
+    /// (a concurrent thread of execution, forked from the spawner's so
+    /// the spawn is the happens-before edge; every delivery of the task
+    /// joins it back) and a
     /// fresh turn counter. The caller enqueues the returned child behind
     /// the spawner.
     #[expect(
@@ -210,6 +217,10 @@ impl Scheduler {
             prompt_origin(&prompt, worker.name(), worker.blocks()),
         )
         .map_err(Error::Store)?;
+        // The task's happens-before identity, recorded before the access
+        // moves into the chain: every delivery joins it, and the chain
+        // end joins it last.
+        let exec = access_id(&access);
         // The task's id is the spawner's next child index, shared with
         // `call` children, so it depends only on the spawner's own
         // dispatch order; the task is its chain, named from the other side.
@@ -244,6 +255,7 @@ impl Scheduler {
                 state: TaskState::Running,
                 ok: None,
                 outcome: None,
+                exec: Some(exec),
             },
         );
         // The start includes the spawn seeds: everything a host needs to
@@ -345,6 +357,35 @@ impl Scheduler {
         match outcome {
             Ok(_) if !leaked.is_empty() => Err(Error::TasksLive { tasks: leaked }),
             outcome => outcome,
+        }
+    }
+
+    /// Joins `task` into `owner`: merges the task's final clock into the
+    /// owner's access, so everything the task did happens before the
+    /// owner's next step. A timer (no identity) and an owner already
+    /// ended (no access) need no join.
+    pub(super) fn join_task(&self, owner: ChainIndex, task: &TaskId) {
+        let Some(exec) = self.tasks.get(task).and_then(|slot| slot.exec) else {
+            return;
+        };
+        let Ok(access) = self.chains[owner.index()].access() else {
+            return;
+        };
+        promptforge_vfs::detail::access_join(access, exec);
+    }
+
+    /// Joins every task `owner` owns into `access`: the chain-end join,
+    /// so the chain's own final clock transitively covers everything its
+    /// tasks did even when no wait delivered them.
+    pub(super) fn join_owned_tasks(&self, owner: ChainIndex, access: &Access) {
+        let execs: Vec<ExecId> = self
+            .tasks
+            .values()
+            .filter(|slot| slot.owner == owner)
+            .filter_map(|slot| slot.exec)
+            .collect();
+        for exec in execs {
+            promptforge_vfs::detail::access_join(access, exec);
         }
     }
 

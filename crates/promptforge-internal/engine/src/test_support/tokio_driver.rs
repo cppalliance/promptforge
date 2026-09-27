@@ -14,17 +14,23 @@
 //!
 //! When the run reports itself decided ([`Run::decided`]) every performer
 //! still out is aborted and joined - a blocking-pool store operation runs
-//! to completion, so its access clone and the claims it holds release
-//! before the result is delivered - and its effect is answered `Dropped`,
-//! as is every effect issued in the deciding step itself, which is never
-//! performed; so the run reaches `Done` with every effect answered exactly
-//! once.
+//! to completion before the run ends - and its effect is answered
+//! `Dropped`, as is every effect issued in the deciding step itself, which
+//! is never performed; so the run reaches `Done` with every effect
+//! answered exactly once.
 //!
 //! Cancellation is a synchronous flag: the caller hands one to
 //! [`drive_tokio`], the loop awaits it beside the answer channel, and when
 //! it fires the loop cancels the run so a run whose chains are all
 //! suspended tears down promptly. Running Lua observes the run's own flag
 //! from its instruction hook.
+//!
+//! Under a test shuffle seed ([`TokioDriver::set_shuffle_for_test`]) the
+//! loop instead holds each wave of answers until every outstanding effect
+//! has posted one, then delivers the wave in the seed's permutation: one
+//! seed is one deterministic completion interleaving, which the
+//! determinism suites sweep across seeds. The performers all post
+//! independently of the run, so the hold cannot deadlock.
 //!
 //! This is a test host: the engine's own suites drive it in place of the
 //! scheduler they used to drive, and a companion crate's suite enables
@@ -143,6 +149,10 @@ pub(crate) struct TokioDriver<'a> {
     /// The caller's cancel flag, awaited while the loop waits on answers;
     /// when it fires the run is cancelled.
     cancel: CancelHandle,
+    /// Test-only: the seed for the completion-order shuffle; `None`
+    /// delivers answers in arrival order.
+    #[cfg(test)]
+    shuffle: Option<u64>,
     /// Every event the run has reported, in step order: the history a
     /// `TaskEvents` effect is answered from. A step's events are appended
     /// before its effects are performed, so a task reading its own record
@@ -194,6 +204,8 @@ impl<'a> TokioDriver<'a> {
             history: Vec::new(),
             #[cfg(test)]
             tap: None,
+            #[cfg(test)]
+            shuffle: None,
         }
     }
 
@@ -266,15 +278,22 @@ impl<'a> TokioDriver<'a> {
     /// the cancel, so a fully suspended run costs no wakeups while it
     /// waits.
     async fn await_answer(&mut self) {
+        #[cfg(test)]
+        if self.shuffle.is_some() {
+            self.await_shuffled_batch().await;
+            return;
+        }
         tokio::select! {
             biased;
             arrival = self.rx.recv() => {
-                if let Some((id, answer)) = arrival {
-                    self.deliver(id, answer);
+                let mut batch = Vec::new();
+                if let Some(pair) = arrival {
+                    batch.push(pair);
                 }
-                while let Ok((id, answer)) = self.rx.try_recv() {
-                    self.deliver(id, answer);
+                while let Ok(pair) = self.rx.try_recv() {
+                    batch.push(pair);
                 }
+                self.deliver_batch(batch);
             }
             // The run acts on its own flag at its next step; setting it
             // here is what makes that step happen promptly when the
@@ -282,6 +301,54 @@ impl<'a> TokioDriver<'a> {
             () = self.cancel.cancelled() => {
                 self.run.cancel();
             }
+        }
+    }
+
+    /// Test-only wait under a shuffle seed: holds the current wave's
+    /// delivery until every outstanding effect has posted its answer,
+    /// then delivers the whole wave in the seed's permutation. Holding
+    /// the whole wave is what makes the shuffle exhaustive - answering
+    /// one arrival at a time would rarely permute anything - and every
+    /// performer posts independently of the run, so the hold cannot
+    /// deadlock. The cancel flag still tears the run down from the
+    /// hold.
+    #[cfg(test)]
+    async fn await_shuffled_batch(&mut self) {
+        let mut batch = Vec::new();
+        loop {
+            tokio::select! {
+                biased;
+                arrival = self.rx.recv() => {
+                    if let Some(pair) = arrival {
+                        batch.push(pair);
+                        if batch.len() >= self.outstanding.len() {
+                            self.deliver_batch(batch);
+                            return;
+                        }
+                    } else {
+                        self.deliver_batch(batch);
+                        return;
+                    }
+                }
+                () = self.cancel.cancelled() => {
+                    self.run.cancel();
+                    self.deliver_batch(batch);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Delivers one wave of answers in arrival order, or - under a test
+    /// shuffle seed - in the seed's permutation of the wave.
+    fn deliver_batch(&mut self, batch: Vec<(EffectId, EffectAnswer)>) {
+        #[cfg(test)]
+        let batch = match &mut self.shuffle {
+            Some(seed) => shuffle_batch(batch, seed),
+            None => batch,
+        };
+        for (id, answer) in batch {
+            self.deliver(id, answer);
         }
     }
 
@@ -295,9 +362,8 @@ impl<'a> TokioDriver<'a> {
 
     /// Aborts and joins every performer still out and answers each of
     /// their effects `Dropped`. A blocking-pool store operation cannot be
-    /// interrupted, so the join waits for it to finish; only then is its
-    /// access clone - and the claims it holds - gone, which is what keeps
-    /// claim release bounded to the run's lifetime.
+    /// interrupted, so the join waits for it to finish; only then does the
+    /// run reach `Done`, with every issued effect answered exactly once.
     async fn drop_outstanding(&mut self) {
         let outstanding = std::mem::take(&mut self.outstanding);
         for (id, handle) in outstanding {
@@ -346,12 +412,6 @@ impl<'a> TokioDriver<'a> {
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&Store::new(&access), op);
-                    // Claims-release ordering constraint: the access clone
-                    // must drop after the op and before the answer posts,
-                    // so the claims it holds release before a resumed chain
-                    // can acquire overlapping claims; the fix changes when
-                    // claims release, never whether an operation succeeds.
-                    drop(access);
                     post(&tx, id, EffectAnswer::Store(result));
                 })
             }
@@ -384,6 +444,14 @@ impl<'a> TokioDriver<'a> {
         let tap = Arc::new(Mutex::new(Vec::new()));
         self.tap = Some(Arc::clone(&tap));
         tap
+    }
+
+    /// Test-only: seeds the completion-order shuffle, so each seed
+    /// yields one deterministic interleaving of concurrently completed
+    /// effects.
+    #[cfg(test)]
+    pub(crate) fn set_shuffle_for_test(&mut self, seed: u64) {
+        self.shuffle = Some(seed);
     }
 
     /// Appends one step's issued effects to the tap, in issue order.
@@ -464,4 +532,23 @@ impl Drop for TokioDriver<'_> {
 /// driver whose receiver closed); the answer is then moot.
 fn post(tx: &AnswerSender, id: EffectId, answer: EffectAnswer) {
     let _ = tx.send((id, answer));
+}
+
+/// Deterministically permutes `batch` under `seed`, advancing the seed
+/// so successive waves differ. xorshift64: dependency-free, and one
+/// seed always yields one order.
+#[cfg(test)]
+fn shuffle_batch(
+    mut batch: Vec<(EffectId, EffectAnswer)>,
+    seed: &mut u64,
+) -> Vec<(EffectId, EffectAnswer)> {
+    for index in (1..batch.len()).rev() {
+        *seed ^= seed.wrapping_shl(13);
+        *seed ^= *seed >> 7;
+        *seed ^= seed.wrapping_shl(17);
+        // The modulo binds the pick to the batch; the truncated-fallback
+        // arm never runs on a 64-bit target, which this suite requires.
+        batch.swap(index, usize::try_from(*seed).unwrap_or(0) % (index + 1));
+    }
+    batch
 }

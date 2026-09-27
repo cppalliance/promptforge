@@ -775,7 +775,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-5>
 
-### Step 5: Happens-before claims and joins
+### Step 5: Happens-before claims and joins [completed]
 
 - Component: Happens-before determinism
 - Piece: happens-before core. The VFS claims and the engine joins are built jointly, in one commit: without joins an owner can't read a finished task's files, and the joins need `detail::access_join`, so neither half is green alone.
