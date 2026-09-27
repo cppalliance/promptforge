@@ -17,7 +17,8 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { ZoneStateService, ZONE_STATE, ZONE_NAMES } from "./src/services/zone-state-service.ts";
+      export { ZoneStateService, ZONE_STATE } from "./src/services/zone-state-service.ts";
+      export { ZONE_NAMES } from "@workshop/platform/panel-registry";
       export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(uiDir, ".."),

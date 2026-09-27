@@ -1,7 +1,7 @@
 // The zone registry: the only module that talks to Dockview placement
-// APIs. Zones are named tab banks - "left" holds the workspace tree,
-// "main" holds document editors, "right" holds the agent session
-// ("bottom" is reserved for later). Placement for a new panel resolves as
+// APIs. Zones are named tab banks - "left" and "right" are the side bars,
+// "main" is the document area between them ("bottom" is reserved for
+// later). Placement for a new panel resolves as
 // the per-panel override recorded when the user last moved that panel,
 // then the panel type's declared affinity from the panel registry.
 //
@@ -47,22 +47,21 @@ import "./zones.css";
 import type { Direction, DockviewApi, IDockviewGroupPanel, IDockviewPanel } from "dockview";
 
 import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
-import { DOCK, isPanelType, panelTypeEntry, type PanelType } from "../../services/panel-registry";
-import { getService, registerService } from "@workshop/platform/service-registry";
 import {
+  DOCK,
   ZONE_NAMES,
-  ZoneStateService,
-  ZONE_STATE,
+  isPanelType,
+  panelTypeEntry,
+  type PanelParams,
+  type PanelType,
   type ZoneName,
-  type ZoneState,
-} from "../../services/zone-state-service";
+} from "@workshop/platform/panel-registry";
+import { getService, registerService } from "@workshop/platform/service-registry";
+import { ZoneStateService, ZONE_STATE, type ZoneState } from "../../services/zone-state-service";
 
-export { ZONE_NAMES } from "../../services/zone-state-service";
-export type { PanelType } from "../../services/panel-registry";
-export type { ZoneName, ZoneState } from "../../services/zone-state-service";
-
-/** Parameters passed into a panel open; editor opens pass { path }. */
-export type PanelParams = Record<string, unknown>;
+export { ZONE_NAMES } from "@workshop/platform/panel-registry";
+export type { PanelParams, PanelType, ZoneName } from "@workshop/platform/panel-registry";
+export type { ZoneState } from "../../services/zone-state-service";
 
 let dock: DockviewApi | null = null;
 
@@ -154,34 +153,25 @@ function rebuildZone(zone: ZoneName): void {
 }
 
 /**
- * The panel id for one open: editors key by path, new agent panels key by
- * their instance id, Run windows key by their instance id, and every
- * other panel kind is a singleton.
+ * The panel id for one open: the type's own panelId rule when it declares
+ * one, else `type:instance` when the params carry a string instance, else
+ * the bare type, making the kind a singleton.
  */
 export function panelIdFor(type: PanelType, params: PanelParams): string {
-  if (type === "editor") {
-    const path = params.path;
-    if (typeof path === "string") {
-      return `editor:${path}`;
-    }
-    // Untitled buffers key by their allocated serial, so each new buffer
-    // is its own panel instead of reactivating the previous one.
-    const untitled = params.untitled;
-    if (typeof untitled === "number") {
-      return `editor:untitled-${untitled}`;
-    }
-    return "editor:";
+  const panelId = panelTypeEntry(type)?.panelId;
+  if (panelId !== undefined) {
+    return panelId(params);
   }
-  if (type === "agent" && typeof params.instance === "string") {
-    return `agent:${params.instance}`;
-  }
-  if (type === "run" && typeof params.instance === "string") {
-    return `run:${params.instance}`;
+  if (typeof params.instance === "string") {
+    return `${type}:${params.instance}`;
   }
   return type;
 }
 
-/** Recovers the panel type from a panel id built by panelIdFor. */
+/**
+ * Recovers the panel type from a panel id built by panelIdFor. Splits at
+ * the first colon: path-keyed ids like `type:C:\...` carry more colons.
+ */
 function panelTypeFromId(id: string): PanelType | null {
   const separator = id.indexOf(":");
   const name = separator === -1 ? id : id.slice(0, separator);
@@ -278,9 +268,9 @@ function liveGroup(zone: ZoneName): IDockviewGroupPanel | undefined {
 
 /**
  * Hides or shows a zone's live group and answers the new visibility.
- * Hiding goes through the group's own setVisible, so its panels - and
- * the agent session's socket, for the right zone - survive; nothing is
- * removed. Answers undefined when the zone has no live group, leaving
+ * Hiding goes through the group's own setVisible, so its panels and
+ * their live connections survive; nothing is removed. Answers undefined
+ * when the zone has no live group, leaving
  * the caller to open the zone's anchor panel instead.
  */
 export function toggleZoneVisibility(zone: ZoneName): boolean | undefined {
@@ -334,18 +324,13 @@ function rebuildPosition(zone: ZoneName): ZonePosition | undefined {
   return { referenceGroup: first.id, direction: zone };
 }
 
-/** The tab title for one open: editors take the file's base name. */
+/** The tab title for one open: the type's title, computed when it is a function. */
 function titleFor(type: PanelType, params: PanelParams): string {
-  if (type === "editor" || type === "run") {
-    const path = params.path;
-    if (typeof path === "string") {
-      const name = path.split(/[\\/]/).filter(Boolean).pop();
-      if (name !== undefined) {
-        return type === "run" ? `Run: ${name}` : name;
-      }
-    }
+  const title = panelTypeEntry(type)?.title;
+  if (title === undefined) {
+    return type;
   }
-  return panelTypeEntry(type)?.title ?? type;
+  return typeof title === "function" ? title(params) : title;
 }
 
 /**

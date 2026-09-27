@@ -33,6 +33,8 @@ import { setupGatewayConfigBridge } from "./parts/gateway/gateway-config-bridge"
 import { StatusBar } from "./parts/status/status-bar";
 import { UpdateView } from "./parts/chrome/update-view";
 import { setupWindowChrome } from "./parts/chrome/window-chrome";
+// Panel types register through this import's contribution modules, which
+// must evaluate before the layout boots: keep it static.
 import { setupWindowMenus } from "./parts/menu/index";
 import { KeybindingDispatcher } from "./parts/layout/keybinding-dispatcher";
 import { CommandsHistory } from "./parts/quickinput/commands-history";

@@ -1,46 +1,46 @@
-// The panel registry: the SPA-side mirror of the server's
-// workshop-registry. Every dockview panel kind is declared here once -
-// its zone affinity, default title, tab renderer, and the import thunk
-// that lazy-loads its feature directory - and the feature's own
-// register() installs the panel factory when the chunk resolves. The
-// registry holds metadata eagerly and code lazily: zones.ts resolves
-// placement from the entries below without the panel implementations
-// (CodeMirror, Shiki, TipTap) landing in the initial bundle, and the
-// first activation of a panel loads its directory on demand.
+// The panel registry: every dockview panel kind is declared here once -
+// its zone affinity, title, identity rule, and the import thunk that
+// lazy-loads its feature directory - and the feature's own register()
+// installs the panel factory when the chunk resolves. The registry is
+// open: it declares no panel kind itself; each feature registers its own
+// from an eager module that evaluates before the layout boots. It holds
+// metadata eagerly and code lazily: placement resolves from the entries
+// without the panel implementations landing in the initial bundle, and
+// the first activation of a panel loads its directory on demand.
 //
 // The registry itself is DOM-free data plus the load machinery; the
-// renderer that swaps a resolved panel into the dock lives in
-// parts/layout/panel-types.ts.
+// renderer that swaps a resolved panel into the dock lives with the
+// application.
 
 import type { DockviewApi, IContentRenderer } from "dockview";
 
-import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
-import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
-import type { ZoneName } from "./zone-state-service";
+import { DisposableStore, type IDisposable } from "./lifecycle";
+import { createServiceToken, type ServiceToken } from "./service-registry";
 
-/** The registered name of the close-button-free tab renderer. */
-export const PERMANENT_TAB = "permanent";
-/** The registered name of the agent tab renderer with an SPA context menu. */
-export const AGENT_TAB = "agent-tab";
-/** The registered name of the Run window's shimmering-title tab renderer. */
-export const RUN_TAB = "run-tab";
+/** The dock's named tab banks. */
+export const ZONE_NAMES = ["left", "main", "right"] as const;
+export type ZoneName = (typeof ZONE_NAMES)[number];
 
-/** The panel kinds the workbench knows. */
-export type PanelType = "tree" | "editor" | "config" | "agent" | "run";
+/** A registered panel kind's name. */
+export type PanelType = string;
+
+/**
+ * Parameters passed into a panel open. They must be JSON-safe: Dockview
+ * serializes them into the saved layout, and a restored panel receives
+ * them back as its only state.
+ */
+export type PanelParams = Record<string, unknown>;
 
 /**
  * The contract a lazy feature directory's barrel (index.ts) satisfies.
  * register() installs what belongs to the chunk: the directory's panel
- * factory, chunk-bound quick-access providers, and chunk-sourced
- * context keys (the editor's activeEditor/editorLangId, which follow
- * the dock). Actions, menu rows, and keybinding rules do not belong
- * here - they live in the feature's eager <feature>.contribution.ts,
- * registered into the shared registries at module scope through
- * registerAction, because register() runs only when the chunk loads
- * and the boot-time menus must render before that. register() returns
- * a disposable the registry holds for the page lifetime. It may return
- * a promise when activation has async setup; the panel mounts after it
- * resolves.
+ * factory, chunk-bound quick-access providers, and context keys that
+ * follow the dock. Actions, menu rows, and keybinding rules do not belong
+ * here - they register at module scope from an eager module, because
+ * register() runs only when the chunk loads and the boot-time menus must
+ * render before that. register() returns a disposable the registry holds
+ * for the page lifetime. It may return a promise when activation has
+ * async setup; the panel mounts after it resolves.
  */
 export interface PanelFeatureModule {
   register?: () => IDisposable | Promise<IDisposable> | void | Promise<void>;
@@ -48,24 +48,34 @@ export interface PanelFeatureModule {
 
 /** One panel kind's registration: static metadata plus the lazy thunk. */
 export interface PanelTypeEntry {
-  readonly type: string;
+  readonly type: PanelType;
+  /** The tab title: fixed, or computed from the open's params. */
+  readonly title: string | ((params: PanelParams) => string);
   /** The zone a new panel opens in when the user has not moved it. */
   readonly defaultZone: ZoneName;
-  readonly title: string;
+  /** False when the tab strip must not close the panel. Defaults to true. */
+  readonly closable?: boolean;
+  /**
+   * The panel id for one open. Without it, a string `instance` param keys
+   * the id as `type:instance`, and otherwise the kind is a singleton.
+   * An id must start with `type:` or equal `type`, so the type is
+   * recoverable by splitting at the first colon.
+   */
+  readonly panelId?: (params: PanelParams) => string;
   /** The named tab renderer, or undefined for Dockview's default tab. */
-  readonly tabComponent: string | undefined;
+  readonly tabComponent?: string;
   /** Loads the feature directory's barrel; esbuild splits it into a chunk. */
   readonly load: () => Promise<PanelFeatureModule>;
 }
 
-/** The composition root's dock, registered by initZones at boot. */
+/** The composition root's dock, registered by the zone layer at boot. */
 export const DOCK: ServiceToken<DockviewApi> = createServiceToken<DockviewApi>("workshop.dock");
 
 /**
  * The seam a lazy panel wrapper exposes: the real panel once the feature
- * chunk has resolved. Panels that inspect dock content (the editor
- * commands' instanceof checks, the tree's focus command) must unwrap
- * through resolvePanelContent, never read view.content directly.
+ * chunk has resolved. Code that inspects dock content (instanceof checks
+ * against a feature's panel class) must unwrap through
+ * resolvePanelContent, never read view.content directly.
  */
 export interface LazyPanelHost {
   readonly resolvedPanel: IContentRenderer | null;
@@ -95,10 +105,13 @@ const loadPromises = new Map<string, Promise<(() => IContentRenderer) | undefine
 const registrationStore = new DisposableStore();
 
 /**
- * Declares one panel kind. Re-registering a type replaces its entry.
+ * Declares one panel kind. Throws when the type is already registered.
  * The returned disposable removes the registration.
  */
 export function registerPanelType(entry: PanelTypeEntry): IDisposable {
+  if (entries.has(entry.type)) {
+    throw new Error(`the panel type "${entry.type}" is already registered`);
+  }
   entries.set(entry.type, entry);
   loadPromises.delete(entry.type);
   return {
@@ -180,44 +193,3 @@ export function loadPanelType(type: string): Promise<(() => IContentRenderer) | 
   promise.catch(() => loadPromises.delete(type));
   return promise;
 }
-
-// The built-in panel kinds. The metadata is eager; the code behind each
-// thunk is a lazy chunk. Heavy panels (the agent session's Shiki and
-// TipTap, the editor's CodeMirror) leave the initial bundle this way.
-registerPanelType({
-  type: "tree",
-  defaultZone: "left",
-  title: "Workshop",
-  // The Workshop tree anchors the workbench; its tab has no close
-  // button, so the panel cannot be dismissed from the tab strip.
-  tabComponent: PERMANENT_TAB,
-  load: () => import("../parts/workspace/index"),
-});
-registerPanelType({
-  type: "editor",
-  defaultZone: "main",
-  title: "Editor",
-  tabComponent: undefined,
-  load: () => import("../parts/editor/index"),
-});
-registerPanelType({
-  type: "config",
-  defaultZone: "main",
-  title: "Gateway Config",
-  tabComponent: undefined,
-  load: () => import("../parts/gateway/index"),
-});
-registerPanelType({
-  type: "agent",
-  defaultZone: "right",
-  title: "Agent Session",
-  tabComponent: AGENT_TAB,
-  load: () => import("../parts/agent/index"),
-});
-registerPanelType({
-  type: "run",
-  defaultZone: "main",
-  title: "Run",
-  tabComponent: RUN_TAB,
-  load: () => import("../parts/run/index"),
-});

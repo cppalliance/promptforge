@@ -30,7 +30,7 @@ import {
 import { nextDiagnostic, previousDiagnostic } from "@codemirror/lint";
 import { openSearchPanel, SearchCursor, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 
-import { DOCK, resolvePanelContent } from "../../services/panel-registry";
+import { DOCK, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { EditorPanel } from "./editor-panel";
 

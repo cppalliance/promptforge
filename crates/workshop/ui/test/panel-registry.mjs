@@ -1,13 +1,14 @@
-// Unit test for the panel registry (src/services/panel-registry.ts) and the
-// lazy panel seam in panel-types.ts: panel types are declared with import
-// thunks, the feature chunk loads on first activation, the directory's
-// register() runs exactly once no matter how many panels open, and the
-// real panel swaps into the dockview renderer element when the chunk
-// resolves. Bundles the modules with esbuild (the built-in thunks come
-// along but are never triggered) and drives the registry against jsdom
-// with a synthetic lazy feature (test/helpers/lazy-feature.mjs). Covers:
-// the four built-in panel types' metadata (zone affinity, title, tab
-// renderer), isPanelType narrowing, the unknown-name placeholder, lazy
+// Unit test for the panel registry (@workshop/platform/panel-registry) and
+// the lazy panel seam in panel-types.ts: panel types are declared with
+// import thunks, the feature chunk loads on first activation, the
+// directory's register() runs exactly once no matter how many panels
+// open, and the real panel swaps into the dockview renderer element when
+// the chunk resolves. Bundles the modules with esbuild (the features'
+// thunks come along but are never triggered) and drives the registry
+// against jsdom with a synthetic lazy feature
+// (test/helpers/lazy-feature.mjs). Covers: the feature panel types'
+// metadata as their contribution modules register it (zone affinity,
+// title, tab renderer), isPanelType narrowing, the unknown-name placeholder, lazy
 // mount with init params forwarded, register-once semantics, disposal
 // reaching the real panel, and the registration outliving the panel.
 // Run: node test/panel-registry.mjs
@@ -37,7 +38,13 @@ globalThis.Node = window.Node;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      import { registerPanelType, registerPanelFactory } from "./src/services/panel-registry.ts";
+      import { registerPanelType, registerPanelFactory } from "@workshop/platform/panel-registry";
+      // Each feature registers its own panel type from its contribution.
+      import "./src/parts/workspace/workspace.contribution.ts";
+      import "./src/parts/editor/editor.contribution.ts";
+      import "./src/parts/gateway/gateway.contribution.ts";
+      import "./src/parts/agent/agent.contribution.ts";
+      import "./src/parts/run/run.contribution.ts";
       // The synthetic lazy feature, registered from inside the bundle so
       // its register() shares this module graph's registry instance (the
       // helper receives registerPanelFactory through a global: a static
@@ -50,14 +57,8 @@ const bundle = await esbuild.build({
         tabComponent: undefined,
         load: () => import("./test/helpers/lazy-feature.mjs"),
       });
-      export {
-        registerPanelType,
-        isPanelType,
-        panelTypeEntry,
-        PERMANENT_TAB,
-        AGENT_TAB,
-      } from "./src/services/panel-registry.ts";
-      export { createPanelComponent } from "./src/parts/layout/panel-types.ts";
+      export { registerPanelType, isPanelType, panelTypeEntry } from "@workshop/platform/panel-registry";
+      export { createPanelComponent, PERMANENT_TAB, AGENT_TAB, RUN_TAB } from "./src/parts/layout/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -83,6 +84,7 @@ const {
   panelTypeEntry,
   PERMANENT_TAB,
   AGENT_TAB,
+  RUN_TAB,
   createPanelComponent,
 } = await import(pathToFileURL(bundlePath).href);
 
@@ -97,19 +99,35 @@ async function flush() {
   }
 }
 
-// --- The built-in panel types ------------------------------------------------
+// --- The contribution-registered panel types -----------------------------------
 
+const editorTitle = panelTypeEntry("editor")?.title;
+const editorPanelId = panelTypeEntry("editor")?.panelId;
+const runTitle = panelTypeEntry("run")?.title;
 check(
-  "the tree anchors the left zone with the permanent tab",
+  "the tree anchors the left zone with the permanent, closeless tab",
   panelTypeEntry("tree")?.defaultZone === "left" &&
     panelTypeEntry("tree")?.title === "Workshop" &&
+    panelTypeEntry("tree")?.closable === false &&
     panelTypeEntry("tree")?.tabComponent === PERMANENT_TAB,
 );
 check(
   "the editor opens in the main zone with the default tab",
   panelTypeEntry("editor")?.defaultZone === "main" &&
-    panelTypeEntry("editor")?.title === "Editor" &&
     panelTypeEntry("editor")?.tabComponent === undefined,
+);
+check(
+  "the editor titles by base name, else Editor",
+  typeof editorTitle === "function" &&
+    editorTitle({ path: "C:\\project\\a.txt" }) === "a.txt" &&
+    editorTitle({ untitled: 1 }) === "Editor",
+);
+check(
+  "the editor keys by path, then untitled serial, then the bare prefix",
+  typeof editorPanelId === "function" &&
+    editorPanelId({ path: "C:\\project\\a.txt" }) === "editor:C:\\project\\a.txt" &&
+    editorPanelId({ untitled: 3 }) === "editor:untitled-3" &&
+    editorPanelId({}) === "editor:",
 );
 check(
   "the gateway config opens in the main zone",
@@ -121,6 +139,14 @@ check(
   panelTypeEntry("agent")?.defaultZone === "right" &&
     panelTypeEntry("agent")?.title === "Agent Session" &&
     panelTypeEntry("agent")?.tabComponent === AGENT_TAB,
+);
+check(
+  "the Run window opens in the main zone, titled after its file",
+  panelTypeEntry("run")?.defaultZone === "main" &&
+    panelTypeEntry("run")?.tabComponent === RUN_TAB &&
+    typeof runTitle === "function" &&
+    runTitle({ path: "C:\\project\\p.md" }) === "Run: p.md" &&
+    runTitle({}) === "Run",
 );
 check("isPanelType narrows registered names", isPanelType("editor") && !isPanelType("nope"));
 

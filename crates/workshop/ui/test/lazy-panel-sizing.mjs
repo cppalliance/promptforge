@@ -30,7 +30,7 @@ const uiDir = path.join(testDir, "..");
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      import { registerPanelType, registerPanelFactory } from "./src/services/panel-registry.ts";
+      import { registerPanelType, registerPanelFactory } from "@workshop/platform/panel-registry";
       // A synthetic lazy panel kind whose factory the test supplies through
       // a global, so the test observes the real panel's layout() calls
       // from outside the bundle.
@@ -46,6 +46,8 @@ const bundle = await esbuild.build({
             },
           }),
       });
+      // The agent panel type registers from its contribution.
+      import "./src/parts/agent/agent.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export { initZones, openInZone } from "./src/parts/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";

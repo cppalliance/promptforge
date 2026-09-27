@@ -13,10 +13,8 @@
 import { Emitter } from "@workshop/platform/event";
 import type { Event } from "@workshop/platform/event";
 import type { IDisposable } from "@workshop/platform/lifecycle";
+import { ZONE_NAMES, type ZoneName } from "@workshop/platform/panel-registry";
 import { createServiceToken, registerService } from "@workshop/platform/service-registry";
-
-export const ZONE_NAMES = ["left", "main", "right"] as const;
-export type ZoneName = (typeof ZONE_NAMES)[number];
 
 /** The persisted placement state: live zone groups and user overrides. */
 export interface ZoneState {

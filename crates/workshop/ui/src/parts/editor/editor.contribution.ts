@@ -11,6 +11,10 @@
 // chords outrank them. Rows the catalog shows without a keybinding
 // (Duplicate Selection, Add Previous Occurrence, Select All Occurrences)
 // register none.
+//
+// The editor's panel type registers here too: editors key by path, and
+// untitled buffers by their allocated serial, so each new buffer is its
+// own panel instead of reactivating the previous one.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
@@ -18,11 +22,29 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingsRegistry, KeybindingWeight } from "@workshop/platform/keybinding-registry";
 import { MenuId } from "@workshop/platform/menu-registry";
+import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { getService } from "@workshop/platform/service-registry";
+import { baseName } from "../../base/paths";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "../../services/editor-settings-service";
 import { createGotoLineProvider } from "./goto-line";
+
+registerPanelType({
+  type: "editor",
+  title: (params) => (typeof params.path === "string" ? baseName(params.path) : "Editor"),
+  defaultZone: "main",
+  panelId: (params) => {
+    if (typeof params.path === "string") {
+      return `editor:${params.path}`;
+    }
+    if (typeof params.untitled === "number") {
+      return `editor:untitled-${params.untitled}`;
+    }
+    return "editor:";
+  },
+  load: () => import("./index"),
+});
 
 /** The editor-commands module as a type only; the runtime import stays lazy. */
 type EditorCommands = typeof import("./editor-commands");

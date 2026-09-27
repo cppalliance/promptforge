@@ -22,6 +22,9 @@
 // own titles and pass the path as args[0], which the run bodies narrow
 // to string, never cast. Neither is f1 - a palette row cannot supply a
 // path argument, and Go to File... already owns that surface.
+//
+// The tree's panel type registers here too: the Workshop tree anchors
+// the left zone and its tab has no close button.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
@@ -30,12 +33,23 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingWeight } from "@workshop/platform/keybinding-registry";
 import { MenuId, Menus } from "@workshop/platform/menu-registry";
+import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService } from "@workshop/platform/service-registry";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
+import { PERMANENT_TAB } from "../layout/panel-types";
 import { createFileQuickAccessProvider, createRecentMenuProvider } from "./open-recent";
 import { focusWorkshopTree, toggleWorkshopPanel } from "./workshop-panel";
+
+registerPanelType({
+  type: "tree",
+  title: "Workshop",
+  defaultZone: "left",
+  closable: false,
+  tabComponent: PERMANENT_TAB,
+  load: () => import("./index"),
+});
 
 /** The file-actions module as a type only; the runtime import stays lazy. */
 type FileActions = typeof import("./file-actions");

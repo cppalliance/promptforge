@@ -2,7 +2,7 @@
 // activation hook. Importers point at the source files directly; this
 // module re-exports nothing.
 
-import { registerPanelFactory } from "../../services/panel-registry";
+import { registerPanelFactory } from "@workshop/platform/panel-registry";
 import { MODEL_SERVICE } from "../../services/model-service";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { SPEECH_CAPTURE } from "../../services/speech-capture";

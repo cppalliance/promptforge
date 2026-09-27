@@ -24,7 +24,7 @@ import type { GroupPanelPartInitParameters } from "dockview";
 
 import { toDisposable } from "@workshop/platform/lifecycle";
 import { WorkshopPart } from "@workshop/platform/workshop-part";
-import { DOCK, resolvePanelContent } from "../../services/panel-registry";
+import { DOCK, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";

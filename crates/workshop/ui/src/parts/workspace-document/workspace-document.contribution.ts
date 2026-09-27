@@ -42,7 +42,7 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import { errorText, isCatalogError, type Result } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
 import { MenuId } from "@workshop/platform/menu-registry";
-import { DOCK } from "../../services/panel-registry";
+import { DOCK } from "@workshop/platform/panel-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";

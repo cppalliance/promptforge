@@ -39,7 +39,7 @@ const bundle = await esbuild.build({
       export { ensureSyntaxTree } from "@codemirror/language";
       export { setDiagnostics } from "@codemirror/lint";
       export { registerService, getService } from "@workshop/platform/service-registry";
-      export { DOCK } from "./src/services/panel-registry.ts";
+      export { DOCK } from "@workshop/platform/panel-registry";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { CodeMirrorSurface } from "./src/parts/editor/editor-surface.ts";
       export { Commands } from "@workshop/platform/command-registry";

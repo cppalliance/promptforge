@@ -29,6 +29,10 @@ const bundle = await esbuild.build({
       // the implementation's module scope self-registers the empty default,
       // so importing it here keeps close/empty-group handling working.
       import "./src/parts/editor/closed-editors.ts";
+      // The panel types this test opens register from their contributions.
+      import "./src/parts/workspace/workspace.contribution.ts";
+      import "./src/parts/editor/editor.contribution.ts";
+      import "./src/parts/agent/agent.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,

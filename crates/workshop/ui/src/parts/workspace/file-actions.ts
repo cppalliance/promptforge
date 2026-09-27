@@ -9,7 +9,7 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { errorText } from "../../services/error-catalog";
-import { DOCK } from "../../services/panel-registry";
+import { DOCK } from "@workshop/platform/panel-registry";
 import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
 import { fetchTree } from "../../services/workspace-api";

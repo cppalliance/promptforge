@@ -6,14 +6,22 @@
 // rows. The run body opens the config panel through the zone registry;
 // the panel's chunk loads lazily through the panel registry, and a
 // second activation focuses the existing panel because the config panel
-// is a singleton.
+// is a singleton. The config panel's type registers here too.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "@workshop/platform/menu-registry";
+import { registerPanelType } from "@workshop/platform/panel-registry";
 import { openInZone } from "../layout/zones";
+
+registerPanelType({
+  type: "config",
+  title: "Gateway Config",
+  defaultZone: "main",
+  load: () => import("./index"),
+});
 
 /** The Preferences flyout's id; the menubar contribution declares the submenu. */
 const PREFERENCES_MENU: MenuId = "menubar/file/preferences";

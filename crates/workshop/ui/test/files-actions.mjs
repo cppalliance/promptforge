@@ -34,6 +34,8 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/workspace/workspace.contribution.ts";
+      // Opening a file needs the editor's panel type, registered by its contribution.
+      import "./src/parts/editor/editor.contribution.ts";
       export { Commands } from "@workshop/platform/command-registry";
       export { Menus } from "@workshop/platform/menu-registry";
       export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
@@ -41,7 +43,7 @@ const bundle = await esbuild.build({
       export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
       export { registerService } from "@workshop/platform/service-registry";
-      export { DOCK } from "./src/services/panel-registry.ts";
+      export { DOCK } from "@workshop/platform/panel-registry";
       export { QUICK_INPUT_SERVICE } from "./src/services/quick-input-service.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
@@ -603,8 +605,8 @@ registerService(RECENT_FILES_STORE, () => recentStore);
     (r) => r.title ?? Commands.lookup(r.command)?.title,
   );
   check(
-    "Open Recent lists roots, then recent files, then the static rows",
-    titles.join(",") === "project,a.txt,notes.txt,More...,Clear Recently Opened...",
+    "Open Recent lists the editor's reopen row, roots, then recent files, then the static rows",
+    titles.join(",") === "Reopen Closed Editor,project,a.txt,notes.txt,More...,Clear Recently Opened...",
   );
 
   const descriptor = QuickAccessRegistry.getQuickAccessProvider("b.txt");

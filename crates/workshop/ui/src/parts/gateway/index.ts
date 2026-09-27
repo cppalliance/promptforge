@@ -3,7 +3,7 @@
 // module re-exports nothing.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
-import { registerPanelFactory } from "../../services/panel-registry";
+import { registerPanelFactory } from "@workshop/platform/panel-registry";
 import { GatewayConfigPanel } from "./gateway-config-panel";
 
 /**

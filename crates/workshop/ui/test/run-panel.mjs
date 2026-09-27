@@ -26,6 +26,9 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
+      // The panel types this test opens register from their contributions.
+      import "./src/parts/workspace/workspace.contribution.ts";
+      import "./src/parts/run/run.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export { initZones, openInZone, panelIdFor, zoneOfPanel } from "./src/parts/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";

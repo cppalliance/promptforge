@@ -12,15 +12,28 @@
 // item, no keybinding - F5 belongs to the full plan's Run Prompt
 // command. The disabled debug stubs in stubs.contribution.ts stay
 // untouched; this row lands in its own group above them.
+//
+// The Run panel's type registers here too, keyed by the `instance`
+// param and titled after the seeded file.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "@workshop/platform/menu-registry";
-import { DOCK } from "../../services/panel-registry";
+import { DOCK, registerPanelType } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
+import { baseName } from "../../base/paths";
+import { RUN_TAB } from "../layout/panel-types";
 import { openInZone } from "../layout/zones";
+
+registerPanelType({
+  type: "run",
+  title: (params) => (typeof params.path === "string" ? `Run: ${baseName(params.path)}` : "Run"),
+  defaultZone: "main",
+  tabComponent: RUN_TAB,
+  load: () => import("./index"),
+});
 
 const action: ActionDescriptor = {
   id: "workbench.action.newRunWindow",

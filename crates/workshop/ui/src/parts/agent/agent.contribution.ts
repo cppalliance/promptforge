@@ -9,13 +9,26 @@
 //
 // The id is ours: Cursor ships a New Agents Window row but its command
 // id is not public.
+//
+// The agent panel's type registers here too. Its instances key by the
+// `instance` param; an open without one is the boot-time singleton.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "@workshop/platform/menu-registry";
+import { registerPanelType } from "@workshop/platform/panel-registry";
+import { AGENT_TAB } from "../layout/panel-types";
 import { openInZone } from "../layout/zones";
+
+registerPanelType({
+  type: "agent",
+  title: "Agent Session",
+  defaultZone: "right",
+  tabComponent: AGENT_TAB,
+  load: () => import("./index"),
+});
 
 const action: ActionDescriptor = {
   id: "workbench.action.newAgentsWindow",

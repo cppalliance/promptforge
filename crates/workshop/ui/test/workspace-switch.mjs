@@ -47,6 +47,9 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/workspace-document/workspace-document.contribution.ts";
+      // The default layout's panel types register from their contributions.
+      import "./src/parts/workspace/workspace.contribution.ts";
+      import "./src/parts/agent/agent.contribution.ts";
       export { register } from "./src/parts/workspace-document/index.ts";
       export { Commands } from "@workshop/platform/command-registry";
       export { registerService } from "@workshop/platform/service-registry";

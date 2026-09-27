@@ -1,11 +1,11 @@
 // The dockview renderer seam for the panel registry. The panel kinds
 // themselves - zone affinity, title, tab renderer, and the import thunk
-// that lazy-loads the feature directory - are declared in
-// services/panel-registry.ts; this file holds the DOM side: the LazyPanel
-// that stands in for a panel while its chunk loads (Home Assistant's
-// partial-panel-resolver pattern), the tab renderers, and Dockview's
-// createComponent / createTabComponent dispatch. main.ts and the tests
-// build the dock's dispatch from here.
+// that lazy-loads the feature directory - are registered by each feature
+// into @workshop/platform/panel-registry; this file holds the DOM side:
+// the LazyPanel that stands in for a panel while its chunk loads (Home
+// Assistant's partial-panel-resolver pattern), the tab renderers, and
+// Dockview's createComponent / createTabComponent dispatch. main.ts and
+// the tests build the dock's dispatch from here.
 
 import type {
   CreateComponentOptions,
@@ -16,26 +16,24 @@ import type {
 } from "dockview";
 
 import { Disposable } from "@workshop/platform/lifecycle";
-import {
-  AGENT_TAB,
-  PERMANENT_TAB,
-  RUN_TAB,
-  loadPanelType,
-  panelTypeEntry,
-} from "../../services/panel-registry";
+import { loadPanelType, panelTypeEntry } from "@workshop/platform/panel-registry";
 import { DropdownMenu } from "@workshop/look/dropdown";
 import { RunTab } from "./run-tab";
 
 export {
-  AGENT_TAB,
-  PERMANENT_TAB,
-  RUN_TAB,
   isPanelType,
   panelTypeEntry,
   registerPanelFactory,
   registerPanelType,
-} from "../../services/panel-registry";
-export type { PanelFeatureModule, PanelType, PanelTypeEntry } from "../../services/panel-registry";
+} from "@workshop/platform/panel-registry";
+export type { PanelFeatureModule, PanelType, PanelTypeEntry } from "@workshop/platform/panel-registry";
+
+/** The registered name of the close-button-free tab renderer. */
+export const PERMANENT_TAB = "permanent";
+/** The registered name of the agent tab renderer with an SPA context menu. */
+export const AGENT_TAB = "agent-tab";
+/** The registered name of the Run window's shimmering-title tab renderer. */
+export const RUN_TAB = "run-tab";
 
 /**
  * A dockview content renderer standing in for a panel whose feature

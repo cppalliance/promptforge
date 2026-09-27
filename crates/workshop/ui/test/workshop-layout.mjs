@@ -55,6 +55,7 @@ const bundle = await esbuild.build({
       import "./src/parts/editor/editor.contribution.ts";
       import "./src/parts/layout/layout.contribution.ts";
       import "./src/parts/workspace/workspace.contribution.ts";
+      import "./src/parts/agent/agent.contribution.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { StatusBar } from "./src/parts/status/status-bar.ts";
     `,

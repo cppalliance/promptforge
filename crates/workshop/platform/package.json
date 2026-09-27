@@ -21,7 +21,8 @@
     "./reconnect-backoff": "./reconnect-backoff.ts",
     "./text-control-service": "./text-control-service.ts",
     "./status-bar": "./status-bar.ts",
-    "./workshop-part": "./workshop-part.ts"
+    "./workshop-part": "./workshop-part.ts",
+    "./panel-registry": "./panel-registry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

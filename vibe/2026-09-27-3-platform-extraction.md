@@ -492,7 +492,7 @@ Four components, built in dependency order. Each is useful on its own and resemb
 
 <step-3>
 
-### Step 3: Open the panel registry and let features register their panel types
+### Step 3: Open the panel registry and let features register their panel types [completed]
 
 - Component: open panel registry
 - Piece: registry and self-registration. Built before the layout policy, sequentially, because the policy resolves `defaultZone` from registered entries.
