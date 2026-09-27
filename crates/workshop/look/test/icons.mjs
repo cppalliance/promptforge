@@ -1,23 +1,23 @@
-// Unit test for the lucide-backed icon strings (src/parts/shared/icons.ts).
-// Bundles the module with esbuild, imports it via a data URL under jsdom
-// (lucide's createElement needs a document at module load), and asserts
-// every exported icon is a parseable inline SVG string holding the
-// dimensions and stroke attributes the tree panel's CSS sizes against -
-// the panel assigns these strings to innerHTML.
-// Run: node test/icons.mjs
+// Unit test for the lucide-backed icon strings (icons.ts). Bundles the
+// module with esbuild, imports it via a data URL under jsdom (lucide's
+// createElement needs a document at module load), and asserts every
+// exported icon is a parseable inline SVG string holding the dimensions
+// and stroke attributes the tree panel's CSS sizes against - the panel
+// assigns these strings to innerHTML.
+// Run: node test/icons.mjs (from crates/workshop/look).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const lookDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
 const result = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "parts", "shared", "icons.ts")],
+  entryPoints: [path.join(lookDir, "icons.ts")],
   bundle: true,
   write: false,
   format: "esm",

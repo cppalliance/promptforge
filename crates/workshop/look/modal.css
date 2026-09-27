@@ -20,7 +20,7 @@
 		padding: 1.25rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-xl);
-		background: var(--bg-secondary);
+		background: var(--cursor-chrome);
 		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
 	}
 	.modal-actions {

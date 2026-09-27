@@ -1,14 +1,17 @@
-// Unit test for the shared status bar view (@workshop/look/status-bar.ts):
-// the barberpole beside the consumer's indicators group (setBusy shows
-// and hides the barberpole, the group stays visible throughout and keeps
-// its contents, the barberpole precedes the group in DOM order), the
-// text region's label, tooltip, and error styling, and the extras region
-// the consumers fill. Bundles the module with esbuild and drives it
-// against jsdom.
-// Run: node test/shared-status-bar.mjs.
+// Unit test for the shared status bar view (status-bar.ts): the
+// barberpole beside the consumer's indicators group (setBusy shows and
+// hides the barberpole, the group stays visible throughout and keeps its
+// contents, the barberpole precedes the group in DOM order), the text
+// region's label, tooltip, and error styling, and the extras region the
+// consumers fill. Bundles the module with esbuild and drives it against
+// jsdom.
+// Run: node test/shared-status-bar.mjs (from crates/workshop/look).
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+
+const lookDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
@@ -19,7 +22,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/status-bar"))],
+  entryPoints: [path.join(lookDir, "status-bar.ts")],
   bundle: true,
   write: false,
   format: "esm",

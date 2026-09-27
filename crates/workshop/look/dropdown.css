@@ -31,7 +31,7 @@
 		border: 0;
 		border-radius: var(--radius);
 		background: transparent;
-		color: var(--text-primary);
+		color: var(--cursor-text-primary);
 		font: inherit;
 		font-size: var(--font-size-base);
 		text-align: start;

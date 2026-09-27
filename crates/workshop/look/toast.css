@@ -23,11 +23,11 @@
 		border: 1px solid var(--border);
 		border-left-width: 3px;
 		border-radius: var(--radius);
-		background: var(--bg-secondary);
+		background: var(--cursor-chrome);
 		box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
 	}
 	.toast-success {
-		border-left-color: var(--success);
+		border-left-color: var(--cursor-green);
 	}
 	.toast-error {
 		border-left-color: var(--danger);

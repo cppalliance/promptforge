@@ -2,7 +2,7 @@
 // gives out (events), and exposes (the handle), plus the chip model and
 // the persisted draft shape. Everything the host and the component
 // share is declared here and nowhere else. `chatbox/` imports only
-// `base/lifecycle`, `shared/icons`, and `@tiptap/*`; the two host types
+// `base/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two host types
 // this file mirrors - the text-control adapter and dictation's input
 // target - are declared structurally so neither side imports the other.
 

@@ -25,7 +25,7 @@ import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { EditorState } from "@tiptap/pm/state";
 import { Disposable, type IDisposable, toDisposable } from "../../base/lifecycle";
-import { ICON_MIC, ICON_SEND } from "../shared/icons";
+import { ICON_MIC, ICON_SEND } from "@workshop/look/icons";
 import { renderChip } from "./chip-view";
 import {
   attrsFromChip,

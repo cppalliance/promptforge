@@ -345,7 +345,7 @@ Every change is behavior-neutral, so verification means the existing suites pass
 
 <step-4>
 
-### Step 4: Absorb the family visual layer into look and give it tests and guards
+### Step 4: Absorb the family visual layer into look and give it tests and guards [completed]
 
 - Component: `@workshop/look`
 - Placement: last, because it edits `look` as the package the Workshop already consumes and both documentation items describe the final shape. The alias cleanup, token tiers, icons, tests, guards, and docs are built jointly in one commit: they touch disjoint files except `src/main.ts` (token imports) and `workshop-panel.ts` and `chat-box.ts` (icon import lines only), none changes behavior, and one run of the workspace suites plus a visual check covers all of them. The boundary test's `lucide` allowance needs the icons moved in this same step.

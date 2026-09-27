@@ -15,8 +15,17 @@ The Workshop family: the desktop app, the in-process server, the subsystems the 
 - `protocol` (vocabulary): the `/ws` frame types and the agent input-wait frames. The agent-session frames live in the server, their only producer, so this crate depends on no product crate.
 - `registry` (vocabulary): self-registration slots and the `Push` facade.
 - `support` (vocabulary): shared primitives (including the retained broadcast bus and its `recv_or_pending` helper) and test fixtures.
-- `ui` (not a Rust crate): the TypeScript SPA. The workspace tree panel lives in `parts/workspace/`, the File menu's open, save-as, and duplicate workspace commands in `parts/workspace-document/`, and the icons and panel dialog helper in `parts/shared/`.
-- `look` (not a Rust crate): `@workshop/look`, the Workshop family's fork of `crates/shared-ui` - the Cursor Dark tokens and the shared components (modal, dropdown, toast stack, status bar view, progress bar, button and input bases). The SPA consumes it through the npm workspace rooted at `crates/workshop`.
+- `ui` (not a Rust crate): the TypeScript SPA. The workspace tree panel lives in `parts/workspace/`, the File menu's open, save-as, and duplicate workspace commands in `parts/workspace-document/`, and the panel dialog helper in `parts/shared/`.
+- `look` (not a Rust crate): `@workshop/look`, the family's visual layer, forked from `crates/shared-ui` - the palette, sizes, and semantic tokens, the icon strings, and the shared components (modal, dropdown, toast stack, status bar view, progress bar, button and input bases). The SPA consumes it through the npm workspace below.
+
+## npm workspace
+
+`crates/workshop/package.json` is the root of one npm workspace whose members are the family's TypeScript packages (`ui` and `look` today).
+
+- There is one install, at `crates/workshop` (`npm ci --prefix crates/workshop`), and one lockfile, `crates/workshop/package-lock.json`.
+- A new package joins by adding its directory to `workspaces`.
+- Shared tooling (`esbuild`, `typescript`, `jsdom`) sits at the root as dev dependencies. Runtime dependencies go in the member that uses them.
+- A new member needs no `node_modules` ignore line; `/crates/workshop/**/node_modules/` already covers it. A member that writes build output adds an anchored ignore line for it, like `/crates/workshop/ui/dist/`. Every member adds its `eol=lf` line to `.gitattributes`.
 
 ## Runtime links
 

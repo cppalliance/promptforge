@@ -19,7 +19,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: transparent;
-		color: var(--text-primary);
+		color: var(--cursor-text-primary);
 		font-size: 0.8125rem;
 		font-weight: 500;
 		white-space: nowrap;
@@ -46,7 +46,7 @@
 		color: var(--cursor-chrome);
 	}
 	.button-primary:hover {
-		background: var(--accent-hover);
+		background: color-mix(in srgb, var(--accent) 88%, #ffffff);
 	}
 	.button-outline {
 		border-color: var(--border);
@@ -71,7 +71,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: var(--cursor-bg-input-surface);
-		color: var(--text-primary);
+		color: var(--cursor-text-primary);
 		font-size: 0.8125rem;
 	}
 	.input::placeholder {
@@ -100,7 +100,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: var(--cursor-bg-input-surface);
-		color: var(--text-primary);
+		color: var(--cursor-text-primary);
 		font-size: 0.8125rem;
 		cursor: pointer;
 	}

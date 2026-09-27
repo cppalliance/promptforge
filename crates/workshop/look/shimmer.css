@@ -17,11 +17,11 @@
 .ws-shimmer-text {
 	background-image: linear-gradient(
 		90deg,
-		color-mix(in srgb, var(--text-primary) 60%, transparent) 0,
-		color-mix(in srgb, var(--text-primary) 60%, transparent) 25%,
+		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 0,
+		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 25%,
 		var(--cursor-text-primary) 60%,
-		color-mix(in srgb, var(--text-primary) 60%, transparent) 75%,
-		color-mix(in srgb, var(--text-primary) 60%, transparent) 100%
+		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 75%,
+		color-mix(in srgb, var(--cursor-text-primary) 60%, transparent) 100%
 	);
 	background-size: 200% 100%;
 	background-clip: text;

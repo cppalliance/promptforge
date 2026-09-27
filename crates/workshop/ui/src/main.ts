@@ -3,8 +3,8 @@ import "@workshop/look/controls.css";
 import "@workshop/look/shimmer.css";
 import "dockview/dist/styles/dockview.css";
 
-import "./tokens/base.css";
-import "./tokens/semantic.css";
+import "@workshop/look/sizes.css";
+import "@workshop/look/semantic.css";
 import "./tokens/component.css";
 
 import { createDockview, themeDark } from "dockview";

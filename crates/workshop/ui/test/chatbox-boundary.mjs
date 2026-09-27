@@ -1,6 +1,6 @@
 // The chat box boundary guard: the exit check from the chatbox
 // extraction's Testing Plan. `src/parts/chatbox/` is an isolated
-// component - it imports only `base/lifecycle`, `shared/icons`, skin
+// component - it imports only `base/lifecycle`, `@workshop/look/icons`, skin
 // tokens through CSS, `lucide`, and `@tiptap/*` - so this test walks
 // every file in the directory and fails on any quoted import prefix that
 // reaches back into the host layers (`"../agent`, `"../stt`,

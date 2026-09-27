@@ -32,7 +32,7 @@ import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { addFolderToWorkspace } from "./add-folder";
 import { rootsCurrentIn } from "./workspace-drops";
 import { DropdownMenu } from "@workshop/look/dropdown";
-import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../shared/icons";
+import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "@workshop/look/icons";
 import { openInZone, panelIdFor } from "../layout/zones";
 import "./workshop-panel.css";
 

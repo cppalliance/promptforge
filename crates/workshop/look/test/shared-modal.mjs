@@ -1,13 +1,16 @@
-// Unit test for the shared focus-trapped modal (@workshop/look/modal.ts):
-// the overlay and dialog structure with the prefix class contract, the
-// Tab trap cycling both directions, Escape and backdrop dismissal with
-// focus return to the invoker, the requiresValue gating with Enter
-// submission, and the per-kind duplicate guard. Bundles the module with
-// esbuild and drives it against jsdom.
-// Run: node test/shared-modal.mjs.
+// Unit test for the shared focus-trapped modal (modal.ts): the overlay and
+// dialog structure with the prefix class contract, the Tab trap cycling
+// both directions, Escape and backdrop dismissal with focus return to the
+// invoker, the requiresValue gating with Enter submission, and the
+// per-kind duplicate guard. Bundles the module with esbuild and drives it
+// against jsdom.
+// Run: node test/shared-modal.mjs (from crates/workshop/look).
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+
+const lookDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
@@ -19,7 +22,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/modal"))],
+  entryPoints: [path.join(lookDir, "modal.ts")],
   bundle: true,
   write: false,
   format: "esm",

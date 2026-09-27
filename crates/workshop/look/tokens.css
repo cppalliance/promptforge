@@ -1,10 +1,12 @@
 /* ==========================================================================
-   PromptForge shared Cursor Dark token sheet
+   Workshop family Cursor Dark palette sheet
 
-   The single source of truth for every visual value both UIs (the gateway
-   config UI and the workshop) share: palette, type, spacing, radius, and
-   the status bar's progress and LED effects. Both esbuild builds bundle
-   this file; no component stylesheet hardcodes a color or a themed length.
+   The palette tier of @workshop/look and the single source of truth for
+   every visual value the Workshop family's UIs share: palette, type,
+   spacing, radius, and the status bar's progress and LED effects. No
+   component stylesheet hardcodes a color or a themed length. The Gateway
+   config UI keeps its own copy in crates/shared-ui; edits here never
+   reach it.
 
    The surface, text, border, spacing, radius, shadow, and motion values
    mirror Cursor's dark theme (extracted from its workbench tokens); the
@@ -13,10 +15,7 @@
    color-mix() formulas intact (never encode premultiplied RGB as
    straight-alpha hex).
 
-   The first block is the workshop's original :root sheet, copied over
-   verbatim. The "Generic aliases" block at the end maps the names the
-   gateway config UI's components consume onto the same Cursor Dark
-   values, so both UIs read one sheet.
+   The :root block is the workshop's original sheet, copied over verbatim.
    ========================================================================== */
 
 :root {
@@ -264,23 +263,4 @@
   --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
   --scrollbar-thumb: #F0F0F011;
   --scrollbar-thumb-hover: #F0F0F01E;
-
-  /* ------------------------------------------------------------------
-     Generic aliases: the token names the gateway config UI's components
-     consume, mapped onto the Cursor Dark values above so both UIs read
-     one sheet. The accent stays PromptForge gold in both products.
-     ------------------------------------------------------------------ */
-  --bg-primary: var(--cursor-editor);
-  --bg-secondary: var(--cursor-chrome);
-  --bg-tertiary: var(--cursor-bg-tertiary);
-  --text-primary: var(--cursor-text-primary);
-  --text-secondary: var(--cursor-text-secondary);
-  --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
-  --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
-  --success: var(--cursor-green);
-  --success-text: color-mix(in srgb, var(--cursor-green) 55%, #ffffff);
-  --warning: var(--cursor-yellow);
-  --border-strong: var(--cursor-stroke-secondary);
-  --font: var(--font-prose);
-  --font-mono: var(--code-font);
 }

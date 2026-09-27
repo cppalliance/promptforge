@@ -1,13 +1,16 @@
-// Unit test for the shared toast stack (@workshop/look/toast.ts), which the
-// workshop's update notifications now feed: show() appends a kind-classed
-// toast to the polite live region, and the toast dismisses itself after
-// its four-second lifetime. Bundles the module with esbuild and drives it
+// Unit test for the shared toast stack (toast.ts), which the workshop's
+// update notifications now feed: show() appends a kind-classed toast to
+// the polite live region, and the toast dismisses itself after its
+// four-second lifetime. Bundles the module with esbuild and drives it
 // against jsdom with mocked timers.
-// Run: node test/shared-toast.mjs.
+// Run: node test/shared-toast.mjs (from crates/workshop/look).
+import path from "node:path";
 import { mock } from "node:test";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
+
+const lookDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
@@ -18,7 +21,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/toast"))],
+  entryPoints: [path.join(lookDir, "toast.ts")],
   bundle: true,
   write: false,
   format: "esm",
