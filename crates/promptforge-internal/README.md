@@ -18,13 +18,9 @@ The sandboxed Lua runtime: the section VM, the coroutine protocol, and the host 
 
 The prompt document parser: YAML frontmatter, the H1 and nested-section tree, and exact lua fence splitting. It is the engine's first stop for every prompt file. Depends on promptforge-types and promptforge-lua.
 
-## promptforge-store
-
-Run-scoped virtual files: the Store facade over the VFS, built by `Store::new(&access)`. Lua sections and the model share run files through it. Depends on promptforge-vfs.
-
 ## promptforge-vfs
 
-The PromptForge virtual filesystem: canonical interned paths, the claims model, the mount router, and the host and memory backends, plus the `/_promptforge` mount layout, the stock empty handle, and the mode policy. It is the permanent bottom of the dependency stack. Std only - no dependencies at all, enforced by its own manifest test.
+The PromptForge virtual filesystem: canonical interned paths, the claims model, the mount router, and the host and memory backends, and the mode policy. It is the permanent bottom of the dependency stack. Std only - no dependencies at all, enforced by its own manifest test.
 
 ## promptforge-model-client
 

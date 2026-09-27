@@ -927,7 +927,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-10>
 
-### Step 10: Retire the store crate and the fixed store path
+### Step 10: Retire the store crate and the fixed store path [completed]
 
 - Component: Declared store
 - Piece: retirement, sequential last in its component: `promptforge-store` is the last user of `STORE_MOUNT` and `empty()`, and after Step 9 nothing else in the workspace depends on it. Retiring it here, before the docs steps, lets Step 12's API check and stale-term sweep run against final code.

@@ -4873,16 +4873,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-store"
-version = "0.3.0"
-dependencies = [
- "promptforge",
- "promptforge-vfs",
- "thiserror 2.0.19",
- "workspace-hack",
-]
-
-[[package]]
 name = "promptforge-types"
 version = "0.3.0"
 dependencies = [

@@ -48,9 +48,9 @@ pub struct Stat {
 
 /// One directory entry.
 ///
-/// `description` is the annotation column; it is `None` outside
-/// `/_promptforge` and the engine adapter drops it. `Entry` is designed
-/// to grow: annotations live here.
+/// `description` is the annotation column; backends leave it `None` and
+/// the engine adapter drops it. `Entry` is designed to grow: annotations
+/// live here.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct Entry {

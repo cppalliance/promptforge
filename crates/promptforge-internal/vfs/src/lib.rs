@@ -3,13 +3,12 @@
 //! operation-observation seam, and backends) and the promptforge policy
 //! over it.
 //!
-//! The crate root holds promptforge policy: the `/_promptforge` mount
-//! layout, the [`empty`] stock handle, and [`ModePolicy`], the editor mode
-//! gate. The machinery modules hold no promptforge policy (no
-//! `/_promptforge` paths, no run concepts). The declared store is generic
-//! machinery: [`VfsRefBuilder::store`] names any mount as the store, and
-//! the store view's strict logical-path rules are the store's caller
-//! contract, not promptforge policy.
+//! The crate root holds promptforge policy: [`ModePolicy`], the editor mode
+//! gate. The machinery modules hold no promptforge policy (no run
+//! concepts). The declared store is generic machinery:
+//! [`VfsRefBuilder::store`] names any mount as the store, and the store
+//! view's strict logical-path rules are the store's caller contract, not
+//! promptforge policy.
 //!
 //! This crate is the permanent bottom of the dependency stack: std only,
 //! no workspace or external crates.
@@ -39,21 +38,6 @@ pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
 pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
-
-/// The mount prefix of the run-scoped store. Hosts seed before `run()`
-/// and extract after through this mount; callers never hardcode the
-/// path - [`empty`] installs it and the Store facade scopes to it.
-pub const STORE_MOUNT: &str = "/_promptforge/store";
-
-/// The stock handle: a router with a fresh memory backend at
-/// [`STORE_MOUNT`]. Empty of content, not of mounts, so callers can
-/// seed before `run()` and extract after.
-#[must_use]
-pub fn empty() -> VfsRef {
-    VfsRef::builder()
-        .mount(STORE_MOUNT, MemoryBackend::new())
-        .build()
-}
 
 /// The default handle: a memory store at `/` and nothing else.
 ///
@@ -182,7 +166,7 @@ impl Policy for ModePolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{Mode, ModePolicy, STORE_MOUNT, empty};
+    use super::{Mode, ModePolicy};
     use crate::{Origin, VfsError, VfsRef};
 
     /// A manifest section is a dependency table when it is exactly one of
@@ -247,37 +231,14 @@ mod tests {
     }
 
     #[test]
-    fn empty_has_the_store_mount() -> Result<(), VfsError> {
-        let vfs = empty();
-        let access = vfs.acquire(Origin::new("empty store mount test"))?;
-        let path = format!("{STORE_MOUNT}/paper.md");
-        access.write(&path, b"# draft")?;
-        assert_eq!(access.read(&path)?, b"# draft");
-        // Empty of content, not of mounts: the mount exists and serves.
-        assert!(access.exists(&path)?);
-        Ok(())
-    }
-
-    #[test]
-    fn empty_serves_nothing_outside_the_store_mount() -> Result<(), VfsError> {
-        let vfs = empty();
-        let access = vfs.acquire(Origin::new("empty namespace test"))?;
-        assert!(matches!(
-            access.read("/elsewhere.txt"),
-            Err(VfsError::NotFound { .. })
-        ));
-        Ok(())
-    }
-
-    #[test]
     fn a_mode_flip_through_the_shared_handle_is_visible_on_the_next_operation()
     -> Result<(), VfsError> {
         let policy = ModePolicy::new(Mode::Ask);
         let handle = policy.handle();
-        let vfs = VfsRef::with_policy(empty(), policy);
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
         let access = vfs.acquire(Origin::new("mode flip test"))?;
-        let path = format!("{STORE_MOUNT}/notes.md");
-        match access.write(&path, b"x") {
+        let path = "notes.md";
+        match access.write(path, b"x") {
             Err(VfsError::PermissionDenied { reason, .. }) => {
                 assert!(
                     reason.contains("Ask"),
@@ -289,20 +250,20 @@ mod tests {
         // The UI flips the mode mid-run through the shared handle; the
         // very next operation sees it.
         handle.set(Mode::Agent);
-        access.write(&path, b"x")?;
-        assert_eq!(access.read(&path)?, b"x");
+        access.write(path, b"x")?;
+        assert_eq!(access.read(path)?, b"x");
         Ok(())
     }
 
     #[test]
     fn plan_mode_allows_mutations_only_to_markdown_paths() -> Result<(), VfsError> {
         let policy = ModePolicy::new(Mode::Plan);
-        let vfs = VfsRef::with_policy(empty(), policy);
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
         let access = vfs.acquire(Origin::new("plan mode test"))?;
-        let markdown = format!("{STORE_MOUNT}/notes.md");
-        let binary = format!("{STORE_MOUNT}/data.bin");
-        access.write(&markdown, b"# ok")?;
-        match access.write(&binary, b"x") {
+        let markdown = "notes.md";
+        let binary = "data.bin";
+        access.write(markdown, b"# ok")?;
+        match access.write(binary, b"x") {
             Err(VfsError::PermissionDenied { reason, .. }) => {
                 assert!(
                     reason.contains("Plan"),
@@ -312,7 +273,7 @@ mod tests {
             other => panic!("expected a denial, got {other:?}"),
         }
         // The denied write never partially applied.
-        assert!(!access.exists(&binary)?);
+        assert!(!access.exists(binary)?);
         Ok(())
     }
 
@@ -320,15 +281,15 @@ mod tests {
     fn modes_gate_mutations_never_reads() -> Result<(), VfsError> {
         let policy = ModePolicy::new(Mode::Agent);
         let handle = policy.handle();
-        let vfs = VfsRef::with_policy(empty(), policy);
-        let path = format!("{STORE_MOUNT}/paper.md");
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
+        let path = "paper.md";
         vfs.acquire(Origin::new("read gate test"))?
-            .write(&path, b"text")?;
+            .write(path, b"text")?;
         // Even in Ask, the strictest mode, reads flow.
         handle.set(Mode::Ask);
         let access = vfs.acquire(Origin::new("read gate test"))?;
-        assert_eq!(access.read(&path)?, b"text");
-        assert!(access.exists(&path)?);
+        assert_eq!(access.read(path)?, b"text");
+        assert!(access.exists(path)?);
         Ok(())
     }
 }
