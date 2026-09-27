@@ -61,9 +61,9 @@ pub struct UiBuild {
 ///
 /// # Errors
 /// Returns an error when not run through Cargo, when `<crate>/ui/` is not
-/// a directory, when a `package.json` at or above it exists but cannot be
-/// read or parsed, when no esbuild install is found at or above it or
-/// esbuild fails, or when a static file cannot be copied.
+/// a directory, when a `package.json` at or above it up to its install
+/// root exists but cannot be read or parsed, when no esbuild install is
+/// found there or esbuild fails, or when a static file cannot be copied.
 pub fn build(config: UiBuild) -> anyhow::Result<()> {
     build_sibling("ui", config)
 }
@@ -77,10 +77,10 @@ pub fn build(config: UiBuild) -> anyhow::Result<()> {
 ///
 /// # Errors
 /// Returns an error when not run through Cargo, when the resolved
-/// package directory does not exist, when a `package.json` at or above it
-/// exists but cannot be read or parsed, when no esbuild install is found
-/// at or above it or esbuild fails, or when a static file cannot be
-/// copied.
+/// package directory does not exist, when a `package.json` at or above
+/// it up to its install root exists but cannot be read or parsed, when
+/// no esbuild install is found there or esbuild fails, or when a static
+/// file cannot be copied.
 pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
@@ -110,7 +110,8 @@ pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
 ///
 /// # Errors
 /// Returns an error when no esbuild install is found at or above
-/// `ui_dir` or esbuild fails, or when a static file cannot be copied.
+/// `ui_dir` up to its install root or esbuild fails, or when a static
+/// file cannot be copied.
 pub fn build_in(ui_dir: &Path, dist_dir: &Path, config: UiBuild) -> anyhow::Result<()> {
     // The output tree is rebuilt from scratch so removed assets never
     // linger into what debug builds serve and release builds embed.
@@ -175,15 +176,20 @@ struct Workspace {
     members: Vec<PathBuf>,
 }
 
-/// Finds the nearest `package.json` at or above `ui_dir` whose
-/// `workspaces` field is an array, returning its directory and every
-/// listed member except `ui_dir`. Entries are taken literally; npm's glob
-/// patterns are not expanded. A manifest that exists but cannot be read
-/// or parsed is an error rather than a skip: skipping a broken workspace
-/// root would drop it and its members from the watch list.
+/// Finds the nearest `package.json` at or above `ui_dir`, up to and
+/// including its [`install_root`], whose `workspaces` field is an array,
+/// returning its directory and every listed member except `ui_dir`.
+/// Entries are taken literally; npm's glob patterns are not expanded. A
+/// manifest that exists but cannot be read or parsed is an error rather
+/// than a skip: skipping a broken workspace root would drop it and its
+/// members from the watch list.
 fn workspace_members(ui_dir: &Path) -> anyhow::Result<Option<Workspace>> {
+    let install_root = install_root(ui_dir);
     let ui_dir = normalize(ui_dir);
-    for dir in ui_dir.ancestors() {
+    for dir in ui_dir
+        .ancestors()
+        .take_while(|dir| dir.starts_with(&install_root))
+    {
         let manifest_path = dir.join("package.json");
         let text = match std::fs::read_to_string(&manifest_path) {
             Ok(text) => text,
@@ -228,9 +234,20 @@ fn nearest_lockfile(ui_dir: &Path) -> Option<PathBuf> {
         .find(|lockfile| lockfile.is_file())
 }
 
+/// The directory the upward searches stop at: the one holding the
+/// nearest `package-lock.json`, where `npm ci` installs, or `ui_dir`
+/// itself when there is no lockfile.
+fn install_root(ui_dir: &Path) -> PathBuf {
+    nearest_lockfile(ui_dir)
+        .and_then(|lockfile| lockfile.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| normalize(ui_dir))
+}
+
 /// Finds the npm esbuild shim (`node_modules/.bin/esbuild`, or
 /// `esbuild.cmd` on Windows) in `ui_dir` or the nearest ancestor that has
-/// one, the way Node resolves packages: a standalone UI's own install wins,
+/// one, searching up to and including the install root and never above
+/// it: the directory holding the nearest `package-lock.json`, or `ui_dir`
+/// itself when there is none. A standalone UI finds only its own install,
 /// and an npm workspace member finds the install hoisted to its root.
 #[must_use]
 pub fn find_esbuild(ui_dir: &Path) -> Option<PathBuf> {
@@ -239,8 +256,10 @@ pub fn find_esbuild(ui_dir: &Path) -> Option<PathBuf> {
     } else {
         "esbuild"
     };
+    let install_root = install_root(ui_dir);
     normalize(ui_dir)
         .ancestors()
+        .take_while(|dir| dir.starts_with(&install_root))
         .map(|dir| dir.join("node_modules").join(".bin").join(shim))
         .find(|path| path.is_file())
 }
@@ -320,13 +339,10 @@ fn bundle(ui_dir: &Path, dist_dir: &Path, config: &UiBuild) -> anyhow::Result<()
 /// `.cmd` file, which only runs through `cmd /c`.
 fn esbuild_command(ui_dir: &Path) -> anyhow::Result<Command> {
     let Some(esbuild) = find_esbuild(ui_dir) else {
-        let install_dir = nearest_lockfile(ui_dir)
-            .and_then(|lockfile| lockfile.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| ui_dir.to_path_buf());
         return Err(anyhow::anyhow!(
             "no node_modules/.bin/esbuild at or above {}; run `npm ci` in {} first",
             ui_dir.display(),
-            install_dir.display()
+            install_root(ui_dir).display()
         ));
     };
     if cfg!(windows) {

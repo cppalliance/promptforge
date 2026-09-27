@@ -33,6 +33,7 @@ fn write(path: &Path, contents: &str) {
 fn a_ui_local_install_wins_over_an_ancestor_install() {
     let temp = tempfile::TempDir::new().unwrap();
     let ui = temp.path().join("ui");
+    write(&temp.path().join("package-lock.json"), "{}");
     install_esbuild(temp.path());
     let local = install_esbuild(&ui);
     assert_eq!(find_esbuild(&ui), Some(local));
@@ -43,6 +44,7 @@ fn an_ancestor_install_is_found() {
     let temp = tempfile::TempDir::new().unwrap();
     let ui = temp.path().join("ui");
     fs::create_dir_all(&ui).unwrap();
+    write(&temp.path().join("package-lock.json"), "{}");
     let hoisted = install_esbuild(temp.path());
     assert_eq!(find_esbuild(&ui), Some(hoisted));
 }
@@ -52,9 +54,18 @@ fn no_install_in_the_tree_finds_nothing_in_it() {
     let temp = tempfile::TempDir::new().unwrap();
     let ui = temp.path().join("ui");
     fs::create_dir_all(ui.join("node_modules").join(".bin")).unwrap();
-    // An install above the scratch directory, such as a home-level
-    // node_modules, is outside the test's control.
-    assert!(find_esbuild(&ui).is_none_or(|found| !found.starts_with(temp.path())));
+    assert!(find_esbuild(&ui).is_none());
+}
+
+#[test]
+fn an_install_above_the_install_root_is_not_used() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path().join("root");
+    let ui = root.join("ui");
+    fs::create_dir_all(&ui).unwrap();
+    write(&root.join("package-lock.json"), "{}");
+    install_esbuild(temp.path());
+    assert_eq!(find_esbuild(&ui), None);
 }
 
 #[test]
@@ -85,6 +96,7 @@ fn the_other_listed_members_are_returned() {
         &root.join("package.json"),
         r#"{ "private": true, "workspaces": ["ui", "look"] }"#,
     );
+    write(&root.join("package-lock.json"), "{}");
     write(&root.join("ui").join("package.json"), r#"{ "name": "ui" }"#);
     fs::create_dir_all(root.join("look")).unwrap();
     let workspace = workspace_members(&root.join("ui")).unwrap().unwrap();
@@ -100,6 +112,7 @@ fn a_package_json_without_workspaces_is_not_the_root() {
         &root.join("package.json"),
         r#"{ "workspaces": ["inner/ui", "look"] }"#,
     );
+    write(&root.join("package-lock.json"), "{}");
     write(
         &root.join("inner").join("package.json"),
         r#"{ "name": "inner" }"#,
@@ -112,11 +125,28 @@ fn a_package_json_without_workspaces_is_not_the_root() {
 }
 
 #[test]
+fn a_workspace_root_above_the_install_root_is_not_adopted() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "workspaces": ["ui", "look"] }"#,
+    );
+    fs::create_dir_all(root.join("look")).unwrap();
+    let ui = root.join("ui");
+    write(&ui.join("package.json"), r#"{ "name": "ui" }"#);
+    write(&ui.join("package-lock.json"), "{}");
+    let workspace = workspace_members(&ui).unwrap();
+    assert!(workspace.is_none(), "adopted {workspace:?}");
+}
+
+#[test]
 fn a_malformed_package_json_is_an_error_naming_it() {
     let temp = tempfile::TempDir::new().unwrap();
     let root = temp.path();
     let broken = root.join("package.json");
     write(&broken, r#"{ "workspaces": ["ui", "look"] "#);
+    write(&root.join("package-lock.json"), "{}");
     let ui = root.join("ui");
     write(&ui.join("package.json"), r#"{ "name": "ui" }"#);
     let error = workspace_members(&ui).unwrap_err().to_string();
@@ -129,6 +159,22 @@ fn a_malformed_package_json_is_an_error_naming_it() {
 }
 
 #[test]
+fn a_malformed_package_json_above_the_install_root_is_not_read() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        &root.join("package.json"),
+        r#"{ "workspaces": ["ui", "look"] "#,
+    );
+    let ui = root.join("ui");
+    write(&ui.join("package.json"), r#"{ "name": "ui" }"#);
+    write(&ui.join("package-lock.json"), "{}");
+    let workspace = workspace_members(&ui).unwrap();
+    assert!(workspace.is_none(), "adopted {workspace:?}");
+    assert!(watched_paths(&ui, &CONFIG).is_ok());
+}
+
+#[test]
 fn the_ui_dir_is_left_out_when_reached_through_a_parent_hop() {
     let temp = tempfile::TempDir::new().unwrap();
     let root = temp.path();
@@ -136,6 +182,7 @@ fn the_ui_dir_is_left_out_when_reached_through_a_parent_hop() {
         &root.join("package.json"),
         r#"{ "workspaces": ["ui", "look"] }"#,
     );
+    write(&root.join("package-lock.json"), "{}");
     for member in ["ui", "look", "server"] {
         fs::create_dir_all(root.join(member)).unwrap();
     }
