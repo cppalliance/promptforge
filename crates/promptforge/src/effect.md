@@ -299,7 +299,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`AnswerRecord::Chat`] holds a [`Result`] of a [`ChatAnswerRecord`] or the [`CompletionError`](crate::model::CompletionError)'s text. It is recorded from an [`EffectAnswer::Chat`].
 - [`AnswerRecord::ToolCall`] holds a [`Result`] of a [`ToolAnswerRecord`] or the [`ToolError`](crate::tools::ToolError)'s text. It is recorded from an [`EffectAnswer::ToolCall`]. The text is the model-safe message only, so a cause attached with [`ToolError::with_source`](crate::tools::ToolError::with_source) is not recorded.
 - [`AnswerRecord::UserInput`] holds a [`Result`] of an [`InputAnswerRecord`] or the [`InputError`](crate::input::InputError)'s message. It is recorded from an [`EffectAnswer::UserInput`].
-- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`]. The success payload's JSON is byte-identical to the retired `StoreAnswerRecord` shape: the outcome serializes through serde's externally tagged form.
+- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`]. The success payload's JSON is byte-identical to the retired store answer record's shape: the outcome serializes through serde's externally tagged form.
 - [`AnswerRecord::Timer`] carries no data. It records that the timer fired.
 - [`AnswerRecord::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values, a clone of the answered events.
 - [`AnswerRecord::Dropped`] carries no data. It records that the host dropped the effect without performing it.

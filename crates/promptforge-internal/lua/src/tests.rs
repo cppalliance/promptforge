@@ -2691,8 +2691,8 @@ fn store_glob_returns_a_sorted_array() {
 
 #[test]
 fn store_error_surfaces_as_lua_error() {
-    // An ambiguous `str_replace` anchor is a `StoreError`, which must reach
-    // the caller as `Error::Lua` (mapped through `mlua::Error::external`).
+    // An ambiguous `str_replace` anchor is a `VfsError::Anchor`, wrapped as
+    // `Error::Store` (mapped through `mlua::Error::external`).
     let err = run(
         "store.write('a.txt', 'na na na')\nstore.str_replace('a.txt', 'na', 'la')",
         "",

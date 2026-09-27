@@ -1007,7 +1007,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-12>
 
-### Step 12: Update the living docs and run the final checks
+### Step 12: Update the living docs and run the final checks [completed]
 
 - Component: Language guide and living docs
 - Piece: living docs, built jointly with the guide (Step 11). Its facade audits, API check and stale-term sweep run last because they confirm the whole plan.
