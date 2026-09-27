@@ -411,6 +411,12 @@ impl<'a> TokioDriver<'a> {
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&access, op);
+                    // The answer implies the view is dropped: the run's
+                    // scope ends before `drive()` returns, so a post-run
+                    // fresh-scope read never meets the run's claims.
+                    // The harness's `perform_store` drops before posting
+                    // for the same reason.
+                    drop(access);
                     post(&tx, id, EffectAnswer::Store(result));
                 })
             }

@@ -1028,7 +1028,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-13>
 
-### Step 13: Drop the store view before answering in the test driver
+### Step 13: Drop the store view before answering in the test driver [completed]
 
 - Component: Test support
 - Placement: appended after the run closed, when a post-run full-suite failure showed the tokio test driver answers a store effect before dropping the effect's access, so the run's scope can outlive drive() and a fresh-scope read right after the run conflicts, depending on blocking-pool timing. Safe to fix now: the production harness already drops before posting (perform_store), and no later step exists to disturb it.
