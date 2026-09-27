@@ -1,0 +1,51 @@
+/* The shimmering text treatment: a clone of Cursor's own agent-panel
+   status shimmer (the .make-shine class on its "Thinking" / "Planning
+   next moves" spans), recovered verbatim from the installed workbench
+   stylesheet and mapped onto the shared tokens. The base is the
+   foreground token at 60%; the bright stop is the primary text token.
+   The sweep runs left to right on a 2s loop over a 200% background.
+
+   A consumer that re-renders the labelled element (a dock tab title)
+   keeps the sweep continuous by setting a negative animation-delay
+   computed against a module-level epoch:
+   el.style.animationDelay = `-${(Date.now() - epoch) % 2000}ms`.
+
+   Under prefers-reduced-motion the animation, gradient, clip, and
+   transparent fill all come off and the text renders as solid muted
+   foreground (Cursor's glass variant's behavior). */
+
+.ws-shimmer-text {
+	background-image: linear-gradient(
+		90deg,
+		color-mix(in srgb, var(--text-primary) 60%, transparent) 0,
+		color-mix(in srgb, var(--text-primary) 60%, transparent) 25%,
+		var(--cursor-text-primary) 60%,
+		color-mix(in srgb, var(--text-primary) 60%, transparent) 75%,
+		color-mix(in srgb, var(--text-primary) 60%, transparent) 100%
+	);
+	background-size: 200% 100%;
+	background-clip: text;
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	animation: shine 2s linear infinite;
+}
+
+@keyframes shine {
+	0% {
+		background-position: 200% 0;
+	}
+	to {
+		background-position: -200% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ws-shimmer-text {
+		animation: none;
+		background-image: none;
+		background-clip: unset;
+		-webkit-background-clip: unset;
+		-webkit-text-fill-color: unset;
+		color: var(--text-muted);
+	}
+}

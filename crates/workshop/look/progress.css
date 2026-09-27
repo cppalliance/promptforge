@@ -1,0 +1,28 @@
+/* The inline progress bar from progress.ts: a thin rounded track whose
+   fill scales by --progress (transform, compositor-only). The fill reads
+   --progress-fill, so a consumer recolors by state with a modifier class
+   (the gateway's metric tiles use is-warning / is-danger). Rules live in
+   the components layer so consumer overrides win. */
+
+@layer components {
+	.progress {
+		height: 0.375rem;
+		border-radius: 9999px;
+		background: var(--progress-track);
+		overflow: hidden;
+	}
+	.progress__fill {
+		height: 100%;
+		border-radius: 9999px;
+		background: var(--progress-fill);
+		transform-origin: 0 50%;
+		transform: scaleX(var(--progress, 0));
+		transition: transform 300ms ease-out;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.progress__fill {
+			transition: none;
+		}
+	}
+}

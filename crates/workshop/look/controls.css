@@ -1,0 +1,131 @@
+/* Button, input, and select base classes shared by both UIs, on the
+   Cursor Dark tokens from tokens.css. The rules live in the components
+   cascade layer: a consuming UI that declares its own layer order (the
+   gateway's base.css declares `reset, base, components, utilities`)
+   keeps its overrides winning on specificity, and a consuming UI with
+   no layers (the workshop) lets its unlayered rules override these.
+   Interactive classes inherit the consuming UI's focus convention - no
+   focus frames are added here. */
+
+@layer components {
+	/* Buttons: rounded-full, h-9 default / h-8 sm / h-6 xs. */
+	.button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.375rem;
+		height: 2.25rem;
+		padding-inline: 0.75rem;
+		border: 1px solid transparent;
+		border-radius: 9999px;
+		background: transparent;
+		color: var(--text-primary);
+		font-size: 0.8125rem;
+		font-weight: 500;
+		white-space: nowrap;
+		cursor: pointer;
+		transition: background-color 140ms ease-out, color 140ms ease-out,
+			border-color 140ms ease-out;
+	}
+	.button:disabled {
+		opacity: 0.5;
+		pointer-events: none;
+	}
+	.button-sm {
+		height: 2rem;
+	}
+	.button-xs {
+		height: 1.5rem;
+		padding-inline: 0.625rem;
+		font-size: 0.75rem;
+	}
+	/* Dark label on the gold accent: the chrome color on --accent
+	   measures well past WCAG AA. */
+	.button-primary {
+		background: var(--accent);
+		color: var(--cursor-chrome);
+	}
+	.button-primary:hover {
+		background: var(--accent-hover);
+	}
+	.button-outline {
+		border-color: var(--border);
+		background: var(--cursor-bg-quaternary);
+	}
+	.button-outline:hover {
+		background: var(--cursor-bg-tertiary);
+	}
+	.button-danger {
+		border-color: var(--danger);
+		background: color-mix(in srgb, var(--danger) 10%, transparent);
+		color: var(--danger-text);
+	}
+	.button-danger:hover {
+		background: color-mix(in srgb, var(--danger) 15%, transparent);
+	}
+
+	/* Text input: rounded-full on the Cursor input surface. */
+	.input {
+		height: 2.25rem;
+		padding-inline: 0.875rem;
+		border: 1px solid transparent;
+		border-radius: 9999px;
+		background: var(--cursor-bg-input-surface);
+		color: var(--text-primary);
+		font-size: 0.8125rem;
+	}
+	.input::placeholder {
+		color: var(--input-placeholder);
+	}
+	input::-ms-reveal {
+		display: none;
+	}
+	.input:hover {
+		background: var(--cursor-bg-tertiary);
+	}
+	textarea.input {
+		height: auto;
+		padding-block: 0.625rem;
+		border-radius: 0.75rem;
+	}
+
+	/* Select trigger: same pill-and-soft-surface family as .input. */
+	.select {
+		display: inline-flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		height: 2.25rem;
+		padding-inline: 0.875rem;
+		border: 1px solid transparent;
+		border-radius: 9999px;
+		background: var(--cursor-bg-input-surface);
+		color: var(--text-primary);
+		font-size: 0.8125rem;
+		cursor: pointer;
+	}
+	.select::after {
+		content: "";
+		width: 0.4rem;
+		height: 0.4rem;
+		border-inline-end: 1px solid currentcolor;
+		border-block-end: 1px solid currentcolor;
+		transform: translateY(-0.125rem) rotate(45deg);
+	}
+	.select:hover {
+		background: var(--cursor-bg-tertiary);
+	}
+	.select:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.select-sm {
+		height: 2rem;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.button {
+			transition: none;
+		}
+	}
+}

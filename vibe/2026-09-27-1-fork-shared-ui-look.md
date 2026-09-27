@@ -311,7 +311,7 @@ Every change is behavior-neutral, so verification means the existing suites pass
 
 <step-2>
 
-### Step 2: Copy shared-ui verbatim into crates/workshop/look
+### Step 2: Copy shared-ui verbatim into crates/workshop/look [completed]
 
 - Component: `@workshop/look`
 - Placement: this component follows the workspace because it joins the workspace as a member. Its fork-and-switch piece is sequential: a verbatim copy first and every edit in later commits, so review sees the copy as a copy and each change to the fork on its own.
