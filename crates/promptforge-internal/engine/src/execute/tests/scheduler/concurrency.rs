@@ -1,13 +1,17 @@
 //! The admission limit: `tasks.concurrency` clamps to the parent chain's
 //! limit and reads the effective limit back, a queued task reads
 //! `blocked == 'queued'` until its start event fires at admission, a
-//! resumed task is admitted ahead of fresh starts, and a nested fanout
-//! does not deadlock under a ceiling of one.
+//! resumed task is admitted ahead of fresh starts, a nested fanout
+//! does not deadlock under a ceiling of one, and a queue that can never
+//! be admitted is reported as a stall.
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use super::super::serial_driver::perform_locally;
 use super::*;
+use crate::execute::RunResult;
+use crate::execute::run::{Run, Step};
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// Builds the run context and its observing host under the given limits.
@@ -417,4 +421,57 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         out.expect("the nested fanout completes"),
         "a:x1+y2+z3,b:x1+y2+z3,c:x1+y2+z3"
     );
+}
+
+#[test]
+fn a_queued_task_that_can_never_be_admitted_is_reported_as_a_stall() {
+    // The walk parks on its store write, and the test wedges the walk's
+    // limit at zero. Once the write is answered the walk spawns its child
+    // and parks on the join: nothing is ready, nothing is in flight, and
+    // no slot will ever admit the queued child. The step must end the run
+    // with a stall report rather than return Pending with nothing to
+    // answer.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Limits\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        store.write('park', 'x')\n\
+        local t = tasks.spawn('## Child')\n\
+        tasks.join_any({ t })\n\
+        return 'never'\n\
+        ```\n\n\
+        ## Child\n\n\
+        ```lua\nreturn 'child'\n```\n";
+    let prompt = parse(md);
+    let (state, _host) = limited_context(
+        &prompt,
+        &TestStore::new(),
+        ceiling(1),
+        Arc::new(NullObserver::default()),
+    );
+    let mut run = Run::from_state(state);
+    let Step::Pending { effects, .. } = run.step() else {
+        panic!("the walk parks on its store write");
+    };
+    run.scheduler_for_test().wedge_admission_for_test(0);
+    for (id, _, effect) in effects {
+        let answer = perform_locally(&effect, &mut |effect| {
+            panic!("the fixture issues no model round: {effect:?}")
+        });
+        run.resume(id, answer);
+    }
+    match run.step() {
+        Step::Done {
+            result: RunResult::Failure(error),
+            ..
+        } => assert!(
+            error.to_string().contains("stalled"),
+            "the run reports the stall: {error}"
+        ),
+        Step::Done { result, .. } => panic!("the stalled run must fail, got {result:?}"),
+        Step::Pending { effects, .. } => panic!(
+            "a stalled run must not return Pending, got {} effects",
+            effects.len()
+        ),
+    }
 }

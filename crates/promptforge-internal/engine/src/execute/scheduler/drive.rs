@@ -2,8 +2,9 @@
 //! answer`, run until no chain can proceed without a host answer. The step
 //! starts the run's first chain on its first call, drains the ready queue,
 //! and returns the effects the drain issued with the events it reported.
-//! An empty ready queue with an empty pending table is a stall, which
-//! fails loudly rather than hangs. The run's `Done` is withheld until
+//! An empty ready queue with an empty pending table and no queued chain
+//! that can be admitted is a stall, which fails loudly rather than hangs.
+//! The run's `Done` is withheld until
 //! every issued effect has its answer, so every effect the host was
 //! handed has exactly one answer.
 
@@ -38,17 +39,17 @@ impl Scheduler {
         // a child, waiting on a task, or queued for admission, and a
         // blocked or waiting chain transitively bottoms out in a ready or
         // pending chain, so an empty ready queue with an empty pending
-        // table and empty admission queues can only be a
-        // scheduler bug (nothing ready, nothing pending, and whatever is
-        // waiting can never be woken) - fail loudly rather than hang.
-        if matches!(self.phase, Phase::Running)
-            && self.ready.is_empty()
-            && self.pending.is_empty()
-            && self.resuming.is_empty()
-            && self.spawned.is_empty()
+        // table and no admissible queued chain can only be a scheduler
+        // bug (nothing ready, nothing pending, no slot that will ever
+        // free, and whatever is waiting can never be woken) - fail loudly
+        // rather than hang. A running drain returns only after `admit`
+        // left the ready queue empty, so no queued chain is admissible
+        // here and the two empty checks are the whole guard.
+        if matches!(self.phase, Phase::Running) && self.ready.is_empty() && self.pending.is_empty()
         {
             self.end(Err(Error::internal(
-                "the scheduler stalled with no ready chain and no in-flight request",
+                "the scheduler stalled with no ready chain, no in-flight request, \
+                 and no queued chain that can be admitted",
             )));
         }
         let effects = std::mem::take(&mut self.issued);

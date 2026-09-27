@@ -5,14 +5,21 @@
 
 use promptforge_types::ids::TaskId;
 
-use super::Scheduler;
 pub(crate) use super::tasks::TaskState;
+use super::{ChainIndex, Scheduler};
 
 impl Scheduler {
     /// Shrinks the chain-count bound so a test can drive the
     /// [`start_chain`](Self::start_chain) overflow path.
     pub(crate) fn set_max_chains_for_test(&mut self, limit: usize) {
         self.max_chains = limit;
+    }
+
+    /// Drops the admission limit of the chain at arena index `chain` to
+    /// zero, a limit `tasks.concurrency` refuses, so a test can leave a
+    /// queued task that no slot will ever admit.
+    pub(crate) fn wedge_admission_for_test(&mut self, chain: u32) {
+        self.chains[ChainIndex(chain).index()].concurrency = 0;
     }
 
     /// The number of leaf effects the run has issued so far, so a test

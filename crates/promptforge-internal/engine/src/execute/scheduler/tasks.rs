@@ -10,9 +10,9 @@
 //!
 //! Admission bounds the run: every task chain takes a slot at its owner
 //! and at every enclosing ancestor, held until the task ends - except
-//! while it is parked on a task wait, which gives the slot back so its
-//! descendants can run - and a chain admits at most its effective limit
-//! at once. The root's limit is the run's
+//! while it, or a `call` chain it is blocked on, is parked on a task
+//! wait, which gives the slot back so its descendants can run - and a
+//! chain admits at most its effective limit at once. The root's limit is the run's
 //! [`RunLimits::max_concurrency`](super::config_limits::RunLimits::max_concurrency)
 //! ceiling; a spawned task and a call chain start with their parent's,
 //! and `tasks.concurrency` lowers it, clamped to the parent's. Queue
@@ -610,7 +610,7 @@ impl Scheduler {
     pub(super) fn admit(&mut self) {
         let mut remaining = VecDeque::new();
         for id in std::mem::take(&mut self.resuming) {
-            if self.can_admit(id) {
+            if self.can_admit(self.slot_holder(id)) {
                 self.resume_chain(id);
             } else {
                 remaining.push_back(id);
@@ -628,13 +628,21 @@ impl Scheduler {
         self.spawned = remaining;
     }
 
-    /// Re-admits a resumed task chain: takes its slots back and enqueues
-    /// it. Its start event already fired at its first admission - this
-    /// path only moves it from its wait back to running.
+    /// The chain whose slots `id`'s resumption takes back: the holding
+    /// ancestor a parked call chain released, or the resumed task itself.
+    fn slot_holder(&self, id: ChainIndex) -> ChainIndex {
+        self.chains[id.index()].released_holder.unwrap_or(id)
+    }
+
+    /// Re-admits a resumed chain: takes its slot holder's slots back and
+    /// enqueues it. Its start event already fired at its first admission -
+    /// this path only moves it from its wait back to running.
     fn resume_chain(&mut self, id: ChainIndex) {
-        self.take_slots(id);
+        let holder = self.slot_holder(id);
+        self.take_slots(holder);
+        self.chains[holder.index()].holding = true;
         let chain = &mut self.chains[id.index()];
-        chain.holding = true;
+        chain.released_holder = None;
         chain.blocked = None;
         self.ready.push_back(id);
     }
@@ -706,38 +714,53 @@ impl Scheduler {
     /// A chain parked on a task wait gives its admission slots back when
     /// the wait holds real tasks - a timer-only wait keeps them, since
     /// nothing it waits for needs a slot - so its descendants can run
-    /// under its limit. The main walk holds no slots to give.
+    /// under its limit. A call chain holds no slots of its own, so it
+    /// gives back those of its nearest holding ancestor through `parent`
+    /// (the task it runs inside, blocked on the call) and records which
+    /// chain gave them. A call chain in the main walk finds no holding
+    /// ancestor, and the main walk holds no slots to give.
     pub(super) fn park_wait(&mut self, id: ChainIndex) {
-        let release = {
-            let chain = &self.chains[id.index()];
-            chain.holding
-                && chain
-                    .waiting_on
-                    .iter()
-                    .any(|task| self.tasks.get(task).is_some_and(|slot| !slot.is_internal()))
-        };
-        if release {
+        let chain = &self.chains[id.index()];
+        let waits_on_tasks = chain
+            .waiting_on
+            .iter()
+            .any(|task| self.tasks.get(task).is_some_and(|slot| !slot.is_internal()));
+        if !waits_on_tasks {
+            return;
+        }
+        if chain.holding {
             self.release_chain_slots(id);
+            return;
+        }
+        let mut at = chain.parent;
+        while let Some(ancestor) = at {
+            let chain = &self.chains[ancestor.index()];
+            if chain.holding {
+                self.release_chain_slots(ancestor);
+                self.chains[id.index()].released_holder = Some(ancestor);
+                return;
+            }
+            at = chain.parent;
         }
     }
 
     /// Resumes a chain parked on a task wait with its delivered answer:
-    /// a task chain that gave its slots back takes them again - admitted
-    /// ahead of fresh starts at the drain's edge - while the main walk,
-    /// and a chain that kept its slots (a timer-only wait), resume
-    /// inline.
+    /// a task chain that gave its slots back, and a call chain that gave
+    /// back its ancestor's, take them again - admitted ahead of fresh
+    /// starts at the drain's edge - while the main walk, and a chain that
+    /// kept its slots (a timer-only wait), resume inline.
     pub(super) fn wake_from_wait(&mut self, id: ChainIndex, answer: Answer<Error>) {
-        let holding = self.chains[id.index()].holding;
-        let is_task = self.chains[id.index()].owner.is_some();
+        let chain = &self.chains[id.index()];
+        let requeue = chain.released_holder.is_some() || (!chain.holding && chain.owner.is_some());
         let chain = &mut self.chains[id.index()];
         chain.incoming = Some(answer);
-        if holding || !is_task {
-            self.ready.push_back(id);
-        } else {
+        if requeue {
             // Waiting for a slot again reads `queued`, exactly as a
             // fresh spawn's wait does.
             chain.blocked = Some("queued");
             self.resuming.push_back(id);
+        } else {
+            self.ready.push_back(id);
         }
     }
 }

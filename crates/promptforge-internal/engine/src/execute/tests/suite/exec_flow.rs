@@ -1121,11 +1121,21 @@ return item .. ':' .. table.concat(items, ',')\n\
 /// as plain
 /// sections (no `item` seed), and its final reply is the call's return value.
 /// The arm and the contained chain also see the run's `sys.section_count`.
+/// The run's limit is 1 and the contained chain fans out: while the chain
+/// waits on its arms it gives back the slot its arm holds, so its arms can
+/// run instead of queueing behind that slot forever. The driver fails a
+/// stalled run, and the timeout fails a hung one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn call_inside_a_fanout_arm_runs_a_contained_chain() {
-    let md = [
-        ARM_FANOUT_PARENT,
-        "### Worker\n\n\
+    let md = flow_prompt!(
+        "\
+## Parent\n\n\
+```lua\n\
+tasks.concurrency(1)\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
 ```lua\n\
 assert(sys.section_count == 1, 'the arm sees the run top-level section count')\n\
 local got = call('### Sub')\n\
@@ -1136,17 +1146,23 @@ return 'worker:' .. got .. ':' .. item\n\
 assert(sys.id == '0.0.0.0', 'a contained chain is the arm chain child and starts at entry 0')\n\
 assert(item == nil, 'a contained chain runs as a plain section')\n\
 assert(sys.section_count == 1, 'a contained chain sees the run section count')\n\
+local leaves = fanout('#### Leaf', {'x', 'y'})\n\
+var.leaves = leaves[1].text .. leaves[2].text\n\
+```\n\n\
+#### Leaf\n\n\
+```lua\n\
+return item .. '!'\n\
 ```\n\n\
 ### Tail\n\n\
 ```lua\n\
-return 'tail-reply'\n\
-```\n",
-    ]
-    .concat();
-    let out = run_offline(&md)
+return 'tail-reply:' .. var.leaves\n\
+```\n"
+    );
+    let out = tokio::time::timeout(std::time::Duration::from_secs(10), run_offline(md))
         .await
+        .expect("a contained chain's fanout under a limit of 1 must not deadlock")
         .expect("call inside an arm must run a contained chain");
-    assert_eq!(out, "worker:tail-reply:alpha");
+    assert_eq!(out, "worker:tail-reply:x!y!:alpha");
 }
 
 /// `fanout` inside a fanout arm maps over a collection: the nested worker
@@ -2540,5 +2556,86 @@ return item\n\
         error.kind(),
         RunErrorKind::Determinism,
         "a caught load-time conflict is still fatal: {error:?}"
+    );
+}
+
+/// The shared library the captured-store cases load: `store.write`
+/// captured in a local at load time, reached later only through a helper.
+const CAPTURED_STORE_WRITE: &str = "\
+```lua shared\n\
+local write = store.write\n\
+function save_note(path, text)\n\
+  write(path, text)\n\
+end\n\
+```\n\n";
+
+/// A store function the shared library captured at load time follows the
+/// load phase: called after load it yields like `store.*`, so two arms
+/// racing on one path through it end the run with a determinism violation
+/// even though each arm caught its own failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_captured_store_function_conflict_caught_with_pcall_still_ends_the_run_with_determinism()
+{
+    let md = [
+        flow_prompt!(""),
+        CAPTURED_STORE_WRITE,
+        "## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha', 'beta'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+pcall(save_note, 'note.txt', item)\n\
+return item\n\
+```\n",
+    ]
+    .concat();
+    let error = run_offline(&md)
+        .await
+        .expect_err("the captured function's caught conflict must still end the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Determinism,
+        "a conflict through a captured store function is fatal: {error:?}"
+    );
+}
+
+/// A store function the shared library captured at load time reaches the
+/// host as an `Effect::Store` when called after load, like `store.*` does.
+#[test]
+fn a_captured_store_function_called_after_load_reaches_the_host_as_a_store_effect() {
+    use super::super::context::{parse, test_context};
+    use super::super::serial_driver::perform_locally;
+    use crate::{Effect, EffectRecord, Run, StoreOp};
+
+    let md = [
+        flow_prompt!(""),
+        CAPTURED_STORE_WRITE,
+        "## Only\n\n\
+```lua\n\
+save_note('note.txt', 'kept')\n\
+return 'saved'\n\
+```\n",
+    ]
+    .concat();
+    let run = Run::new(Arc::new(parse(&md)), "", test_context(EXECUTION));
+    let mut records = Vec::new();
+    let (result, _) = crate::test_support::drive(run, |_, effect: &Effect| {
+        records.push(effect.record());
+        perform_locally(effect, &mut |effect| {
+            panic!("the fixture issues no model round: {effect:?}")
+        })
+    });
+    assert!(
+        matches!(&result, RunResult::Ok(text) if text == "saved"),
+        "the run succeeds: {result:?}"
+    );
+    assert!(
+        records.iter().any(|record| matches!(
+            record,
+            EffectRecord::Store { op: StoreOp::Write { path, .. } } if path == "note.txt"
+        )),
+        "the captured write is performed by the host: {records:?}"
     );
 }

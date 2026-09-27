@@ -1,15 +1,40 @@
 //! Host callbacks installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
 
 use std::fmt::Write as _;
+use std::sync::LazyLock;
 
+use mlua::Table;
 use promptforge_types::event::lifecycle::Lifecycle;
 
 use crate::protocol::StoreOp;
 
 use super::{
-    Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
-    LuaSerdeExt, MultiValue, Mutex, Ordering, Result, Value, lifecycle,
+    Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, Function, GuardNonce,
+    LUA_LOG_CHARACTER_LIMIT, Lua, LuaProgram, LuaSerdeExt, MultiValue, Mutex, Ordering, Result,
+    SharedSource, Value, lifecycle,
 };
+
+/// The store dispatcher chunk's name, `@`-prefixed as the shim chunks'
+/// names are, so its frames render as verbatim `file:line:` references.
+const STORE_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_store.lua";
+
+/// The store dispatcher source, embedded verbatim so chunk line 1 is file
+/// line 1.
+const STORE_SOURCE: &str = include_str!("__impl_store.lua");
+
+/// The registry key of the store dispatchers' phase table, kept by
+/// [`install_store_table`] so [`route_store_to_shims`] can switch every
+/// dispatcher to the yield shims once the shared library has loaded.
+const STORE_PHASE_REGISTRY: &str = "promptforge.host.store_phase";
+
+/// The store dispatcher program, compiled once and loaded per VM under the
+/// shim programs' failure contract: compiling the bundled source fails
+/// only on a crate bug.
+static STORE_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(STORE_SOURCE, STORE_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
+    });
 
 /// Shared body of the persistent per-section `log(message)` host callback.
 fn log_checkpoint(
@@ -395,6 +420,12 @@ fn number_lines_from(lines: &[&str], start: usize) -> String {
 /// when the load returns, so the run ends with a determinism violation
 /// even if author code caught the error.
 ///
+/// The table's function values are Lua dispatchers over those closures,
+/// not the closures themselves: each runs its closure until
+/// [`route_store_to_shims`] switches it to the matching yield shim. So a
+/// function the shared library captured at load time runs directly during
+/// the load and yields like `store.*` afterward.
+///
 /// [`VfsError`]: promptforge_vfs::VfsError
 ///
 /// # Errors
@@ -427,6 +458,14 @@ pub(crate) fn install_store_table(
             source,
         })?,
     );
+    let program = STORE_PROGRAM.as_ref().map_err(Error::shared)?;
+    let (dispatcher, phase): (Function, Table) = program.load(lua)?.call(()).map_err(Error::lua)?;
+    lua.set_named_registry_value(STORE_PHASE_REGISTRY, phase)
+        .map_err(Error::lua)?;
+    let install = |name: &str, direct: Function| -> Result<()> {
+        let function: Function = dispatcher.call((name, direct)).map_err(Error::lua)?;
+        table.raw_set(name, function).map_err(Error::lua)
+    };
 
     macro_rules! install_reported_store_fn {
         (
@@ -450,7 +489,7 @@ pub(crate) fn install_store_table(
                     result.map_err(|source| mlua::Error::external(Error::store(&$op, source)))
                 })
                 .map_err(Error::lua)?;
-            table.set($name, function).map_err(Error::lua)?;
+            install($name, function)?;
         }};
     }
 
@@ -556,7 +595,7 @@ pub(crate) fn install_store_table(
             lua.create_sequence_from(paths)
         })
         .map_err(Error::lua)?;
-    table.set("glob", glob).map_err(Error::lua)?;
+    install("glob", glob)?;
 
     let handle = Arc::clone(&view);
     let exists_conflicts = Arc::clone(conflicts);
@@ -578,10 +617,25 @@ pub(crate) fn install_store_table(
             })
         })
         .map_err(Error::lua)?;
-    table.set("exists", exists).map_err(Error::lua)?;
+    install("exists", exists)?;
 
     globals.raw_set("store", table).map_err(Error::lua)?;
     Ok(())
+}
+
+/// Switches every store dispatcher [`install_store_table`] built on this
+/// VM to the yield shims in `shims`, whichever reference the prompt
+/// holds: a function the shared library captured at load time yields
+/// from here on exactly as `store.*` does.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the VM's store table was never installed or
+/// the switch fails.
+pub(crate) fn route_store_to_shims(lua: &Lua, shims: &Table) -> Result<()> {
+    let phase: Table = lua
+        .named_registry_value(STORE_PHASE_REGISTRY)
+        .map_err(Error::lua)?;
+    phase.raw_set("shims", shims.clone()).map_err(Error::lua)
 }
 
 /// Executes one validated store operation against the store view: the

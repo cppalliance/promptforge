@@ -106,7 +106,7 @@ mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod host;
 pub use host::install_ui;
-pub(crate) use host::{install_log, install_store_table, install_untrusted};
+pub(crate) use host::{install_log, install_store_table, install_untrusted, route_store_to_shims};
 mod tools;
 pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
 mod handles;

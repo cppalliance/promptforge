@@ -448,7 +448,7 @@ Every regression test below must fail at `3088311d` and pass after its work item
 
 <step-5>
 
-### Step 5: Unblock call-chain admission and route captured store functions through effects (D1-3, D1-4, D1-31), then run the exit checks
+### Step 5: Unblock call-chain admission and route captured store functions through effects (D1-3, D1-4, D1-31), then run the exit checks [completed]
 
 - Component: Executor and Lua VM boundary
 

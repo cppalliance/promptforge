@@ -328,8 +328,15 @@ struct Chain {
     slots_used: usize,
     /// Whether this chain currently holds its own admission slots: `true`
     /// from admission until it ends or parks on a task wait, which gives
-    /// the slots back so its descendants can run.
+    /// the slots back so its descendants can run. A task blocked on a
+    /// `call` child gives them back while that child parks on a task
+    /// wait.
     holding: bool,
+    /// The nearest holding ancestor whose slots this call chain gave back
+    /// when it parked on a task wait: the chain's wake takes that
+    /// ancestor's slots back before the chain continues. `None` on every
+    /// other chain and once the slots are retaken.
+    released_holder: Option<ChainIndex>,
     /// Whether the chain was admitted at least once: the start event has
     /// fired, so its terminal event may fire too. A cancelled or
     /// abandoned chain that never ran reports no terminal.

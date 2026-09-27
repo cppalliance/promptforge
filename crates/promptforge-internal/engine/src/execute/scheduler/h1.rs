@@ -71,6 +71,7 @@ impl Scheduler {
             concurrency: self.ctx.limits().concurrency().get(),
             slots_used: 0,
             holding: false,
+            released_holder: None,
             admitted: false,
             pending_spawn: None,
             parent: None,

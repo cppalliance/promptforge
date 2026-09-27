@@ -156,7 +156,8 @@ where
     // calls must hit the direct closures (which capture the same
     // Arc<Access>, leaving claims attribution unchanged). Installing
     // earlier would make a top-level `store.write` yield from outside a
-    // coroutine.
+    // coroutine. The install also switches any store function the load
+    // captured, so none of them runs directly after this point.
     crate::lua::install_store_shims(vm.lua())?;
     vm.install_captured_bindings().map_err(Error::from)
 }

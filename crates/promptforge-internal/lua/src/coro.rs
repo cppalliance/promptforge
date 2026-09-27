@@ -26,7 +26,9 @@ use std::sync::{Arc, LazyLock};
 
 use mlua::{Function, Table, Value};
 
-use super::{Error, Lua, LuaProgram, Result, SharedSource, StdLib, var_snapshot_table};
+use super::{
+    Error, Lua, LuaProgram, Result, SharedSource, StdLib, route_store_to_shims, var_snapshot_table,
+};
 use crate::error_value::{Raised, install_error_value, install_normalize_failure, raised_from};
 
 /// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
@@ -433,11 +435,16 @@ pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
 }
 
 /// Installs the store yield shims onto a VM's `store` table, replacing the
-/// direct closures the host API install put there. Every store operation
+/// dispatchers the host API install put there, and switches those
+/// dispatchers to the shims too, so a store function the shared library
+/// captured before this call (`local write = store.write`) yields as well.
+/// Every store operation, through whichever reference the prompt holds,
 /// then suspends the block as a leaf yield the driver answers against the
 /// sync VFS via the blocking pool - uniformly for all backends, with no
 /// inline fast path, so interleaving behavior never depends on which
-/// backend serves the mount.
+/// backend serves the mount. The host performs each one as an
+/// `Effect::Store`, and a claims-model conflict through any of them ends
+/// the run with a determinism violation that `pcall` cannot catch.
 ///
 /// The executor's section setup and live H1 setup are the only callers.
 ///
@@ -455,7 +462,7 @@ pub fn install_store_shims(lua: &Lua) -> Result<()> {
         let (name, function) = pair.map_err(Error::lua)?;
         store.raw_set(name, function).map_err(Error::lua)?;
     }
-    Ok(())
+    route_store_to_shims(lua, &shims)
 }
 
 #[cfg(test)]

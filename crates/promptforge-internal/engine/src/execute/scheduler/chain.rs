@@ -100,6 +100,7 @@ impl Scheduler {
             concurrency,
             slots_used: 0,
             holding: false,
+            released_holder: None,
             admitted: false,
             pending_spawn: None,
             parent,
