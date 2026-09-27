@@ -39,12 +39,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop/ui
+          npm ci --prefix crates/workshop
           npm ci --prefix crates/gateway/config-ui/ui
 
       - name: Build Gateway without Workshop UI tooling
@@ -84,12 +84,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop/ui
+          npm ci --prefix crates/workshop
           npm ci --prefix crates/gateway/config-ui/ui
 
       - name: Test (concurrent via nextest)
@@ -129,12 +129,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop/ui
+          npm ci --prefix crates/workshop
           npm ci --prefix crates/gateway/config-ui/ui
 
       - name: Docs
@@ -168,12 +168,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop/ui
+          npm ci --prefix crates/workshop
           npm ci --prefix crates/gateway/config-ui/ui
 
       - name: Build featureless Gateway
@@ -261,12 +261,12 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/workshop/ui
+          npm ci --prefix crates/workshop
           npm ci --prefix crates/gateway/config-ui/ui
 
       - name: Build featureless Gateway
@@ -313,24 +313,24 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
-        working-directory: crates/workshop/ui
+        working-directory: crates/workshop
         run: npm ci
 
       - name: Typecheck
-        working-directory: crates/workshop/ui
-        run: npm run typecheck
+        working-directory: crates/workshop
+        run: npm run typecheck --workspaces --if-present
 
       - name: Build
-        working-directory: crates/workshop/ui
-        run: npm run build
+        working-directory: crates/workshop
+        run: npm run build --workspace ui
 
       - name: Test
-        working-directory: crates/workshop/ui
-        run: npm test
+        working-directory: crates/workshop
+        run: npm test --workspaces --if-present
 
       - name: Install config UI dependencies
         working-directory: crates/gateway/config-ui/ui

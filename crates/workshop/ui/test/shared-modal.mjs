@@ -5,12 +5,9 @@
 // submission, and the per-kind duplicate guard. Bundles the module with
 // esbuild and drives it against jsdom.
 // Run: node test/shared-modal.mjs.
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
-
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 const { window } = dom;
@@ -22,7 +19,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "node_modules", "shared-ui", "modal.ts")],
+  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/modal"))],
   bundle: true,
   write: false,
   format: "esm",

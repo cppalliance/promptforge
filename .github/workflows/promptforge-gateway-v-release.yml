@@ -142,8 +142,12 @@ jobs:
         uses: "actions/setup-node@v4"
         with:
           "node-version": 22
+          "cache": "npm"
+          "cache-dependency-path": |
+            crates/workshop/package-lock.json
+            crates/gateway/*/ui/package-lock.json
       - name: "Install UI dependencies"
-        run: "npm ci --prefix crates/workshop/ui"
+        run: "npm ci --prefix crates/workshop"
       - name: "Install config UI dependencies"
         run: "npm ci --prefix crates/gateway/config-ui/ui"
       - name: Install dist

@@ -10,10 +10,11 @@
 //! change detection decides when the bundle is rebuilt. Splitting builds
 //! content-hash every bundle file and emit a `manifest.json` plus a
 //! stamped `index.html`; non-splitting builds keep the unversioned
-//! `app.js`. Building requires Node.js 22 and one `npm ci` per UI
-//! package; there is no fallback.
+//! `app.js`. Building requires Node.js 22 and one `npm ci` per install
+//! root - the UI package itself, or the npm workspace root it is a member
+//! of; there is no fallback.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 /// Static files copied next to the workshop UI bundle, relative to `ui/`.
@@ -60,8 +61,9 @@ pub struct UiBuild {
 ///
 /// # Errors
 /// Returns an error when not run through Cargo, when `<crate>/ui/` is not
-/// a directory, when the local esbuild install is missing or fails, or
-/// when a static file cannot be copied.
+/// a directory, when a `package.json` at or above it exists but cannot be
+/// read or parsed, when no esbuild install is found at or above it or
+/// esbuild fails, or when a static file cannot be copied.
 pub fn build(config: UiBuild) -> anyhow::Result<()> {
     build_sibling("ui", config)
 }
@@ -75,8 +77,10 @@ pub fn build(config: UiBuild) -> anyhow::Result<()> {
 ///
 /// # Errors
 /// Returns an error when not run through Cargo, when the resolved
-/// package directory does not exist, when the local esbuild install is
-/// missing or fails, or when a static file cannot be copied.
+/// package directory does not exist, when a `package.json` at or above it
+/// exists but cannot be read or parsed, when no esbuild install is found
+/// at or above it or esbuild fails, or when a static file cannot be
+/// copied.
 pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
@@ -94,7 +98,7 @@ pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
     );
     let dist_dir = out_dir.join("ui-dist");
 
-    watch(&ui_dir, &config);
+    watch(&ui_dir, &config)?;
     build_in(&ui_dir, &dist_dir, config)
 }
 
@@ -105,8 +109,8 @@ pub fn build_sibling(relative: &str, config: UiBuild) -> anyhow::Result<()> {
 /// result against the Node build script's `--out` output.
 ///
 /// # Errors
-/// Returns an error when the local esbuild install is missing or fails,
-/// or when a static file cannot be copied.
+/// Returns an error when no esbuild install is found at or above
+/// `ui_dir` or esbuild fails, or when a static file cannot be copied.
 pub fn build_in(ui_dir: &Path, dist_dir: &Path, config: UiBuild) -> anyhow::Result<()> {
     // The output tree is rebuilt from scratch so removed assets never
     // linger into what debug builds serve and release builds embed.
@@ -125,38 +129,142 @@ pub fn build_in(ui_dir: &Path, dist_dir: &Path, config: UiBuild) -> anyhow::Resu
 /// Tells Cargo what to watch: the sources, the static files, and the
 /// build inputs whose contents change the bundle. Cargo watches a
 /// directory recursively, so one line covers every file under `ui/src`.
-fn watch(ui_dir: &Path, config: &UiBuild) {
-    println!("cargo::rerun-if-changed={}", ui_dir.join("src").display());
-    for file in config.static_files {
-        println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
+fn watch(ui_dir: &Path, config: &UiBuild) -> anyhow::Result<()> {
+    for path in watched_paths(ui_dir, config)? {
+        println!("cargo::rerun-if-changed={}", path.display());
     }
+    Ok(())
+}
+
+/// The paths [`watch`] declares, keeping only those that exist: Cargo
+/// reruns a build script on every build while a watched path is missing.
+fn watched_paths(ui_dir: &Path, config: &UiBuild) -> anyhow::Result<Vec<PathBuf>> {
+    let mut paths = vec![ui_dir.join("src")];
+    paths.extend(config.static_files.iter().map(|file| ui_dir.join(file)));
     // esbuild reads tsconfig.json from its working directory, and the
     // lockfile pins the dependency code that lands in the bundle; both can
     // change the output without touching ui/src.
-    for file in [
-        "build.mjs",
-        "package.json",
-        "package-lock.json",
-        "tsconfig.json",
-    ] {
-        println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
+    paths.extend(["build.mjs", "package.json", "tsconfig.json"].map(|file| ui_dir.join(file)));
+    paths.extend(nearest_lockfile(ui_dir));
+    // In an npm workspace the root manifest and the sibling members the UI
+    // imports through workspace links change the bundle too. The UI's own
+    // directory stays out: its inputs are listed above, and the jsdom
+    // tests write its dist/.
+    if let Some(workspace) = workspace_members(ui_dir)? {
+        paths.push(workspace.root.join("package.json"));
+        paths.extend(workspace.members);
     }
     // Both UIs bundle the shared-ui package (a `file:` dependency at
     // crates/shared-ui); its sources change the bundle without touching
     // ui/src. The UIs sit at different depths under crates/, so search
     // upward for the crates/ directory instead of counting parents.
-    let shared_ui = ui_dir
-        .ancestors()
-        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "crates"))
-        .map(|crates| crates.join("shared-ui"));
-    if let Some(shared_ui) = shared_ui.filter(|dir| dir.is_dir()) {
-        println!("cargo::rerun-if-changed={}", shared_ui.display());
-    }
+    paths.extend(
+        ui_dir
+            .ancestors()
+            .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "crates"))
+            .map(|crates| crates.join("shared-ui")),
+    );
+    paths.retain(|path| path.exists());
+    Ok(paths)
 }
 
-/// Runs the esbuild bundle step from the local `ui/node_modules` install.
-/// There is no `npx` fallback: `npx` can download a different esbuild
-/// version and produce different output.
+/// An npm workspace root and its member directories other than the UI's.
+#[derive(Debug)]
+struct Workspace {
+    root: PathBuf,
+    members: Vec<PathBuf>,
+}
+
+/// Finds the nearest `package.json` at or above `ui_dir` whose
+/// `workspaces` field is an array, returning its directory and every
+/// listed member except `ui_dir`. Entries are taken literally; npm's glob
+/// patterns are not expanded. A manifest that exists but cannot be read
+/// or parsed is an error rather than a skip: skipping a broken workspace
+/// root would drop it and its members from the watch list.
+fn workspace_members(ui_dir: &Path) -> anyhow::Result<Option<Workspace>> {
+    let ui_dir = normalize(ui_dir);
+    for dir in ui_dir.ancestors() {
+        let manifest_path = dir.join("package.json");
+        let text = match std::fs::read_to_string(&manifest_path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => anyhow::bail!(
+                "read {} to find the npm workspace root: {error}",
+                manifest_path.display()
+            ),
+        };
+        let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
+            anyhow::anyhow!(
+                "parse {} to find the npm workspace root: {error}",
+                manifest_path.display()
+            )
+        })?;
+        let Some(entries) = manifest
+            .get("workspaces")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        let members = entries
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(|entry| normalize(&dir.join(entry)))
+            .filter(|member| *member != ui_dir)
+            .collect();
+        return Ok(Some(Workspace {
+            root: dir.to_path_buf(),
+            members,
+        }));
+    }
+    Ok(None)
+}
+
+/// The nearest `package-lock.json` at or above `ui_dir`: the UI's own for
+/// a standalone package, the root's for an npm workspace member.
+fn nearest_lockfile(ui_dir: &Path) -> Option<PathBuf> {
+    normalize(ui_dir)
+        .ancestors()
+        .map(|dir| dir.join("package-lock.json"))
+        .find(|lockfile| lockfile.is_file())
+}
+
+/// Finds the npm esbuild shim (`node_modules/.bin/esbuild`, or
+/// `esbuild.cmd` on Windows) in `ui_dir` or the nearest ancestor that has
+/// one, the way Node resolves packages: a standalone UI's own install wins,
+/// and an npm workspace member finds the install hoisted to its root.
+#[must_use]
+pub fn find_esbuild(ui_dir: &Path) -> Option<PathBuf> {
+    let shim = if cfg!(windows) {
+        "esbuild.cmd"
+    } else {
+        "esbuild"
+    };
+    normalize(ui_dir)
+        .ancestors()
+        .map(|dir| dir.join("node_modules").join(".bin").join(shim))
+        .find(|path| path.is_file())
+}
+
+/// Folds `.` and `..` lexically so the ancestor searches walk the real
+/// parent chain: the workshop server passes `crates/workshop/server/../ui`,
+/// whose lexical ancestors include `server`.
+fn normalize(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir if normal.file_name().is_some() => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
+}
+
+/// Runs the esbuild bundle step from the npm install [`find_esbuild`]
+/// locates. There is no `npx` fallback: `npx` can download a different
+/// esbuild version and produce different output.
 fn bundle(ui_dir: &Path, dist_dir: &Path, config: &UiBuild) -> anyhow::Result<()> {
     let mut command = esbuild_command(ui_dir)?;
     command.current_dir(ui_dir).args([
@@ -206,34 +314,28 @@ fn bundle(ui_dir: &Path, dist_dir: &Path, config: &UiBuild) -> anyhow::Result<()
     ))
 }
 
-/// Builds the command that invokes the local esbuild install, failing with
-/// the setup instructions when `ui/node_modules` is absent. On Windows the
-/// npm shim is a `.cmd` file, which only runs through `cmd /c`.
+/// Builds the command that invokes the esbuild install [`find_esbuild`]
+/// locates, failing with the setup instructions when there is none: `npm
+/// ci` belongs where the nearest lockfile is. On Windows the npm shim is a
+/// `.cmd` file, which only runs through `cmd /c`.
 fn esbuild_command(ui_dir: &Path) -> anyhow::Result<Command> {
-    let bin_dir = ui_dir.join("node_modules").join(".bin");
-
-    #[cfg(windows)]
-    {
-        let local = bin_dir.join("esbuild.cmd");
-        if local.exists() {
-            let mut command = Command::new("cmd");
-            command.arg("/c").arg(local);
-            return Ok(command);
-        }
+    let Some(esbuild) = find_esbuild(ui_dir) else {
+        let install_dir = nearest_lockfile(ui_dir)
+            .and_then(|lockfile| lockfile.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| ui_dir.to_path_buf());
+        return Err(anyhow::anyhow!(
+            "no node_modules/.bin/esbuild at or above {}; run `npm ci` in {} first",
+            ui_dir.display(),
+            install_dir.display()
+        ));
+    };
+    if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.arg("/c").arg(esbuild);
+        Ok(command)
+    } else {
+        Ok(Command::new(esbuild))
     }
-
-    #[cfg(not(windows))]
-    {
-        let local = bin_dir.join("esbuild");
-        if local.exists() {
-            return Ok(Command::new(local));
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "ui/node_modules is missing; run `npm ci` in {} first",
-        ui_dir.display()
-    ))
 }
 
 /// Copies the static UI files next to the bundle, keeping the relative
@@ -302,3 +404,7 @@ fn hashed_entry(dist_dir: &Path, extension: &str) -> anyhow::Result<String> {
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "lib-tests.rs"]
+mod tests;

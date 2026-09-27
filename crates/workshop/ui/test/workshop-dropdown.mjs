@@ -32,7 +32,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "node_modules", "shared-ui", "dropdown.ts")],
+  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/dropdown"))],
   bundle: true,
   write: false,
   format: "esm",

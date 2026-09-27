@@ -625,6 +625,7 @@ name = "build-ui"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "serde_json",
  "tempfile",
  "workspace-hack",
 ]

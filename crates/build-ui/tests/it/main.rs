@@ -10,22 +10,22 @@ use std::process::Command;
 /// (`ui/build.mjs --out`, the fast-iteration path) must emit the same
 /// layout - the same hash-normalized file set, the same manifest, and
 /// the same stamped index page. Skips with a message when Node.js or
-/// the UI's `node_modules` install is absent.
+/// the Workshop npm workspace install is absent.
 #[test]
 fn both_implementers_emit_the_same_layout() -> anyhow::Result<()> {
-    let ui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let workspace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("workshop")
-        .join("ui");
+        .join("workshop");
+    let ui_dir = workspace_dir.join("ui");
     if !node_available() {
         eprintln!("skipping: node is not on PATH; install Node.js 22 to run this test");
         return Ok(());
     }
-    if !ui_dir.join("node_modules").is_dir() {
+    if build_ui::find_esbuild(&ui_dir).is_none() {
         eprintln!(
-            "skipping: {} is missing; run `npm ci` in {} first",
-            ui_dir.join("node_modules").display(),
-            ui_dir.display()
+            "skipping: no esbuild install at or above {}; run `npm ci` in {} first",
+            ui_dir.display(),
+            workspace_dir.display()
         );
         return Ok(());
     }

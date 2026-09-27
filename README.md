@@ -66,12 +66,12 @@ Lua sets up the turn. The prose before a Lua block is that block's lazy `prose` 
 
 ## Build from source
 
-Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so run `npm ci` once in each `ui/` folder after cloning:
+Every build needs Rust and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so after cloning run `npm ci` once in the Workshop's npm workspace (`crates/workshop`) and once in the Gateway config UI:
 
 ```bash
 git clone git@github.com:cppalliance/promptforge.git
 cd promptforge
-npm ci --prefix crates/workshop/ui
+npm ci --prefix crates/workshop
 npm ci --prefix crates/gateway/config-ui/ui
 ```
 

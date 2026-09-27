@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "workspaces": [
+    "ui"
+  ],
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2"
+  }
+}

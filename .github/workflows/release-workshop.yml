@@ -113,11 +113,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            crates/*/ui/package-lock.json
+            crates/workshop/package-lock.json
             crates/gateway/*/ui/package-lock.json
 
       - name: Install UI dependencies
-        working-directory: crates/workshop/ui
+        working-directory: crates/workshop
         run: npm ci
 
       # The gateway sidecar build needs the config UI's esbuild pipeline
