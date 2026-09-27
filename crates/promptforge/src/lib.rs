@@ -138,7 +138,6 @@ pub mod vfs {
     pub use promptforge_engine::perform_store_op;
     pub use promptforge_lua::StoreOp;
     pub use promptforge_lua::StoreOutcome;
-    pub use promptforge_store::PathReason;
     pub use promptforge_store::StoreError;
     pub use promptforge_store::StoreErrorKind;
     pub use promptforge_vfs::Access;
@@ -158,6 +157,7 @@ pub mod vfs {
     pub use promptforge_vfs::OpEvent;
     pub use promptforge_vfs::OpSink;
     pub use promptforge_vfs::Origin;
+    pub use promptforge_vfs::PathReason;
     pub use promptforge_vfs::Policy;
     pub use promptforge_vfs::Stat;
     pub use promptforge_vfs::Verdict;

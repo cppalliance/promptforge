@@ -9,7 +9,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::error::VfsError;
+use crate::error::{PathReason, VfsError};
 
 /// Canonical virtual path. Produced by `canonicalize` at the moment the
 /// API receives a path. The string is `Arc`-shared per value lineage:
@@ -91,7 +91,10 @@ impl fmt::Display for VfsPathBuf {
 /// joins onto `root`, and the empty path is rejected.
 pub(crate) fn canonicalize(root: &VfsPath, path: &str) -> Result<VfsPath, VfsError> {
     if path.is_empty() {
-        return Err(VfsError::InvalidPath("empty path".into()));
+        return Err(VfsError::InvalidPath {
+            path: path.to_owned(),
+            reason: PathReason::Empty,
+        });
     }
     let normalized = path.replace('\\', "/");
     let mut segments: Vec<&str> = Vec::new();
@@ -110,9 +113,10 @@ pub(crate) fn canonicalize(root: &VfsPath, path: &str) -> Result<VfsPath, VfsErr
                 if segments.len() > floor {
                     segments.pop();
                 } else if floor == 0 {
-                    return Err(VfsError::InvalidPath(format!(
-                        "path escapes the namespace root: {path:?}"
-                    )));
+                    return Err(VfsError::InvalidPath {
+                        path: path.to_owned(),
+                        reason: PathReason::Traversal,
+                    });
                 }
             }
             _ => segments.push(segment),
@@ -136,12 +140,14 @@ pub(crate) fn canonicalize(root: &VfsPath, path: &str) -> Result<VfsPath, VfsErr
 /// Canonicalizes a path that is already namespace-absolute: mount
 /// prefixes, mount-relative backend paths, and backend results. A
 /// relative path is rejected rather than joined onto a root, so
-/// construction-time prefixes stay strict.
+/// construction-time prefixes stay strict. Reaching this boundary with a
+/// relative value is a producer bug - a backend result or a construction
+/// prefix outside the namespace - so it reports as a backend failure.
 pub(crate) fn canonicalize_absolute(path: &str) -> Result<VfsPath, VfsError> {
     if !path.starts_with('/') {
-        return Err(VfsError::InvalidPath(format!(
-            "relative path is not in the virtual namespace: {path:?}"
-        )));
+        return Err(VfsError::Backend {
+            message: format!("relative path is not in the virtual namespace: {path:?}"),
+        });
     }
     canonicalize(&VfsPath::root(), path)
 }
@@ -150,8 +156,8 @@ pub(crate) fn canonicalize_absolute(path: &str) -> Result<VfsPath, VfsError> {
 mod tests {
     use std::sync::Arc;
 
-    use super::{VfsPath, canonicalize};
-    use crate::VfsError;
+    use super::{VfsPath, canonicalize, canonicalize_absolute};
+    use crate::{PathReason, VfsError};
 
     fn canonical(path: &str) -> Result<String, VfsError> {
         Ok(canonicalize(&VfsPath::root(), path)?.as_str().to_owned())
@@ -196,13 +202,42 @@ mod tests {
 
     #[test]
     fn traversal_past_the_root_is_rejected() {
-        assert!(canonicalize(&VfsPath::root(), "/..").is_err());
-        assert!(canonicalize(&VfsPath::root(), "/a/../../b").is_err());
+        for path in ["/..", "/a/../../b"] {
+            assert_eq!(
+                canonicalize(&VfsPath::root(), path),
+                Err(VfsError::InvalidPath {
+                    path: path.to_owned(),
+                    reason: PathReason::Traversal,
+                }),
+                "an escape names the traversal rule for {path:?}"
+            );
+        }
     }
 
     #[test]
     fn empty_paths_are_rejected() {
-        assert!(canonicalize(&VfsPath::root(), "").is_err());
+        assert_eq!(
+            canonicalize(&VfsPath::root(), ""),
+            Err(VfsError::InvalidPath {
+                path: String::new(),
+                reason: PathReason::Empty,
+            }),
+        );
+    }
+
+    #[test]
+    fn a_relative_path_at_a_namespace_boundary_is_rejected() -> Result<(), VfsError> {
+        // Mount prefixes, mount-relative paths, and backend results must
+        // already be namespace-absolute; a relative value is a producer
+        // bug and reports as a backend failure.
+        assert_eq!(
+            canonicalize_absolute("notes.md"),
+            Err(VfsError::Backend {
+                message: "relative path is not in the virtual namespace: \"notes.md\"".to_owned(),
+            }),
+        );
+        assert_eq!(canonicalize_absolute("/notes.md")?.as_str(), "/notes.md",);
+        Ok(())
     }
 
     #[test]

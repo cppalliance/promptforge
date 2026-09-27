@@ -20,23 +20,40 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::error::VfsError;
-use crate::glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
+use crate::error::{PathReason, VfsError};
+use crate::glob::{compile_glob, matches_tokens, validate_glob_pattern};
 use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
 use crate::traits::{ExecId, Vfs, VfsAccess};
 
 /// Maps an I/O failure to the error kind the trait surface promises.
+/// Each `path` field holds the canonical path alone, so a host reading
+/// the field per its documented contract gets a path, never the OS
+/// error's text; the kind carries the OS failure, and only
+/// `PermissionDenied` keeps the extra text in `reason`.
 fn map_io(path: &str, err: &std::io::Error) -> VfsError {
     let message = format!("{path}: {err}");
     match err.kind() {
-        std::io::ErrorKind::NotFound => VfsError::NotFound(message),
-        std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied(message),
-        std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists(message),
-        std::io::ErrorKind::IsADirectory => VfsError::IsADirectory(message),
-        std::io::ErrorKind::NotADirectory => VfsError::NotADirectory(message),
-        std::io::ErrorKind::DirectoryNotEmpty => VfsError::DirectoryNotEmpty(message),
-        _ => VfsError::Backend(message),
+        std::io::ErrorKind::NotFound => VfsError::NotFound {
+            path: path.to_owned(),
+        },
+        std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied {
+            path: path.to_owned(),
+            reason: message,
+        },
+        std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists {
+            path: path.to_owned(),
+        },
+        std::io::ErrorKind::IsADirectory => VfsError::IsADirectory {
+            path: path.to_owned(),
+        },
+        std::io::ErrorKind::NotADirectory => VfsError::NotADirectory {
+            path: path.to_owned(),
+        },
+        std::io::ErrorKind::DirectoryNotEmpty => VfsError::DirectoryNotEmpty {
+            path: path.to_owned(),
+        },
+        _ => VfsError::Backend { message },
     }
 }
 
@@ -104,7 +121,10 @@ fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
 /// the missing tail is re-appended lexically. This catches link escapes
 /// for existing paths while still resolving paths yet to be created.
 fn contain(root: &Path, candidate: &Path, original: &VfsPath) -> Result<PathBuf, VfsError> {
-    let denied = || VfsError::PermissionDenied(format!("{original} escapes the mounted root"));
+    let denied = || VfsError::PermissionDenied {
+        path: original.to_string(),
+        reason: format!("{original} escapes the mounted root"),
+    };
     let mut ancestor = candidate;
     let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
     loop {
@@ -140,12 +160,19 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn atomic_write(dest: &Path, contents: &[u8]) -> Result<(), VfsError> {
     let display = dest.to_string_lossy().into_owned();
     let Some(parent) = dest.parent() else {
-        return Err(VfsError::InvalidPath(format!(
-            "{display} has no parent directory"
-        )));
+        // A destination without a parent names only the filesystem root:
+        // the write addresses nothing below the root. No canonical
+        // virtual path produces this, so it is a backend impossibility,
+        // not a path rule a caller broke; reporting a path reason here
+        // would blame the path for the backend's own shape.
+        return Err(VfsError::Backend {
+            message: format!("write destination has no parent directory: {display:?}"),
+        });
     };
     let Some(name) = dest.file_name() else {
-        return Err(VfsError::InvalidPath(format!("{display} has no file name")));
+        return Err(VfsError::Backend {
+            message: format!("write destination has no file name: {display:?}"),
+        });
     };
     let temp = parent.join(format!(
         ".{}.vfs-tmp-{}-{}",
@@ -313,7 +340,7 @@ impl HostBackend {
         let display = dir.as_ref().to_string_lossy().into_owned();
         let canonical = fs::canonicalize(dir.as_ref()).map_err(|err| map_io(&display, &err))?;
         if !canonical.is_dir() {
-            return Err(VfsError::NotADirectory(display));
+            return Err(VfsError::NotADirectory { path: display });
         }
         Ok(HostBackend {
             root: HostRoot::Rooted(canonical),
@@ -396,9 +423,10 @@ impl HostAccess {
     /// touched: a denied operation never partially applies.
     fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
         if self.read_only {
-            return Err(VfsError::PermissionDenied(format!(
-                "the host backend is read-only, so {path} cannot be mutated"
-            )));
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: format!("the host backend is read-only, so {path} cannot be mutated"),
+            });
         }
         Ok(())
     }
@@ -408,7 +436,9 @@ impl VfsAccess for HostAccess {
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
         let host = self.resolve(path)?;
         if host.is_dir() {
-            return Err(VfsError::IsADirectory(path.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_string(),
+            });
         }
         fs::read(&host).map_err(|err| map_io(path.as_str(), &err))
     }
@@ -417,7 +447,9 @@ impl VfsAccess for HostAccess {
         // Seek, never materialize: the host can position directly.
         let host = self.resolve(path)?;
         if host.is_dir() {
-            return Err(VfsError::IsADirectory(path.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_string(),
+            });
         }
         let mut file = File::open(&host).map_err(|err| map_io(path.as_str(), &err))?;
         file.seek(SeekFrom::Start(offset))
@@ -433,7 +465,9 @@ impl VfsAccess for HostAccess {
         self.check_writable(path)?;
         let host = self.resolve(path)?;
         if host.is_dir() {
-            return Err(VfsError::IsADirectory(path.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_string(),
+            });
         }
         create_parent(&host, path)?;
         atomic_write(&host, contents)
@@ -443,7 +477,9 @@ impl VfsAccess for HostAccess {
         self.check_writable(path)?;
         let host = self.resolve(path)?;
         if host.is_dir() {
-            return Err(VfsError::IsADirectory(path.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_string(),
+            });
         }
         create_parent(&host, path)?;
         let mut file = fs::OpenOptions::new()
@@ -458,9 +494,10 @@ impl VfsAccess for HostAccess {
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
         self.check_writable(path)?;
         if path.as_str() == "/" {
-            return Err(VfsError::PermissionDenied(
-                "the mounted root cannot be removed".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: "the mounted root cannot be removed".into(),
+            });
         }
         let host = self.resolve(path)?;
         let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
@@ -492,15 +529,11 @@ impl VfsAccess for HostAccess {
     }
 
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
-            return Err(VfsError::InvalidPath(format!(
-                "glob pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"
-            )));
-        }
-        if let Err(reason) = validate_glob_grammar(pattern) {
-            return Err(VfsError::InvalidPath(format!(
-                "invalid glob pattern {pattern:?}: {reason}"
-            )));
+        if let Err(reason) = validate_glob_pattern(pattern) {
+            return Err(VfsError::InvalidPath {
+                path: pattern.to_owned(),
+                reason,
+            });
         }
         let tokens = compile_glob(pattern.as_bytes());
         let root = self.resolve(&canonicalize_absolute(walk_root(pattern))?)?;
@@ -548,7 +581,9 @@ impl VfsAccess for HostAccess {
         self.check_writable(path)?;
         let host = self.resolve(path)?;
         if fs::symlink_metadata(&host).is_ok() {
-            return Err(VfsError::AlreadyExists(path.to_string()));
+            return Err(VfsError::AlreadyExists {
+                path: path.to_string(),
+            });
         }
         if recursive {
             fs::create_dir_all(&host)
@@ -561,19 +596,22 @@ impl VfsAccess for HostAccess {
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
         self.check_writable(from)?;
         if from.as_str() == "/" {
-            return Err(VfsError::PermissionDenied(
-                "the mounted root cannot be renamed".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: from.to_string(),
+                reason: "the mounted root cannot be renamed".into(),
+            });
         }
         if to.as_str() == "/" {
-            return Err(VfsError::PermissionDenied(
-                "a path cannot be renamed onto the mounted root".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: from.to_string(),
+                reason: "a path cannot be renamed onto the mounted root".into(),
+            });
         }
         if to.as_str().starts_with(&format!("{}/", from.as_str())) {
-            return Err(VfsError::InvalidPath(format!(
-                "cannot rename {from} into its own descendant {to}"
-            )));
+            return Err(VfsError::InvalidPath {
+                path: from.to_string(),
+                reason: PathReason::IntoDescendant,
+            });
         }
         let host_from = self.resolve(from)?;
         let host_to = self.resolve(to)?;
@@ -589,11 +627,15 @@ impl VfsAccess for HostAccess {
         let host_from = self.resolve(from)?;
         let host_to = self.resolve(to)?;
         if host_from.is_dir() {
-            return Err(VfsError::IsADirectory(from.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: from.to_string(),
+            });
         }
         let bytes = fs::read(&host_from).map_err(|err| map_io(from.as_str(), &err))?;
         if host_to.is_dir() {
-            return Err(VfsError::IsADirectory(to.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: to.to_string(),
+            });
         }
         create_parent(&host_to, to)?;
         atomic_write(&host_to, &bytes)
@@ -606,8 +648,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::{HostBackend, identity_to_virtual, map_io};
-    use crate::error::VfsError;
+    use super::{HostBackend, atomic_write, identity_to_virtual, map_io};
+    use crate::error::{PathReason, VfsError};
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
@@ -710,7 +752,7 @@ mod tests {
         access.mkdir(&path("/a/c")?, false)?;
         assert!(matches!(
             access.mkdir(&path("/a/c")?, false),
-            Err(VfsError::AlreadyExists(_))
+            Err(VfsError::AlreadyExists { .. })
         ));
         access.rename(&path("/a/b/f.txt")?, &path("/a/b/g.txt")?)?;
         assert!(!access.exists(&path("/a/b/f.txt")?)?);
@@ -723,7 +765,7 @@ mod tests {
         // The mounted root itself cannot be removed.
         assert!(matches!(
             access.remove(&path("/")?, true),
-            Err(VfsError::PermissionDenied(_))
+            Err(VfsError::PermissionDenied { .. })
         ));
         access.remove(&path("/a")?, true)?;
         assert!(!access.exists(&path("/a")?)?);
@@ -745,14 +787,14 @@ mod tests {
         assert!(
             matches!(
                 access.read(&path("/link/secret.txt")?),
-                Err(VfsError::PermissionDenied(_))
+                Err(VfsError::PermissionDenied { .. })
             ),
             "a read through the escaping link must be denied"
         );
         assert!(
             matches!(
                 access.write(&path("/link/new.txt")?, b"x"),
-                Err(VfsError::PermissionDenied(_))
+                Err(VfsError::PermissionDenied { .. })
             ),
             "a write through the escaping link must be denied"
         );
@@ -775,7 +817,7 @@ mod tests {
         access.mkdir(&path("/dir")?, false)?;
         assert!(matches!(
             access.write(&path("/dir")?, b"x"),
-            Err(VfsError::IsADirectory(_))
+            Err(VfsError::IsADirectory { .. })
         ));
         assert!(temp.path().join("dir").is_dir());
         // A write through a file ancestor fails; the file is unchanged.
@@ -793,7 +835,7 @@ mod tests {
         access.write(&path("/dst.txt")?, b"old")?;
         assert!(matches!(
             access.copy(&path("/missing.txt")?, &path("/dst.txt")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         assert_eq!(access.read(&path("/dst.txt")?)?, b"old");
         assert_no_temp_files_left(temp.path())?;
@@ -807,15 +849,19 @@ mod tests {
         access.write(&path("/dst.txt")?, b"old")?;
         assert!(matches!(
             access.rename(&path("/missing.txt")?, &path("/dst.txt")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         assert_eq!(access.read(&path("/dst.txt")?)?, b"old");
-        // Renaming a directory into its own descendant is rejected.
+        // Renaming a directory into its own descendant is rejected, and
+        // the rejection names the descendant rule.
         access.mkdir(&path("/d")?, false)?;
-        assert!(matches!(
+        assert_eq!(
             access.rename(&path("/d")?, &path("/d/inner")?),
-            Err(VfsError::InvalidPath(_))
-        ));
+            Err(VfsError::InvalidPath {
+                path: "/d".to_owned(),
+                reason: PathReason::IntoDescendant,
+            })
+        );
         assert!(access.exists(&path("/d")?)?);
         assert_no_temp_files_left(temp.path())?;
         Ok(())
@@ -842,7 +888,7 @@ mod tests {
             access.copy(&path("/keep.txt")?, &path("/copy.txt")?),
         ] {
             assert!(
-                matches!(result, Err(VfsError::PermissionDenied(_))),
+                matches!(result, Err(VfsError::PermissionDenied { .. })),
                 "expected a read-only denial, got {result:?}"
             );
         }
@@ -892,7 +938,7 @@ mod tests {
         // ENOENT: an indeterminate path must not report as absent.
         assert!(matches!(
             access.exists(&path("/f.txt/g.txt")?),
-            Err(VfsError::NotADirectory(_))
+            Err(VfsError::NotADirectory { .. })
         ));
         assert!(!access.exists(&path("/missing.txt")?)?);
         Ok(())
@@ -905,20 +951,63 @@ mod tests {
             .map_err(|err| map_io("seeding the file", &err))?;
         assert!(matches!(
             HostBackend::rooted(temp.path().join("f.txt")),
-            Err(VfsError::NotADirectory(_))
+            Err(VfsError::NotADirectory { .. })
         ));
         assert!(matches!(
             HostBackend::rooted(temp.path().join("missing")),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
+    }
+
+    #[test]
+    fn map_io_reports_the_canonical_path_not_the_os_sentence() {
+        use std::io::ErrorKind;
+        // The kind carries the OS failure; the `path` field holds the
+        // canonical path alone, as the field's documented contract
+        // promises, so a host reading it gets a path, never OS text.
+        let cases = [
+            (ErrorKind::NotFound, "not found: /x"),
+            (ErrorKind::AlreadyExists, "already exists: /x"),
+            (ErrorKind::IsADirectory, "is a directory: /x"),
+            (ErrorKind::NotADirectory, "not a directory: /x"),
+            (ErrorKind::DirectoryNotEmpty, "directory not empty: /x"),
+        ];
+        for (kind, text) in cases {
+            assert_eq!(
+                map_io("/x", &std::io::Error::from(kind)).to_string(),
+                text,
+                "the OS detail must not crowd out the path"
+            );
+        }
+        // PermissionDenied keeps the OS text beside the path, in its
+        // reason field.
+        match map_io("/x", &std::io::Error::from(ErrorKind::PermissionDenied)) {
+            VfsError::PermissionDenied { path, reason } => {
+                assert_eq!(path, "/x");
+                assert!(reason.contains("/x"), "{reason}");
+            }
+            other => panic!("expected a permission denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_atomic_write_addressing_only_a_root_is_a_backend_failure() {
+        // A destination without a parent or a file name names nothing
+        // below the root; it is a backend impossibility, not a path rule
+        // a caller broke, so it must not render as "path is empty".
+        let err = atomic_write(Path::new("/"), b"x").unwrap_err();
+        assert!(
+            matches!(err, VfsError::Backend { .. }),
+            "a root-only destination is not a path-validation failure: {err:?}"
+        );
     }
 
     /// The rooted-path, idempotent-remove, and split-glob semantics of
     /// the public capability, exercised over the host backend.
     mod semantics {
         use super::{HostBackend, TempDir, VfsError};
-        use crate::{Origin, VfsRef};
+        use crate::{Origin, PathReason, VfsRef};
 
         fn rooted(temp: &TempDir) -> Result<VfsRef, VfsError> {
             Ok(VfsRef::new(HostBackend::rooted(temp.path())?))
@@ -942,7 +1031,7 @@ mod tests {
             assert_eq!(access.read("drafts/../drafts/f.txt")?, b"x");
             assert!(matches!(
                 access.read("../f.txt"),
-                Err(VfsError::InvalidPath(_))
+                Err(VfsError::InvalidPath { .. })
             ));
             Ok(())
         }
@@ -982,10 +1071,35 @@ mod tests {
         fn glob_refuses_a_backslash_in_the_raw_pattern() -> Result<(), VfsError> {
             let temp = TempDir::new()?;
             let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
-            assert!(matches!(
+            assert_eq!(
                 access.glob("/a\\b"),
-                Err(VfsError::InvalidPath(_))
-            ));
+                Err(VfsError::InvalidPath {
+                    path: "/a\\b".to_owned(),
+                    reason: PathReason::Backslash,
+                })
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn glob_refuses_control_characters_and_bad_grammar_with_their_reasons()
+        -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            assert_eq!(
+                access.glob("/a\u{0}b"),
+                Err(VfsError::InvalidPath {
+                    path: "/a\u{0}b".to_owned(),
+                    reason: PathReason::Control,
+                })
+            );
+            assert_eq!(
+                access.glob("/a/***/b"),
+                Err(VfsError::InvalidPath {
+                    path: "/a/***/b".to_owned(),
+                    reason: PathReason::Wildcard,
+                })
+            );
             Ok(())
         }
     }

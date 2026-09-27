@@ -731,7 +731,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-3>
 
-### Step 3: Restructure VfsError and move PathReason into the VFS
+### Step 3: Restructure VfsError and move PathReason into the VFS [completed]
 
 - Component: VFS core API
 - Piece: error model, sequential after path semantics (Step 2), so every construction site, including Step 2's raw-pattern checks, is migrated once.

@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use crate::error::VfsError;
-use crate::glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
+use crate::error::{PathReason, VfsError};
+use crate::glob::{compile_glob, matches_tokens, validate_glob_pattern};
 use crate::path::VfsPath;
 use crate::stat::{Entry, FileType, Stat};
 use crate::traits::{ExecId, Vfs, VfsAccess};
@@ -116,13 +116,17 @@ impl Tree {
     /// this before any mutation.
     fn check_file_destination(&self, path: &str) -> Result<(), VfsError> {
         if self.dirs.contains(path) {
-            return Err(VfsError::IsADirectory(path.to_owned()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_owned(),
+            });
         }
         if let Some(ancestor) = ancestors(path)
             .into_iter()
             .find(|ancestor| self.files.contains_key(*ancestor))
         {
-            return Err(VfsError::NotADirectory(ancestor.to_owned()));
+            return Err(VfsError::NotADirectory {
+                path: ancestor.to_owned(),
+            });
         }
         Ok(())
     }
@@ -192,9 +196,13 @@ impl VfsAccess for MemoryAccess {
             return Ok(bytes.clone());
         }
         if tree.dirs.contains(path.as_str()) {
-            return Err(VfsError::IsADirectory(path.to_string()));
+            return Err(VfsError::IsADirectory {
+                path: path.to_string(),
+            });
         }
-        Err(VfsError::NotFound(path.to_string()))
+        Err(VfsError::NotFound {
+            path: path.to_string(),
+        })
     }
 
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
@@ -224,15 +232,20 @@ impl VfsAccess for MemoryAccess {
             return Ok(());
         }
         if !tree.dirs.contains(key) {
-            return Err(VfsError::NotFound(path.to_string()));
+            return Err(VfsError::NotFound {
+                path: path.to_string(),
+            });
         }
         if key == "/" {
-            return Err(VfsError::PermissionDenied(
-                "the namespace root cannot be removed".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: "the namespace root cannot be removed".into(),
+            });
         }
         if tree.has_children(key) && !recursive {
-            return Err(VfsError::DirectoryNotEmpty(path.to_string()));
+            return Err(VfsError::DirectoryNotEmpty {
+                path: path.to_string(),
+            });
         }
         let prefix = format!("{key}/");
         tree.files.retain(|file, _| !file.starts_with(&prefix));
@@ -246,15 +259,11 @@ impl VfsAccess for MemoryAccess {
     }
 
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
-            return Err(VfsError::InvalidPath(format!(
-                "glob pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"
-            )));
-        }
-        if let Err(reason) = validate_glob_grammar(pattern) {
-            return Err(VfsError::InvalidPath(format!(
-                "invalid glob pattern {pattern:?}: {reason}"
-            )));
+        if let Err(reason) = validate_glob_pattern(pattern) {
+            return Err(VfsError::InvalidPath {
+                path: pattern.to_owned(),
+                reason,
+            });
         }
         // Compile once, then reuse the tokens across every key, so the
         // per-key tokenization cost is not repeated while the storage
@@ -276,10 +285,14 @@ impl VfsAccess for MemoryAccess {
         let tree = self.tree();
         let key = path.as_str();
         if tree.files.contains_key(key) {
-            return Err(VfsError::NotADirectory(path.to_string()));
+            return Err(VfsError::NotADirectory {
+                path: path.to_string(),
+            });
         }
         if !tree.dirs.contains(key) {
-            return Err(VfsError::NotFound(path.to_string()));
+            return Err(VfsError::NotFound {
+                path: path.to_string(),
+            });
         }
         let mut entries = Vec::new();
         for name in tree.children(key) {
@@ -303,29 +316,38 @@ impl VfsAccess for MemoryAccess {
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
         self.tree()
             .stat_of(path.as_str())
-            .ok_or_else(|| VfsError::NotFound(path.to_string()))
+            .ok_or_else(|| VfsError::NotFound {
+                path: path.to_string(),
+            })
     }
 
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
         let mut tree = self.tree();
         let key = path.as_str();
         if tree.contains(key) {
-            return Err(VfsError::AlreadyExists(path.to_string()));
+            return Err(VfsError::AlreadyExists {
+                path: path.to_string(),
+            });
         }
         if let Some(file) = ancestors(key)
             .into_iter()
             .find(|ancestor| tree.files.contains_key(*ancestor))
         {
-            return Err(VfsError::NotADirectory(file.to_owned()));
+            return Err(VfsError::NotADirectory {
+                path: file.to_owned(),
+            });
         }
         let missing_ancestors: Vec<&str> = ancestors(key)
             .into_iter()
             .filter(|ancestor| !tree.dirs.contains(*ancestor))
             .collect();
         if !recursive && !missing_ancestors.is_empty() {
-            return Err(VfsError::NotFound(format!(
-                "the parent of {path} does not exist"
-            )));
+            // The field names the path that did not resolve, as the host
+            // backend reports it: the target the call addressed, not a
+            // sentence about its parent.
+            return Err(VfsError::NotFound {
+                path: path.to_string(),
+            });
         }
         tree.create_ancestors(key);
         tree.dirs.insert(key.to_owned());
@@ -337,14 +359,16 @@ impl VfsAccess for MemoryAccess {
         let source = from.as_str();
         let dest = to.as_str();
         if source == "/" {
-            return Err(VfsError::PermissionDenied(
-                "the namespace root cannot be renamed".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: source.to_owned(),
+                reason: "the namespace root cannot be renamed".into(),
+            });
         }
         if dest.starts_with(&format!("{source}/")) {
-            return Err(VfsError::InvalidPath(format!(
-                "cannot rename {source} into its own descendant {dest}"
-            )));
+            return Err(VfsError::InvalidPath {
+                path: source.to_owned(),
+                reason: PathReason::IntoDescendant,
+            });
         }
         if let Some(bytes) = tree.files.get(source).cloned() {
             tree.check_file_destination(dest)?;
@@ -354,26 +378,35 @@ impl VfsAccess for MemoryAccess {
             return Ok(());
         }
         if !tree.dirs.contains(source) {
-            return Err(VfsError::NotFound(from.to_string()));
+            return Err(VfsError::NotFound {
+                path: from.to_string(),
+            });
         }
         // A directory moves with its whole subtree. Validation finishes
         // before any mutation, so a failed rename changes nothing.
         if dest == "/" {
-            return Err(VfsError::PermissionDenied(
-                "a directory cannot be renamed onto the namespace root".into(),
-            ));
+            return Err(VfsError::PermissionDenied {
+                path: source.to_owned(),
+                reason: "a directory cannot be renamed onto the namespace root".into(),
+            });
         }
         if tree.files.contains_key(dest) {
-            return Err(VfsError::NotADirectory(to.to_string()));
+            return Err(VfsError::NotADirectory {
+                path: to.to_string(),
+            });
         }
         if tree.dirs.contains(dest) && tree.has_children(dest) {
-            return Err(VfsError::DirectoryNotEmpty(to.to_string()));
+            return Err(VfsError::DirectoryNotEmpty {
+                path: to.to_string(),
+            });
         }
         if let Some(ancestor) = ancestors(dest)
             .into_iter()
             .find(|ancestor| tree.files.contains_key(*ancestor))
         {
-            return Err(VfsError::NotADirectory(ancestor.to_owned()));
+            return Err(VfsError::NotADirectory {
+                path: ancestor.to_owned(),
+            });
         }
         let prefix = format!("{source}/");
         let moved_files: Vec<String> = tree
@@ -409,9 +442,13 @@ impl VfsAccess for MemoryAccess {
         let mut tree = self.tree();
         let Some(bytes) = tree.files.get(from.as_str()).cloned() else {
             if tree.dirs.contains(from.as_str()) {
-                return Err(VfsError::IsADirectory(from.to_string()));
+                return Err(VfsError::IsADirectory {
+                    path: from.to_string(),
+                });
             }
-            return Err(VfsError::NotFound(from.to_string()));
+            return Err(VfsError::NotFound {
+                path: from.to_string(),
+            });
         };
         tree.check_file_destination(to.as_str())?;
         tree.create_ancestors(to.as_str());
@@ -423,7 +460,7 @@ impl VfsAccess for MemoryAccess {
 #[cfg(test)]
 mod tests {
     use super::MemoryBackend;
-    use crate::error::VfsError;
+    use crate::error::{PathReason, VfsError};
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
@@ -458,7 +495,7 @@ mod tests {
         let access = seeded(&[])?;
         assert!(matches!(
             access.read(&path("/missing.txt")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -468,7 +505,7 @@ mod tests {
         let access = seeded(&[("/dir/f.txt", "x")])?;
         assert!(matches!(
             access.read(&path("/dir")?),
-            Err(VfsError::IsADirectory(_))
+            Err(VfsError::IsADirectory { .. })
         ));
         Ok(())
     }
@@ -500,7 +537,7 @@ mod tests {
         let mut access = seeded(&[("/dir/f.txt", "x")])?;
         assert!(matches!(
             access.write(&path("/dir")?, b"y"),
-            Err(VfsError::IsADirectory(_))
+            Err(VfsError::IsADirectory { .. })
         ));
         assert_eq!(access.read(&path("/dir/f.txt")?)?, b"x");
         Ok(())
@@ -520,7 +557,7 @@ mod tests {
         let mut access = seeded(&[])?;
         assert!(matches!(
             access.remove(&path("/gone.txt")?, false),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -538,7 +575,7 @@ mod tests {
         let mut access = seeded(&[("/dir/f.txt", "x")])?;
         assert!(matches!(
             access.remove(&path("/dir")?, false),
-            Err(VfsError::DirectoryNotEmpty(_))
+            Err(VfsError::DirectoryNotEmpty { .. })
         ));
         // The failed removal changed nothing.
         assert_eq!(access.read(&path("/dir/f.txt")?)?, b"x");
@@ -571,7 +608,7 @@ mod tests {
         let mut access = seeded(&[("/f.txt", "x")])?;
         assert!(matches!(
             access.remove(&path("/")?, true),
-            Err(VfsError::PermissionDenied(_))
+            Err(VfsError::PermissionDenied { .. })
         ));
         assert_eq!(access.read(&path("/f.txt")?)?, b"x");
         Ok(())
@@ -628,14 +665,20 @@ mod tests {
     #[test]
     fn glob_rejects_invalid_patterns() -> Result<(), VfsError> {
         let access = seeded(&[("/f.txt", "x")])?;
-        assert!(matches!(
+        assert_eq!(
             access.glob("/a/***/b"),
-            Err(VfsError::InvalidPath(_))
-        ));
-        assert!(matches!(
+            Err(VfsError::InvalidPath {
+                path: "/a/***/b".to_owned(),
+                reason: PathReason::Wildcard,
+            })
+        );
+        assert_eq!(
             access.glob("/a\\b"),
-            Err(VfsError::InvalidPath(_))
-        ));
+            Err(VfsError::InvalidPath {
+                path: "/a\\b".to_owned(),
+                reason: PathReason::Backslash,
+            })
+        );
         Ok(())
     }
 
@@ -657,11 +700,11 @@ mod tests {
         let access = seeded(&[("/f.txt", "x")])?;
         assert!(matches!(
             access.list(&path("/f.txt")?),
-            Err(VfsError::NotADirectory(_))
+            Err(VfsError::NotADirectory { .. })
         ));
         assert!(matches!(
             access.list(&path("/missing")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -677,7 +720,7 @@ mod tests {
         assert_eq!(dir.file_type, FileType::Directory);
         assert!(matches!(
             access.stat(&path("/missing")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -689,11 +732,11 @@ mod tests {
         assert!(access.exists(&path("/new")?)?);
         assert!(matches!(
             access.mkdir(&path("/new")?, false),
-            Err(VfsError::AlreadyExists(_))
+            Err(VfsError::AlreadyExists { .. })
         ));
         assert!(matches!(
             access.mkdir(&path("/f.txt")?, false),
-            Err(VfsError::AlreadyExists(_))
+            Err(VfsError::AlreadyExists { .. })
         ));
         Ok(())
     }
@@ -701,10 +744,14 @@ mod tests {
     #[test]
     fn mkdir_without_recursive_requires_an_existing_parent() -> Result<(), VfsError> {
         let mut access = seeded(&[])?;
-        assert!(matches!(
+        // The error names the target path, not a sentence about its
+        // parent, matching the host backend's own NotFound spelling.
+        assert_eq!(
             access.mkdir(&path("/a/b")?, false),
-            Err(VfsError::NotFound(_))
-        ));
+            Err(VfsError::NotFound {
+                path: "/a/b".to_owned(),
+            })
+        );
         access.mkdir(&path("/a/b")?, true)?;
         assert!(access.exists(&path("/a")?)?);
         assert!(access.exists(&path("/a/b")?)?);
@@ -716,7 +763,7 @@ mod tests {
         let mut access = seeded(&[("/f.txt", "x")])?;
         assert!(matches!(
             access.mkdir(&path("/f.txt/g")?, true),
-            Err(VfsError::NotADirectory(_))
+            Err(VfsError::NotADirectory { .. })
         ));
         Ok(())
     }
@@ -745,7 +792,7 @@ mod tests {
         let mut access = seeded(&[("/d/a.txt", "a"), ("/other.txt", "o")])?;
         assert!(matches!(
             access.rename(&path("/d")?, &path("/")?),
-            Err(VfsError::PermissionDenied(_))
+            Err(VfsError::PermissionDenied { .. })
         ));
         // The failed rename changed nothing: the subtree is intact.
         assert_eq!(access.read(&path("/d/a.txt")?)?, b"a");
@@ -764,15 +811,19 @@ mod tests {
         let mut access = seeded(&[("/dst.txt", "old")])?;
         assert!(matches!(
             access.rename(&path("/missing.txt")?, &path("/dst.txt")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         assert_eq!(access.read(&path("/dst.txt")?)?, b"old");
-        // Renaming a directory into its own descendant is rejected.
+        // Renaming a directory into its own descendant is rejected, and
+        // the rejection names the descendant rule.
         access.mkdir(&path("/d")?, false)?;
-        assert!(matches!(
+        assert_eq!(
             access.rename(&path("/d")?, &path("/d/inner")?),
-            Err(VfsError::InvalidPath(_))
-        ));
+            Err(VfsError::InvalidPath {
+                path: "/d".to_owned(),
+                reason: PathReason::IntoDescendant,
+            })
+        );
         assert!(access.exists(&path("/d")?)?);
         Ok(())
     }
@@ -791,12 +842,12 @@ mod tests {
         let mut access = seeded(&[("/d/f.txt", "x"), ("/dst.txt", "old")])?;
         assert!(matches!(
             access.copy(&path("/d")?, &path("/dst.txt")?),
-            Err(VfsError::IsADirectory(_))
+            Err(VfsError::IsADirectory { .. })
         ));
         assert_eq!(access.read(&path("/dst.txt")?)?, b"old");
         assert!(matches!(
             access.copy(&path("/missing.txt")?, &path("/dst.txt")?),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         assert_eq!(access.read(&path("/dst.txt")?)?, b"old");
         Ok(())

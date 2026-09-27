@@ -94,7 +94,7 @@ fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
         .write("/shared.txt", b"from b")
         .expect_err("run b conflicts with run a's live claim");
     assert!(
-        matches!(error, VfsError::Conflict(_)),
+        matches!(error, VfsError::Conflict { .. }),
         "a determinism violation, not a backend error: {error}"
     );
     // The conflicting write never partially applied.

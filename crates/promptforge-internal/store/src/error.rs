@@ -2,50 +2,10 @@
 
 /// Why a logical store path was rejected before any backend saw it.
 ///
-/// The `Store` facade validates every caller-supplied path into one
-/// canonical form before dispatch; this names the rule the path broke.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PathReason {
-    /// The path was empty or contained only separators.
-    Empty,
-    /// The path began with `/`, so it addressed outside the run's namespace.
-    Absolute,
-    /// The path contained a `.` or `..` segment (parent or current traversal).
-    Traversal,
-    /// The path contained a control character (below `0x20`, or `0x7f`).
-    Control,
-    /// The path contained an empty segment (a `//` run, or a trailing `/`).
-    EmptySegment,
-    /// The path contained a backslash, which is ambiguous across backends (a
-    /// literal byte to one, a separator to another).
-    Backslash,
-    /// A segment was a platform-reserved device name (for example `CON`,
-    /// `NUL`, `COM1`), which some backends cannot represent as a plain file.
-    ReservedName,
-    /// A segment ended in a byte some backends silently strip (a trailing `.`
-    /// or space), so the stored name would not round-trip.
-    UnsafeSuffix,
-    /// The path exceeded the maximum supported length in bytes.
-    TooLong,
-}
-
-impl std::fmt::Display for PathReason {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let text = match self {
-            PathReason::Empty => "path is empty",
-            PathReason::Absolute => "path is absolute",
-            PathReason::Traversal => "path contains a traversal segment",
-            PathReason::Control => "path contains a control character",
-            PathReason::EmptySegment => "path contains an empty segment",
-            PathReason::Backslash => "path contains a backslash",
-            PathReason::ReservedName => "path contains a reserved device name",
-            PathReason::UnsafeSuffix => "path segment ends in an unsafe character",
-            PathReason::TooLong => "path is too long",
-        };
-        formatter.write_str(text)
-    }
-}
+/// Lives in the VFS crate, which rejects its own malformed paths and
+/// patterns with the same reasons; the `Store` facade re-exports it and
+/// reuses the first nine for its own path validation.
+pub use promptforge_vfs::PathReason;
 
 /// A stable, matchable classification of a [`StoreError`].
 ///

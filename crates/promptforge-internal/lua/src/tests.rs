@@ -44,9 +44,9 @@ struct FailingBackend;
 
 impl FailingBackend {
     fn error(path: &VfsPath) -> VfsError {
-        VfsError::Backend(format!(
-            "the failing backend rejects every operation: {path}"
-        ))
+        VfsError::Backend {
+            message: format!("the failing backend rejects every operation: {path}"),
+        }
     }
 }
 
@@ -86,9 +86,9 @@ impl VfsAccess for FailingAccess {
     }
 
     fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, VfsError> {
-        Err(VfsError::Backend(format!(
-            "the failing backend rejects every operation: {pattern}"
-        )))
+        Err(VfsError::Backend {
+            message: format!("the failing backend rejects every operation: {pattern}"),
+        })
     }
 
     fn list(&self, path: &VfsPath) -> std::result::Result<Vec<promptforge_vfs::Entry>, VfsError> {

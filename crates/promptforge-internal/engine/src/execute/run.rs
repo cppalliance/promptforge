@@ -274,7 +274,7 @@ fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, promptforge_vf
         .stat(promptforge_vfs::STORE_MOUNT)
     {
         Ok(_) => Ok(true),
-        Err(promptforge_vfs::VfsError::NotFound(_)) => Ok(false),
+        Err(promptforge_vfs::VfsError::NotFound { .. }) => Ok(false),
         Err(error) => Err(error),
     }
 }

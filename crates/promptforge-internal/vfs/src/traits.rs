@@ -83,14 +83,14 @@ pub trait VfsAccess: Send {
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
         let data = self.read(path)?;
         let Ok(start) = usize::try_from(offset) else {
-            return Err(VfsError::Backend(format!(
-                "read_range offset {offset} exceeds the addressable size"
-            )));
+            return Err(VfsError::Backend {
+                message: format!("read_range offset {offset} exceeds the addressable size"),
+            });
         };
         let Ok(length) = usize::try_from(len) else {
-            return Err(VfsError::Backend(format!(
-                "read_range length {len} exceeds the addressable size"
-            )));
+            return Err(VfsError::Backend {
+                message: format!("read_range length {len} exceeds the addressable size"),
+            });
         };
         if start >= data.len() {
             return Ok(Vec::new());
@@ -219,27 +219,33 @@ pub trait VfsAccess: Send {
     /// write fails.
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         if old.is_empty() {
-            return Err(VfsError::Backend(format!(
-                "str_replace requires a non-empty anchor: {path}"
-            )));
+            return Err(VfsError::Anchor {
+                path: path.to_string(),
+                anchor: String::new(),
+                count: 0,
+            });
         }
         let bytes = self.read(path)?;
-        let text = String::from_utf8(bytes).map_err(|source| {
-            VfsError::Backend(format!("str_replace requires UTF-8 text: {path}: {source}"))
+        let text = String::from_utf8(bytes).map_err(|_| VfsError::NotUtf8 {
+            path: path.to_string(),
         })?;
         let count = text.matches(old).count();
-        if count == 0 {
-            return Err(VfsError::Backend(format!(
-                "str_replace found no occurrence of {old:?} in {path}"
-            )));
+        match count {
+            0 => Err(VfsError::Anchor {
+                path: path.to_string(),
+                anchor: old.to_owned(),
+                count: 0,
+            }),
+            1 => {
+                let replaced = text.replacen(old, new, 1);
+                self.write(path, replaced.as_bytes())
+            }
+            count => Err(VfsError::Anchor {
+                path: path.to_string(),
+                anchor: old.to_owned(),
+                count,
+            }),
         }
-        if count > 1 {
-            return Err(VfsError::Backend(format!(
-                "str_replace found {count} occurrences of {old:?} in {path}; exactly one is required"
-            )));
-        }
-        let replaced = text.replacen(old, new, 1);
-        self.write(path, replaced.as_bytes())
     }
 
     /// Searches files under the query's root.
@@ -256,10 +262,12 @@ pub trait VfsAccess: Send {
     /// when the glob or a read fails.
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         if query.is_regex {
-            return Err(VfsError::Unsupported(
-                "the default grep matches literal text only; regex requires a backend override"
-                    .into(),
-            ));
+            return Err(VfsError::Unsupported {
+                path: query.root.to_string(),
+                detail:
+                    "the default grep matches literal text only; regex requires a backend override"
+                        .into(),
+            });
         }
         let base = match query.root.as_str() {
             "/" => "",
@@ -275,7 +283,7 @@ pub trait VfsAccess: Send {
             let vfs_path = canonicalize_absolute(&path)?;
             let bytes = match self.read(&vfs_path) {
                 Ok(bytes) => bytes,
-                Err(VfsError::IsADirectory(_)) => continue,
+                Err(VfsError::IsADirectory { .. }) => continue,
                 Err(err) => return Err(err),
             };
             let Ok(text) = String::from_utf8(bytes) else {
@@ -315,9 +323,10 @@ pub trait VfsAccess: Send {
     /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
         let _ = target;
-        Err(VfsError::Unsupported(format!(
-            "symlink is not supported by this backend: {link}"
-        )))
+        Err(VfsError::Unsupported {
+            path: link.to_string(),
+            detail: format!("symlink is not supported by this backend: {link}"),
+        })
     }
 
     /// Reads the target of the symbolic link at `path`.
@@ -328,9 +337,10 @@ pub trait VfsAccess: Send {
     ///
     /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
-        Err(VfsError::Unsupported(format!(
-            "read_link is not supported by this backend: {path}"
-        )))
+        Err(VfsError::Unsupported {
+            path: path.to_string(),
+            detail: format!("read_link is not supported by this backend: {path}"),
+        })
     }
 
     /// Changes the mode bits of `path`.
@@ -342,9 +352,10 @@ pub trait VfsAccess: Send {
     /// Returns [`VfsError::Unsupported`] unless a backend overrides.
     fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
         let _ = mode;
-        Err(VfsError::Unsupported(format!(
-            "chmod is not supported by this backend: {path}"
-        )))
+        Err(VfsError::Unsupported {
+            path: path.to_string(),
+            detail: format!("chmod is not supported by this backend: {path}"),
+        })
     }
 }
 
@@ -462,7 +473,9 @@ mod tests {
             self.files
                 .get(path.as_str())
                 .cloned()
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
@@ -483,7 +496,9 @@ mod tests {
             self.files
                 .remove(path.as_str())
                 .map(|_| ())
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
@@ -506,13 +521,17 @@ mod tests {
         }
 
         fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not list".into()))
+            Err(VfsError::Unsupported {
+                path: path.to_string(),
+                detail: "the stub does not list".into(),
+            })
         }
 
         fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not stat".into()))
+            Err(VfsError::Unsupported {
+                path: path.to_string(),
+                detail: "the stub does not stat".into(),
+            })
         }
 
         fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
@@ -524,17 +543,21 @@ mod tests {
             let bytes = self
                 .files
                 .remove(from.as_str())
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+                .ok_or_else(|| VfsError::NotFound {
+                    path: from.to_string(),
+                })?;
             self.files.insert(to.to_string(), bytes);
             Ok(())
         }
 
         fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-            let bytes = self
-                .files
-                .get(from.as_str())
-                .cloned()
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+            let bytes =
+                self.files
+                    .get(from.as_str())
+                    .cloned()
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: from.to_string(),
+                    })?;
             self.files.insert(to.to_string(), bytes);
             Ok(())
         }
@@ -568,7 +591,14 @@ mod tests {
     fn the_default_str_replace_rejects_zero_matches() -> Result<(), VfsError> {
         let mut backend = stub(&[("/a.txt", "alpha beta")]);
         let result = backend.str_replace(&path("/a.txt")?, "missing", "x");
-        assert!(matches!(result, Err(VfsError::Backend(_))));
+        assert_eq!(
+            result,
+            Err(VfsError::Anchor {
+                path: "/a.txt".to_owned(),
+                anchor: "missing".to_owned(),
+                count: 0,
+            })
+        );
         assert_eq!(backend.read(&path("/a.txt")?)?, b"alpha beta");
         Ok(())
     }
@@ -577,7 +607,14 @@ mod tests {
     fn the_default_str_replace_rejects_multiple_matches() -> Result<(), VfsError> {
         let mut backend = stub(&[("/a.txt", "foo and foo")]);
         let result = backend.str_replace(&path("/a.txt")?, "foo", "bar");
-        assert!(matches!(result, Err(VfsError::Backend(_))));
+        assert_eq!(
+            result,
+            Err(VfsError::Anchor {
+                path: "/a.txt".to_owned(),
+                anchor: "foo".to_owned(),
+                count: 2,
+            })
+        );
         assert_eq!(backend.read(&path("/a.txt")?)?, b"foo and foo");
         Ok(())
     }
@@ -587,8 +624,14 @@ mod tests {
         let mut backend = stub(&[("/a.txt", "")]);
         let result = backend.str_replace(&path("/a.txt")?, "", "x");
         match result {
-            Err(VfsError::Backend(message)) => {
-                assert_eq!(message, "str_replace requires a non-empty anchor: /a.txt");
+            Err(VfsError::Anchor {
+                path,
+                anchor,
+                count,
+            }) => {
+                assert_eq!(path, "/a.txt");
+                assert!(anchor.is_empty());
+                assert_eq!(count, 0);
             }
             other => panic!("expected the empty-anchor refusal, got {other:?}"),
         }
@@ -602,12 +645,31 @@ mod tests {
         let mut backend = stub(&[("/a.txt", "alpha beta")]);
         let result = backend.str_replace(&path("/a.txt")?, "", "x");
         match result {
-            Err(VfsError::Backend(message)) => {
-                assert_eq!(message, "str_replace requires a non-empty anchor: /a.txt");
+            Err(VfsError::Anchor {
+                path,
+                anchor,
+                count,
+            }) => {
+                assert_eq!(path, "/a.txt");
+                assert!(anchor.is_empty());
+                assert_eq!(count, 0);
             }
             other => panic!("expected the empty-anchor refusal, got {other:?}"),
         }
         assert_eq!(backend.read(&path("/a.txt")?)?, b"alpha beta");
+        Ok(())
+    }
+
+    #[test]
+    fn the_default_str_replace_reports_non_utf8_text() -> Result<(), VfsError> {
+        let mut backend = stub(&[]);
+        backend.write(&path("/bin.dat")?, &[0xff, 0xfe])?;
+        assert_eq!(
+            backend.str_replace(&path("/bin.dat")?, "x", "y"),
+            Err(VfsError::NotUtf8 {
+                path: "/bin.dat".to_owned(),
+            })
+        );
         Ok(())
     }
 
@@ -668,7 +730,10 @@ mod tests {
         let backend = stub(&[("/a.txt", "hit")]);
         let mut q = query("/", "h.t")?;
         q.is_regex = true;
-        assert!(matches!(backend.grep(&q), Err(VfsError::Unsupported(_))));
+        assert!(matches!(
+            backend.grep(&q),
+            Err(VfsError::Unsupported { .. })
+        ));
         Ok(())
     }
 
@@ -677,15 +742,15 @@ mod tests {
         let mut backend = stub(&[("/a.txt", "x")]);
         assert!(matches!(
             backend.symlink(&path("/a.txt")?, &path("/b.txt")?),
-            Err(VfsError::Unsupported(_))
+            Err(VfsError::Unsupported { .. })
         ));
         assert!(matches!(
             backend.read_link(&path("/a.txt")?),
-            Err(VfsError::Unsupported(_))
+            Err(VfsError::Unsupported { .. })
         ));
         assert!(matches!(
             backend.chmod(&path("/a.txt")?, 0o644),
-            Err(VfsError::Unsupported(_))
+            Err(VfsError::Unsupported { .. })
         ));
         Ok(())
     }

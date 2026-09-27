@@ -405,9 +405,9 @@ impl Store<'_> {
         // the store vocabulary.
         let scoped = format!("{STORE_MOUNT}/{pattern}");
         let matches = self.access.glob(&scoped).map_err(|err| match err {
-            VfsError::InvalidPath(reason) => StoreError::InvalidPattern {
+            VfsError::InvalidPath { reason, .. } => StoreError::InvalidPattern {
                 pattern: pattern.to_owned(),
-                reason,
+                reason: reason.to_string(),
             },
             other => map_vfs(other, pattern),
         })?;
@@ -471,12 +471,12 @@ fn full(path: &str) -> String {
 /// opaque backend failure.
 fn map_vfs(err: VfsError, path: &str) -> StoreError {
     match err {
-        VfsError::NotFound(_) => StoreError::NotFound {
+        VfsError::NotFound { .. } => StoreError::NotFound {
             path: path.to_owned(),
         },
-        VfsError::Conflict(message) => StoreError::WriteRace {
+        VfsError::Conflict { detail, .. } => StoreError::WriteRace {
             path: path.to_owned(),
-            detail: message,
+            detail,
         },
         other => StoreError::backend(other),
     }

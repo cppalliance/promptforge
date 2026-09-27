@@ -76,8 +76,8 @@ assert_eq!(access.read_string("/drafts\\plan\\today.md")?, "ship it");
 
 // A relative path joins onto the access's root, which is `/` here.
 assert_eq!(access.read_string("drafts/plan/today.md")?, "ship it");
-assert!(matches!(access.read("/.."), Err(VfsError::InvalidPath(_))));
-assert!(matches!(access.read("/Drafts/plan/today.md"), Err(VfsError::NotFound(_))));
+assert!(matches!(access.read("/.."), Err(VfsError::InvalidPath { .. })));
+assert!(matches!(access.read("/Drafts/plan/today.md"), Err(VfsError::NotFound { .. })));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
@@ -103,7 +103,7 @@ let writer = vfs.acquire(Origin::at("## Draft", "notes", 12))?;
 writer.write("/plan.md", b"step one")?;
 
 let reader = vfs.acquire(Origin::new("claims example"))?;
-assert!(matches!(reader.read("/plan.md"), Err(VfsError::Conflict(_))));
+assert!(matches!(reader.read("/plan.md"), Err(VfsError::Conflict { .. })));
 
 drop(writer);
 assert_eq!(reader.read("/plan.md")?, b"step one");
@@ -122,14 +122,14 @@ A backend stores the files. [`Vfs`] is the trait every backend implements, and t
 use promptforge::vfs::{HostBackend, VfsError};
 
 let missing = HostBackend::rooted("this-directory-does-not-exist");
-assert!(matches!(missing, Err(VfsError::NotFound(_))));
+assert!(matches!(missing, Err(VfsError::NotFound { .. })));
 
 let _whole_disk = HostBackend::identity().with_read_only(true);
 ````
 
 # Mounting
 
-[`VfsRef::builder`] returns a [`VfsRefBuilder`]. Each [`VfsRefBuilder::mount`] call installs a backend at a prefix, and [`VfsRefBuilder::build`] freezes the mount table into a [`VfsRef`]. A handle built this way is a *router*, because it routes each path to one mount. The longest matching prefix serves each path, so a longer mount shadows the same prefix of a shorter one. Each backend sees paths relative to its own mount, so `/a/b/f.txt` reaches the backend mounted at `/a/b` as `/f.txt`. A path that no mount serves fails with [`VfsError::NotFound`] and the message "no mount serves {path}".
+[`VfsRef::builder`] returns a [`VfsRefBuilder`]. Each [`VfsRefBuilder::mount`] call installs a backend at a prefix, and [`VfsRefBuilder::build`] freezes the mount table into a [`VfsRef`]. A handle built this way is a *router*, because it routes each path to one mount. The longest matching prefix serves each path, so a longer mount shadows the same prefix of a shorter one. Each backend sees paths relative to its own mount, so `/a/b/f.txt` reaches the backend mounted at `/a/b` as `/f.txt`. A path that no mount serves fails with [`VfsError::NotFound`] naming the path.
 
 A router acquires a mounted backend lazily, on the first operation that touches the mount. So a backend that refuses an identity reports the error from that operation, not from [`VfsRef::acquire`].
 
@@ -151,7 +151,7 @@ let direct = VfsRef::new(data).acquire(Origin::new("mount example"))?;
 assert_eq!(direct.read("/report.md")?, b"q3");
 assert!(!direct.exists("/notes.md")?);
 
-assert!(matches!(access.rename("/notes.md", "/data/notes.md"), Err(VfsError::Unsupported(_))));
+assert!(matches!(access.rename("/notes.md", "/data/notes.md"), Err(VfsError::Unsupported { .. })));
 assert!(access.exists("/notes.md")?);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
@@ -171,7 +171,7 @@ drop(writer);
 
 let reader = base.acquire(Origin::new("overlay example"))?;
 assert_eq!(reader.read("/notes.md")?, b"kept");
-assert!(matches!(reader.read("/scratch/tmp.txt"), Err(VfsError::NotFound(_))));
+assert!(matches!(reader.read("/scratch/tmp.txt"), Err(VfsError::NotFound { .. })));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
@@ -216,7 +216,7 @@ let vfs = VfsRef::builder()
     .build();
 let access = vfs.acquire(Origin::new("read-only example"))?;
 assert_eq!(access.read("/reference/style.md")?, b"be brief");
-assert!(matches!(access.write("/reference/style.md", b"x"), Err(VfsError::PermissionDenied(_))));
+assert!(matches!(access.write("/reference/style.md", b"x"), Err(VfsError::PermissionDenied { .. })));
 access.write("/notes.md", b"writable")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
@@ -256,7 +256,7 @@ let vfs = VfsRef::builder()
     .build();
 let access = vfs.acquire(Origin::new("policy example"))?;
 access.write("/drafts/plan.md", b"step one")?;
-assert!(matches!(access.write("/plan.md", b"step one"), Err(VfsError::PermissionDenied(_))));
+assert!(matches!(access.write("/plan.md", b"step one"), Err(VfsError::PermissionDenied { .. })));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
@@ -275,11 +275,11 @@ let policy = ModePolicy::new(Mode::Ask);
 let mode = policy.handle();
 let vfs = VfsRef::with_policy(MemoryBackend::new(), policy);
 let access = vfs.acquire(Origin::new("mode example"))?;
-assert!(matches!(access.write("/plan.md", b"x"), Err(VfsError::PermissionDenied(_))));
+assert!(matches!(access.write("/plan.md", b"x"), Err(VfsError::PermissionDenied { .. })));
 
 mode.set(Mode::Plan);
 access.write("/plan.md", b"step one")?;
-assert!(matches!(access.write("/plan.txt", b"x"), Err(VfsError::PermissionDenied(_))));
+assert!(matches!(access.write("/plan.txt", b"x"), Err(VfsError::PermissionDenied { .. })));
 assert_eq!(access.read("/plan.md")?, b"step one");
 
 mode.set(Mode::Agent);
@@ -418,10 +418,13 @@ impl Vfs for Capped {
 impl CappedSession {
     fn within_limit(&self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
         if contents.len() > self.limit {
-            return Err(VfsError::PermissionDenied(format!(
-                "{path} would take more than {} bytes in one call",
-                self.limit
-            )));
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: format!(
+                    "{path} would take more than {} bytes in one call",
+                    self.limit
+                ),
+            });
         }
         Ok(())
     }
@@ -478,7 +481,7 @@ impl VfsAccess for CappedSession {
 let vfs = VfsRef::new(Capped { inner: MemoryBackend::new(), limit: 8 });
 let access = vfs.acquire(Origin::new("capped example"))?;
 access.write("/small.txt", b"fits")?;
-assert!(matches!(access.write("/big.txt", b"far too long"), Err(VfsError::PermissionDenied(_))));
+assert!(matches!(access.write("/big.txt", b"far too long"), Err(VfsError::PermissionDenied { .. })));
 
 let entries = access.list("/")?;
 assert_eq!(entries.len(), 1);
@@ -535,24 +538,24 @@ Each method canonicalizes its path arguments, consults the policy, registers a c
 **Reading.**
 
 - [`Access::read`] takes `path` and returns the file's bytes as stored, as a [`Vec`] of [`u8`]. It registers a read claim and reports [`Op::Read`]. It fails with [`VfsError::NotFound`] when the file is absent, and with [`VfsError::IsADirectory`] on a directory in the built-in backends.
-- [`Access::read_string`] takes `path` and returns the contents as a UTF-8 [`String`]. It reads through [`Access::read`], so it claims and reports the same way. Content that is not UTF-8 fails with [`VfsError::Backend`] and the message "read_string requires UTF-8 text: {path}: {source}".
-- [`Access::read_range`] takes `path`, a `start` of type [`usize`], and an `end` of type [`Option`] of [`usize`], and returns a [`String`]. The range is 1-based and inclusive. `start` must be at least 1. An `end` of [`None`] means the last line, and an `end` past the last line clamps to it. The selected lines are joined by `"\n"` with no trailing newline, and a `start` past the last line returns `""`. So `read_range("/f.txt", 2, None)` on `"one\ntwo\nthree\n"` returns `"two\nthree"`. Lines are split with [`str::lines`]. It reads the whole file through [`Access::read`], so it claims and reports the same way. A `start` of 0 fails with [`VfsError::Backend`] and "invalid line range for {path}: start {start} is below 1", checked before the file is read. A clamped `end` before `start` fails with "invalid line range for {path}: end {end} is before start {start}". Content that is not UTF-8 also fails.
+- [`Access::read_string`] takes `path` and returns the contents as a UTF-8 [`String`]. It reads through [`Access::read`], so it claims and reports the same way. Content that is not UTF-8 fails with [`VfsError::NotUtf8`] and the message "not UTF-8: {path}".
+- [`Access::read_range`] takes `path`, a `start` of type [`usize`], and an `end` of type [`Option`] of [`usize`], and returns a [`String`]. The range is 1-based and inclusive. `start` must be at least 1. An `end` of [`None`] means the last line, and an `end` past the last line clamps to it. The selected lines are joined by `"\n"` with no trailing newline, and a `start` past the last line returns `""`. So `read_range("/f.txt", 2, None)` on `"one\ntwo\nthree\n"` returns `"two\nthree"`. Lines are split with [`str::lines`]. It reads the whole file through [`Access::read`], so it claims and reports the same way. A `start` of 0 fails with [`VfsError::InvalidRange`] and "invalid line range for {path}: start is below 1", checked before the file is read. A clamped `end` before `start` fails with "invalid line range for {path}: end is before start". Content that is not UTF-8 fails with [`VfsError::NotUtf8`].
 - [`Access::read_range_numbered`] takes the same arguments as [`Access::read_range`] and fails the same ways. Each selected line starts with its absolute line number, right-aligned to the width of the largest number shown and followed by `"| "`. So `read_range_numbered("/f.txt", 9, Some(10))` returns `" 9| line9\n10| line10"`. Models use the numbers to navigate.
 
 **Writing.**
 
 - [`Access::write`] takes `path` and `contents`, a [`&[u8]`](slice) holding the complete new file, and creates or overwrites the file. It registers a write claim and reports [`Op::Write`]. It fails with [`VfsError::IsADirectory`] when a directory sits at the path, and with [`VfsError::NotADirectory`] in the memory backend when an ancestor is a file. The built-in backends create missing ancestor directories.
 - [`Access::append`] takes `path` and `contents`, a [`&[u8]`](slice) of bytes to add at the end. It creates the file when it is absent, and the built-in backends also create missing ancestors. It registers a write claim, reports [`Op::Append`], and fails as [`Access::write`] does.
-- [`Access::str_replace`] takes `path`, `old`, and `new`, each a [`&str`](str). `old` is the anchor text and must occur exactly once in the file, and `new` replaces it. The policy and claims treat it as a write, so it registers a write claim and reports [`Op::Write`]. With the default backend body it fails with [`VfsError::Backend`] and one of "str_replace requires UTF-8 text: {path}: {source}", "str_replace found no occurrence of {old:?} in {path}", or "str_replace found {count} occurrences of {old:?} in {path}; exactly one is required". A missing file fails with [`VfsError::NotFound`]. A backend can override the default body.
+- [`Access::str_replace`] takes `path`, `old`, and `new`, each a [`&str`](str). `old` is the anchor text and must occur exactly once in the file, and `new` replaces it. The policy and claims treat it as a write, so it registers a write claim and reports [`Op::Write`]. With the default backend body a match count other than one fails with [`VfsError::Anchor`], whose fields name the path, the anchor, and the count. An empty anchor is refused with the message "str_replace requires a non-empty anchor: {path}", a missing anchor with "anchor {anchor:?} was not found in {path}, expected exactly one", and an ambiguous one with "anchor {anchor:?} occurs {count} times in {path}, expected exactly one". Text that is not UTF-8 fails with [`VfsError::NotUtf8`], and a missing file with [`VfsError::NotFound`]. A backend can override the default body.
 - [`Access::remove`] takes `path` and `recursive`, a [`bool`]. With `true` it removes a directory with its whole subtree. With `false` it removes only a file, a link, or an empty directory. On a symlink it removes the link, never the target. It registers a write claim and reports [`Op::Delete`]. It returns a [`bool`]: `true` when the path existed and was removed, and `false` when the path was already absent, so deleting is idempotent. It fails with [`VfsError::DirectoryNotEmpty`] for a non-empty directory without `recursive`. Removing the backend's root fails with [`VfsError::PermissionDenied`], as "the namespace root cannot be removed" in the memory backend and "the mounted root cannot be removed" in the host backend. The backend trait's [`VfsAccess::remove`] still reports an absent path as [`VfsError::NotFound`]; only the capability maps it to `Ok(false)`.
-- [`Access::mkdir`] takes `path` and `recursive`, a [`bool`]. With `true` it also creates missing ancestors, and with `false` the parent must exist. It registers a write claim and reports [`Op::Mkdir`]. It fails with [`VfsError::AlreadyExists`] when anything already sits at the path. In the memory backend it fails with [`VfsError::NotADirectory`] when an ancestor is a file, and with [`VfsError::NotFound`] and "the parent of {path} does not exist" when the parent is missing without `recursive`.
-- [`Access::rename`] takes `from` and `to`, and renames or moves a file or directory. `to` must be served by the same mount as `from`, and must not be inside `from`. Both paths are checked by the policy and claimed as writes under [`Op::Rename`], `from` first, and the op sink fires once per path. It fails with [`VfsError::InvalidPath`] and "cannot rename {from} into its own descendant {to}", with [`VfsError::Unsupported`] across mounts, and with [`VfsError::NotFound`] when the source is absent. Renaming a backend's root, or onto it, fails with [`VfsError::PermissionDenied`]. The memory backend moves a directory's whole subtree and can fail with [`VfsError::NotADirectory`] or [`VfsError::DirectoryNotEmpty`] for an incompatible directory destination. The rename is atomic where the backend allows.
+- [`Access::mkdir`] takes `path` and `recursive`, a [`bool`]. With `true` it also creates missing ancestors, and with `false` the parent must exist. It registers a write claim and reports [`Op::Mkdir`]. It fails with [`VfsError::AlreadyExists`] when anything already sits at the path. In the memory backend it fails with [`VfsError::NotADirectory`] when an ancestor is a file, and with [`VfsError::NotFound`] when the parent is missing without `recursive`.
+- [`Access::rename`] takes `from` and `to`, and renames or moves a file or directory. `to` must be served by the same mount as `from`, and must not be inside `from`. Both paths are checked by the policy and claimed as writes under [`Op::Rename`], `from` first, and the op sink fires once per path. It fails with [`VfsError::InvalidPath`] and [`PathReason::IntoDescendant`] when `to` is inside `from`, with [`VfsError::Unsupported`] across mounts, and with [`VfsError::NotFound`] when the source is absent. Renaming a backend's root, or onto it, fails with [`VfsError::PermissionDenied`]. The memory backend moves a directory's whole subtree and can fail with [`VfsError::NotADirectory`] or [`VfsError::DirectoryNotEmpty`] for an incompatible directory destination. The rename is atomic where the backend allows.
 - [`Access::copy`] takes `from` and `to`, and copies one file. The source is claimed as a read and the destination as a write, both under [`Op::Copy`], and the op sink fires once per path. It fails with [`VfsError::IsADirectory`] when either path is a directory, with [`VfsError::NotFound`] when the source is absent, and with [`VfsError::Unsupported`] across mounts. Only a read-only destination mount refuses it.
 
 **Looking around.**
 
 - [`Access::exists`] takes `path` and returns a [`bool`]: `true` when a file or directory exists there, and `false` only for a confirmed absence. A lookup that cannot decide is an error. For example, the host backend fails with [`VfsError::NotADirectory`] for a path through a file ancestor, and counts a dangling symlink as existing. It registers a read claim and reports [`Op::Exists`].
-- [`Access::glob`] takes `pattern`, a [`&str`](str) holding a glob over virtual paths, and returns the matching paths, sorted, as a [`Vec`] of [`String`]. It lists files, or only directories when the pattern ends in `/`, as in `"x/*/"`. A pattern holds literal bytes, `*` for zero or more bytes within one segment, and `**` for any number of whole segments. `**` must occupy a whole segment, as in `**`, `**/...`, `.../**`, or `.../**/...`. There are no escapes. The raw pattern is validated before canonicalization: backslashes and runs of three or more `*` are rejected, and a pattern over 1024 bytes fails with [`VfsError::InvalidPath`] and "glob pattern exceeds 1024 bytes", or a malformed one with "invalid glob pattern {pattern:?}: {reason}". A pattern without a leading `/` joins onto the access's root, and its results come back relative to that root. The claim, the policy check, and the op sink all use the canonicalized pattern as the path, with a read claim and [`Op::Glob`]. A router sends the pattern to the longest-prefix mount, strips the prefix, and joins it back onto each result.
+- [`Access::glob`] takes `pattern`, a [`&str`](str) holding a glob over virtual paths, and returns the matching paths, sorted, as a [`Vec`] of [`String`]. It lists files, or only directories when the pattern ends in `/`, as in `"x/*/"`. A pattern holds literal bytes, `*` for zero or more bytes within one segment, and `**` for any number of whole segments. `**` must occupy a whole segment, as in `**`, `**/...`, `.../**`, or `.../**/...`. There are no escapes. The raw pattern is validated before canonicalization, and each broken rule fails with [`VfsError::InvalidPath`] naming the rule in its [`PathReason`]: an empty pattern is [`PathReason::Empty`], one over 1024 bytes is [`PathReason::TooLong`], a control character is [`PathReason::Control`], a backslash is [`PathReason::Backslash`], and malformed wildcard grammar is [`PathReason::Wildcard`]. A pattern without a leading `/` joins onto the access's root, and its results come back relative to that root. The claim, the policy check, and the op sink all use the canonicalized pattern as the path, with a read claim and [`Op::Glob`]. A router sends the pattern to the longest-prefix mount, strips the prefix, and joins it back onto each result.
 - [`Access::list`] takes the `path` of a directory and returns its immediate children as a [`Vec`] of [`Entry`], sorted by name in the built-in backends. It registers a read claim and reports [`Op::List`]. It fails with [`VfsError::NotADirectory`] on a file and [`VfsError::NotFound`] when the path is absent.
 - [`Access::stat`] takes `path` and returns its [`Stat`]. It registers a read claim and reports [`Op::Stat`]. It fails with [`VfsError::NotFound`] when the path is absent. The host backend does not follow symlinks here, so a link reports [`FileType::Symlink`].
 - [`Access::grep`] takes `query`, a reference to a [`GrepQuery`], and returns a [`GrepResults`]. Through a router, each match's [`GrepMatch::path`] is the full virtual path. The query's [`GrepQuery::root`] is canonicalized, checked by the policy under [`Op::Grep`], and read-claimed. The claim and the op sink use the root only, not each searched file. It fails with [`VfsError::Unsupported`] when [`GrepQuery::is_regex`] is `true` and the backend uses the default body, and with any error from the backend's glob or reads. A host cannot build a [`GrepQuery`] of its own, as its entry explains, so in practice a host calls [`Access::grep`] only with a query it received and cloned.
@@ -565,20 +568,43 @@ Dropping an [`Access`] releases its claims and its backend session, as [Identiti
 
 ## VfsError
 
-[`VfsError`] is the one error type every filesystem operation returns. The host receives it from [`Access`], [`VfsRef::acquire`], and [`HostBackend::rooted`]. A custom backend builds variants directly, for example `VfsError::NotFound(path.to_string())`. Every variant holds a [`String`] with a human-readable message. The enum is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
+[`VfsError`] is the one error type every filesystem operation returns. The host receives it from [`Access`], [`VfsRef::acquire`], and [`HostBackend::rooted`]. Every variant is a plain struct with public fields: the variant is the kind, so a host matches on it and reads the fields directly. There are no helper methods. A custom backend builds variants directly, as literals, for example `VfsError::NotFound { path: path.to_string() }`. The enum is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
 
 - [`VfsError::NotFound`]: the path does not exist in the serving backend. A router also returns it when no mount serves the path, [`HostBackend::rooted`] returns it for an absent directory, and the memory backend returns it for a non-recursive [`Access::mkdir`] with a missing parent. Through the store it becomes [`StoreError::NotFound`], or success for [`StoreOp::Delete`].
-- [`VfsError::PermissionDenied`]: the operation is not permitted. The causes are a policy [`Verdict::Deny`] or [`Verdict::Ask`], whose text is the message, a read-only mount, a host path escaping its rooted directory, removing or renaming a backend's root, or a host OS permission error. Show the message to the model or the user. Retrying unchanged fails again.
+  - [`VfsError::NotFound::path`](VfsError#variant.NotFound.field.path), a [`String`], is the path that did not resolve.
 - [`VfsError::AlreadyExists`]: the path already exists where creation required absence, for example [`Access::mkdir`] on an existing path.
-- [`VfsError::InvalidPath`]: the path is malformed or escapes the root. The messages are "empty path", "relative path is not in the virtual namespace: {path:?}", and "path escapes the namespace root: {path:?}". It also covers an invalid or over-long glob pattern, and a rename into the source's own descendant.
+  - [`VfsError::AlreadyExists::path`](VfsError#variant.AlreadyExists.field.path), a [`String`], is the path that was already present.
 - [`VfsError::NotADirectory`]: a directory operation named a non-directory. That covers [`Access::list`] of a file, a path through a file ancestor, and [`HostBackend::rooted`] on a file.
+  - [`VfsError::NotADirectory::path`](VfsError#variant.NotADirectory.field.path), a [`String`], is the path that is not a directory.
 - [`VfsError::IsADirectory`]: a file operation named a directory, such as [`Access::read`], [`Access::write`], [`Access::append`], or [`Access::copy`] on a directory.
+  - [`VfsError::IsADirectory::path`](VfsError#variant.IsADirectory.field.path), a [`String`], is the path that is a directory.
 - [`VfsError::DirectoryNotEmpty`]: a removal without `recursive` named a non-empty directory. The memory backend also returns it for a directory renamed onto a non-empty directory. Retry with `recursive` set to `true` if that was intended.
-- [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose message is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", a regex grep against the default body, and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
-- [`VfsError::Conflict`]: the operation conflicts with another live identity's claim, and it never reached the backend. The message is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path becomes [`StoreError::WriteRace`] and ends the run.
-- [`VfsError::Backend`]: the serving backend failed for any other reason. That covers text that is not UTF-8 in [`Access::read_string`], [`Access::read_range`], or the default [`VfsAccess::str_replace`], an invalid line range in [`Access::read_range`], a default [`VfsAccess::str_replace`] match count other than one, a backend refusing an identity, and an unmapped host I/O error.
+  - [`VfsError::DirectoryNotEmpty::path`](VfsError#variant.DirectoryNotEmpty.field.path), a [`String`], is the path of the non-empty directory.
+- [`VfsError::NotUtf8`]: text that is not UTF-8 appeared where UTF-8 text was required, in [`Access::read_string`], [`Access::read_range`], [`Access::read_range_numbered`], or the default [`VfsAccess::str_replace`].
+  - [`VfsError::NotUtf8::path`](VfsError#variant.NotUtf8.field.path), a [`String`], is the path of the file whose contents are not UTF-8.
+- [`VfsError::InvalidPath`]: the path or glob pattern is malformed or escapes the namespace root. The [`reason`](VfsError#variant.InvalidPath.field.reason) field is a [`PathReason`] naming the rule that broke: an empty path or pattern is [`PathReason::Empty`], `..` above the root is [`PathReason::Traversal`], an over-long pattern is [`PathReason::TooLong`], a raw pattern with a control character or a backslash is [`PathReason::Control`] or [`PathReason::Backslash`], a glob whose wildcard grammar is invalid is [`PathReason::Wildcard`], and a rename into the source's own descendant is [`PathReason::IntoDescendant`].
+  - [`VfsError::InvalidPath::path`](VfsError#variant.InvalidPath.field.path), a [`String`], is the rejected path or pattern, exactly as supplied.
+  - [`VfsError::InvalidPath::reason`](VfsError#variant.InvalidPath.field.reason), a [`PathReason`], is the rule it broke.
+- [`VfsError::InvalidRange`]: a line range was rejected before any lines were read, from [`Access::read_range`] and [`Access::read_range_numbered`]. The messages are "invalid line range for {path}: start is below 1" and "invalid line range for {path}: end is before start".
+  - [`VfsError::InvalidRange::path`](VfsError#variant.InvalidRange.field.path), a [`String`], is the path the read targeted.
+  - [`VfsError::InvalidRange::reason`](VfsError#variant.InvalidRange.field.reason), a [`&'static str`](str), is why the range was rejected.
+- [`VfsError::Anchor`]: a [`Access::str_replace`] anchor did not occur exactly once. An empty anchor is `anchor == ""`, a missing one is `count == 0`, and an ambiguous one is `count >= 2`.
+  - [`VfsError::Anchor::path`](VfsError#variant.Anchor.field.path), a [`String`], is the path the edit targeted.
+  - [`VfsError::Anchor::anchor`](VfsError#variant.Anchor.field.anchor), a [`String`], is the anchor text.
+  - [`VfsError::Anchor::count`](VfsError#variant.Anchor.field.count), a [`usize`], is the number of times the anchor matched.
+- [`VfsError::PermissionDenied`]: the operation is not permitted. The causes are a policy [`Verdict::Deny`] or [`Verdict::Ask`], whose text is the [`reason`](VfsError#variant.PermissionDenied.field.reason), a read-only mount, a host path escaping its rooted directory, removing or renaming a backend's root, or a host OS permission error. Show the message to the model or the user. Retrying unchanged fails again.
+  - [`VfsError::PermissionDenied::path`](VfsError#variant.PermissionDenied.field.path), a [`String`], is the path the operation targeted.
+  - [`VfsError::PermissionDenied::reason`](VfsError#variant.PermissionDenied.field.reason), a [`String`], names why the operation was refused.
+- [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose detail is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", a regex grep against the default body, and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
+  - [`VfsError::Unsupported::path`](VfsError#variant.Unsupported.field.path), a [`String`], is the path the operation targeted.
+  - [`VfsError::Unsupported::detail`](VfsError#variant.Unsupported.field.detail), a [`String`], names what is unsupported and why.
+- [`VfsError::Conflict`]: the operation conflicts with another live identity's claim, and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path becomes [`StoreError::WriteRace`] and ends the run.
+  - [`VfsError::Conflict::path`](VfsError#variant.Conflict.field.path), a [`String`], is the canonical path both identities claimed.
+  - [`VfsError::Conflict::detail`](VfsError#variant.Conflict.field.detail), a [`String`], is the claims model's diagnosis, naming both identities and both claim kinds.
+- [`VfsError::Backend`]: the serving backend failed for any other reason. That covers a backend refusing an identity, an unmapped host I/O error, and a byte-range read whose bounds exceed the addressable size.
+  - [`VfsError::Backend::message`](VfsError#variant.Backend.field.message), a [`String`], is the backend's own diagnosis.
 
-[`VfsError`] implements [`std::error::Error`]. Its [`Display`](std::fmt::Display) form puts a fixed prefix before the message: "not found: ", "permission denied: ", "already exists: ", "invalid path: ", "not a directory: ", "is a directory: ", "directory not empty: ", "unsupported operation: ", "conflicting claim: ", or "backend failure: ".
+[`VfsError`] implements [`std::error::Error`]. Its [`Display`](std::fmt::Display) form puts a fixed prefix before the leading field: "not found: ", "already exists: ", "not a directory: ", "is a directory: ", "directory not empty: ", and "not UTF-8: " before the path; "invalid path {path:?}: " and "invalid line range for {path}: " before the reason; "permission denied: " before the reason, "unsupported operation: " before the detail, "conflicting claim: " before the detail, and "backend failure: " before the message. An anchor renders as "str_replace requires a non-empty anchor: {path}", "anchor {anchor:?} was not found in {path}, expected exactly one", or "anchor {anchor:?} occurs {count} times in {path}, expected exactly one".
 
 ## MemoryBackend
 
@@ -823,7 +849,7 @@ The read bounds are [`i64`] for compatibility with the prompt-facing call. [`Sto
   - [`StoreError::InvalidPath::reason`](StoreError#variant.InvalidPath.field.reason), a [`PathReason`], is the rule it broke.
 - [`StoreError::InvalidPattern`]: a [`StoreOp::Glob`] pattern was rejected before matching.
   - [`StoreError::InvalidPattern::pattern`](StoreError#variant.InvalidPattern.field.pattern), a [`String`], is the rejected pattern as supplied, without the store mount prefix.
-  - [`StoreError::InvalidPattern::reason`](StoreError#variant.InvalidPattern.field.reason), a [`String`], is "pattern is empty", "pattern exceeds 1024 bytes", "pattern contains a control character", "pattern does not support backslash escapes", or the [`VfsError::InvalidPath`] message for a grammar or canonicalization failure.
+  - [`StoreError::InvalidPattern::reason`](StoreError#variant.InvalidPattern.field.reason), a [`String`], is "pattern is empty", "pattern exceeds 1024 bytes", "pattern contains a control character", "pattern does not support backslash escapes", or the [`VfsError::InvalidPath`] reason text for a grammar or canonicalization failure.
 - [`StoreError::InvalidRange`]: a [`StoreOp::Read`] or [`StoreOp::ReadNumbered`] line range was rejected.
   - [`StoreError::InvalidRange::path`](StoreError#variant.InvalidRange.field.path), a [`String`], is the path the read targeted.
   - [`StoreError::InvalidRange::reason`](StoreError#variant.InvalidRange.field.reason), a [`&'static str`](str), is "start must be at least 1", "end must not be before start", or "start is required when end is given".
@@ -868,7 +894,7 @@ The methods classify and inspect an error. None of them can fail.
 
 ## PathReason
 
-[`PathReason`] says why a logical store path was rejected before any backend saw it. It arrives in [`StoreError::InvalidPath::reason`](StoreError#variant.InvalidPath.field.reason), and hosts never build one, though they can name variants to compare. It is `#[non_exhaustive]`. [The run's store](#the-runs-store) gives the order the rules are checked in. The fix in every case is to supply a path that follows the rule.
+[`PathReason`] says why a path or glob pattern was rejected before any backend saw it. The VFS owns it: every [`VfsError::InvalidPath`] carries one, and the store re-exports it and reuses the first nine reasons for its own path validation, where it arrives in [`StoreError::InvalidPath::reason`](StoreError#variant.InvalidPath.field.reason). Hosts never build one, though they can name variants to compare. It is `#[non_exhaustive]`. [The run's store](#the-runs-store) gives the order the store's rules are checked in. The fix in every case is to supply a path that follows the rule.
 
 - [`PathReason::Empty`]: the path was the empty string. Its documentation also claims a path made only of separators, but the leading `/` check runs first, so such a path reports [`PathReason::Absolute`].
 - [`PathReason::Absolute`]: the path began with `/`. Store paths are relative to the store mount, so drop the leading slash.
@@ -879,8 +905,10 @@ The methods classify and inspect an error. None of them can fail.
 - [`PathReason::ReservedName`]: a segment was a platform-reserved device name. The base name before the first `.` is compared case-insensitively, so `con.txt` is rejected.
 - [`PathReason::UnsafeSuffix`]: a segment ended in `.` or a space, which some backends silently strip, so the name would not round-trip.
 - [`PathReason::TooLong`]: the path exceeded 1024 bytes.
+- [`PathReason::Wildcard`]: a glob pattern's wildcard grammar was invalid, such as a run of three or more `*` or a `**` not occupying a whole segment. Only VFS glob sites report it; the store's own pattern checks run first.
+- [`PathReason::IntoDescendant`]: a rename named a destination inside the source's own subtree. Only VFS rename sites report it.
 
-Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute", "path contains a traversal segment", "path contains a control character", "path contains an empty segment", "path contains a backslash", "path contains a reserved device name", "path segment ends in an unsafe character", and "path is too long".
+Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute", "path contains a traversal segment", "path contains a control character", "path contains an empty segment", "path contains a backslash", "path contains a reserved device name", "path segment ends in an unsafe character", "path is too long", "pattern contains invalid wildcard grammar", and "a rename cannot move a directory into its own descendant".
 
 ## Vfs
 
@@ -912,7 +940,7 @@ Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute"
 **Methods with default bodies.**
 
 - [`VfsAccess::read_range`] takes `path`, `offset`, a [`u64`] starting byte, and `len`, a [`u64`] maximum byte count. It returns up to `len` bytes from `offset`, empty when `offset` is at or past the end, and clipped at the end of the file. The default body reads the whole file and slices it. It fails as [`VfsAccess::read`] does, and with [`VfsError::Backend`] and "read_range offset {offset} exceeds the addressable size" or "read_range length {len} exceeds the addressable size" when a value does not fit a [`usize`]. Override it to seek, as the host backend does. A router passes it to the mount. The trait's documentation says the handle's line-based ranges are built on this method, but [`Access::read_range`] reads the whole file through [`Access::read`] instead, and [`Access`] exposes no byte-range read.
-- [`VfsAccess::str_replace`] takes `&mut self`, `path`, `old`, and `new`, and returns `()` after the rewritten file is written. The default body reads the file, counts matches of `old`, replaces the one occurrence, and writes the result. It fails with [`VfsError::Backend`] and "str_replace requires UTF-8 text: {path}: {source}", "str_replace found no occurrence of {old:?} in {path}", or "str_replace found {count} occurrences of {old:?} in {path}; exactly one is required", or with a read or write failure. A router checks the mount's read-only flag before passing it on.
+- [`VfsAccess::str_replace`] takes `&mut self`, `path`, `old`, and `new`, and returns `()` after the rewritten file is written. The default body reads the file, counts matches of `old`, replaces the one occurrence, and writes the result. An empty `old`, a count other than one, and text that is not UTF-8 fail with [`VfsError::Anchor`] or [`VfsError::NotUtf8`], as [`Access::str_replace`] describes, and a read or write failure passes through. A router checks the mount's read-only flag before passing it on.
 - [`VfsAccess::grep`] takes `query`, a reference to a [`GrepQuery`] whose root is mount-relative through a router, and returns a [`GrepResults`]. The default body globs `{root}/**/{filter}`, where the filter is [`GrepQuery::glob_filter`] or `*`, and a root of `/` becomes the empty base. It skips directories and files that are not UTF-8, splits lines with [`str::lines`], and matches the pattern as a literal substring, lowercasing both sides when [`GrepQuery::case_insensitive`] is `true`. It stops when a match turns up after [`GrepQuery::max_results`] hits are already collected, and sets [`GrepResults::truncated`]. It fails with [`VfsError::Unsupported`] and "the default grep matches literal text only; regex requires a backend override" when [`GrepQuery::is_regex`] is `true`, and with errors from glob, from canonicalizing a globbed path, or from reads other than [`VfsError::IsADirectory`]. Override it for indexed or regex search.
 - [`VfsAccess::symlink`] takes `&mut self`, `target`, the link's target, passed verbatim because a router neither strips nor resolves it, and `link`, the path of the link to create. The default body fails with [`VfsError::Unsupported`] and "symlink is not supported by this backend: {link}".
 - [`VfsAccess::read_link`] takes `path`, a link, and returns its target as a [`VfsPathBuf`], which an override builds with [`VfsPath::to_buf`]. The default body fails with [`VfsError::Unsupported`] and "read_link is not supported by this backend: {path}".

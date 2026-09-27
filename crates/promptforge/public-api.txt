@@ -1358,10 +1358,12 @@ pub promptforge::vfs::PathReason::Backslash
 pub promptforge::vfs::PathReason::Control
 pub promptforge::vfs::PathReason::Empty
 pub promptforge::vfs::PathReason::EmptySegment
+pub promptforge::vfs::PathReason::IntoDescendant
 pub promptforge::vfs::PathReason::ReservedName
 pub promptforge::vfs::PathReason::TooLong
 pub promptforge::vfs::PathReason::Traversal
 pub promptforge::vfs::PathReason::UnsafeSuffix
+pub promptforge::vfs::PathReason::Wildcard
 pub promptforge::vfs::Stat::created: core::option::Option<std::time::SystemTime>
 pub promptforge::vfs::Stat::file_type: promptforge::vfs::FileType
 pub promptforge::vfs::Stat::mode: core::option::Option<u32>
@@ -1428,26 +1430,39 @@ pub promptforge::vfs::Verdict::Ask(..)
 pub promptforge::vfs::Verdict::Ask::0: alloc::string::String
 pub promptforge::vfs::Verdict::Deny(..)
 pub promptforge::vfs::Verdict::Deny::0: alloc::string::String
-pub promptforge::vfs::VfsError::AlreadyExists(..)
-pub promptforge::vfs::VfsError::AlreadyExists::0: alloc::string::String
-pub promptforge::vfs::VfsError::Backend(..)
-pub promptforge::vfs::VfsError::Backend::0: alloc::string::String
-pub promptforge::vfs::VfsError::Conflict(..)
-pub promptforge::vfs::VfsError::Conflict::0: alloc::string::String
-pub promptforge::vfs::VfsError::DirectoryNotEmpty(..)
-pub promptforge::vfs::VfsError::DirectoryNotEmpty::0: alloc::string::String
-pub promptforge::vfs::VfsError::InvalidPath(..)
-pub promptforge::vfs::VfsError::InvalidPath::0: alloc::string::String
-pub promptforge::vfs::VfsError::IsADirectory(..)
-pub promptforge::vfs::VfsError::IsADirectory::0: alloc::string::String
-pub promptforge::vfs::VfsError::NotADirectory(..)
-pub promptforge::vfs::VfsError::NotADirectory::0: alloc::string::String
-pub promptforge::vfs::VfsError::NotFound(..)
-pub promptforge::vfs::VfsError::NotFound::0: alloc::string::String
-pub promptforge::vfs::VfsError::PermissionDenied(..)
-pub promptforge::vfs::VfsError::PermissionDenied::0: alloc::string::String
-pub promptforge::vfs::VfsError::Unsupported(..)
-pub promptforge::vfs::VfsError::Unsupported::0: alloc::string::String
+pub promptforge::vfs::VfsError::AlreadyExists { .. }
+pub promptforge::vfs::VfsError::AlreadyExists::path: alloc::string::String
+pub promptforge::vfs::VfsError::Anchor { .. }
+pub promptforge::vfs::VfsError::Anchor::anchor: alloc::string::String
+pub promptforge::vfs::VfsError::Anchor::count: usize
+pub promptforge::vfs::VfsError::Anchor::path: alloc::string::String
+pub promptforge::vfs::VfsError::Backend { .. }
+pub promptforge::vfs::VfsError::Backend::message: alloc::string::String
+pub promptforge::vfs::VfsError::Conflict { .. }
+pub promptforge::vfs::VfsError::Conflict::detail: alloc::string::String
+pub promptforge::vfs::VfsError::Conflict::path: alloc::string::String
+pub promptforge::vfs::VfsError::DirectoryNotEmpty { .. }
+pub promptforge::vfs::VfsError::DirectoryNotEmpty::path: alloc::string::String
+pub promptforge::vfs::VfsError::InvalidPath { .. }
+pub promptforge::vfs::VfsError::InvalidPath::path: alloc::string::String
+pub promptforge::vfs::VfsError::InvalidPath::reason: promptforge::vfs::PathReason
+pub promptforge::vfs::VfsError::InvalidRange { .. }
+pub promptforge::vfs::VfsError::InvalidRange::path: alloc::string::String
+pub promptforge::vfs::VfsError::InvalidRange::reason: &'static str
+pub promptforge::vfs::VfsError::IsADirectory { .. }
+pub promptforge::vfs::VfsError::IsADirectory::path: alloc::string::String
+pub promptforge::vfs::VfsError::NotADirectory { .. }
+pub promptforge::vfs::VfsError::NotADirectory::path: alloc::string::String
+pub promptforge::vfs::VfsError::NotFound { .. }
+pub promptforge::vfs::VfsError::NotFound::path: alloc::string::String
+pub promptforge::vfs::VfsError::NotUtf8 { .. }
+pub promptforge::vfs::VfsError::NotUtf8::path: alloc::string::String
+pub promptforge::vfs::VfsError::PermissionDenied { .. }
+pub promptforge::vfs::VfsError::PermissionDenied::path: alloc::string::String
+pub promptforge::vfs::VfsError::PermissionDenied::reason: alloc::string::String
+pub promptforge::vfs::VfsError::Unsupported { .. }
+pub promptforge::vfs::VfsError::Unsupported::detail: alloc::string::String
+pub promptforge::vfs::VfsError::Unsupported::path: alloc::string::String
 pub struct promptforge::Run { /* private fields */ }
 pub struct promptforge::SourceLocation { .. }
 pub struct promptforge::cancel::CancelHandle { /* private fields */ }

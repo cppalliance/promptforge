@@ -2143,7 +2143,7 @@ async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
                 .acquire(promptforge_vfs::Origin::new("overlay absence probe"))
                 .expect("the stock backend acquires")
                 .stat(promptforge_vfs::STORE_MOUNT),
-            Err(promptforge_vfs::VfsError::NotFound(_))
+            Err(promptforge_vfs::VfsError::NotFound { .. })
         ),
         "the run's writes must land on the overlay, not the caller's backend"
     );

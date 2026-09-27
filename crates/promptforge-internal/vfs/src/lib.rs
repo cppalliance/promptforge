@@ -26,7 +26,7 @@ mod traits;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-pub use error::VfsError;
+pub use error::{PathReason, VfsError};
 pub use grep::{GrepMatch, GrepQuery, GrepResults};
 pub use handle::{Access, VfsRef};
 pub use host::HostBackend;
@@ -250,7 +250,7 @@ mod tests {
         let access = vfs.acquire(Origin::new("empty namespace test"))?;
         assert!(matches!(
             access.read("/elsewhere.txt"),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -264,7 +264,7 @@ mod tests {
         let access = vfs.acquire(Origin::new("mode flip test"))?;
         let path = format!("{STORE_MOUNT}/notes.md");
         match access.write(&path, b"x") {
-            Err(VfsError::PermissionDenied(reason)) => {
+            Err(VfsError::PermissionDenied { reason, .. }) => {
                 assert!(
                     reason.contains("Ask"),
                     "names the rule that fired: {reason}"
@@ -289,7 +289,7 @@ mod tests {
         let binary = format!("{STORE_MOUNT}/data.bin");
         access.write(&markdown, b"# ok")?;
         match access.write(&binary, b"x") {
-            Err(VfsError::PermissionDenied(reason)) => {
+            Err(VfsError::PermissionDenied { reason, .. }) => {
                 assert!(
                     reason.contains("Plan"),
                     "names the rule that fired: {reason}"

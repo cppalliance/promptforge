@@ -1,51 +1,325 @@
-//! The error type shared by every VFS layer.
+//! The error types shared by every VFS layer: [`VfsError`], the one
+//! error every operation returns, and [`PathReason`], why a path or
+//! glob pattern was refused before any backend saw it.
 
 use std::fmt;
 
+/// Why a path or glob pattern was rejected before any backend saw it.
+///
+/// Every [`VfsError::InvalidPath`] carries one. The store facade
+/// re-exports this type and reuses the first nine reasons for its own
+/// path validation; the last two are reported by VFS sites alone:
+/// [`PathReason::Wildcard`] for a glob pattern whose wildcard grammar is
+/// invalid, and [`PathReason::IntoDescendant`] for a rename into the
+/// source's own descendant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PathReason {
+    /// The path was empty or contained only separators.
+    Empty,
+    /// The path began with `/`, so it addressed outside the run's namespace.
+    Absolute,
+    /// The path contained a `.` or `..` segment (parent or current traversal).
+    Traversal,
+    /// The path contained a control character (below `0x20`, or `0x7f`).
+    Control,
+    /// The path contained an empty segment (a `//` run, or a trailing `/`).
+    EmptySegment,
+    /// The path contained a backslash, which is ambiguous across backends (a
+    /// literal byte to one, a separator to another).
+    Backslash,
+    /// A segment was a platform-reserved device name (for example `CON`,
+    /// `NUL`, `COM1`), which some backends cannot represent as a plain file.
+    ReservedName,
+    /// A segment ended in a byte some backends silently strip (a trailing `.`
+    /// or space), so the stored name would not round-trip.
+    UnsafeSuffix,
+    /// The path exceeded the maximum supported length in bytes.
+    TooLong,
+    /// The wildcard grammar of a glob pattern is invalid: a run of three or
+    /// more `*`, or a `**` that does not occupy a whole path segment.
+    Wildcard,
+    /// A rename named a destination inside the source's own subtree.
+    IntoDescendant,
+}
+
+impl fmt::Display for PathReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            PathReason::Empty => "path is empty",
+            PathReason::Absolute => "path is absolute",
+            PathReason::Traversal => "path contains a traversal segment",
+            PathReason::Control => "path contains a control character",
+            PathReason::EmptySegment => "path contains an empty segment",
+            PathReason::Backslash => "path contains a backslash",
+            PathReason::ReservedName => "path contains a reserved device name",
+            PathReason::UnsafeSuffix => "path segment ends in an unsafe character",
+            PathReason::TooLong => "path is too long",
+            PathReason::Wildcard => "pattern contains invalid wildcard grammar",
+            PathReason::IntoDescendant => {
+                "a rename cannot move a directory into its own descendant"
+            }
+        };
+        formatter.write_str(text)
+    }
+}
+
 /// The one error type returned by every virtual filesystem operation.
 ///
-/// `#[non_exhaustive]` so new kinds can ship without breaking match arms
-/// in downstream crates; the public surface of this crate is load-bearing.
-#[non_exhaustive]
+/// Every variant is a plain struct with public fields: the variants are
+/// the kinds, so a caller matches on the variant and reads the fields
+/// directly - there are no helper methods. A custom backend builds
+/// variants directly, as literals. `#[non_exhaustive]` so new variants
+/// can ship without breaking match arms in downstream crates; the public
+/// surface of this crate is load-bearing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VfsError {
     /// The path does not exist in the serving backend.
-    NotFound(String),
-    /// The operation is not permitted: a read-only mount or a policy denial.
-    PermissionDenied(String),
+    NotFound {
+        /// The canonical path that did not resolve.
+        path: String,
+    },
     /// The path already exists where creation required absence.
-    AlreadyExists(String),
-    /// The path is malformed or escapes the virtual namespace root.
-    InvalidPath(String),
+    AlreadyExists {
+        /// The canonical path that was already present.
+        path: String,
+    },
     /// A directory operation named a non-directory.
-    NotADirectory(String),
+    NotADirectory {
+        /// The canonical path that is not a directory.
+        path: String,
+    },
     /// A file operation named a directory.
-    IsADirectory(String),
+    IsADirectory {
+        /// The canonical path that is a directory.
+        path: String,
+    },
     /// A directory removal without `recursive` named a non-empty directory.
-    DirectoryNotEmpty(String),
+    DirectoryNotEmpty {
+        /// The canonical path of the non-empty directory.
+        path: String,
+    },
+    /// Text that is not UTF-8 appeared where UTF-8 text was required.
+    NotUtf8 {
+        /// The path of the file whose contents are not UTF-8.
+        path: String,
+    },
+    /// The path or glob pattern is malformed or escapes the namespace root.
+    InvalidPath {
+        /// The rejected path or pattern, exactly as supplied.
+        path: String,
+        /// The validation rule the path or pattern broke.
+        reason: PathReason,
+    },
+    /// A line range was rejected before any lines were read.
+    InvalidRange {
+        /// The path the read targeted.
+        path: String,
+        /// A short human-readable reason the range was rejected.
+        reason: &'static str,
+    },
+    /// A `str_replace` anchor did not occur exactly once: it was empty,
+    /// missing, or ambiguous.
+    Anchor {
+        /// The path the edit targeted.
+        path: String,
+        /// The anchor text. Empty means the anchor was itself invalid and
+        /// was refused before any search.
+        anchor: String,
+        /// The number of times the anchor matched: `0` when it was not
+        /// found, and `2` or more when the edit would be ambiguous.
+        count: usize,
+    },
+    /// The operation is not permitted: a read-only mount or a policy denial.
+    PermissionDenied {
+        /// The canonical path the operation targeted.
+        path: String,
+        /// Why the operation was refused: the policy's verdict text or the
+        /// mount's refusal, naming the rule that fired.
+        reason: String,
+    },
     /// The serving backend does not implement the operation.
-    Unsupported(String),
+    Unsupported {
+        /// The canonical path the operation targeted.
+        path: String,
+        /// What is unsupported and why.
+        detail: String,
+    },
     /// The operation conflicts with another live identity's claim.
-    Conflict(String),
+    Conflict {
+        /// The canonical path both identities claimed.
+        path: String,
+        /// The claims model's diagnosis, naming both identities and both
+        /// claim kinds.
+        detail: String,
+    },
     /// The serving backend failed for any other reason.
-    Backend(String),
+    Backend {
+        /// The backend's own diagnosis.
+        message: String,
+    },
 }
 
 impl fmt::Display for VfsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotFound(m) => write!(f, "not found: {m}"),
-            Self::PermissionDenied(m) => write!(f, "permission denied: {m}"),
-            Self::AlreadyExists(m) => write!(f, "already exists: {m}"),
-            Self::InvalidPath(m) => write!(f, "invalid path: {m}"),
-            Self::NotADirectory(m) => write!(f, "not a directory: {m}"),
-            Self::IsADirectory(m) => write!(f, "is a directory: {m}"),
-            Self::DirectoryNotEmpty(m) => write!(f, "directory not empty: {m}"),
-            Self::Unsupported(m) => write!(f, "unsupported operation: {m}"),
-            Self::Conflict(m) => write!(f, "conflicting claim: {m}"),
-            Self::Backend(m) => write!(f, "backend failure: {m}"),
+            Self::NotFound { path } => write!(f, "not found: {path}"),
+            Self::AlreadyExists { path } => write!(f, "already exists: {path}"),
+            Self::NotADirectory { path } => write!(f, "not a directory: {path}"),
+            Self::IsADirectory { path } => write!(f, "is a directory: {path}"),
+            Self::DirectoryNotEmpty { path } => write!(f, "directory not empty: {path}"),
+            Self::NotUtf8 { path } => write!(f, "not UTF-8: {path}"),
+            Self::InvalidPath { path, reason } => write!(f, "invalid path {path:?}: {reason}"),
+            Self::InvalidRange { path, reason } => {
+                write!(f, "invalid line range for {path}: {reason}")
+            }
+            Self::Anchor {
+                path,
+                anchor,
+                count,
+            } => {
+                if anchor.is_empty() {
+                    write!(f, "str_replace requires a non-empty anchor: {path}")
+                } else if *count == 0 {
+                    write!(
+                        f,
+                        "anchor {anchor:?} was not found in {path}, expected exactly one"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "anchor {anchor:?} occurs {count} times in {path}, expected exactly one"
+                    )
+                }
+            }
+            Self::PermissionDenied { reason, .. } => write!(f, "permission denied: {reason}"),
+            Self::Unsupported { detail, .. } => write!(f, "unsupported operation: {detail}"),
+            Self::Conflict { detail, .. } => write!(f, "conflicting claim: {detail}"),
+            Self::Backend { message } => write!(f, "backend failure: {message}"),
         }
     }
 }
 
 impl std::error::Error for VfsError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{PathReason, VfsError};
+
+    #[test]
+    fn the_derives_hold_as_before() {
+        // Clone, PartialEq, Eq, and Debug stay available on the struct
+        // variants: backends compare and clone errors.
+        let error = VfsError::NotFound {
+            path: "/x".to_owned(),
+        };
+        let clone = error.clone();
+        assert_eq!(error, clone);
+        assert!(format!("{error:?}").contains("NotFound"));
+        assert_eq!(
+            VfsError::InvalidPath {
+                path: String::new(),
+                reason: PathReason::Empty,
+            },
+            VfsError::InvalidPath {
+                path: String::new(),
+                reason: PathReason::Empty,
+            }
+        );
+    }
+
+    #[test]
+    fn every_variant_displays_with_its_own_prefix() {
+        let cases = [
+            (
+                VfsError::NotFound {
+                    path: "/x".to_owned(),
+                },
+                "not found: /x",
+            ),
+            (
+                VfsError::AlreadyExists {
+                    path: "/x".to_owned(),
+                },
+                "already exists: /x",
+            ),
+            (
+                VfsError::NotADirectory {
+                    path: "/x".to_owned(),
+                },
+                "not a directory: /x",
+            ),
+            (
+                VfsError::IsADirectory {
+                    path: "/x".to_owned(),
+                },
+                "is a directory: /x",
+            ),
+            (
+                VfsError::DirectoryNotEmpty {
+                    path: "/x".to_owned(),
+                },
+                "directory not empty: /x",
+            ),
+            (
+                VfsError::NotUtf8 {
+                    path: "/x".to_owned(),
+                },
+                "not UTF-8: /x",
+            ),
+            (
+                VfsError::InvalidPath {
+                    path: String::new(),
+                    reason: PathReason::Empty,
+                },
+                "invalid path \"\": path is empty",
+            ),
+            (
+                VfsError::InvalidRange {
+                    path: "/x".to_owned(),
+                    reason: "start is below 1",
+                },
+                "invalid line range for /x: start is below 1",
+            ),
+            (
+                VfsError::Anchor {
+                    path: "/x".to_owned(),
+                    anchor: "TODO".to_owned(),
+                    count: 2,
+                },
+                "anchor \"TODO\" occurs 2 times in /x, expected exactly one",
+            ),
+            (
+                VfsError::PermissionDenied {
+                    path: "/x".to_owned(),
+                    reason: "denied".to_owned(),
+                },
+                "permission denied: denied",
+            ),
+            (
+                VfsError::Unsupported {
+                    path: "/x".to_owned(),
+                    detail: "no".to_owned(),
+                },
+                "unsupported operation: no",
+            ),
+            (
+                VfsError::Conflict {
+                    path: "/x".to_owned(),
+                    detail: "d".to_owned(),
+                },
+                "conflicting claim: d",
+            ),
+            (
+                VfsError::Backend {
+                    message: "m".to_owned(),
+                },
+                "backend failure: m",
+            ),
+        ];
+        for (error, text) in cases {
+            assert_eq!(error.to_string(), text);
+        }
+    }
+}

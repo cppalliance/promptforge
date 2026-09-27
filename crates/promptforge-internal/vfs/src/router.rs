@@ -136,8 +136,10 @@ impl RoutingAccess {
         path: &VfsPath,
         op: impl FnOnce(&mut dyn VfsAccess) -> Result<R, VfsError>,
     ) -> Result<R, VfsError> {
-        let (prefix, backend) = resolve(&self.mounts, path.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
+        let (prefix, backend) =
+            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: path.to_string(),
+            })?;
         let mut acquired = self.acquired.borrow_mut();
         if !acquired.contains_key(prefix) {
             let session = lock(backend).acquire(self.id)?;
@@ -151,20 +153,25 @@ impl RoutingAccess {
 
     /// The mount-relative path the serving backend sees.
     fn strip(&self, path: &VfsPath) -> Result<VfsPath, VfsError> {
-        let (prefix, _) = resolve(&self.mounts, path.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
+        let (prefix, _) =
+            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: path.to_string(),
+            })?;
         canonicalize_absolute(strip_mount(prefix.as_str(), path.as_str()))
     }
 
     /// Rejects mutations on read-only mounts before anything is
     /// touched: a denied operation never partially applies.
     fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
-        let (prefix, backend) = resolve(&self.mounts, path.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
+        let (prefix, backend) =
+            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: path.to_string(),
+            })?;
         if lock(backend).read_only() {
-            return Err(VfsError::PermissionDenied(format!(
-                "the mount at {prefix} is read-only, so {path} cannot be mutated"
-            )));
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: format!("the mount at {prefix} is read-only, so {path} cannot be mutated"),
+            });
         }
         Ok(())
     }
@@ -173,15 +180,22 @@ impl RoutingAccess {
     /// guarantees stop at the mount boundary.
     fn one_mount(&self, from: &VfsPath, to: &VfsPath, op: &str) -> Result<(), VfsError> {
         let from_prefix = resolve(&self.mounts, from.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {from}")))?
+            .ok_or_else(|| VfsError::NotFound {
+                path: from.to_string(),
+            })?
             .0;
         let to_prefix = resolve(&self.mounts, to.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {to}")))?
+            .ok_or_else(|| VfsError::NotFound {
+                path: to.to_string(),
+            })?
             .0;
         if from_prefix != to_prefix {
-            return Err(VfsError::Unsupported(format!(
-                "{op} across mounts is unsupported: {from} and {to} are served by different mounts"
-            )));
+            return Err(VfsError::Unsupported {
+                path: from.to_string(),
+                detail: format!(
+                    "{op} across mounts is unsupported: {from} and {to} are served by different mounts"
+                ),
+            });
         }
         Ok(())
     }
@@ -228,8 +242,10 @@ impl VfsAccess for RoutingAccess {
         // canonicalizing resolves dot segments and rejects escapes past
         // the namespace root; wildcards are ordinary segments.
         let canonical = canonicalize_absolute(pattern)?;
-        let (prefix, _) = resolve(&self.mounts, canonical.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {canonical}")))?;
+        let (prefix, _) =
+            resolve(&self.mounts, canonical.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: canonical.to_string(),
+            })?;
         let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
         let mut matches = self.with_mount(&canonical, |session| session.glob(&scoped))?;
         for path in &mut matches {
@@ -244,8 +260,10 @@ impl VfsAccess for RoutingAccess {
         // session with the already-stripped pattern, which loses the
         // flag and filters the files-only result down to nothing.
         let canonical = canonicalize_absolute(pattern)?;
-        let (prefix, _) = resolve(&self.mounts, canonical.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {canonical}")))?;
+        let (prefix, _) =
+            resolve(&self.mounts, canonical.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: canonical.to_string(),
+            })?;
         let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
         let mut matches =
             self.with_mount(&canonical, |session| session.glob_kind(&scoped, dirs_only))?;
@@ -298,8 +316,10 @@ impl VfsAccess for RoutingAccess {
 
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         let root = canonicalize_absolute(query.root.as_str())?;
-        let (prefix, _) = resolve(&self.mounts, root.as_str())
-            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {root}")))?;
+        let (prefix, _) =
+            resolve(&self.mounts, root.as_str()).ok_or_else(|| VfsError::NotFound {
+                path: root.to_string(),
+            })?;
         let mut scoped = query.clone();
         scoped.root = canonicalize_absolute(strip_mount(prefix.as_str(), root.as_str()))?.to_buf();
         let mut results = self.with_mount(&root, |session| session.grep(&scoped))?;
@@ -522,7 +542,9 @@ mod tests {
             self.files()
                 .get(path.as_str())
                 .cloned()
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
@@ -546,7 +568,9 @@ mod tests {
             self.files()
                 .remove(path.as_str())
                 .map(|_| ())
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
@@ -567,17 +591,21 @@ mod tests {
         }
 
         fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not list".into()))
+            Err(VfsError::Unsupported {
+                path: path.to_string(),
+                detail: "the stub does not list".into(),
+            })
         }
 
         fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
             // Every stored key is a file; the stub holds no directories.
-            let bytes = self
-                .files()
-                .get(path.as_str())
-                .cloned()
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))?;
+            let bytes =
+                self.files()
+                    .get(path.as_str())
+                    .cloned()
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: path.to_string(),
+                    })?;
             Ok(Stat {
                 file_type: FileType::File,
                 size: bytes.len() as u64,
@@ -598,7 +626,9 @@ mod tests {
             let bytes = self
                 .files()
                 .remove(from.as_str())
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+                .ok_or_else(|| VfsError::NotFound {
+                    path: from.to_string(),
+                })?;
             self.files().insert(to.to_string(), bytes);
             Ok(())
         }
@@ -606,11 +636,13 @@ mod tests {
         fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
             self.record(from);
             self.record(to);
-            let bytes = self
-                .files()
-                .get(from.as_str())
-                .cloned()
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+            let bytes =
+                self.files()
+                    .get(from.as_str())
+                    .cloned()
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: from.to_string(),
+                    })?;
             self.files().insert(to.to_string(), bytes);
             Ok(())
         }
@@ -688,7 +720,7 @@ mod tests {
         // registered through the mounted handle is visible.
         let reader = child.acquire(test_origin())?;
         match reader.read("/base/f.txt") {
-            Err(VfsError::Conflict(_)) => {}
+            Err(VfsError::Conflict { .. }) => {}
             other => panic!("expected a conflict, got {other:?}"),
         }
         // The local mount routes to its own backend.
@@ -711,8 +743,8 @@ mod tests {
         assert_eq!(access.read("/ro/a.txt")?, b"keep");
         // A write is denied with a clear read-only error.
         match access.write("/ro/new.txt", b"x") {
-            Err(VfsError::PermissionDenied(message)) => {
-                assert!(message.contains("read-only"), "names the cause: {message}");
+            Err(VfsError::PermissionDenied { reason, .. }) => {
+                assert!(reason.contains("read-only"), "names the cause: {reason}");
             }
             other => panic!("expected a read-only denial, got {other:?}"),
         }
@@ -720,7 +752,7 @@ mod tests {
         // A rename wholly inside the mount is denied before the source
         // is touched.
         match access.rename("/ro/a.txt", "/ro/b.txt") {
-            Err(VfsError::PermissionDenied(_)) => {}
+            Err(VfsError::PermissionDenied { .. }) => {}
             other => panic!("expected a read-only denial, got {other:?}"),
         }
         assert_eq!(access.read("/ro/a.txt")?, b"keep");
@@ -729,7 +761,7 @@ mod tests {
         // is untouched.
         access.write("/x.txt", b"data")?;
         match access.copy("/x.txt", "/ro/x.txt") {
-            Err(VfsError::PermissionDenied(_)) => {}
+            Err(VfsError::PermissionDenied { .. }) => {}
             other => panic!("expected a read-only denial, got {other:?}"),
         }
         assert!(!ro.files().contains_key("/x.txt"));
@@ -743,11 +775,11 @@ mod tests {
         let access = vfs.acquire(test_origin())?;
         assert!(matches!(
             access.read("/mnt/../../etc/passwd"),
-            Err(VfsError::InvalidPath(_))
+            Err(VfsError::InvalidPath { .. })
         ));
         assert!(matches!(
             access.glob("/mnt/../../*"),
-            Err(VfsError::InvalidPath(_))
+            Err(VfsError::InvalidPath { .. })
         ));
         Ok(())
     }
@@ -764,9 +796,12 @@ mod tests {
         assert!(storage.seen().contains(&"/f.txt".to_owned()));
         // A path that climbs out of the mount re-roots absolutely: it
         // canonicalizes to /secret.txt, no mount serves it, and the
-        // mount's backend never sees the traversal spelling.
+        // mount's backend never sees the traversal spelling. The error's
+        // path field names that unrouted path, not a routing sentence.
         match access.read("/mnt/../secret.txt") {
-            Err(VfsError::NotFound(_)) => {}
+            Err(VfsError::NotFound { path }) => {
+                assert_eq!(path, "/secret.txt");
+            }
             other => panic!("expected no serving mount, got {other:?}"),
         }
         assert!(
@@ -823,7 +858,7 @@ mod tests {
         let mut session = router.acquire(ExecId::vend())?;
         assert!(matches!(
             session.remove(&canonicalize_absolute("/base/missing.txt")?, false),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -853,7 +888,7 @@ mod tests {
         // The overlay mount exists only in the overlay's view.
         assert!(matches!(
             reader.read("/overlay/x.txt"),
-            Err(VfsError::NotFound(_))
+            Err(VfsError::NotFound { .. })
         ));
         Ok(())
     }
@@ -868,8 +903,8 @@ mod tests {
         // write attempted through the overlay: one claims table.
         let second = overlay.acquire(test_origin())?;
         match second.write("/store/shared.txt", b"2") {
-            Err(VfsError::Conflict(message)) => {
-                assert!(message.contains("/store/shared.txt"), "{message}");
+            Err(VfsError::Conflict { detail, .. }) => {
+                assert!(detail.contains("/store/shared.txt"), "{detail}");
             }
             other => panic!("expected a conflict, got {other:?}"),
         }

@@ -4,12 +4,31 @@
 //! then matches stored paths with a bounded iterative dynamic program, so
 //! a hostile pattern cannot drive exponential time or blow the stack.
 
+use crate::error::PathReason;
+
 /// The largest glob pattern, in bytes, a backend will attempt to match.
 ///
 /// The recursion-free matcher is linear, but an unbounded pattern is still
 /// a cheap denial-of-service lever, so an over-long pattern is refused
 /// outright.
 pub(crate) const MAX_GLOB_PATTERN_BYTES: usize = 1024;
+
+/// Validates a raw glob pattern as written, before canonicalization: the
+/// length, control characters, backslashes, and then the wildcard
+/// grammar. Each refusal names the rule the pattern broke, so every glob
+/// site reports the same [`PathReason`].
+pub(crate) fn validate_glob_pattern(pattern: &str) -> Result<(), PathReason> {
+    if pattern.len() > MAX_GLOB_PATTERN_BYTES {
+        return Err(PathReason::TooLong);
+    }
+    if pattern.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err(PathReason::Control);
+    }
+    if pattern.contains('\\') {
+        return Err(PathReason::Backslash);
+    }
+    validate_glob_grammar(pattern).map_err(|_| PathReason::Wildcard)
+}
 
 /// One unit of a validated glob pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +194,19 @@ pub(crate) fn matches_tokens(tokens: &[GlobToken], text: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{compile_glob, glob_match, matches_tokens};
+    use crate::error::PathReason;
+    use crate::glob::{MAX_GLOB_PATTERN_BYTES, validate_glob_pattern};
+
+    #[test]
+    fn pattern_validation_names_the_rule_each_broken_pattern_breaks() {
+        let over_long = "a".repeat(MAX_GLOB_PATTERN_BYTES + 1);
+        assert_eq!(validate_glob_pattern(&over_long), Err(PathReason::TooLong));
+        assert_eq!(validate_glob_pattern("a\u{0}b"), Err(PathReason::Control));
+        assert_eq!(validate_glob_pattern("a\\b"), Err(PathReason::Backslash));
+        assert_eq!(validate_glob_pattern("a/***/b"), Err(PathReason::Wildcard));
+        assert_eq!(validate_glob_pattern("a/**b"), Err(PathReason::Wildcard));
+        assert_eq!(validate_glob_pattern("ok/*.txt"), Ok(()));
+    }
 
     #[test]
     fn compiled_and_one_shot_match_expected_results_across_many_paths() {

@@ -15,8 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use crate::error::VfsError;
-use crate::glob::{MAX_GLOB_PATTERN_BYTES, validate_glob_grammar};
+use crate::error::{PathReason, VfsError};
+use crate::glob::validate_glob_pattern;
 use crate::grep::{GrepQuery, GrepResults};
 use crate::observe::{OpEvent, OpSink, Origin};
 use crate::path::{VfsPath, canonicalize, canonicalize_absolute};
@@ -148,9 +148,12 @@ fn conflict(
     other: ExecId,
     other_kind: ClaimKind,
 ) -> VfsError {
-    VfsError::Conflict(format!(
-        "{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"
-    ))
+    VfsError::Conflict {
+        path: path.to_string(),
+        detail: format!(
+            "{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"
+        ),
+    }
 }
 
 /// Re-spells a namespace-absolute result relative to the access's root,
@@ -393,8 +396,8 @@ impl Access {
     /// Returns an error when the file's contents are not UTF-8.
     pub fn read_string(&self, path: &str) -> Result<String, VfsError> {
         let bytes = self.read(path)?;
-        String::from_utf8(bytes).map_err(|source| {
-            VfsError::Backend(format!("read_string requires UTF-8 text: {path}: {source}"))
+        String::from_utf8(bytes).map_err(|_| VfsError::NotUtf8 {
+            path: path.to_owned(),
         })
     }
 
@@ -472,9 +475,11 @@ impl Access {
     /// match count is not exactly one, or when the backend fails.
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), VfsError> {
         if old.is_empty() {
-            return Err(VfsError::Backend(format!(
-                "str_replace requires a non-empty anchor: {path}"
-            )));
+            return Err(VfsError::Anchor {
+                path: path.to_owned(),
+                anchor: String::new(),
+                count: 0,
+            });
         }
         let path = self.gate(Op::Write, path, ClaimKind::Write)?;
         self.fire(Op::Write, &path);
@@ -496,7 +501,7 @@ impl Access {
             Ok(()) => Ok(true),
             // The backend trait reports an absent path as NotFound; the
             // public capability confirms the absence instead.
-            Err(VfsError::NotFound(_)) => Ok(false),
+            Err(VfsError::NotFound { .. }) => Ok(false),
             Err(err) => Err(err),
         }
     }
@@ -517,28 +522,30 @@ impl Access {
     /// directories when the pattern ends in `/`, sorted.
     ///
     /// The raw pattern is validated before canonicalization, so a
-    /// backslash is refused rather than turned into a separator. A
-    /// pattern without a leading `/` joins onto the access's root, and
-    /// its results come back relative to that root.
+    /// backslash or a control character is refused rather than treated
+    /// as a pattern byte, and a backslash is never turned into a
+    /// separator. A pattern without a leading `/` joins onto the
+    /// access's root, and its results come back relative to that root.
     ///
     /// # Errors
-    /// Returns an error when the pattern is empty, over-long, or
-    /// grammar-invalid, when the policy denies the glob, when another
-    /// live identity holds a conflicting claim, or when the backend
-    /// fails.
+    /// Returns an error when the pattern is empty, over-long,
+    /// control-bearing, backslash-bearing, or grammar-invalid, when the
+    /// policy denies the glob, when another live identity holds a
+    /// conflicting claim, or when the backend fails. Each malformed
+    /// pattern reports the rule it broke as a [`PathReason`] in the
+    /// [`VfsError::InvalidPath`].
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
         if pattern.is_empty() {
-            return Err(VfsError::InvalidPath("empty path".into()));
+            return Err(VfsError::InvalidPath {
+                path: pattern.to_owned(),
+                reason: PathReason::Empty,
+            });
         }
-        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
-            return Err(VfsError::InvalidPath(format!(
-                "glob pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"
-            )));
-        }
-        if let Err(reason) = validate_glob_grammar(pattern) {
-            return Err(VfsError::InvalidPath(format!(
-                "invalid glob pattern {pattern:?}: {reason}"
-            )));
+        if let Err(reason) = validate_glob_pattern(pattern) {
+            return Err(VfsError::InvalidPath {
+                path: pattern.to_owned(),
+                reason,
+            });
         }
         // A trailing `/` asks for directories only; matching and the
         // claim key use the pattern without it.
@@ -671,7 +678,10 @@ impl Access {
     fn check_policy(&self, op: Op, path: &VfsPath) -> Result<(), VfsError> {
         match self.policy.check(op, path) {
             Verdict::Allow => Ok(()),
-            Verdict::Deny(reason) | Verdict::Ask(reason) => Err(VfsError::PermissionDenied(reason)),
+            Verdict::Deny(reason) | Verdict::Ask(reason) => Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason,
+            }),
         }
     }
 
@@ -697,9 +707,10 @@ impl Access {
         render: impl FnOnce(&[&str], usize) -> String,
     ) -> Result<String, VfsError> {
         if start < 1 {
-            return Err(VfsError::Backend(format!(
-                "invalid line range for {path}: start {start} is below 1"
-            )));
+            return Err(VfsError::InvalidRange {
+                path: path.to_owned(),
+                reason: "start is below 1",
+            });
         }
         let contents = self.read_string(path)?;
         let lines: Vec<&str> = contents.lines().collect();
@@ -708,9 +719,10 @@ impl Access {
         }
         let end = end.unwrap_or(lines.len()).min(lines.len());
         if end < start {
-            return Err(VfsError::Backend(format!(
-                "invalid line range for {path}: end {end} is before start {start}"
-            )));
+            return Err(VfsError::InvalidRange {
+                path: path.to_owned(),
+                reason: "end is before start",
+            });
         }
         Ok(render(&lines[start - 1..end], start))
     }
@@ -799,7 +811,9 @@ impl VfsAccess for HandleAccess {
         if self.0.remove(path.as_str(), recursive)? {
             Ok(())
         } else {
-            Err(VfsError::NotFound(path.to_string()))
+            Err(VfsError::NotFound {
+                path: path.to_string(),
+            })
         }
     }
 
@@ -921,7 +935,9 @@ mod tests {
             self.files()
                 .get(path.as_str())
                 .cloned()
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
@@ -942,7 +958,9 @@ mod tests {
             self.files()
                 .remove(path.as_str())
                 .map(|_| ())
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))
+                .ok_or_else(|| VfsError::NotFound {
+                    path: path.to_string(),
+                })
         }
 
         fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
@@ -960,17 +978,21 @@ mod tests {
         }
 
         fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not list".into()))
+            Err(VfsError::Unsupported {
+                path: path.to_string(),
+                detail: "the stub does not list".into(),
+            })
         }
 
         fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
             // Every stored key is a file; the stub holds no directories.
-            let bytes = self
-                .files()
-                .get(path.as_str())
-                .cloned()
-                .ok_or_else(|| VfsError::NotFound(path.to_string()))?;
+            let bytes =
+                self.files()
+                    .get(path.as_str())
+                    .cloned()
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: path.to_string(),
+                    })?;
             Ok(Stat {
                 file_type: FileType::File,
                 size: bytes.len() as u64,
@@ -989,17 +1011,21 @@ mod tests {
             let bytes = self
                 .files()
                 .remove(from.as_str())
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+                .ok_or_else(|| VfsError::NotFound {
+                    path: from.to_string(),
+                })?;
             self.files().insert(to.to_string(), bytes);
             Ok(())
         }
 
         fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-            let bytes = self
-                .files()
-                .get(from.as_str())
-                .cloned()
-                .ok_or_else(|| VfsError::NotFound(from.to_string()))?;
+            let bytes =
+                self.files()
+                    .get(from.as_str())
+                    .cloned()
+                    .ok_or_else(|| VfsError::NotFound {
+                        path: from.to_string(),
+                    })?;
             self.files().insert(to.to_string(), bytes);
             Ok(())
         }
@@ -1033,7 +1059,7 @@ mod tests {
     /// Extracts the Conflict message or fails the test.
     fn conflict_message(result: Result<(), VfsError>) -> String {
         match result {
-            Err(VfsError::Conflict(message)) => message,
+            Err(VfsError::Conflict { detail, .. }) => detail,
             other => panic!("expected a conflict, got {other:?}"),
         }
     }
@@ -1077,8 +1103,14 @@ mod tests {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "")]));
         let access = vfs.acquire(test_origin())?;
         match access.str_replace("/f.txt", "", "x") {
-            Err(VfsError::Backend(message)) => {
-                assert_eq!(message, "str_replace requires a non-empty anchor: /f.txt");
+            Err(VfsError::Anchor {
+                path,
+                anchor,
+                count,
+            }) => {
+                assert_eq!(path, "/f.txt");
+                assert!(anchor.is_empty());
+                assert_eq!(count, 0);
             }
             other => panic!("expected the empty-anchor refusal, got {other:?}"),
         }
@@ -1092,8 +1124,14 @@ mod tests {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "hello")]));
         let access = vfs.acquire(test_origin())?;
         match access.str_replace("/f.txt", "", "x") {
-            Err(VfsError::Backend(message)) => {
-                assert_eq!(message, "str_replace requires a non-empty anchor: /f.txt");
+            Err(VfsError::Anchor {
+                path,
+                anchor,
+                count,
+            }) => {
+                assert_eq!(path, "/f.txt");
+                assert!(anchor.is_empty());
+                assert_eq!(count, 0);
             }
             other => panic!("expected the empty-anchor refusal, got {other:?}"),
         }
@@ -1135,7 +1173,7 @@ mod tests {
         writer.write("/f.txt", b"x")?;
         let reader = vfs.acquire(test_origin())?;
         match reader.read("/f.txt") {
-            Err(VfsError::Conflict(_)) => {}
+            Err(VfsError::Conflict { .. }) => {}
             other => panic!("expected a conflict, got {other:?}"),
         }
         Ok(())
@@ -1332,7 +1370,8 @@ mod tests {
         );
         let denied = vfs.acquire(test_origin())?;
         match denied.write("/f.txt", b"x") {
-            Err(VfsError::PermissionDenied(reason)) => {
+            Err(VfsError::PermissionDenied { path, reason }) => {
+                assert_eq!(path, "/f.txt");
                 assert_eq!(reason, "writes are sealed");
             }
             other => panic!("expected a denial, got {other:?}"),
@@ -1362,8 +1401,20 @@ mod tests {
     fn read_range_rejects_invalid_bounds() -> Result<(), VfsError> {
         let vfs = handle(&StubFs::seeded(&[("/f.txt", "one\ntwo\n")]));
         let access = vfs.acquire(test_origin())?;
-        assert!(access.read_range("/f.txt", 0, None).is_err());
-        assert!(access.read_range("/f.txt", 2, Some(1)).is_err());
+        assert_eq!(
+            access.read_range("/f.txt", 0, None),
+            Err(VfsError::InvalidRange {
+                path: "/f.txt".to_owned(),
+                reason: "start is below 1",
+            })
+        );
+        assert_eq!(
+            access.read_range("/f.txt", 2, Some(1)),
+            Err(VfsError::InvalidRange {
+                path: "/f.txt".to_owned(),
+                reason: "end is before start",
+            })
+        );
         Ok(())
     }
 
@@ -1402,7 +1453,9 @@ mod tests {
         let access = vfs.acquire(test_origin())?;
         access.write("/bin.dat", &[0xff, 0xfe])?;
         match access.read_string("/bin.dat") {
-            Err(VfsError::Backend(_)) => {}
+            Err(VfsError::NotUtf8 { path }) => {
+                assert_eq!(path, "/bin.dat");
+            }
             other => panic!("expected a UTF-8 failure, got {other:?}"),
         }
         Ok(())
@@ -1423,9 +1476,9 @@ mod tests {
     impl Vfs for RefusingFs {
         fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
             let _ = id;
-            Err(VfsError::Backend(
-                "the backend refuses acquisition".to_owned(),
-            ))
+            Err(VfsError::Backend {
+                message: "the backend refuses acquisition".to_owned(),
+            })
         }
 
         fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
@@ -1438,7 +1491,7 @@ mod tests {
     fn a_backend_refusal_fails_acquire_with_an_error_instead_of_panicking() {
         let vfs = VfsRef::new(RefusingFs);
         match vfs.acquire(test_origin()) {
-            Err(VfsError::Backend(message)) => {
+            Err(VfsError::Backend { message }) => {
                 assert_eq!(message, "the backend refuses acquisition");
             }
             other => panic!("expected a backend refusal, got {other:?}"),
@@ -1459,9 +1512,9 @@ mod tests {
                 let mut vended = self.vended.lock().unwrap_or_else(PoisonError::into_inner);
                 *vended += 1;
                 if *vended == 2 {
-                    return Err(VfsError::Backend(
-                        "the backend refuses acquisition".to_owned(),
-                    ));
+                    return Err(VfsError::Backend {
+                        message: "the backend refuses acquisition".to_owned(),
+                    });
                 }
                 Ok(Box::new(StubAccess {
                     files: Arc::new(Mutex::new(BTreeMap::new())),
@@ -1480,7 +1533,7 @@ mod tests {
         let parent = vfs.acquire(test_origin())?;
         parent.write("/f.txt", b"1")?;
         match parent.spawn(test_origin()) {
-            Err(VfsError::Backend(message)) => {
+            Err(VfsError::Backend { message }) => {
                 assert_eq!(message, "the backend refuses acquisition");
             }
             other => panic!("expected a backend refusal, got {other:?}"),
@@ -1565,7 +1618,7 @@ mod tests {
         let access = vfs.acquire(test_origin())?;
         assert!(matches!(
             access.write("/f.txt", b"x"),
-            Err(VfsError::PermissionDenied(_))
+            Err(VfsError::PermissionDenied { .. })
         ));
         assert!(
             events
@@ -1593,6 +1646,7 @@ mod tests {
         use crate::memory::MemoryBackend;
 
         use super::{VfsError, VfsRef, test_origin};
+        use crate::PathReason;
 
         fn memory() -> VfsRef {
             VfsRef::new(MemoryBackend::new())
@@ -1612,10 +1666,13 @@ mod tests {
             let access = memory().acquire(test_origin())?;
             access.write("/drafts/f.txt", b"x")?;
             assert_eq!(access.read("drafts/../drafts/f.txt")?, b"x");
-            assert!(matches!(
+            assert_eq!(
                 access.read("../f.txt"),
-                Err(VfsError::InvalidPath(_))
-            ));
+                Err(VfsError::InvalidPath {
+                    path: "../f.txt".to_owned(),
+                    reason: PathReason::Traversal,
+                })
+            );
             Ok(())
         }
 
@@ -1645,14 +1702,48 @@ mod tests {
             access.write("/a.txt", b"")?;
             // A backslash is refused as written, never turned into a
             // separator by canonicalization.
-            assert!(matches!(
+            assert_eq!(
                 access.glob("/a\\b"),
-                Err(VfsError::InvalidPath(_))
-            ));
-            assert!(matches!(
+                Err(VfsError::InvalidPath {
+                    path: "/a\\b".to_owned(),
+                    reason: PathReason::Backslash,
+                })
+            );
+            assert_eq!(
                 access.glob("/a/***/b"),
-                Err(VfsError::InvalidPath(_))
-            ));
+                Err(VfsError::InvalidPath {
+                    path: "/a/***/b".to_owned(),
+                    reason: PathReason::Wildcard,
+                })
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn glob_names_the_rule_for_an_empty_control_or_over_long_pattern() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            assert_eq!(
+                access.glob(""),
+                Err(VfsError::InvalidPath {
+                    path: String::new(),
+                    reason: PathReason::Empty,
+                })
+            );
+            assert_eq!(
+                access.glob("/a\u{0}b"),
+                Err(VfsError::InvalidPath {
+                    path: "/a\u{0}b".to_owned(),
+                    reason: PathReason::Control,
+                })
+            );
+            let over_long = format!("/{}", "a".repeat(1024));
+            assert_eq!(
+                access.glob(&over_long),
+                Err(VfsError::InvalidPath {
+                    path: over_long,
+                    reason: PathReason::TooLong,
+                })
+            );
             Ok(())
         }
 
