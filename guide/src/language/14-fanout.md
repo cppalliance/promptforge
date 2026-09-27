@@ -483,13 +483,15 @@ Arms run concurrently by interleaving at suspending calls such as `models.infer`
 
 Conversations overlap the same way. With `models.loop` in every arm, all the arms' rounds are in flight together: every arm's first round goes out before any arm's second round, instead of one loop running after another.
 
-### The concurrency cap
+### The concurrency limit
 
-In one `fanout` call, at most the run's concurrency cap of arms are live at once, 8 by default. The host running the prompt sets the cap, and no frontmatter key or prompt call changes it.
+The host running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
 
-`fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). Arms start in member order until the cap is reached. From then on, whenever any live arm finishes, the next member's arm starts at once, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
+`fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). It spawns every arm up front and then collects them, and an arm that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` ([Checking on tasks](15-tasks.md#checking-on-tasks)). The scheduler admits the waiting arms in spawn order as slots free up, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
 
-A collection far larger than the cap runs in full as the cap refills:
+A task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock: an outer arm releases its slot while it waits on its own arms, and takes it back once its wait returns. [`tasks.concurrency(n)`](15-tasks.md#the-concurrency-limit) before a fanout lowers the limit for the tasks the calling chain spawns, and `tasks.concurrency()` reads the effective limit back.
+
+A collection far larger than the limit runs in full as the limit refills:
 
 ````markdown
 ---
@@ -568,9 +570,9 @@ Each arm sees the value the H1 pass seeded and never its sibling's key, and afte
 
 ### Sharing the store
 
-The store is the exception to arm isolation: the arms and the caller all use the run's one store. Arms keep out of each other's way through [claims](09-the-store.md#sharing-the-store-across-calls-and-tasks). An arm holds a claim on each path it writes or appends until the arm finishes, and while it is live, a sibling arm that writes, appends, reads, or globs that path causes a claims conflict, which ends the run. Once an arm has finished, its claims are released.
+The store is the exception to arm isolation: the arms and the caller all use the run's one store. What keeps arms out of each other's way is the order the run defines between chains, not isolation: every arm is spawned before any of them is collected, so no arm is ordered after a sibling, and an arm never sees another arm's writes ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). A write or append an arm makes to a path a sibling is also writing, or a read or glob that touches a sibling's path, is a conflict, and the run ends with `Determinism`. That verdict depends only on the prompt's structure, never on which arm happens to run first. After `fanout` returns, every arm's work is joined, so the caller can read, glob, and merge all of it freely.
 
-So the safe pattern gives each arm its own store path, for example one built from `sys.index`, and reads or combines the per-arm files in the calling section after `fanout` returns:
+So the safe pattern gives each arm its own store path, for example one built from `sys.index`, and the caller merges the per-arm files by index after `fanout` returns:
 
 ````markdown
 ---
@@ -585,10 +587,12 @@ promptforge: 0
 
 ```lua
 local results = fanout('### Worker', list_from_section('### Topics'))
-local files = store.glob('arm-*.md')
-local merged = table.concat(results, ',')
-store.write('merged.md', merged)
-return #files .. ':' .. merged
+local parts = {}
+for i = 1, #results do
+  parts[i] = store.read('arm-' .. i .. '.md')
+end
+store.write('merged.md', table.concat(parts, ','))
+return #parts .. ':' .. parts[1] .. ',' .. parts[2]
 ```
 
 ### Worker
@@ -608,16 +612,16 @@ return item
 2:alpha,beta
 ````
 
-After the run, `arm-1.md` holds `alpha`, `arm-2.md` holds `beta`, and `merged.md` holds `alpha,beta`. The path built from `sys.index` gives every arm a path of its own, so the arms never contend for a path. After `fanout` returns, [`store.glob`](09-the-store.md#listing-files-with-glob) in the caller finds both arm files, and the merge writes the ordered join of the results to one store file.
+After the run, `arm-1.md` holds `alpha`, `arm-2.md` holds `beta`, and `merged.md` holds `alpha,beta`. The path built from `sys.index` gives every arm a path of its own, so the arms never contend for a path, and the caller reads them back by index, which is also the order of the results, so the merge is the same on every run.
 
 Two more patterns never conflict:
 
 - One arm may write the same path several times, and the last write wins; rewriting its own path is never a conflict. `store.write('own.txt', 'first')` and then `store.write('own.txt', 'second')` in one arm leave `second`.
-- One block may call `fanout` more than once, and a later fanout's arms may write paths an earlier fanout's arms wrote. The earlier arms have finished, so the later write simply overwrites. Two fanouts in a row whose worker section runs `store.write('seq.txt', item)`, over `{'one'}` and then `{'two'}`, leave `two`.
+- One block may call `fanout` more than once, and a later fanout's arms may write paths an earlier fanout's arms wrote. The earlier arms have been joined by the time the first fanout returns, so the later write simply overwrites. Two fanouts in a row whose worker section runs `store.write('seq.txt', item)`, over `{'one'}` and then `{'two'}`, leave `two`.
 
 ### When arms conflict
 
-Two live arms writing the same path end the whole run:
+Two arms writing the same path end the whole run:
 
 ````markdown
 ---
@@ -643,9 +647,9 @@ return item
 ```
 ````
 
-The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms.
+The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
 
-`store.append` counts as a write. Two live arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
+`store.append` counts as a write. Two arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
 
 `pcall` cannot catch a claims conflict, not even wrapped around the store call inside the arm. Over `{'alpha', 'beta'}`, this worker section still ends the run as `Determinism`:
 
@@ -654,9 +658,9 @@ local ok, err = pcall(store.append, 'notes.md', item .. '\n')
 store.write('caught-' .. sys.index .. '.txt', tostring(ok))
 ````
 
-The conflict ends the whole run: the losing arm never resumes, no arm counts as failed, arms still waiting are cancelled, and at most the winning arm completes. The losing arm's store call never reaches the store, so exactly one arm's change lands: `notes.md` ends as `alpha` or as `beta`, followed by a newline, never both. In block code a claims conflict is never raised at the call ([store errors](09-the-store.md#store-errors)). The one exception is a store call in shared library code while it loads, for example in an arm whose section VM is starting while a live sibling holds the claim, and the store chapter covers that case.
+The conflict ends the whole run: the losing arm never resumes, no arm counts as failed, arms still waiting are cancelled, and at most the winning arm completes. The losing arm's store call never reaches the store, so exactly one arm's change lands: `notes.md` ends as `alpha` or as `beta`, followed by a newline, never both. A claims conflict is never raised at the call, and no `pcall` can catch it ([store errors](09-the-store.md#store-errors)), not even for a store call in shared library code while it loads.
 
-Live arms stay entirely off each other's claimed paths, and a read or glob counts too: an arm whose `store.read` or `store.glob` touches a path a live sibling has claimed ends the run with the same `Determinism` error. So arms coordinate only through the results `fanout` returns, never through store files a live sibling is writing, and they cannot meet by polling each other's marker files.
+Arms stay entirely off each other's paths, and a read or glob counts too: an arm whose `store.read` or `store.glob` touches a path a sibling is writing ends the run with the same `Determinism` error. So arms coordinate only through the results `fanout` returns, never through store files a sibling is writing, and they cannot meet by polling each other's marker files.
 
 A run that ends on a claims conflict still leaves the store consistent. The run does not return until any arm store call still in flight has finished, so the winning arm's write is in the store and the store reads normally afterward.
 

@@ -351,7 +351,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 return results[1].result .. ' and ' .. results[2].result
 ```
 
@@ -372,7 +372,7 @@ return 'beta'
 alpha and beta
 ````
 
-The string `'## Alpha'` is a heading reference, which names a section by its level and heading text ([referring to a section by heading](02-file-structure.md#referring-to-a-section-by-heading)). `tasks.spawn('## Alpha')` starts that section as a task and returns a Task handle, and `tasks.when_all` waits for every handle and returns one entry per handle, in the order given, each with its `result` ([tasks at a glance](15-tasks.md#tasks-at-a-glance)).
+The string `'## Alpha'` is a heading reference, which names a section by its level and heading text ([referring to a section by heading](02-file-structure.md#referring-to-a-section-by-heading)). `tasks.spawn('## Alpha')` starts that section as a task and returns a Task handle, and `tasks.join` waits for every handle and returns one entry per handle, in the order given, each with its `result` ([tasks at a glance](15-tasks.md#tasks-at-a-glance)).
 
 `## Main` returns after the wait, and that return ends the walk, so the walk never falls through into `## Alpha` or `## Beta`. Each of them runs only as a task that `## Main` started, and its return goes back to `## Main`. Only the entry section's return becomes the run result.
 
@@ -2822,7 +2822,7 @@ The failure is a Lua runtime error whose text includes your message, here `the a
 
 ### Failed host calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. One store failure is different: a conflict between two chains over the same store file, in block code, never raises at the call, and instead ends the run with run error kind `Determinism`.
+A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
 Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
 
@@ -3524,9 +3524,9 @@ The run result is:
 not an arm: runtime error: unknown sys field 'index'
 ````
 
-### The twelve error kinds
+### The thirteen error kinds
 
-`err.kind` is always one of exactly twelve tags. Each tag is raised by the feature its link points to:
+`err.kind` is always one of exactly thirteen tags. Each tag is raised by the feature its link points to:
 
 | Kind | Its own fields | Raised by |
 |---|---|---|
@@ -3540,17 +3540,18 @@ not an arm: runtime error: unknown sys field 'index'
 | `task_consumed` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `tasks_live` | `tasks` | [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) |
 | `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel) |
+| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | [Store errors](09-the-store.md#store-errors) |
 | `lua` | none | This chapter |
 | `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
 
-`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context, keeps its own kind and fields.
+`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
 ### Message, fields, and tostring
 
 - `err.message` is always a string. When the raiser gave no message, the message is the kind tag itself.
 - `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught host error shows exactly the host's message.
 - A caught error value joins with a string using `..` on either side, as `'prefix: ' .. err` or `err .. ' suffix'`, exactly as if it were its message string.
-- A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. Every such field is a string, and kinds without fields have only `kind` and `message`.
+- A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. A `store` value carries `reason`, `path`, and either `anchor` with `count` or `rule`. Every such field is a string except `count`, which is a number, and kinds without fields have only `kind` and `message`.
 
 A caught host-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the host's message verbatim from `tostring(err)`:
 
@@ -3570,7 +3571,7 @@ A `models.loop` failure works the same way: catch it with `pcall` and read `err.
 
 ### Catching at the call site
 
-An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site.
+An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
 
 Every string-argument failure has one of two shapes:
 
@@ -3614,7 +3615,7 @@ Only error values the host builds take a kind out of a block. A table you build 
 When a failed host call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
 
 - Raised again with `error(err)` before any other suspending call, an error value ends the run exactly as if it had never been caught, with the same run error kind.
-- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
+- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Store`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
 - A `lua`-kind error value that leaves a block surfaces as a Lua runtime error with the same message and the absolute prompt line.
 
 ### Uncaught failures
@@ -5834,7 +5835,7 @@ path must be a string, got {type}
 contents must be a string, got {type}
 ````
 
-Reading a file that does not exist fails with `file not found: {path}`, naming the path as the prompt wrote it.
+Reading a file that does not exist fails with `file not found in store: {path}`, naming the path as the prompt wrote it.
 
 A file declared under `input:` or `output:` in the frontmatter is an ordinary store file ([Input and output files](02-file-structure.md#input-and-output-files)). The host places each input file in the store before the run, and a block reads it with `store.read(path)` at the declared path. A prompt produces each promised output file by writing it with `store.write(path, contents)` at the declared path, and the host collects it from the store after the run ends. With `paper.md` declared as an input file and `report.md` as an output file, this block reads the first and writes the second:
 
@@ -5904,29 +5905,29 @@ A valid path is used exactly as written, with no trimming, case folding, or rewr
 
 ### Path errors
 
-A bad path fails the call with an [error value](05-lua-environment.md#catching-and-inspecting-errors) of kind `lua` and this message:
+A bad path fails the call with an [error value](05-lua-environment.md#catching-and-inspecting-errors) of kind `store` and this message:
 
 ````text
 invalid path "{path}": {reason}
 ````
 
-The path appears in double quotes exactly as supplied, escaped: a backslash shows doubled, and control characters appear as escapes. A bad path gets exactly one of nine reasons, from the first rule it breaks in this order:
+The error value's `reason` is `invalid_path`, its `path` names the path exactly as supplied, and its `rule` names the rule the path broke, in snake_case. The message's `{reason}` is the same rule in a sentence, and the path appears in double quotes exactly as supplied, escaped: a backslash shows doubled, and control characters appear as escapes. A bad path gets exactly one of nine rules, from the first rule it breaks in this order:
 
-| Order | Reason | When |
-|---|---|---|
-| 1 | `path is empty` | The path is the empty string |
-| 2 | `path is too long` | The path is longer than 1024 bytes |
-| 3 | `path is absolute` | The path starts with `/` |
-| 4 | `path contains a control character` | The path holds a byte below 0x20, or 0x7f |
-| 5 | `path contains a backslash` | The path holds a `\` |
-| 6 | `path contains an empty segment` | A segment is empty, from a trailing `/` or a doubled `//` |
-| 7 | `path contains a traversal segment` | A segment is `.` or `..` |
-| 8 | `path segment ends in an unsafe character` | A segment ends in `.` or a space |
-| 9 | `path contains a reserved device name` | A segment's base name is a device name |
+| Order | `err.rule` | Message reason | When |
+|---|---|---|---|
+| 1 | `empty` | `path is empty` | The path is the empty string |
+| 2 | `too_long` | `path is too long` | The path is longer than 1024 bytes |
+| 3 | `absolute` | `path is absolute` | The path starts with `/` |
+| 4 | `control` | `path contains a control character` | The path holds a byte below 0x20, or 0x7f |
+| 5 | `backslash` | `path contains a backslash` | The path holds a `\` |
+| 6 | `empty_segment` | `path contains an empty segment` | A segment is empty, from a trailing `/` or a doubled `//` |
+| 7 | `traversal` | `path contains a traversal segment` | A segment is `.` or `..` |
+| 8 | `unsafe_suffix` | `path segment ends in an unsafe character` | A segment ends in `.` or a space |
+| 9 | `reserved_name` | `path contains a reserved device name` | A segment's base name is a device name |
 
-The first five checks look at the whole path. The last four check each segment, one after another from left to right. So a path starting with `/` always reports `path is absolute`, an over-long path reports `path is too long` whatever else is wrong with it, and when a device-name segment comes before a `..` segment, the device-name reason wins.
+The first five checks look at the whole path. The last four check each segment, one after another from left to right. So a path starting with `/` always reports `path is absolute`, an over-long path reports `path is too long` whatever else is wrong with it, and when a device-name segment comes before a `..` segment, the device-name rule wins.
 
-A rejected path changes nothing: the path is checked before the call touches any file, so nothing is read, created, written, appended, replaced, or deleted. Store error messages name the path exactly as the prompt wrote it, never with the store's internal prefix. The one message that shows the full internal path is the message that ends a run when two chains clash over one path.
+A rejected path changes nothing: the path is checked before the call touches any file, so nothing is read, created, written, appended, replaced, or deleted. Store error messages name the path exactly as the prompt wrote it, never with any internal prefix. The one message that shows both chains and claim kinds is the message that ends a run when two chains clash over one path.
 
 ## Line ranges and numbered reads
 
@@ -5976,7 +5977,7 @@ Lines split at `\n` or `\r\n`, so a final newline adds no empty last line and a 
 2| second
 ````
 
-An empty file reads as an empty string, and a missing file fails with `file not found: {path}`.
+An empty file reads as an empty string, and a missing file fails with `file not found in store: {path}`.
 
 `store.read_numbered(path, start)` and `store.read_numbered(path, start, end)` take the same argument types and follow the same bound rules as `store.read`, and return the selected lines with their absolute line numbers. A numbered slice keeps the file's real line numbers instead of restarting at 1:
 
@@ -6006,11 +6007,11 @@ The `start` and `end` bounds are integers, or floats with a whole value such as 
 4. An `end` past the last line clamps down to the last line.
 5. Only then must `end` not be before `start`.
 
-So on a three-line file the range 3 to 99 returns line 3, the numbered range 2 to 99 returns `2| two` and `3| three`, and a range from 5 to 2 returns an empty string because the past-the-end check comes first. `store.read(p, 99)` and `store.read_numbered(p, 99)` both return an empty string, and so does any ranged read of an empty file, plain or numbered. When `start` is given, the file is read before the bounds are checked, so a missing file reports `file not found: {path}` even when the bounds are out of range. An `end` given with a nil `start` is checked before the file is read, so it fails with its line range error whether or not the file exists.
+So on a three-line file the range 3 to 99 returns line 3, the numbered range 2 to 99 returns `2| two` and `3| three`, and a range from 5 to 2 returns an empty string because the past-the-end check comes first. `store.read(p, 99)` and `store.read_numbered(p, 99)` both return an empty string, and so does any ranged read of an empty file, plain or numbered. When `start` is given, the file is read before the bounds are checked, so a missing file reports `file not found in store: {path}` even when the bounds are out of range. An `end` given with a nil `start` is checked before the file is read, so it fails with its line range error whether or not the file exists.
 
 ### Line range errors
 
-Unusable bounds fail with an error value of kind `lua` and this message, from either `store.read` or `store.read_numbered`:
+Unusable bounds fail with an error value of kind `store` whose `reason` is `invalid_range` and this message, from either `store.read` or `store.read_numbered`:
 
 ````text
 invalid line range for {path}: {reason}
@@ -6063,22 +6064,22 @@ the slow brown fox
 
 ### Anchor rules and errors
 
-The anchor `old` is non-empty and occurs exactly once in the file, counted as non-overlapping substring matches. `store.str_replace` validates the path first and then runs these checks in order. Each failure is an error value of kind `lua` and leaves the file unchanged:
+The anchor `old` is non-empty and occurs exactly once in the file, counted as non-overlapping substring matches. `store.str_replace` validates the path first and then runs these checks in order. Each failure is an error value of kind `store` whose `reason` is `anchor`, with `path`, `anchor`, and `count` fields, and leaves the file unchanged:
 
 | Order | Condition | Message |
 |---|---|---|
-| 1 | `old` is empty, checked before any search | `invalid anchor for {path}: anchor must not be empty` |
-| 2 | The file is missing | `file not found: {path}` |
-| 3 | `old` has no match, which includes any anchor in an empty file | `anchor not found in {path}` |
-| 4 | `old` has more than one match | `anchor occurs {count} times in {path}, expected exactly one` |
+| 1 | `old` is empty, checked before any search | `str_replace requires a non-empty anchor: {path}` |
+| 2 | The file is missing | `file not found in store: {path}` |
+| 3 | `old` has no match, which includes any anchor in an empty file | `anchor "{anchor}" was not found in {path}, expected exactly one` |
+| 4 | `old` has more than one match | `anchor "{anchor}" occurs {count} times in {path}, expected exactly one; include more surrounding text so it matches once` |
 
-The messages name the path, and the count where it applies, which is 2 or more, but never the anchor text. Counts are substring matches on the text, so on `na na na` the anchor `na` occurs 3 times.
+The messages name the path and the anchor text, and the count where it applies, which is 2 or more. `err.anchor` holds the anchor text and `err.count` the match count as a number, so a prompt can branch on them. Counts are substring matches on the text, so on `na na na` the anchor `na` occurs 3 times.
 
 ### Deleting files
 
-`store.delete(path)` removes a store file and returns nil; `path` is a required string. Reading the path afterwards fails with `file not found: {path}`. Deleting a path that does not exist succeeds, so `store.delete` needs no guard and is safe to repeat.
+`store.delete(path)` removes a store file and returns nil; `path` is a required string. Reading the path afterwards fails with `file not found in store: {path}`. Deleting a path that does not exist succeeds, so `store.delete` needs no guard and is safe to repeat.
 
-Directories exist in the store only as the parents of written files. `store.delete` removes files and empty directories only, because removal is not recursive: deleting a directory that still holds files fails with `store backend failure` and changes nothing. Deleting a file leaves its directory in place, so deleting `notes` fails while `notes/a.txt` exists and succeeds once that file is gone.
+Directories exist in the store only as the parents of written files. `store.delete` removes files and empty directories only, because removal is not recursive: deleting a directory that still holds files fails with `directory not empty in store: {path}` and changes nothing. Deleting a file leaves its directory in place, so deleting `notes` fails while `notes/a.txt` exists and succeeds once that file is gone.
 
 ### Checking with exists
 
@@ -6120,7 +6121,7 @@ The second `store.delete('notes/a.txt')` succeeds because the file is already go
 
 ## Listing files with glob
 
-`store.glob(pattern)` lists the store files that match a wildcard pattern. It returns a sorted Lua array of logical paths relative to the store, ready to pass straight to other store calls, which a prompt can index and count with `#`:
+`store.glob(pattern)` lists the store files that match a wildcard pattern, or only directories when the pattern ends in `/`. It returns a sorted Lua array of logical paths relative to the store, ready to pass straight to other store calls, which a prompt can index and count with `#`:
 
 ````markdown
 ---
@@ -6163,25 +6164,29 @@ Patterns are written relative to the store. `*` matches any run of characters wi
 | `*.md` | `notes.md` |
 | `**` | All four files |
 
-### Files only
+### Files and directories
 
-Results list files only, never directories. After writing `notes/a.txt`, the pattern `*` does not list `notes`, while `notes/*` and `**` both list `notes/a.txt`. That is why `**` in the table above returns exactly the four files and none of their directories.
+Results list files, or only directories for a pattern that ends in `/`. After writing `notes/a.txt`, the pattern `*` does not list `notes`, while `notes/*` and `**` both list `notes/a.txt`. That is why `**` in the table above returns exactly the four files and none of their directories.
+
+A trailing `/` selects directories instead: after writing `notes/a.txt`, `store.glob('notes/*/')` lists every directory under `notes` and never the file. The trailing `/` is the selector, not part of the matched names, so the returned paths never end in `/`. Directories exist only as parents of files, so the directories a `*/` glob can find are exactly those. This is how a prompt lists a directory: `store.glob('notes/*')` for its files, and `store.glob('notes/*/')` for its subdirectories.
 
 ### Pattern errors
 
-A pattern is non-empty, at most 1024 bytes (a limit separate from the path limit), and free of control characters and backslashes. A pattern outside those rules, or one that uses `**` other than as a whole segment, fails with an error value of kind `lua` and this message, which quotes the pattern as supplied and names no path:
+A pattern is non-empty, at most 1024 bytes (a limit separate from the path limit), and free of control characters and backslashes. A pattern outside those rules, or one that uses `**` other than as a whole segment, fails with an error value of kind `store` and this message, which quotes the pattern as supplied and names no path:
 
 ````text
 invalid glob pattern "{pattern}": {reason}
 ````
 
-| Reason | When |
-|---|---|
-| `pattern is empty` | The pattern is the empty string |
-| `pattern exceeds 1024 bytes` | The pattern is longer than 1024 bytes |
-| `pattern contains a control character` | The pattern holds a byte below 0x20, or 0x7f |
-| `pattern does not support backslash escapes` | The pattern holds a `\` |
-| The matcher's own reason | A wildcard the matcher cannot accept, such as a `**` that does not fill a whole segment or three or more `*` in a row |
+The error value's `reason` is `invalid_path`, its `path` names the pattern, and its `rule` names the rule the pattern broke:
+
+| `err.rule` | Message reason | When |
+|---|---|---|
+| `empty` | `path is empty` | The pattern is the empty string |
+| `too_long` | `path is too long` | The pattern is longer than 1024 bytes |
+| `control` | `path contains a control character` | The pattern holds a byte below 0x20, or 0x7f |
+| `backslash` | `path contains a backslash` | The pattern holds a `\` |
+| `wildcard` | `pattern contains invalid wildcard grammar` | A `**` that does not fill a whole segment, or three or more `*` in a row |
 
 Matching is bounded, so a pattern with many wildcards returns promptly even when it is built to force backtracking.
 
@@ -6200,7 +6205,7 @@ Store calls work in section blocks, in blocks under the H1 during the [H1 pass](
 
 In a block, each store call is one [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise) answered by the host, a point where other [chains](04-how-a-prompt-runs.md#the-section-walk) may run. It suspends and interleaves the same way whatever serves the store, memory or a host backend, and an ordinary failure is raised right at the call. A prompt's store reads, writes, and globs behave the same whether the host serves the store from memory or from a directory; with a directory-backed store, each `store.write` lands as a real file under the host's directory.
 
-In shared library code while it loads, store calls run directly instead of suspending. Two things differ there: a claims conflict raises at the call, as [Sharing the store across calls and tasks](#sharing-the-store-across-calls-and-tasks) explains, and an argument of the wrong type fails with a generic conversion message instead of the `must be a string` and `must be an integer` messages, while a number passed where a string is expected is converted to text.
+In shared library code while it loads, store calls run directly instead of suspending. One thing differs there: an argument of the wrong type fails with a generic conversion message instead of the `must be a string` and `must be an integer` messages, while a number passed where a string is expected is converted to text. A claims conflict ends the run with `Determinism` there too, exactly as in block code, as [Sharing the store across calls and tasks](#sharing-the-store-across-calls-and-tasks) explains.
 
 A local tool handler, a Lua function a prompt registers with `tools.add_local` for a model to call, can use the store as well, and a store call made there is an ordinary store operation ([Local tools](12-tools.md#local-tools)).
 
@@ -6217,7 +6222,7 @@ Each store operation leaves one success or failure report inside the block and s
 | `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
 | `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
 | `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
-| `store.exists` | None |
+| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
 
 Reports hold no paths, contents, anchors, or [argument string](06-arguments.md#input-basics). An operation that fails in the ordinary way records its failure report and also raises a Lua error in the calling block. For a section whose first block writes a file and whose second block reads it, the section VM reports in this order, starting with the shared library load that every section VM runs:
 
@@ -6265,67 +6270,67 @@ store.write('findings.md', 'three sources agree')
 three sources agree
 ````
 
-### Claims
+### The conflict rule
 
-Chains can interleave at every suspending call, so the store keeps track of which chain touches which path. Every store call takes a claim for the chain that made it:
+Chains can interleave at every suspending call, so the store keeps track of which chain touches which region. Every store call claims what it touches for the chain that made it:
 
-- `store.write`, `store.append`, `store.str_replace`, and `store.delete` take a write claim on their path.
-- `store.read`, `store.read_numbered`, and `store.exists` take a read claim on their path, and `store.glob` takes a read claim on every file it matches.
+- `store.write`, `store.append`, `store.str_replace`, and `store.delete` claim their path for writing.
+- `store.read`, `store.read_numbered`, and `store.exists` claim their path for reading, and `store.glob` claims its pattern.
 
-A chain is live from the moment it starts until it ends, and its claims last until it ends. A write claim conflicts with any claim another live chain holds on that path, a read claim conflicts only with another live chain's write claim, two reads never conflict, and a chain never conflicts with its own claims, so a chain may rewrite its own paths freely. Two live chains claiming one path in conflicting ways is a claims conflict.
+Two accesses conflict when they touch the same region, at least one of them writes, they come from different chains, and neither chain is ordered before the other. Two reads of one path never conflict, and a chain never conflicts with itself, so a chain may rewrite its own paths freely. Two chains whose accesses conflict over one region is a claims conflict.
 
-### Which chain makes a claim
+### Spawn and join
 
-Every store call is attributed, for claims, to the chain that made it:
+Within a run, an order between chains comes from exactly two sources, and everything a prompt writes to the store follows them:
 
-- The walk makes its own claims.
-- A called chain makes them as its caller. It shares its caller's claims, so the caller and the called sections can write and append the same path without conflict, and the end of the called chain never releases the caller's claims.
-- The H1 pass makes claims of its own and releases them when the pass ends. The walk then starts with fresh claims, attributed to the prompt's H1 title and the line where the walk starts, so the H1 pass can use the store without conflicting with the sections that follow.
-- `fanout` runs one section several times side by side, and each of those runs, called an arm, makes its own claims ([Isolation and the store](14-fanout.md#isolation-and-the-store)).
-- A task is a chain that `tasks.spawn` starts to run beside the chain that called it, which is the task's owner, and each task makes its own claims ([Starting a task](15-tasks.md#starting-a-task)). A task starts from its owner's store work at spawn time: everything the owner did in the store before the spawn comes ahead of anything the task does, so the task can build on it.
+- Spawning a task is a fork: everything the owner did in the store before `tasks.spawn` comes ahead of anything the task does, so a task can build on the files its owner wrote.
+- Delivering a task's result is a join: everything the task did comes ahead of the owner's next step. `tasks.join_any` joins the task it returns, `tasks.join` joins every member it delivers, a timed join's members included, and a task notice delivered to the model joins that task. A chain's end joins every task it owns, so nested work is ordered transitively.
 
-### Reading what finished chains wrote
+A [called chain](08-jump-and-call.md#called-chains) shares its caller's identity, so a `call` needs no join: what the called section wrote is readable as soon as `call` returns. A task is a chain that `tasks.spawn` starts to run beside its owner ([Starting a task](15-tasks.md#starting-a-task)), and each arm of a [fanout](14-fanout.md#the-fanout-call) is a task. The H1 pass and the walk that follows share one identity, so the walk reads freely what the H1 pass wrote.
 
-What finished tasks and arms wrote is readable as soon as they are done. Their writes persist, and a task's or arm's claims are released when its chain ends, before an owner waiting on it wakes ([Waiting for results](15-tasks.md#waiting-for-results)). So after `fanout` returns or a wait completes, the caller can read, glob, and merge every arm's or task's files, while touching a path that another still-live arm or task is writing is a claims conflict.
+### Reading what joined tasks wrote
 
-The safe pattern is for each arm to write only its own path, such as one file per arm, and for the caller to merge the files after the arms finish. When each arm has written a file such as `arm-1.md` or `arm-2.md`, the caller merges them like this once `fanout` returns:
+What a task wrote is visible only after a delivery that joins it, and never before. After `fanout` returns, or after `tasks.join` or `tasks.join_any` delivers a task, the caller can read, glob, and merge that task's files freely. Reading a task's output without a join is a conflict, and the verdict depends only on the prompt's structure, never on which task happened to finish first.
+
+Four patterns always fail, however the run interleaves:
+
+- Two arms appending to one path. The appends are unordered writes to one region, so whichever comes second always conflicts.
+- Reading a sibling's output without a join. A task's file is readable only by a chain a join ordered after the task, and sibling arms are never ordered after each other.
+- An owner writing a path after spawning a task that reads it. The spawn orders the task after everything the owner did before it, but not after the write that came later, so the write conflicts with the task's read.
+- A glob or `exists` racing a sibling's write. A glob claims its pattern and `exists` claims its path, so either conflicts with a sibling's write to a matching path, whichever runs second.
+
+The safe pattern is for each arm to write only its own path, such as one file per arm built from `sys.index`, and for the caller to merge the files by index after `fanout` returns. When each arm has written a file such as `research/1.md` or `research/2.md`, the caller merges them like this once `fanout` returns:
 
 ````lua
-local files = store.glob('arm-*.md')
+local results = fanout('### Worker', list_from_section('### Topics'))
 local parts = {}
-for i = 1, #files do
-  parts[i] = store.read(files[i])
+for i = 1, #results do
+  parts[i] = store.read('research/' .. i .. '.md')
 end
-store.write('merged.md', table.concat(parts, ','))
+store.write('research.md', table.concat(parts, '\n\n'))
 ````
 
-With two arms that wrote `alpha` and `beta`, `merged.md` holds `alpha,beta`.
+With two arms that wrote `alpha` and `beta`, `research.md` holds `alpha` and `beta`. The index is also the order of the results, so the merge is the same on every run. Sequential fanouts still work: the earlier fanout's arms are joined before the later fanout's arms are spawned, so the later writes simply overwrite.
 
 ### When claims conflict
 
-A path is held by one live chain at a time for conflicting use. When a claims conflict arises in block code, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
+When a claims conflict arises, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
 
 ````text
 store determinism violation: {claim} on {path} by {identity} conflicts with a {other_claim} claim by {other_identity}
 ````
 
-Each claim is `read` or `write`. The path is the file's full internal path, such as `/_promptforge/store/findings.md`, and each identity is a chain, printed as `ExecId(...)`. In block code the conflict is never raised at the call, so no `pcall` can catch it. When two live tasks or arms make conflicting claims on one path, for example both appending to it, the whole run ends at once, no `pcall` in either of them catches it, and any other live tasks are abandoned with the run ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
+Each claim is `read` or `write`, the path is the file's path exactly as the prompt wrote it, and each identity is a chain. The conflict is never raised at the call, so no `pcall` can catch it. When two tasks or arms make conflicting claims on one region, for example both appending to one path, the whole run ends at once, no `pcall` in either of them catches it, and any other live tasks are abandoned with the run ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
 
-Store writes still in flight when the run ends finish before the run completes, because the end of the run waits for outstanding store operations. So when two arms clash over a path, the one write that landed is in the store even though the run fails. Because `store.glob` takes a read claim on every file it matches, a glob that matches a file another live chain is writing is a claims conflict just like a read.
+Of two conflicting accesses, the one that comes second detects the conflict and never reaches the store, so the first one's write is the one that lands. Store writes still in flight when the run ends finish before the run completes, so the write that landed is in the store even though the run fails.
 
 ### Conflicts while the shared library loads
 
-Store calls made in shared library code while it loads run directly, so there a claims conflict raises at the call instead of ending the run. That can happen, for example, in an arm or task whose section VM is starting while another live chain holds the claim. The conflict arrives as an error value of kind `lua` with the store's own message, which names the path as written and calls the other chain a live identity:
-
-````text
-write-write race on {path}: another live identity holds a claim on it
-````
-
-This is the only place that message reaches a prompt, and a glob that conflicts while the shared library loads raises it too. Either way, raised at the call or ending the run, the losing call never lands.
+A claims conflict in shared library code while it loads ends the run with run error kind `Determinism` too, exactly as in block code.
 
 ## Store errors
 
-A failed store call can be caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Every store failure except a claims conflict in block code is raised at the call as an error value whose `kind` is `lua` and whose `message` is the store's message, a lowercase phrase with no trailing period. `pcall` returns `false` and that value:
+A failed store call can be caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Every store failure except a claims conflict is raised at the call as an error value whose `kind` is `store`, whose `reason` names the failure mode, and whose `message` is the store's message, a lowercase phrase with no trailing period. `pcall` returns `false` and that value:
 
 ````markdown
 ---
@@ -6345,60 +6350,66 @@ return tostring(ok) .. ' ' .. err.kind .. ' ' .. err.message
 ````
 
 ````text
-false lua file not found: missing.md
+false store file not found in store: missing.md
 ````
 
-`tostring(err)` and `'context: ' .. err` also give the message text. Because every store failure shares the one `lua` kind, the message text is what tells them apart. A counter that may not exist yet reads like this:
+`tostring(err)` and `'context: ' .. err` also give the message text. Branch on `err.reason` rather than the message text: the reason is a fixed tag, while the message may change. A counter that may not exist yet reads like this:
 
 ````lua
-local ok, v = pcall(store.read, 'n.txt')
+local ok, v = pcall(store.read, 'count.txt')
 local count = tonumber(ok and v or '0')
+if not ok then assert(v.reason == 'not_found', 'unexpected store failure') end
 ````
 
-Left uncaught, a store failure aborts the block, and the run fails with [run error kind](17-limits-and-errors.md#how-a-failed-run-is-classified) `Lua`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) the same uncaught failure ends the run as `RequirementsUnmet`, whose requirements notice is the Lua error text. A failure in shared library code while it loads keeps kind `Lua`.
+Left uncaught, a store failure aborts the block, and the run fails with [run error kind](17-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
 
 ### Store messages
 
-A failing store call raises at the call and aborts the block unless caught, and the failure is always one of these:
+A failing store call raises at the call and aborts the block unless caught. Every failure carries one of twelve `reason` tags, and the message is always one of these:
 
-| Failure | Message | Raised by |
+| `err.reason` | Message | Raised by |
 |---|---|---|
-| Invalid path | `invalid path "{path}": {reason}` | Every call that takes a path |
-| File not found | `file not found: {path}` | `store.read`, `store.read_numbered`, `store.str_replace` |
-| Invalid anchor | `invalid anchor for {path}: anchor must not be empty` | `store.str_replace` |
-| Anchor not found | `anchor not found in {path}` | `store.str_replace` |
-| Ambiguous anchor | `anchor occurs {count} times in {path}, expected exactly one` | `store.str_replace` |
-| Invalid line range | `invalid line range for {path}: {reason}` | `store.read`, `store.read_numbered` |
-| Invalid glob pattern | `invalid glob pattern "{pattern}": {reason}` | `store.glob` |
-| Backend failure | `store backend failure` | Any call, in the cases below |
+| `not_found` | `file not found in store: {path}` | `store.read`, `store.read_numbered`, `store.str_replace` |
+| `invalid_path` | `invalid path "{path}": {reason}` | Every call that takes a path |
+| `invalid_path` | `invalid glob pattern "{pattern}": {reason}` | `store.glob` |
+| `invalid_range` | `invalid line range for {path}: {reason}` | `store.read`, `store.read_numbered` |
+| `anchor` | `str_replace requires a non-empty anchor: {path}` | `store.str_replace` with an empty anchor |
+| `anchor` | `anchor "{anchor}" was not found in {path}, expected exactly one` | `store.str_replace` with no match |
+| `anchor` | `anchor "{anchor}" occurs {count} times in {path}, expected exactly one; include more surrounding text so it matches once` | `store.str_replace` with two or more matches |
+| `directory_not_empty` | `directory not empty in store: {path}` | `store.delete` of a directory that still holds files |
+| `is_a_directory` | `is a directory in store: {path}` | A call that needs a file at a directory path |
+| `not_a_directory` | `not a directory in store: {path}` | A call that needs a directory at a file path |
+| `not_utf8` | `file in store is not UTF-8: {path}` | A call that reads or edits text |
+| `already_exists` | `file already exists in store: {path}` | A host-supplied store that refuses a path that already exists |
+| `permission_denied` | `permission denied for store path {path}: {reason}` | A call the host refuses |
+| `unsupported` | `unsupported store operation on {path}: {detail}` | A host-supplied store that cannot serve the call |
+| `backend` | `store backend failure: {message}` | Any call, when the storage behind the store fails |
 
-A claims conflict is the one store failure that ends the run instead, except in shared library code while it loads, where it raises at the call with the `write-write race` message. Store messages name the path as written, with three exceptions: `store backend failure` names no path, `invalid glob pattern` names the pattern and no path, and the claims-conflict message that ends a run names the full internal path.
+The message names the path exactly as the prompt wrote it, with two exceptions: `invalid glob pattern` names the pattern and no path, and `store backend failure` names no path. Where the message points at a fix, it says how to make it: an anchor that occurs more than once says to include more surrounding text, and an invalid path names the rule the path broke. `err.rule` carries that rule's tag as `empty`, `too_long`, `absolute`, `control`, `backslash`, `empty_segment`, `traversal`, `unsafe_suffix`, or `reserved_name`, and `wildcard` for a glob pattern. An anchor error's `err.anchor` and `err.count` carry the anchor text and its match count, and `count` is a number, the one store error field that is not a string.
 
-`file not found: {path}` comes from `store.read`, `store.read_numbered`, or `store.str_replace` on a missing file, whole or ranged, plain or numbered. `store.delete` of a missing file succeeds, and `store.exists` reports absence as `false` without raising.
+`file not found in store: {path}` comes from `store.read`, `store.read_numbered`, or `store.str_replace` on a missing file, whole or ranged, plain or numbered. `store.delete` of a missing file succeeds, and `store.exists` reports absence as `false` without raising.
 
 ### Backend failures
 
-A backend failure has the fixed message `store backend failure`, which names no path and shows no detail from the storage behind the store. A prompt meets it in these cases:
+Four failures that once shared one fixed message now carry their own reasons, each with the message from the table above:
 
-- Deleting a directory that still holds files. The directory and its files stay as they were.
-- Using a directory path as a file. Once `notes/a.txt` exists, `notes` is a directory, so `store.read`, `store.read_numbered`, `store.str_replace`, `store.write`, or `store.append` on `notes` fails with `store backend failure` rather than `file not found`. Writing or appending `a.txt/b.txt` while `a.txt` is a file fails the same way. The failed call changes nothing.
-- Reading or editing a file whose contents are not UTF-8. The store holds text, so `store.read`, `store.read_numbered`, and `store.str_replace` need the file's contents to be UTF-8.
-- A call the host refuses, such as a denial by a host policy or a write to a read-only store. The run's default store has neither, so this appears only when the host sets up such a store.
+- Deleting a directory that still holds files, reason `directory_not_empty`. The directory and its files stay as they were.
+- Using a directory path as a file, reason `is_a_directory`, or a file path where a directory is required, reason `not_a_directory`. Once `notes/a.txt` exists, `notes` is a directory, so `store.read`, `store.read_numbered`, `store.str_replace`, `store.write`, or `store.append` on `notes` fails with `is a directory in store: {path}` rather than `file not found`. Writing or appending `a.txt/b.txt` while `a.txt` is a file fails with `not_a_directory`. The failed call changes nothing.
+- Reading or editing a file whose contents are not UTF-8, reason `not_utf8`. The store holds text, so `store.read`, `store.read_numbered`, and `store.str_replace` need the file's contents to be UTF-8.
+- A call the host refuses, reason `permission_denied`, such as a denial by a host policy or a write to a read-only store. The run's default store has neither, so this appears only when the host sets up such a store.
 
 ### Run error kinds
 
-A store problem that ends a run is classified by one of four run error kinds ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)):
+A store problem that ends a run is classified by one of two run error kinds ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)):
 
 | Run error kind | When |
 |---|---|
-| `Lua` | An uncaught `store.*` failure anywhere other than the H1 pass's blocks, shared library loading included |
-| `RequirementsUnmet` | An uncaught `store.*` failure in a block under the H1 during the H1 pass; the notice is the Lua error text |
-| `Determinism` | A claims conflict from block code |
-| `Store` | The storage behind the store fails outside any `store.*` call |
+| `Store` | An uncaught `store.*` failure, in block code, in the H1 pass, or while the shared library loads; a caught store error raised again; a run whose handle declares no store; or the storage behind the store failing outside any `store.*` call |
+| `Determinism` | A claims conflict, from block code or while the shared library loads |
 
-`Store` appears in only two situations. When the host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store. When the storage refuses store access at the start of the H1 pass, or at the start of the walk that follows it, the run fails with `Store` as well.
+When the host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
 
-A host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `internal` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a host-supplied store.
+A host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a host-supplied store.
 
 ## Wrapping untrusted text
 
@@ -9486,13 +9497,15 @@ Arms run concurrently by interleaving at suspending calls such as `models.infer`
 
 Conversations overlap the same way. With `models.loop` in every arm, all the arms' rounds are in flight together: every arm's first round goes out before any arm's second round, instead of one loop running after another.
 
-### The concurrency cap
+### The concurrency limit
 
-In one `fanout` call, at most the run's concurrency cap of arms are live at once, 8 by default. The host running the prompt sets the cap, and no frontmatter key or prompt call changes it.
+The host running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
 
-`fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). Arms start in member order until the cap is reached. From then on, whenever any live arm finishes, the next member's arm starts at once, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
+`fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). It spawns every arm up front and then collects them, and an arm that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` ([Checking on tasks](15-tasks.md#checking-on-tasks)). The scheduler admits the waiting arms in spawn order as slots free up, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
 
-A collection far larger than the cap runs in full as the cap refills:
+A task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock: an outer arm releases its slot while it waits on its own arms, and takes it back once its wait returns. [`tasks.concurrency(n)`](15-tasks.md#the-concurrency-limit) before a fanout lowers the limit for the tasks the calling chain spawns, and `tasks.concurrency()` reads the effective limit back.
+
+A collection far larger than the limit runs in full as the limit refills:
 
 ````markdown
 ---
@@ -9571,9 +9584,9 @@ Each arm sees the value the H1 pass seeded and never its sibling's key, and afte
 
 ### Sharing the store
 
-The store is the exception to arm isolation: the arms and the caller all use the run's one store. Arms keep out of each other's way through [claims](09-the-store.md#sharing-the-store-across-calls-and-tasks). An arm holds a claim on each path it writes or appends until the arm finishes, and while it is live, a sibling arm that writes, appends, reads, or globs that path causes a claims conflict, which ends the run. Once an arm has finished, its claims are released.
+The store is the exception to arm isolation: the arms and the caller all use the run's one store. What keeps arms out of each other's way is the order the run defines between chains, not isolation: every arm is spawned before any of them is collected, so no arm is ordered after a sibling, and an arm never sees another arm's writes ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). A write or append an arm makes to a path a sibling is also writing, or a read or glob that touches a sibling's path, is a conflict, and the run ends with `Determinism`. That verdict depends only on the prompt's structure, never on which arm happens to run first. After `fanout` returns, every arm's work is joined, so the caller can read, glob, and merge all of it freely.
 
-So the safe pattern gives each arm its own store path, for example one built from `sys.index`, and reads or combines the per-arm files in the calling section after `fanout` returns:
+So the safe pattern gives each arm its own store path, for example one built from `sys.index`, and the caller merges the per-arm files by index after `fanout` returns:
 
 ````markdown
 ---
@@ -9588,10 +9601,12 @@ promptforge: 0
 
 ```lua
 local results = fanout('### Worker', list_from_section('### Topics'))
-local files = store.glob('arm-*.md')
-local merged = table.concat(results, ',')
-store.write('merged.md', merged)
-return #files .. ':' .. merged
+local parts = {}
+for i = 1, #results do
+  parts[i] = store.read('arm-' .. i .. '.md')
+end
+store.write('merged.md', table.concat(parts, ','))
+return #parts .. ':' .. parts[1] .. ',' .. parts[2]
 ```
 
 ### Worker
@@ -9611,16 +9626,16 @@ return item
 2:alpha,beta
 ````
 
-After the run, `arm-1.md` holds `alpha`, `arm-2.md` holds `beta`, and `merged.md` holds `alpha,beta`. The path built from `sys.index` gives every arm a path of its own, so the arms never contend for a path. After `fanout` returns, [`store.glob`](09-the-store.md#listing-files-with-glob) in the caller finds both arm files, and the merge writes the ordered join of the results to one store file.
+After the run, `arm-1.md` holds `alpha`, `arm-2.md` holds `beta`, and `merged.md` holds `alpha,beta`. The path built from `sys.index` gives every arm a path of its own, so the arms never contend for a path, and the caller reads them back by index, which is also the order of the results, so the merge is the same on every run.
 
 Two more patterns never conflict:
 
 - One arm may write the same path several times, and the last write wins; rewriting its own path is never a conflict. `store.write('own.txt', 'first')` and then `store.write('own.txt', 'second')` in one arm leave `second`.
-- One block may call `fanout` more than once, and a later fanout's arms may write paths an earlier fanout's arms wrote. The earlier arms have finished, so the later write simply overwrites. Two fanouts in a row whose worker section runs `store.write('seq.txt', item)`, over `{'one'}` and then `{'two'}`, leave `two`.
+- One block may call `fanout` more than once, and a later fanout's arms may write paths an earlier fanout's arms wrote. The earlier arms have been joined by the time the first fanout returns, so the later write simply overwrites. Two fanouts in a row whose worker section runs `store.write('seq.txt', item)`, over `{'one'}` and then `{'two'}`, leave `two`.
 
 ### When arms conflict
 
-Two live arms writing the same path end the whole run:
+Two arms writing the same path end the whole run:
 
 ````markdown
 ---
@@ -9646,9 +9661,9 @@ return item
 ```
 ````
 
-The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms.
+The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
 
-`store.append` counts as a write. Two live arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
+`store.append` counts as a write. Two arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
 
 `pcall` cannot catch a claims conflict, not even wrapped around the store call inside the arm. Over `{'alpha', 'beta'}`, this worker section still ends the run as `Determinism`:
 
@@ -9657,9 +9672,9 @@ local ok, err = pcall(store.append, 'notes.md', item .. '\n')
 store.write('caught-' .. sys.index .. '.txt', tostring(ok))
 ````
 
-The conflict ends the whole run: the losing arm never resumes, no arm counts as failed, arms still waiting are cancelled, and at most the winning arm completes. The losing arm's store call never reaches the store, so exactly one arm's change lands: `notes.md` ends as `alpha` or as `beta`, followed by a newline, never both. In block code a claims conflict is never raised at the call ([store errors](09-the-store.md#store-errors)). The one exception is a store call in shared library code while it loads, for example in an arm whose section VM is starting while a live sibling holds the claim, and the store chapter covers that case.
+The conflict ends the whole run: the losing arm never resumes, no arm counts as failed, arms still waiting are cancelled, and at most the winning arm completes. The losing arm's store call never reaches the store, so exactly one arm's change lands: `notes.md` ends as `alpha` or as `beta`, followed by a newline, never both. A claims conflict is never raised at the call, and no `pcall` can catch it ([store errors](09-the-store.md#store-errors)), not even for a store call in shared library code while it loads.
 
-Live arms stay entirely off each other's claimed paths, and a read or glob counts too: an arm whose `store.read` or `store.glob` touches a path a live sibling has claimed ends the run with the same `Determinism` error. So arms coordinate only through the results `fanout` returns, never through store files a live sibling is writing, and they cannot meet by polling each other's marker files.
+Arms stay entirely off each other's paths, and a read or glob counts too: an arm whose `store.read` or `store.glob` touches a path a sibling is writing ends the run with the same `Determinism` error. So arms coordinate only through the results `fanout` returns, never through store files a sibling is writing, and they cannot meet by polling each other's marker files.
 
 A run that ends on a claims conflict still leaves the store consistent. The run does not return until any arm store call still in flight has finished, so the winning arm's write is in the store and the store reads normally afterward.
 
@@ -9997,7 +10012,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 return results[1].result .. ' + ' .. results[2].result
 ```
 
@@ -10024,28 +10039,29 @@ alpha text + beta text
 
 A task's result is the value its section returns, so `return 'alpha text'` makes `alpha text` the result of the first task. The [scalar return rule](04-how-a-prompt-runs.md#block-and-section-returns) applies as in any block, but a return ends the run only from the H1 pass or a section on the main walk: inside a task it becomes the task's result for its owner. An error raised in the task's section, such as `error('beta boom')`, makes the task fail instead.
 
-`tasks.when_all(set)` waits for every task in `set`, a Lua array of Task handles, and returns a results sequence with one `{ task, ok, result }` entry per member, in the order the set lists them. `ok` is `true` when the member succeeded, and `result` holds its result text, or its [error value](05-lua-environment.md#catching-and-inspecting-errors) when it failed. Each entry is itself a Task handle, so you can pass it to any other `tasks` function.
+`tasks.join(set)` waits for every task in `set`, a Lua array of Task handles, and returns a results sequence with one `{ task, ok, result }` entry per member, in the order the set lists them. `ok` is `true` when the member succeeded, and `result` holds its result text, or its [error value](05-lua-environment.md#catching-and-inspecting-errors) when it failed. Each entry is itself a Task handle, so you can pass it to any other `tasks` function.
 
 `## Main` ends with `return`, which ends the run, so the walk never reaches `## Alpha` or `## Beta` as walked sections. A section that runs as a task is still an ordinary section, and the walk would run it again as a walked section if it got there.
 
-`tasks.when_any(set)` waits for the first member of `set` to end instead of all of them. It returns three values: the Task handle of the task that ended, `ok`, and `result`, which is the result text when the task succeeded and its error value when it failed. When a member has already ended, it returns at once:
+`tasks.join_any(set)` waits for the first member of `set` to end instead of all of them. It returns three values: the Task handle of the task that ended, `ok`, and `result`, which is the result text when the task succeeded and its error value when it failed. When a member has already ended, it returns at once:
 
 ````lua
 local t = tasks.spawn('## Child')
-local first, ok, result = tasks.when_any({ t })
+local first, ok, result = tasks.join_any({ t })
 ````
 
 When `## Child` runs `return 'child-done'`, `first` is the handle of that task, `ok` is `true`, and `result` is `child-done`.
 
 Only the owner may wait on, inspect, or cancel a task. A chain ends cleanly when every task it spawned has been waited on or cancelled, and a chain that ends normally while a task it spawned is still live fails with an error value of kind `tasks_live`. In the prompt above, the owner is the run's main walk, and its wait leaves nothing live.
 
-The `tasks` global holds nine functions, where `?` marks an optional argument:
+The `tasks` global holds ten functions, where `?` marks an optional argument:
 
 | Function | What it does |
 |---|---|
 | `tasks.spawn(target, opts?)` | Starts a task and returns its Task handle |
-| `tasks.when_any(set, opts?)` | Waits for the first task in a set to end |
-| `tasks.when_all(set, opts?)` | Waits for every task in a set |
+| `tasks.join_any(set, opts?)` | Waits for the first task in a set to end |
+| `tasks.join(set, opts?)` | Waits for every task in a set |
+| `tasks.concurrency(n?)` | Lowers the chain's admission limit for the tasks it spawns, or reads it back |
 | `tasks.ready(task)` | Says whether a task has ended |
 | `tasks.status(task)` | Returns a task's status table |
 | `tasks.events(task, opts?)` | Returns what a task has reported so far |
@@ -10077,7 +10093,7 @@ promptforge: 0
 ```lua
 local pros = tasks.spawn('### Pros')
 local cons = tasks.spawn('### Cons')
-local results = tasks.when_all({ pros, cons })
+local results = tasks.join({ pros, cons })
 return 'Pros: ' .. results[1].result .. '\nCons: ' .. results[2].result
 ```
 
@@ -10103,7 +10119,7 @@ Cons: hard to maintain
 
 The walk never enters a child section by [falling through](04-how-a-prompt-runs.md#the-section-walk), so `### Pros` and `### Cons` run only as tasks, even in a prompt whose spawning section falls through to a later sibling. That matters because a target is an ordinary section. No syntax takes a section out of the walk, so if the main walk reaches a section that also runs as a task, the walk runs it again as a walked section. Keep task sections out of the walk's path by spawning child sections, as here, or by ending the spawning section with `return`, as the first prompt in this chapter does.
 
-The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run. So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
+The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
 
 A [local tool](12-tools.md#local-tools) handler runs inside the calling chain, so it can start and wait on tasks just as block code can, although `jump` stays unavailable there.
 
@@ -10129,7 +10145,7 @@ promptforge: 0
 ```lua
 var.k = 1
 local t = tasks.spawn('## Child', { input = 'child args', item = { name = 'alpha' }, index = 7 })
-local _, ok, result = tasks.when_any({ t })
+local _, ok, result = tasks.join_any({ t })
 return result
 ```
 
@@ -10162,7 +10178,7 @@ The owner's `var` is not an option. The task always starts from a deep copy of i
 
 ### Spawn errors
 
-Every spawn failure is raised at the `tasks.spawn` call, so `pcall(tasks.spawn, ...)` catches it and the run continues. That holds for each failure below, each an error value of kind `lua`, and also for a store refusal while the task is being set up and for any other setup error:
+Every spawn failure is raised at the `tasks.spawn` call, so `pcall(tasks.spawn, ...)` catches it and the run continues. Each failure below is an error value of kind `lua`, and a store refusal while the task is being set up is kind `store` with the message `store operation failed` ([Store errors](09-the-store.md#store-errors)):
 
 - The target is a string. Another type fails with `section target must be a string, got {type}`, such as `section target must be a string, got integer`, the same rule `call` applies to its target.
 - A heading that does not resolve fails with the message `call` gives, `` section heading `{heading}` not found ``, such as `` section heading `## Missing` not found ``.
@@ -10190,7 +10206,7 @@ local t = tasks.spawn('## Child')
 log('spawned ' .. t.task)
 ````
 
-For the first task the main walk spawns, this logs `spawned 0.0`. The handle `tasks.spawn` returns is a plain table, `{ task = id }`, with no metatable, no methods, and no other fields. Every `tasks` function that takes a task accepts either a Task handle or the bare id string, and so does each member of a wait set. Any table with a string `task` field works as a handle, which is why each entry `tasks.when_all` returns works as one too.
+For the first task the main walk spawns, this logs `spawned 0.0`. The handle `tasks.spawn` returns is a plain table, `{ task = id }`, with no metatable, no methods, and no other fields. Every `tasks` function that takes a task accepts either a Task handle or the bare id string, and so does each member of a wait set. Any table with a string `task` field works as a handle, which is why each entry `tasks.join` returns works as one too.
 
 Because a handle is plain data, it survives a trip through [`var`](05-lua-environment.md#keeping-values-in-var) unchanged and works in a later section. This prompt starts a task in one section and collects it in the next:
 
@@ -10218,7 +10234,7 @@ return 'job done'
 ## Finish
 
 ```lua
-local _, ok, result = tasks.when_any({ var.job })
+local _, ok, result = tasks.join_any({ var.job })
 return result
 ```
 ````
@@ -10261,12 +10277,14 @@ A value that is neither a handle nor a string fails with `{call} expects a Task 
 
 When a task's chain ends, its result text or its failure is held for the owner until a wait takes it. A wait parks the owner until tasks end and hands it their results, and a task whose result a wait has taken counts as delivered.
 
-`tasks.when_any(set)` parks the owner until a member of `set` ends, or returns at once when one already has. When several members have already ended, it delivers the first of them in the order the set lists them. Compare the `task` field of its first return value with your handles to learn which member ended:
+A delivery is a join: everything the delivered task did, its store writes included, happens before the owner's next step, so the very next store call sees them. A task notice delivered to the model joins that task, a chain's end joins every task it owns, and reading a task's store files without a delivery that joined it is a conflict ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)).
+
+`tasks.join_any(set)` parks the owner until a member of `set` ends, or returns at once when one already has. When several members have already ended, it delivers the first of them in the order the set lists them. Compare the `task` field of its first return value with your handles to learn which member ended:
 
 ````lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local first, ok, result = tasks.when_any({ a, b })
+local first, ok, result = tasks.join_any({ a, b })
 if first.task == a.task then
   log('alpha ended first: ' .. tostring(result))
 end
@@ -10274,9 +10292,9 @@ end
 
 A failed member comes back as `ok = false`, with its error value as the third return value. The error is returned, never raised, so your code decides what to do with it.
 
-The other members of the set keep running after `tasks.when_any` returns, and the owner waits on them later, for example with another `tasks.when_any` over the members that are left. Each of them still needs a wait or a cancel before the owner ends.
+The other members of the set keep running after `tasks.join_any` returns, and the owner waits on them later, for example with another `tasks.join_any` over the members that are left. Each of them still needs a wait or a cancel before the owner ends.
 
-`tasks.when_all(set)` collects an entry for every member, even when some members fail. This prompt joins two tasks, one of which fails, and reports how each one ended:
+`tasks.join(set)` collects an entry for every member, even when some members fail. This prompt joins two tasks, one of which fails, and reports how each one ended:
 
 ````markdown
 ---
@@ -10292,7 +10310,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 local lines = {}
 for _, entry in ipairs(results) do
   if entry.ok then
@@ -10317,7 +10335,7 @@ error('beta boom')
 ```
 ````
 
-The first line of the result is `0.0 ok: alpha text`. The second starts `0.1 failed: ` and goes on with the error text, which contains `beta boom`. A failed member's entry holds `ok = false` and its error value, here of kind `lua`, and the call itself never raises because a member failed. `tasks.when_all` is built in Lua on top of `tasks.when_any`, so both apply the same checks and give the same messages, each naming its own call.
+The first line of the result is `0.0 ok: alpha text`. The second starts `0.1 failed: ` and goes on with the error text, which contains `beta boom`. A failed member's entry holds `ok = false` and its error value, here of kind `lua`, and the call itself never raises because a member failed. `tasks.join` is built in Lua on top of `tasks.join_any`, so both apply the same checks and give the same messages, each naming its own call.
 
 ### Each result is taken once
 
@@ -10325,8 +10343,8 @@ A result is taken exactly once. After a wait has delivered a task, waiting on it
 
 ````lua
 local t = tasks.spawn('## Child')
-local _, ok, result = tasks.when_any({ t })
-local ok2, err = pcall(tasks.when_any, { t })
+local _, ok, result = tasks.join_any({ t })
+local ok2, err = pcall(tasks.join_any, { t })
 ````
 
 Here `ok2` is `false`, `err.kind` is `task_consumed`, `err.task` is `0.0`, and `tostring(err)` is `` task `0.0` was already delivered: a task's result is taken by one wait ``.
@@ -10337,7 +10355,7 @@ So a loop that waits on several tasks one at a time drops each task from its set
 local left = { tasks.spawn('## Alpha'), tasks.spawn('## Beta'), tasks.spawn('## Gamma') }
 local order = {}
 while #left > 0 do
-  local done = tasks.when_any(left)
+  local done = tasks.join_any(left)
   order[#order + 1] = done.task
   for i, t in ipairs(left) do
     if t.task == done.task then
@@ -10351,37 +10369,37 @@ return table.concat(order, ' ')
 
 The result lists the three task ids in finish order, such as `0.1 0.0 0.2`, and each task is delivered exactly once, so nothing is left live.
 
-A task named more than once in a `tasks.when_all` set is waited on once and fills every position it was named at. `#results` then equals the length of the set, each position holds its own table, and the repeat raises no `task_consumed`: for `tasks.when_all({ a, b, a })`, `#results` is 3, and `results[1]` and `results[3]` are separate tables for the same task.
+A task named more than once in a `tasks.join` set is waited on once and fills every position it was named at. `#results` then equals the length of the set, each position holds its own table, and the repeat raises no `task_consumed`: for `tasks.join({ a, b, a })`, `#results` is 3, and `results[1]` and `results[3]` are separate tables for the same task.
 
 ### Wait errors
 
-Waiting on a task the chain does not own raises an error value of kind `task_not_owned`, with the message `` task `{task}` is not a task this chain owns ``, and waiting on a task already delivered raises `task_consumed`. The set is a table holding at least one task: a value that is not a table fails with `{call} expects a set of tasks, got {type}`, and an empty set fails with `{call} requires at least one task`, both error values of kind `lua`, where `{call}` is `tasks.when_any` or `tasks.when_all`. Each member is checked as a handle or id, as [Task handles and ids](#task-handles-and-ids) describes.
+Waiting on a task the chain does not own raises an error value of kind `task_not_owned`, with the message `` task `{task}` is not a task this chain owns ``, and waiting on a task already delivered raises `task_consumed`. The set is a table holding at least one task: a value that is not a table fails with `{call} expects a set of tasks, got {type}`, and an empty set fails with `{call} requires at least one task`, both error values of kind `lua`, where `{call}` is `tasks.join_any` or `tasks.join`. Each member is checked as a handle or id, as [Task handles and ids](#task-handles-and-ids) describes.
 
 ## Time limits on waits
 
-Pass `{ timeout = seconds }` as the second argument of `tasks.when_any` or `tasks.when_all` to limit how long the wait lasts. The timeout is a number of seconds: a whole number such as `5` or `30`, a fraction such as `1.5` or `0.05`, or `0`. A timeout only ends the wait and never cancels a member.
+Pass `{ timeout = seconds }` as the second argument of `tasks.join_any` or `tasks.join` to limit how long the wait lasts. The timeout is a number of seconds: a whole number such as `5` or `30`, a fraction such as `1.5` or `0.05`, or `0`. A timeout only ends the wait and never cancels a member.
 
-A timed `tasks.when_any` returns `nil` when no member ended in time, so `local first, ok, result = ...` reads three nils, and the members keep running. To collect a member that missed the limit, wait on it again without a timeout:
+A timed `tasks.join_any` returns `nil` when no member ended in time, so `local first, ok, result = ...` reads three nils, and the members keep running. To collect a member that missed the limit, wait on it again without a timeout:
 
 ````lua
 local t = tasks.spawn('## Slow')
-local first, ok, result = tasks.when_any({ t }, { timeout = 5 })
+local first, ok, result = tasks.join_any({ t }, { timeout = 5 })
 if first == nil then
   log('still working after 5 seconds')
-  first, ok, result = tasks.when_any({ t })
+  first, ok, result = tasks.join_any({ t })
 end
 return result
 ````
 
-The second wait returns the member's handle, its `ok` flag, and its result as usual, and nothing is left live at the end of the run. When a member ends before the limit, a timed `tasks.when_any` returns that member's handle, `ok`, and result as usual, and the pending timeout is dropped, so the run does not wait out the rest of it. A member that ends at the same moment the timeout expires wins, and the timeout never appears among the results.
+The second wait returns the member's handle, its `ok` flag, and its result as usual, and nothing is left live at the end of the run. When a member ends before the limit, a timed `tasks.join_any` returns that member's handle, `ok`, and result as usual, and the pending timeout is dropped, so the run does not wait out the rest of it. A member that ends at the same moment the timeout expires wins, and the timeout never appears among the results.
 
-One timeout covers a whole timed `tasks.when_all`, which returns a second value, `timed_out`. When the timeout expires, `timed_out` is `true` and the entries of the unfinished members are `nil`. When every member finishes first, `timed_out` is `false`, every entry is there in member order, and the pending timeout is dropped. `tasks.when_all` always returns `timed_out` as its second value, and it is `false` whenever no timeout fired, including calls with no options.
+One timeout covers a whole timed `tasks.join`, which returns a second value, `timed_out`. When the timeout expires, `timed_out` is `true` and the entries of the unfinished members are `nil`. When every member finishes first, `timed_out` is `false`, every entry is there in member order, and the pending timeout is dropped. `tasks.join` always returns `timed_out` as its second value, and it is `false` whenever no timeout fired, including calls with no options.
 
-After a timed-out `tasks.when_all`, the entries of the unfinished members are holes in the results sequence, and Lua's length rules make `#results` and `ipairs` unreliable across holes. Walk the positions of the set instead, and test each entry for `nil`:
+After a timed-out `tasks.join`, the entries of the unfinished members are holes in the results sequence, and Lua's length rules make `#results` and `ipairs` unreliable across holes. Walk the positions of the set instead, and test each entry for `nil`:
 
 ````lua
 local set = { tasks.spawn('## Quick'), tasks.spawn('## Slow') }
-local results, timed_out = tasks.when_all(set, { timeout = 5 })
+local results, timed_out = tasks.join(set, { timeout = 5 })
 local late = {}
 for i = 1, #set do
   if results[i] == nil then
@@ -10389,11 +10407,11 @@ for i = 1, #set do
   end
 end
 if #late > 0 then
-  tasks.when_all(late)
+  tasks.join(late)
 end
 ````
 
-Members that missed a `tasks.when_all` limit keep running, and a later `tasks.when_all`, like the last one here, gathers them. Members left running by a timeout still need a wait or a cancel before their owner ends.
+Members that missed a `tasks.join` limit keep running, and a later `tasks.join`, like the last one here, gathers them. Members left running by a timeout still need a wait or a cancel before their owner ends.
 
 ### Timeouts and task ids
 
@@ -10401,13 +10419,71 @@ Each timed wait takes one index from the owner's child counter, the same counter
 
 ### Timeout rules
 
-The options are a table, `timeout` is a number, and the number is a non-negative, finite count of seconds within the range a duration can hold. Each rule is checked at the call, before the wait starts, and a broken rule fails with an error value of kind `lua`, where `{call}` is `tasks.when_any` or `tasks.when_all`:
+The options are a table, `timeout` is a number, and the number is a non-negative, finite count of seconds within the range a duration can hold. Each rule is checked at the call, before the wait starts, and a broken rule fails with an error value of kind `lua`, where `{call}` is `tasks.join_any` or `tasks.join`:
 
 - Options that are not a table fail with `{call} opts must be a table, got {type}`.
-- A `timeout` that is not a number fails with `{call} timeout must be a number, got {type}`, such as `tasks.when_any timeout must be a number, got string`.
+- A `timeout` that is not a number fails with `{call} timeout must be a number, got {type}`, such as `tasks.join_any timeout must be a number, got string`.
 - Any other number fails with `timeout must be a non-negative finite number of seconds, got {seconds}`, naming the value.
 
 A refused option starts nothing: no timeout is set and the members are untouched, so after a `pcall` the owner can still wait on them.
+
+### Freeform tasks and pipelines
+
+Tasks generalize beyond `fanout`: spawn a set of worker tasks, join them all, and merge their work by index. In the freeform pattern, prepare each worker's input before you spawn it, and read its output after you join it. Each worker writes its own partition file, named from its `sys.index`, and the caller merges the partitions by index after the join:
+
+````markdown
+---
+name: freeform
+description: Runs one task per topic and merges their files by index
+promptforge: 0
+---
+
+# Freeform
+
+## Research
+
+```lua
+local topics = list_from_section('### Topics')
+local set = {}
+for i, topic in ipairs(topics) do
+  set[i] = tasks.spawn('### Worker', { item = topic, index = i })
+end
+tasks.join(set)
+local parts = {}
+for i = 1, #topics do
+  parts[i] = store.read('research/' .. i .. '.md')
+end
+return table.concat(parts, '\n\n')
+```
+
+### Worker
+
+```lua
+store.write('research/' .. sys.index .. '.md', item)
+```
+
+### Topics
+
+- alpha
+- beta
+````
+
+````text
+alpha
+
+beta
+````
+
+The join delivers and joins every member, so each worker's file is visible to the merge, and merging by index keeps the same order on every run. Freeform tasks count against the [concurrency limit](#the-concurrency-limit) like any other task.
+
+A pipeline chains stages through the owner. A task cannot join its sibling, so the owner orders them: spawn the first stage, join it, then spawn the second stage, which sees the first stage's files because the join ordered it after them:
+
+````lua
+local g = tasks.spawn('### Gather')
+tasks.join({ g })
+local s = tasks.spawn('### Summarize')
+tasks.join({ s })
+````
 
 ## Checking on tasks
 
@@ -10437,7 +10513,7 @@ local t = tasks.spawn('## Child')
 store.write('park', 'x')
 local s = tasks.status(t)
 log('state=' .. s.state .. ' section=' .. tostring(s.section) .. ' blocked=' .. tostring(s.blocked) .. ' note=' .. tostring(s.note))
-local _, ok, result = tasks.when_any({ t })
+local _, ok, result = tasks.join_any({ t })
 return result
 ```
 
@@ -10487,6 +10563,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - `user_input`: an answer from the operator
 - `store`: a store call
 - `tasks`: a wait on tasks, timed or not, or a history read
+- `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
 - `call`: a called chain
 
 `turns` is the task's round count so far: `0` while its first `models.infer` round is in flight, and `1` after that round returns. `tasks` lists the live tasks the task started itself, as id strings in spawn order, and never includes the timeout behind a timed wait. A task waiting with a timeout on the one task it spawned reads `blocked` `tasks`, and its `tasks` field lists that one task alone, such as `0.0.0`. A status table's `tasks` holds id strings, while `tasks.pending()` returns handles; both work as arguments to every `tasks` function.
@@ -10517,8 +10594,9 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 | Call | Returns |
 |---|---|
 | `tasks.spawn` | a Task handle |
-| `tasks.when_any` | the member's Task handle, its `ok` flag, and its result text or error value, or `nil` when a timeout ends the wait first |
-| `tasks.when_all` | the results sequence and `timed_out` |
+| `tasks.join_any` | the member's Task handle, its `ok` flag, and its result text or error value, or `nil` when a timeout ends the wait first |
+| `tasks.join` | the results sequence and `timed_out` |
+| `tasks.concurrency` | the chain's effective admission limit, after clamping when a limit was given |
 | `tasks.ready` | a boolean |
 | `tasks.status` | a status table |
 | `tasks.pending` | a sequence of Task handles, empty when nothing is live |
@@ -10526,6 +10604,14 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 | `tasks.cancel` | nothing |
 
 `tasks.spawn`, `tasks.ready`, `tasks.status`, `tasks.pending`, `tasks.note`, and `tasks.cancel` are answered at once, and so is a wait whose member has already ended.
+
+## The concurrency limit
+
+The host running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+
+`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the host's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. Under a host ceiling of 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable across hosts with different ceilings. The new limit gates admissions from then on only, and never preempts a task that is already running.
+
+An argument that is not a positive whole number raises an error value of kind `lua` at the call site with the message `tasks.concurrency limit must be a positive whole number, got {type}`, where a whole-number float such as `2.0` counts as a whole number and is accepted.
 
 ## Cancellation and task lifetimes
 
@@ -10551,7 +10637,7 @@ models.default('writer')
 ```lua
 local quick = tasks.spawn('### Quick')
 local careful = tasks.spawn('### Careful')
-local _, ok, result = tasks.when_any({ quick, careful })
+local _, ok, result = tasks.join_any({ quick, careful })
 for _, t in ipairs(tasks.pending()) do
   tasks.cancel(t)
 end
@@ -10574,7 +10660,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 ```
 ````
 
-`tasks.when_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
+`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
 A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
 
@@ -10582,7 +10668,7 @@ A wait on a cancelled task returns `ok = false` and an error value of kind `canc
 
 ````lua
 tasks.cancel(t)
-local _, ok, err = tasks.when_any({ t })
+local _, ok, err = tasks.join_any({ t })
 ````
 
 Here `ok` is `false`, `err.kind` is `cancelled`, `err.task` equals `t.task`, and `err.reason` is nil. After the cancel, `tasks.status(t)` reads `state` `cancelled` and `ok` `false`, `tasks.ready(t)` is `true`, `tasks.pending()` no longer lists the task, and the task's section never reaches its `return`. A cancelled task holds no result to consume, so waiting on it again returns the same `cancelled` error value and raises no `task_consumed`. Being cancelled is the only ending other than a finished result that a wait delivers.
@@ -10702,7 +10788,7 @@ A stopped chain's section does not finish. When a cancel stops a chain, whether 
 Every mistake in a `tasks` call raises an error value that [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches. A caught task error has a `kind`, a field naming the task where there is one, and a message you read with `tostring(err)`. For a second wait on a delivered task:
 
 ````lua
-local ok, err = pcall(tasks.when_any, { t })
+local ok, err = pcall(tasks.join_any, { t })
 return err.kind .. '|' .. err.task .. '|' .. tostring(err)
 ````
 
@@ -10747,11 +10833,11 @@ Argument checks made by the `tasks` functions themselves give a message that sta
 | `fanout recursion exceeded cap of 8` | `fanout`, when an arm would cross the cap |
 | `{call} expects a Task handle or task id, got {type}` | any call that takes a task |
 | `` `{text}` is not a task id: required a dot-separated path such as `0.1` `` | any call that takes a task |
-| `{call} expects a set of tasks, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `{call} requires at least one task` | `tasks.when_any`, `tasks.when_all` |
-| `{call} opts must be a table, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `{call} timeout must be a number, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `timeout must be a non-negative finite number of seconds, got {seconds}` | `tasks.when_any`, `tasks.when_all` |
+| `{call} expects a set of tasks, got {type}` | `tasks.join_any`, `tasks.join` |
+| `{call} requires at least one task` | `tasks.join_any`, `tasks.join` |
+| `{call} opts must be a table, got {type}` | `tasks.join_any`, `tasks.join` |
+| `{call} timeout must be a number, got {type}` | `tasks.join_any`, `tasks.join` |
+| `timeout must be a non-negative finite number of seconds, got {seconds}` | `tasks.join_any`, `tasks.join` |
 | `tasks.pending filter must be a table, got {type}` | `tasks.pending` |
 | `` pending filter origin must be `author` or `model`, got `{tag}` `` | `tasks.pending` |
 | `pending filter origin must be a string, got {type}` | `tasks.pending` |
@@ -10913,11 +10999,11 @@ When the owner fails because its `models.loop` ran past the [round cap](11-conve
 
 ### Taking over the model's tasks
 
-The prompt can take over the model's tasks by listing them with `tasks.pending({ origin = "model" })`, and passing that list to `tasks.when_all` collects them:
+The prompt can take over the model's tasks by listing them with `tasks.pending({ origin = "model" })`, and passing that list to `tasks.join` collects them:
 
 ````lua
 local adopted = tasks.pending({ origin = 'model' })
-local results = tasks.when_all(adopted)
+local results = tasks.join(adopted)
 return tostring(results[1].ok) .. '|' .. results[1].result
 ````
 
@@ -10970,7 +11056,7 @@ Each call to `task`, `task_status`, or `await_tasks` is an ordinary tool call: i
 
 ## The model's wait
 
-In a section that called `tools.allow_tasks`, the model can call `await_tasks`, which holds that tool call until one of the tasks the model started ends and then returns every task notice that has arrived, one per line. It needs no arguments, so the model calls it with `{}`. `await_tasks` waits on the same kind of task set as `tasks.when_any`, just as `task_status` and `task_cancel` apply the same rules as `tasks.status` and `tasks.cancel`, each narrowed to the model's own tasks.
+In a section that called `tools.allow_tasks`, the model can call `await_tasks`, which holds that tool call until one of the tasks the model started ends and then returns every task notice that has arrived, one per line. It needs no arguments, so the model calls it with `{}`. `await_tasks` waits on the same kind of task set as `tasks.join_any`, just as `task_status` and `task_cancel` apply the same rules as `tasks.status` and `tasks.cancel`, each narrowed to the model's own tasks.
 
 The wait wakes on the first task to end, not on all of them, and returns the notices that have arrived by then; with one task ended, that is its notice alone. Calling `await_tasks` once per task collects the results in finish order. Here the model starts two tasks and waits twice, and `## Quick` finishes before `## Slow`:
 
@@ -10983,7 +11069,7 @@ The wait wakes on the first task to end, not on all of them, and returns the not
 
 Each notice is delivered exactly once and in arrival order, by whichever takes it first, a `models.loop` round or `await_tasks`, so a notice that `await_tasks` returned is not added again to the next round. Notices already waiting are returned at once, even with other tasks still running and a timeout given, and then no timeout starts.
 
-The wait covers only the model's own tasks: tasks the prompt spawned are neither waited on nor listed as still running. Other chains, such as a task the prompt spawned, keep running while the model's call is held in `await_tasks`, and the owner's status `blocked` reads `tasks` meanwhile. A task that finishes while its owner is inside `await_tasks` keeps its result, so the prompt can still collect it later with `tasks.when_any`.
+The wait covers only the model's own tasks: tasks the prompt spawned are neither waited on nor listed as still running. Other chains, such as a task the prompt spawned, keep running while the model's call is held in `await_tasks`, and the owner's status `blocked` reads `tasks` meanwhile. A task that finishes while its owner is inside `await_tasks` keeps its result, so the prompt can still collect it later with `tasks.join_any`.
 
 The wait's own text is trusted engine text, while each task result inside a notice stays in the untrusted envelope, exactly as the next round would have received it.
 
@@ -11030,7 +11116,7 @@ promptforge: 0
 
 ```lua
 local t = tasks.spawn('### Child')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local kinds = {}
 for _, e in ipairs(tasks.events(t)) do
   kinds[#kinds + 1] = e.kind
@@ -11045,7 +11131,7 @@ return 'done'
 ```
 ````
 
-`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.when_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
+`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
 
 Each table's `kind` field names its event, so the block returns one line per event. The first line is `section_started`, reported when `### Child` began, and the last is `task_succeeded`, reported when the task ended with a result. The lines between report the child's section VM starting up, its Lua block running, and its section finishing.
 
@@ -11067,11 +11153,11 @@ Every event table holds the same four keys, followed by the fields of its own ki
 - `section` is the heading text of the section that reported the event.
 - `provenance` says which task reported the event, in `provenance.task`, and where the event falls in that task's count, in `provenance.seq`.
 
-`execution`, `section`, and `provenance` are the event's three coordinates. An event that holds only `kind` and the three coordinates, such as `run_started`, `section_finished`, or `store_write_succeeded`, is a boundary event: it marks the moment something began, ended, or failed, and says nothing more. Of the 57 kinds, 42 are boundary events, and the other 15 add fields of their own, which this chapter gives with each kind. Read every field with ordinary indexing, as in `e.kind`, `e.section`, `e.provenance.task`, and `e.provenance.seq`.
+`execution`, `section`, and `provenance` are the event's three coordinates. An event that holds only `kind` and the three coordinates, such as `run_started`, `section_finished`, or `store_write_succeeded`, is a boundary event: it marks the moment something began, ended, or failed, and says nothing more. Of the 59 kinds, 44 are boundary events, and the other 15 add fields of their own, which this chapter gives with each kind. Read every field with ordinary indexing, as in `e.kind`, `e.section`, `e.provenance.task`, and `e.provenance.seq`.
 
 ### Event kinds
 
-A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 57, by area:
+A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 59, by area:
 
 | Area | Kinds | Covered in |
 |---|---|---|
@@ -11083,7 +11169,7 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Author checkpoint | `lua` | [Lua block and parse events](#lua-block-and-parse-events) |
 | Model | `model_turn_completed`, `model_turn_failed`, `model_turn_truncated`, `model_metadata_degraded`, `thinking`, `assistant_reply`, `assistant_tool_calls` | [Model round events](#model-round-events) |
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
-| Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed` | [Store and operator input events](#store-and-operator-input-events) |
+| Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
 | Operator input | `user_input_wait_started`, `user_input` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
 | Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
@@ -11122,7 +11208,7 @@ local t = tasks.spawn('### Work')
 local seen
 local kinds = {}
 repeat
-  local ended = tasks.when_any({ t }, { timeout = 2 })
+  local ended = tasks.join_any({ t }, { timeout = 2 })
   for _, e in ipairs(tasks.events(t, { last = seen })) do
     seen = e.provenance.seq
     kinds[#kinds + 1] = e.kind
@@ -11140,7 +11226,7 @@ return 'done'
 ```
 ````
 
-With a `timeout`, `tasks.when_any` returns `nil` if the task is still running after 2 seconds, and the task's handle once it has ended, as [Time limits on waits](15-tasks.md#time-limits-on-waits) describes. Each iteration reads only what the task reported since the previous one and keeps the newest `seq` in `seen`. On the first iteration `seen` is nil, and a `last` of nil reads from the task's first event. The result lists every event of `### Work` once, however many iterations the loop takes.
+With a `timeout`, `tasks.join_any` returns `nil` if the task is still running after 2 seconds, and the task's handle once it has ended, as [Time limits on waits](15-tasks.md#time-limits-on-waits) describes. Each iteration reads only what the task reported since the previous one and keeps the newest `seq` in `seen`. On the first iteration `seen` is nil, and a `last` of nil reads from the task's first event. The result lists every event of `### Work` once, however many iterations the loop takes.
 
 ## Read options, results, and errors
 
@@ -11340,7 +11426,7 @@ There is no section-failed kind. A section whose chain ends in an error reports 
 
 ````lua
 local t = tasks.spawn('### Risky')
-local _, ok = tasks.when_any({ t })
+local _, ok = tasks.join_any({ t })
 if ok then
   return 'the task succeeded'
 end
@@ -11355,7 +11441,7 @@ end
 return 'the task failed'
 ````
 
-`tasks.when_any` returns `ok` as `false` when the task failed, and every section the task started but never finished is left in `open`.
+`tasks.join_any` returns `ok` as `false` when the task failed, and every section the task started but never finished is left in `open`.
 
 ## Lua block and parse events
 
@@ -11436,8 +11522,9 @@ Every [store](09-the-store.md#what-the-store-is) operation reports a succeeded o
 | `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
 | `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
 | `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
+| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
 
-Note that `store.str_replace` reports as `store_replace`, and that `store.exists` reports nothing. The store events hold no path, no content, and no error detail. A failed store call raises an error value of kind `lua` at the call, as [Store errors](09-the-store.md#store-errors) describes, and that error is where the detail lives. A store call made inside a [local tool](12-tools.md#local-tools) handler is an ordinary store operation and reports the same events.
+Note that `store.str_replace` reports as `store_replace`, and that `store.exists` reports its own pair. The store events hold no path, no content, and no error detail. A failed store call raises an error value of kind `store` at the call, as [Store errors](09-the-store.md#store-errors) describes, and that error is where the detail lives. A store call made inside a [local tool](12-tools.md#local-tools) handler is an ordinary store operation and reports the same events.
 
 A store operation's event is reported before the Lua call returns, so its outcome always comes before the block's closing event. Store and model work appear in the order the section did them: a write, then a read, then a model round report `store_write_succeeded`, then `store_read_succeeded`, then `model_turn_completed`, the event that ends a completed round. This prompt counts what a task did with the store:
 
@@ -11454,7 +11541,7 @@ promptforge: 0
 
 ```lua
 local t = tasks.spawn('### Writer')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local writes, failed = 0, 0
 for _, e in ipairs(tasks.events(t)) do
   if e.kind == 'store_write_succeeded' then writes = writes + 1 end
@@ -11821,7 +11908,7 @@ The model's history read shows up as a `tool_result` with `alias` `task_events` 
 
 ## Task lifecycle events
 
-Every task start reports a `task_started` event under the section that started the task, whether the task came from `tasks.spawn`, a `fanout` arm, or the model's `task` built-in. This prompt lists the tasks a fanout started:
+Every task reports a `task_started` event when it is admitted and first runs, under the section that started the task, whether the task came from `tasks.spawn`, a `fanout` arm, or the model's `task` built-in. A task that must wait for a concurrency slot reports nothing until it is admitted, so its `task_started` may come after the spawn and after other tasks' events ([The concurrency limit](14-fanout.md#concurrency)). This prompt lists the tasks a fanout started:
 
 ````markdown
 ---
@@ -11872,7 +11959,7 @@ Each [arm](14-fanout.md#inside-an-arm) of the fanout is a task, so the fanout re
 | `input`, `item`, `index` | The seeds the task started with, each nil when unset, as [Starting a task](15-tasks.md#starting-a-task) describes |
 | `var` | The snapshot of the owner's `var` that the task started with |
 
-`task_started` is stamped on the owner's `seq` count, not the new task's. The new task's own events hold its id in `provenance.task`, so `task_started` events and provenance together are enough to rebuild the tree of tasks. `origin` says who started the task: `author` for a task from `tasks.spawn` or a `fanout` arm, and `model` for a task the model started with its `task` built-in. A model-started task's `task_started` sits under the owner's section, with `origin` `model` and a `target` naming the section without the `##`.
+`task_started` is stamped on the owner's `seq` count, not the new task's. The new task's own events hold its id in `provenance.task`, so `task_started` events and provenance together are enough to rebuild the tree of tasks. It is reported at admission, when the task first runs, under the section that spawned it, which the run records at spawn time. `origin` says who started the task: `author` for a task from `tasks.spawn` or a `fanout` arm, and `model` for a task the model started with its `task` built-in. A model-started task's `task_started` sits under the owner's section, with `origin` `model` and a `target` naming the section without the `##`.
 
 ### How a task ends
 
@@ -11922,7 +12009,7 @@ In a completed notice, `{result}` arrives in the untrusted envelope. The cancel 
 
 ## Trust and what events leave out
 
-Events say that something happened, not everything about it. No `_failed` event holds a message: each says only that something failed, and the detail is the failing call's own error. A failed store call, for example, raises an error value of kind `lua` that `pcall` catches, while its `store_*_failed` event holds none of that detail. In the same way, a run's outcome and its error detail come from the run's result and from the errors raised to Lua, never from events.
+Events say that something happened, not everything about it. No `_failed` event holds a message: each says only that something failed, and the detail is the failing call's own error. A failed store call, for example, raises an error value of kind `store` that `pcall` catches, while its `store_*_failed` event holds none of that detail. In the same way, a run's outcome and its error detail come from the run's result and from the errors raised to Lua, never from events.
 
 ### Untrusted text in events
 
@@ -11940,7 +12027,7 @@ The coordinates come from the host, for `execution`, and from your own headings,
 
 ````lua
 local t = tasks.spawn('### Research')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local found = {}
 for _, e in ipairs(tasks.events(t)) do
   if e.kind == 'assistant_reply' then
@@ -11979,7 +12066,7 @@ Every run observes six limits. These are their defaults:
 | Limit | Default | Applies to | Set by |
 |---|---|---|---|
 | Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the host |
-| Concurrency cap | 8 arms at once | fanout arms running together | the host |
+| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the host, lowered by `tasks.concurrency` |
 | Response cap | 16 MiB (16,777,216 bytes) | each model reply | the host |
 | Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the host |
 | Log event quota | 1024 `log` calls | each section VM | the host |
@@ -12007,7 +12094,7 @@ max_tool_iterations must be a positive integer (>= 1), got {raw}
 max_tool_iterations must be <= 1000, got {raw}
 ````
 
-No frontmatter key sets the other five limits. The concurrency cap is taught with [fanout](14-fanout.md#concurrency), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
+No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
 
 ## How failures are reported
 
@@ -12018,13 +12105,13 @@ Failures fall into four families, each with its own vocabulary:
 | Family | When it happens | What you see |
 |---|---|---|
 | Parse failure | before anything runs | one of five parse error kinds |
-| Error value | inside Lua, at the call that failed | an error value whose `kind` is one of twelve lowercase tags |
+| Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
 | Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of thirteen run error kinds |
 | Cancelled outcome | when the host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
 
-Inside Lua, a failure is an error value ([Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)), and its `kind` is always one of `lua`, `internal`, `cancelled`, `context_exhausted`, `empty_model_reply`, `tool_loop_exhausted`, `tasks_live`, `task_not_owned`, `task_consumed`, `out_of_scope_tool`, `unbound_tool`, or `tool`. Catch it with `pcall` and branch on `err.kind`:
+Inside Lua, a failure is an error value ([Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)), and its `kind` is always one of `lua`, `internal`, `cancelled`, `context_exhausted`, `empty_model_reply`, `tool_loop_exhausted`, `tasks_live`, `task_not_owned`, `task_consumed`, `out_of_scope_tool`, `unbound_tool`, `store`, or `tool`. Catch it with `pcall` and branch on `err.kind`:
 
 ````lua
 local ok, reply = pcall(models.infer, prose)
@@ -12312,9 +12399,8 @@ An error value is the table `pcall` returns for a failure, with its error kind i
 - running past the memory ceiling
 - a refused `log` call
 - a failed `{{ }}` substitution ([Substitution errors](07-substitution.md#substitution-errors))
-- an ordinary failed `store` call ([Store errors](09-the-store.md#store-errors))
 
-The message text is what tells them apart.
+The message text is what tells them apart. A failed `store` operation is not in this family: it has its own kind, `store`, with the failure's reason and fields ([Store errors](09-the-store.md#store-errors)).
 
 ### The internal family
 
@@ -12325,7 +12411,7 @@ The message text is what tells them apart.
 - a failure of the host's input source for `user_input` ([Asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input))
 - a fault in the engine or in the Lua runtime's own machinery
 
-An ordinary failed `store` call is kind `lua`, not `internal`.
+An ordinary failed `store` call is kind `store`, not `internal`. Its message text says what failed, and its `reason` and fields let a prompt branch on the failure mode ([Store errors](09-the-store.md#store-errors)).
 
 ### The cancelled kind
 
@@ -12349,6 +12435,7 @@ An error kind is what Lua sees at the call. A run error kind is what the host re
 | `tasks_live` | `tasks` | `Lua` |
 | `task_not_owned` | `task` | `Lua` |
 | `task_consumed` | `task` | `Lua` |
+| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | `Store` |
 
 Every other error value has only `kind` and `message`. In the H1 pass, some of these failures end the run as `RequirementsUnmet` instead, as [How a failed run is classified](#how-a-failed-run-is-classified) explains. An error value raised inside a local tool handler reaches a `pcall` around the call with its `kind` kept ([Local tools](12-tools.md#local-tools)).
 
@@ -12362,6 +12449,7 @@ When you catch an error value and raise it again with `error(err)`, the run's cl
 | `empty_model_reply` | `Completion` |
 | `context_exhausted`, with its `reason` | `ContextExhausted` |
 | `cancelled` | the cancelled outcome, not a failed run |
+| `store` | `Store` |
 | `task_not_owned`, `task_consumed`, with their `task` | `Lua`, in the H1 pass too |
 | `out_of_scope_tool`, `unbound_tool`, `tasks_live`, `lua`, `internal` | `Lua`, or `RequirementsUnmet` in the H1 pass |
 
@@ -12378,8 +12466,8 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Binding` | a model round had no model selected | `model binding required for section {section}` |
 | `Completion` | a model call failed, or an empty reply went uncaught | the call's own message, such as `non-success backend status {status}` |
 | `Tool` | a tool call failed, was out of scope, or named an unbound tool, or a `models.loop` call reached the round cap | `tool call failure: {message}`, or one of the other tool messages below |
-| `Store` | the host's store backend failed | `store operation failed` |
-| `Determinism` | two live chains claimed one store path in conflicting ways | `store determinism violation: {detail}` |
+| `Store` | a `store` operation failed and went uncaught, or was caught and raised again, or the handle declares no store | the store failure's own message, such as `file not found in store: {path}` or `store operation failed` |
+| `Determinism` | two accesses unordered by happens-before touched one store region in conflicting ways | `store determinism violation: {detail}` |
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
 | `ContextExhausted` | the compactor ran out of the model's context window | `context exhausted: {reason}` |
@@ -12414,21 +12502,15 @@ tool-call loop did not converge
 
 ### Lua and quota failures
 
-- `Lua`: a section's Lua fails at run time or does not return a usable value. That covers an uncaught runtime error, running past the memory ceiling, a failed `store` call, a failed substitution, a misused task (an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, see [Task errors](15-tasks.md#task-errors)), and a block that returns a table ([Block and section returns](04-how-a-prompt-runs.md#block-and-section-returns)). It holds the same way in a walked section, a `call` chain, a task, and a fanout arm; in the H1 pass the ordinary Lua errors among them end the run as `RequirementsUnmet` instead, as the H1 pass hard gate below explains.
+- `Lua`: a section's Lua fails at run time or does not return a usable value. That covers an uncaught runtime error, running past the memory ceiling, a failed substitution, a misused task (an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, see [Task errors](15-tasks.md#task-errors)), and a block that returns a table ([Block and section returns](04-how-a-prompt-runs.md#block-and-section-returns)). It holds the same way in a walked section, a `call` chain, a task, and a fanout arm; in the H1 pass the ordinary Lua errors among them end the run as `RequirementsUnmet` instead, as the H1 pass hard gate below explains.
 - A failed `{{ }}` substitution ends the run as `Lua` with the substitution's own message, or as `RequirementsUnmet` in the H1 pass. Substitution has no run error kind of its own.
 - `Quota`: a section VM runs out the log event quota or the log byte quota. Only the two log quotas lead to `Quota`: running past the memory ceiling is `Lua`, and no instruction count can run out.
 
 ### Store and engine failures
 
-- An author's own failed `store` call is an ordinary `lua`-kind error value, and `Lua` when uncaught ([Store errors](09-the-store.md#store-errors)).
-- `Determinism`: two live chains claim the same store path in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). In block code the run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds.
-- Only while the `lua shared` fence loads does a claims conflict raise at the call instead, as a `lua`-kind error value with this message:
-
-````text
-write-write race on {path}: another live identity holds a claim on it
-````
-
-- `Store`: appears only when the host's store backend itself fails outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task. Nothing in a prompt causes it.
+- An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
+- `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
+- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
 - `Internal`: an engine invariant broke, a fault in the engine rather than a mistake in the prompt. Its location names an engine source file and line.
 
 ### The H1 pass hard gate
@@ -12462,16 +12544,15 @@ In the H1 pass, these failures become `RequirementsUnmet`:
 - an `error` or `assert` call, or any other runtime fault, in a block in the H1 body
 - a failed substitution
 - running past the memory ceiling
-- an ordinary failed `store` call
 - an error value raised again after another suspending call that is rebuilt as `Lua`: kind `out_of_scope_tool`, `unbound_tool`, `tasks_live`, `lua`, or `internal`, or a value missing its fields
 
 Everything else keeps its own classification in the H1 pass:
 
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
 - Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, `ContextExhausted`, and `Input` keep their kinds.
-- A claims conflict stays `Determinism`.
+- A failed store call stays `Store`, and a claims conflict stays `Determinism`.
 - A host cancel stays the cancelled outcome.
-- A failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
+- A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
 
 ## Model call and environment failures
 
@@ -12739,7 +12820,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | `store.append` | `store.append(path, contents)` | `nil`; adds `contents` to the end, creating the file when absent | [The Store](09-the-store.md#writing-and-reading-files) |
 | `store.delete` | `store.delete(path)` | `nil`; removes the file or an empty directory, and succeeds when absent | [The Store](09-the-store.md#changing-and-checking-files) |
 | `store.exists` | `store.exists(path)` | `true` or `false`, for a file or a directory | [The Store](09-the-store.md#changing-and-checking-files) |
-| `store.glob` | `store.glob(pattern)` | A sorted array of matching store file paths, never directories | [The Store](09-the-store.md#listing-files-with-glob) |
+| `store.glob` | `store.glob(pattern)` | A sorted array of matching store file paths, or only directories for a pattern ending in `/` | [The Store](09-the-store.md#listing-files-with-glob) |
 | `store.read` | `store.read(path)` | The whole file verbatim as a string | [The Store](09-the-store.md#writing-and-reading-files) |
 | `store.read` with a range | `store.read(path, start, end?)` | Lines `start` to `end`, 1-based and inclusive, joined with `"\n"` | [The Store](09-the-store.md#line-ranges-and-numbered-reads) |
 | `store.read_numbered` | `store.read_numbered(path)` | The whole file as `N\| text` lines numbered from 1 | [The Store](09-the-store.md#line-ranges-and-numbered-reads) |
@@ -12765,11 +12846,12 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | `tasks.spawn` option `item` | `{ item = v }` | JSON data that becomes the task's `item` | [Tasks](15-tasks.md#starting-a-task) |
 | `tasks.status` | `tasks.status(task)` | The status table of an owned task or of `sys.taskid` | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.status` fields | `tasks.status(t).state` | `target`, `origin`, `state`, `ok`, `section`, `blocked`, `turns`, `tasks`, `depth`, `note` | [Tasks](15-tasks.md#checking-on-tasks) |
-| `tasks.when_all` | `tasks.when_all(set, opts?)` | A results sequence in set order, then `timed_out` | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_all` result entry | `results[i]` | `{ task, ok, result }`, itself a Task handle | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_all` `timed_out` | `local results, timed_out = tasks.when_all(set, { timeout = 5 })` | `true` when the timeout expired first, else `false` | [Tasks](15-tasks.md#time-limits-on-waits) |
-| `tasks.when_any` | `tasks.when_any(set, opts?)` | The ended member's Task handle, `ok`, and its result text or error value | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_any` with a timeout | `tasks.when_any(set, { timeout = 5 })` | `nil` when no member ended in time | [Tasks](15-tasks.md#time-limits-on-waits) |
+| `tasks.concurrency` | `tasks.concurrency(n?)` | The chain's effective admission limit, lowered by `n`, clamped to the parent's | [Tasks](15-tasks.md#the-concurrency-limit) |
+| `tasks.join` | `tasks.join(set, opts?)` | A results sequence in set order, then `timed_out` | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join` result entry | `results[i]` | `{ task, ok, result }`, itself a Task handle | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join` `timed_out` | `local results, timed_out = tasks.join(set, { timeout = 5 })` | `true` when the timeout expired first, else `false` | [Tasks](15-tasks.md#time-limits-on-waits) |
+| `tasks.join_any` | `tasks.join_any(set, opts?)` | The ended member's Task handle, `ok`, and its result text or error value | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join_any` with a timeout | `tasks.join_any(set, { timeout = 5 })` | `nil` when no member ended in time | [Tasks](15-tasks.md#time-limits-on-waits) |
 | wait option `timeout` | `{ timeout = seconds }` | A whole, fractional, or zero number of seconds | [Tasks](15-tasks.md#time-limits-on-waits) |
 
 ### sys
@@ -12862,9 +12944,9 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `err .. s` and `s .. err` | `'prefix: ' .. err` | concatenation with the error's message | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `err.finish_reason` | `err.finish_reason` | provider finish reason on `empty_model_reply`, when sent | [Conversations](11-conversations.md#empty-and-truncated-replies) |
 | `err.kind` and `err.message` | `local ok, err = pcall(f, ...)` | error kind tag; message string | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
-| `err.kind` tags | `err.kind == '{tag}'` | one of exactly twelve tags | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
+| `err.kind` tags | `err.kind == '{tag}'` | one of exactly thirteen tags | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `err.name` | `err.name` | requested tool name on `unbound_tool` and `out_of_scope_tool` | [Tools](12-tools.md#tool-failures) |
-| `err.reason` | `err.reason` | `precheck` or `provider` on `context_exhausted` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
+| `err.reason` | `err.reason` | `precheck` or `provider` on `context_exhausted`; a store reason such as `not_found`, `invalid_path`, or `anchor` on `store` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `err.task` | `err.task` | task id on `task_not_owned`, `task_consumed`, and a cancelled task | [Tasks](15-tasks.md#task-errors) |
 | `err.tasks` | `err.tasks` | leaked task ids joined with `, ` in spawn order, on `tasks_live` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `fanout` | `fanout(worker, collection)` | array of fanout results, one per member in collection order | [Fanout](14-fanout.md#the-fanout-call) |
@@ -12925,7 +13007,7 @@ Set by names the frontmatter key that sets a value, or says whether the host set
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
 | Cancel poll interval | 10,000 instructions | A host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| Fanout concurrency cap | 8 live arms | Per `fanout` call | host | [Fanout](14-fanout.md#concurrency) |
+| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | host | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
 | Host-set limits | Listed in the chapter | A prompt changes only the round cap | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
 | Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
@@ -12962,15 +13044,15 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | Cancelled outcome | The host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
 | `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Determinism` | Two live chains claim one store path in conflicting ways in block code; the call never returns, so no `pcall` catches it | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Input` | The host's input source fails a `user_input` request and the failure goes uncaught | The host's failure text, in `user input request was not answered: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Internal` | An engine invariant breaks, a fault in the engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, a failed `store` call, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | The host's store backend fails as the run starts or as the store opens for the H1 pass, the walk, or a task | Nothing, as in `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 

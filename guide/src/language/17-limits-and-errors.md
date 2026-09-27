@@ -9,7 +9,7 @@ Every run observes six limits. These are their defaults:
 | Limit | Default | Applies to | Set by |
 |---|---|---|---|
 | Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the host |
-| Concurrency cap | 8 arms at once | fanout arms running together | the host |
+| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the host, lowered by `tasks.concurrency` |
 | Response cap | 16 MiB (16,777,216 bytes) | each model reply | the host |
 | Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the host |
 | Log event quota | 1024 `log` calls | each section VM | the host |
@@ -37,7 +37,7 @@ max_tool_iterations must be a positive integer (>= 1), got {raw}
 max_tool_iterations must be <= 1000, got {raw}
 ````
 
-No frontmatter key sets the other five limits. The concurrency cap is taught with [fanout](14-fanout.md#concurrency), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
+No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
 
 ## How failures are reported
 
@@ -48,13 +48,13 @@ Failures fall into four families, each with its own vocabulary:
 | Family | When it happens | What you see |
 |---|---|---|
 | Parse failure | before anything runs | one of five parse error kinds |
-| Error value | inside Lua, at the call that failed | an error value whose `kind` is one of twelve lowercase tags |
+| Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
 | Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of thirteen run error kinds |
 | Cancelled outcome | when the host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
 
-Inside Lua, a failure is an error value ([Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)), and its `kind` is always one of `lua`, `internal`, `cancelled`, `context_exhausted`, `empty_model_reply`, `tool_loop_exhausted`, `tasks_live`, `task_not_owned`, `task_consumed`, `out_of_scope_tool`, `unbound_tool`, or `tool`. Catch it with `pcall` and branch on `err.kind`:
+Inside Lua, a failure is an error value ([Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)), and its `kind` is always one of `lua`, `internal`, `cancelled`, `context_exhausted`, `empty_model_reply`, `tool_loop_exhausted`, `tasks_live`, `task_not_owned`, `task_consumed`, `out_of_scope_tool`, `unbound_tool`, `store`, or `tool`. Catch it with `pcall` and branch on `err.kind`:
 
 ````lua
 local ok, reply = pcall(models.infer, prose)
@@ -342,9 +342,8 @@ An error value is the table `pcall` returns for a failure, with its error kind i
 - running past the memory ceiling
 - a refused `log` call
 - a failed `{{ }}` substitution ([Substitution errors](07-substitution.md#substitution-errors))
-- an ordinary failed `store` call ([Store errors](09-the-store.md#store-errors))
 
-The message text is what tells them apart.
+The message text is what tells them apart. A failed `store` operation is not in this family: it has its own kind, `store`, with the failure's reason and fields ([Store errors](09-the-store.md#store-errors)).
 
 ### The internal family
 
@@ -355,7 +354,7 @@ The message text is what tells them apart.
 - a failure of the host's input source for `user_input` ([Asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input))
 - a fault in the engine or in the Lua runtime's own machinery
 
-An ordinary failed `store` call is kind `lua`, not `internal`.
+An ordinary failed `store` call is kind `store`, not `internal`. Its message text says what failed, and its `reason` and fields let a prompt branch on the failure mode ([Store errors](09-the-store.md#store-errors)).
 
 ### The cancelled kind
 
@@ -379,6 +378,7 @@ An error kind is what Lua sees at the call. A run error kind is what the host re
 | `tasks_live` | `tasks` | `Lua` |
 | `task_not_owned` | `task` | `Lua` |
 | `task_consumed` | `task` | `Lua` |
+| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | `Store` |
 
 Every other error value has only `kind` and `message`. In the H1 pass, some of these failures end the run as `RequirementsUnmet` instead, as [How a failed run is classified](#how-a-failed-run-is-classified) explains. An error value raised inside a local tool handler reaches a `pcall` around the call with its `kind` kept ([Local tools](12-tools.md#local-tools)).
 
@@ -392,6 +392,7 @@ When you catch an error value and raise it again with `error(err)`, the run's cl
 | `empty_model_reply` | `Completion` |
 | `context_exhausted`, with its `reason` | `ContextExhausted` |
 | `cancelled` | the cancelled outcome, not a failed run |
+| `store` | `Store` |
 | `task_not_owned`, `task_consumed`, with their `task` | `Lua`, in the H1 pass too |
 | `out_of_scope_tool`, `unbound_tool`, `tasks_live`, `lua`, `internal` | `Lua`, or `RequirementsUnmet` in the H1 pass |
 
@@ -408,8 +409,8 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Binding` | a model round had no model selected | `model binding required for section {section}` |
 | `Completion` | a model call failed, or an empty reply went uncaught | the call's own message, such as `non-success backend status {status}` |
 | `Tool` | a tool call failed, was out of scope, or named an unbound tool, or a `models.loop` call reached the round cap | `tool call failure: {message}`, or one of the other tool messages below |
-| `Store` | the host's store backend failed | `store operation failed` |
-| `Determinism` | two live chains claimed one store path in conflicting ways | `store determinism violation: {detail}` |
+| `Store` | a `store` operation failed and went uncaught, or was caught and raised again, or the handle declares no store | the store failure's own message, such as `file not found in store: {path}` or `store operation failed` |
+| `Determinism` | two accesses unordered by happens-before touched one store region in conflicting ways | `store determinism violation: {detail}` |
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
 | `ContextExhausted` | the compactor ran out of the model's context window | `context exhausted: {reason}` |
@@ -444,21 +445,15 @@ tool-call loop did not converge
 
 ### Lua and quota failures
 
-- `Lua`: a section's Lua fails at run time or does not return a usable value. That covers an uncaught runtime error, running past the memory ceiling, a failed `store` call, a failed substitution, a misused task (an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, see [Task errors](15-tasks.md#task-errors)), and a block that returns a table ([Block and section returns](04-how-a-prompt-runs.md#block-and-section-returns)). It holds the same way in a walked section, a `call` chain, a task, and a fanout arm; in the H1 pass the ordinary Lua errors among them end the run as `RequirementsUnmet` instead, as the H1 pass hard gate below explains.
+- `Lua`: a section's Lua fails at run time or does not return a usable value. That covers an uncaught runtime error, running past the memory ceiling, a failed substitution, a misused task (an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, see [Task errors](15-tasks.md#task-errors)), and a block that returns a table ([Block and section returns](04-how-a-prompt-runs.md#block-and-section-returns)). It holds the same way in a walked section, a `call` chain, a task, and a fanout arm; in the H1 pass the ordinary Lua errors among them end the run as `RequirementsUnmet` instead, as the H1 pass hard gate below explains.
 - A failed `{{ }}` substitution ends the run as `Lua` with the substitution's own message, or as `RequirementsUnmet` in the H1 pass. Substitution has no run error kind of its own.
 - `Quota`: a section VM runs out the log event quota or the log byte quota. Only the two log quotas lead to `Quota`: running past the memory ceiling is `Lua`, and no instruction count can run out.
 
 ### Store and engine failures
 
-- An author's own failed `store` call is an ordinary `lua`-kind error value, and `Lua` when uncaught ([Store errors](09-the-store.md#store-errors)).
-- `Determinism`: two live chains claim the same store path in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). In block code the run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds.
-- Only while the `lua shared` fence loads does a claims conflict raise at the call instead, as a `lua`-kind error value with this message:
-
-````text
-write-write race on {path}: another live identity holds a claim on it
-````
-
-- `Store`: appears only when the host's store backend itself fails outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task. Nothing in a prompt causes it.
+- An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
+- `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
+- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
 - `Internal`: an engine invariant broke, a fault in the engine rather than a mistake in the prompt. Its location names an engine source file and line.
 
 ### The H1 pass hard gate
@@ -492,16 +487,15 @@ In the H1 pass, these failures become `RequirementsUnmet`:
 - an `error` or `assert` call, or any other runtime fault, in a block in the H1 body
 - a failed substitution
 - running past the memory ceiling
-- an ordinary failed `store` call
 - an error value raised again after another suspending call that is rebuilt as `Lua`: kind `out_of_scope_tool`, `unbound_tool`, `tasks_live`, `lua`, or `internal`, or a value missing its fields
 
 Everything else keeps its own classification in the H1 pass:
 
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
 - Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, `ContextExhausted`, and `Input` keep their kinds.
-- A claims conflict stays `Determinism`.
+- A failed store call stays `Store`, and a claims conflict stays `Determinism`.
 - A host cancel stays the cancelled outcome.
-- A failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
+- A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
 
 ## Model call and environment failures
 

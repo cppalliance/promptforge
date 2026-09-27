@@ -19,7 +19,7 @@ promptforge: 0
 
 ```lua
 local t = tasks.spawn('### Child')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local kinds = {}
 for _, e in ipairs(tasks.events(t)) do
   kinds[#kinds + 1] = e.kind
@@ -34,7 +34,7 @@ return 'done'
 ```
 ````
 
-`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.when_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
+`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
 
 Each table's `kind` field names its event, so the block returns one line per event. The first line is `section_started`, reported when `### Child` began, and the last is `task_succeeded`, reported when the task ended with a result. The lines between report the child's section VM starting up, its Lua block running, and its section finishing.
 
@@ -56,11 +56,11 @@ Every event table holds the same four keys, followed by the fields of its own ki
 - `section` is the heading text of the section that reported the event.
 - `provenance` says which task reported the event, in `provenance.task`, and where the event falls in that task's count, in `provenance.seq`.
 
-`execution`, `section`, and `provenance` are the event's three coordinates. An event that holds only `kind` and the three coordinates, such as `run_started`, `section_finished`, or `store_write_succeeded`, is a boundary event: it marks the moment something began, ended, or failed, and says nothing more. Of the 57 kinds, 42 are boundary events, and the other 15 add fields of their own, which this chapter gives with each kind. Read every field with ordinary indexing, as in `e.kind`, `e.section`, `e.provenance.task`, and `e.provenance.seq`.
+`execution`, `section`, and `provenance` are the event's three coordinates. An event that holds only `kind` and the three coordinates, such as `run_started`, `section_finished`, or `store_write_succeeded`, is a boundary event: it marks the moment something began, ended, or failed, and says nothing more. Of the 59 kinds, 44 are boundary events, and the other 15 add fields of their own, which this chapter gives with each kind. Read every field with ordinary indexing, as in `e.kind`, `e.section`, `e.provenance.task`, and `e.provenance.seq`.
 
 ### Event kinds
 
-A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 57, by area:
+A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 59, by area:
 
 | Area | Kinds | Covered in |
 |---|---|---|
@@ -72,7 +72,7 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Author checkpoint | `lua` | [Lua block and parse events](#lua-block-and-parse-events) |
 | Model | `model_turn_completed`, `model_turn_failed`, `model_turn_truncated`, `model_metadata_degraded`, `thinking`, `assistant_reply`, `assistant_tool_calls` | [Model round events](#model-round-events) |
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
-| Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed` | [Store and operator input events](#store-and-operator-input-events) |
+| Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
 | Operator input | `user_input_wait_started`, `user_input` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
 | Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
@@ -111,7 +111,7 @@ local t = tasks.spawn('### Work')
 local seen
 local kinds = {}
 repeat
-  local ended = tasks.when_any({ t }, { timeout = 2 })
+  local ended = tasks.join_any({ t }, { timeout = 2 })
   for _, e in ipairs(tasks.events(t, { last = seen })) do
     seen = e.provenance.seq
     kinds[#kinds + 1] = e.kind
@@ -129,7 +129,7 @@ return 'done'
 ```
 ````
 
-With a `timeout`, `tasks.when_any` returns `nil` if the task is still running after 2 seconds, and the task's handle once it has ended, as [Time limits on waits](15-tasks.md#time-limits-on-waits) describes. Each iteration reads only what the task reported since the previous one and keeps the newest `seq` in `seen`. On the first iteration `seen` is nil, and a `last` of nil reads from the task's first event. The result lists every event of `### Work` once, however many iterations the loop takes.
+With a `timeout`, `tasks.join_any` returns `nil` if the task is still running after 2 seconds, and the task's handle once it has ended, as [Time limits on waits](15-tasks.md#time-limits-on-waits) describes. Each iteration reads only what the task reported since the previous one and keeps the newest `seq` in `seen`. On the first iteration `seen` is nil, and a `last` of nil reads from the task's first event. The result lists every event of `### Work` once, however many iterations the loop takes.
 
 ## Read options, results, and errors
 
@@ -329,7 +329,7 @@ There is no section-failed kind. A section whose chain ends in an error reports 
 
 ````lua
 local t = tasks.spawn('### Risky')
-local _, ok = tasks.when_any({ t })
+local _, ok = tasks.join_any({ t })
 if ok then
   return 'the task succeeded'
 end
@@ -344,7 +344,7 @@ end
 return 'the task failed'
 ````
 
-`tasks.when_any` returns `ok` as `false` when the task failed, and every section the task started but never finished is left in `open`.
+`tasks.join_any` returns `ok` as `false` when the task failed, and every section the task started but never finished is left in `open`.
 
 ## Lua block and parse events
 
@@ -425,8 +425,9 @@ Every [store](09-the-store.md#what-the-store-is) operation reports a succeeded o
 | `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
 | `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
 | `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
+| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
 
-Note that `store.str_replace` reports as `store_replace`, and that `store.exists` reports nothing. The store events hold no path, no content, and no error detail. A failed store call raises an error value of kind `lua` at the call, as [Store errors](09-the-store.md#store-errors) describes, and that error is where the detail lives. A store call made inside a [local tool](12-tools.md#local-tools) handler is an ordinary store operation and reports the same events.
+Note that `store.str_replace` reports as `store_replace`, and that `store.exists` reports its own pair. The store events hold no path, no content, and no error detail. A failed store call raises an error value of kind `store` at the call, as [Store errors](09-the-store.md#store-errors) describes, and that error is where the detail lives. A store call made inside a [local tool](12-tools.md#local-tools) handler is an ordinary store operation and reports the same events.
 
 A store operation's event is reported before the Lua call returns, so its outcome always comes before the block's closing event. Store and model work appear in the order the section did them: a write, then a read, then a model round report `store_write_succeeded`, then `store_read_succeeded`, then `model_turn_completed`, the event that ends a completed round. This prompt counts what a task did with the store:
 
@@ -443,7 +444,7 @@ promptforge: 0
 
 ```lua
 local t = tasks.spawn('### Writer')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local writes, failed = 0, 0
 for _, e in ipairs(tasks.events(t)) do
   if e.kind == 'store_write_succeeded' then writes = writes + 1 end
@@ -810,7 +811,7 @@ The model's history read shows up as a `tool_result` with `alias` `task_events` 
 
 ## Task lifecycle events
 
-Every task start reports a `task_started` event under the section that started the task, whether the task came from `tasks.spawn`, a `fanout` arm, or the model's `task` built-in. This prompt lists the tasks a fanout started:
+Every task reports a `task_started` event when it is admitted and first runs, under the section that started the task, whether the task came from `tasks.spawn`, a `fanout` arm, or the model's `task` built-in. A task that must wait for a concurrency slot reports nothing until it is admitted, so its `task_started` may come after the spawn and after other tasks' events ([The concurrency limit](14-fanout.md#concurrency)). This prompt lists the tasks a fanout started:
 
 ````markdown
 ---
@@ -861,7 +862,7 @@ Each [arm](14-fanout.md#inside-an-arm) of the fanout is a task, so the fanout re
 | `input`, `item`, `index` | The seeds the task started with, each nil when unset, as [Starting a task](15-tasks.md#starting-a-task) describes |
 | `var` | The snapshot of the owner's `var` that the task started with |
 
-`task_started` is stamped on the owner's `seq` count, not the new task's. The new task's own events hold its id in `provenance.task`, so `task_started` events and provenance together are enough to rebuild the tree of tasks. `origin` says who started the task: `author` for a task from `tasks.spawn` or a `fanout` arm, and `model` for a task the model started with its `task` built-in. A model-started task's `task_started` sits under the owner's section, with `origin` `model` and a `target` naming the section without the `##`.
+`task_started` is stamped on the owner's `seq` count, not the new task's. The new task's own events hold its id in `provenance.task`, so `task_started` events and provenance together are enough to rebuild the tree of tasks. It is reported at admission, when the task first runs, under the section that spawned it, which the run records at spawn time. `origin` says who started the task: `author` for a task from `tasks.spawn` or a `fanout` arm, and `model` for a task the model started with its `task` built-in. A model-started task's `task_started` sits under the owner's section, with `origin` `model` and a `target` naming the section without the `##`.
 
 ### How a task ends
 
@@ -911,7 +912,7 @@ In a completed notice, `{result}` arrives in the untrusted envelope. The cancel 
 
 ## Trust and what events leave out
 
-Events say that something happened, not everything about it. No `_failed` event holds a message: each says only that something failed, and the detail is the failing call's own error. A failed store call, for example, raises an error value of kind `lua` that `pcall` catches, while its `store_*_failed` event holds none of that detail. In the same way, a run's outcome and its error detail come from the run's result and from the errors raised to Lua, never from events.
+Events say that something happened, not everything about it. No `_failed` event holds a message: each says only that something failed, and the detail is the failing call's own error. A failed store call, for example, raises an error value of kind `store` that `pcall` catches, while its `store_*_failed` event holds none of that detail. In the same way, a run's outcome and its error detail come from the run's result and from the errors raised to Lua, never from events.
 
 ### Untrusted text in events
 
@@ -929,7 +930,7 @@ The coordinates come from the host, for `execution`, and from your own headings,
 
 ````lua
 local t = tasks.spawn('### Research')
-tasks.when_any({ t })
+tasks.join_any({ t })
 local found = {}
 for _, e in ipairs(tasks.events(t)) do
   if e.kind == 'assistant_reply' then

@@ -945,7 +945,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-11>
 
-### Step 11: Revise the language guide
+### Step 11: Revise the language guide [completed]
 
 - Component: Language guide and living docs
 - Placement: last of five components. The guide and the living design docs describe the whole behavior, so they change once the code is final, and no test executes the guide's examples, so nothing breaks while they wait.

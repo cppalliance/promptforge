@@ -347,7 +347,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 return results[1].result .. ' and ' .. results[2].result
 ```
 
@@ -368,7 +368,7 @@ return 'beta'
 alpha and beta
 ````
 
-The string `'## Alpha'` is a heading reference, which names a section by its level and heading text ([referring to a section by heading](02-file-structure.md#referring-to-a-section-by-heading)). `tasks.spawn('## Alpha')` starts that section as a task and returns a Task handle, and `tasks.when_all` waits for every handle and returns one entry per handle, in the order given, each with its `result` ([tasks at a glance](15-tasks.md#tasks-at-a-glance)).
+The string `'## Alpha'` is a heading reference, which names a section by its level and heading text ([referring to a section by heading](02-file-structure.md#referring-to-a-section-by-heading)). `tasks.spawn('## Alpha')` starts that section as a task and returns a Task handle, and `tasks.join` waits for every handle and returns one entry per handle, in the order given, each with its `result` ([tasks at a glance](15-tasks.md#tasks-at-a-glance)).
 
 `## Main` returns after the wait, and that return ends the walk, so the walk never falls through into `## Alpha` or `## Beta`. Each of them runs only as a task that `## Main` started, and its return goes back to `## Main`. Only the entry section's return becomes the run result.
 

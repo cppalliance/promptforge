@@ -139,7 +139,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | `store.append` | `store.append(path, contents)` | `nil`; adds `contents` to the end, creating the file when absent | [The Store](09-the-store.md#writing-and-reading-files) |
 | `store.delete` | `store.delete(path)` | `nil`; removes the file or an empty directory, and succeeds when absent | [The Store](09-the-store.md#changing-and-checking-files) |
 | `store.exists` | `store.exists(path)` | `true` or `false`, for a file or a directory | [The Store](09-the-store.md#changing-and-checking-files) |
-| `store.glob` | `store.glob(pattern)` | A sorted array of matching store file paths, never directories | [The Store](09-the-store.md#listing-files-with-glob) |
+| `store.glob` | `store.glob(pattern)` | A sorted array of matching store file paths, or only directories for a pattern ending in `/` | [The Store](09-the-store.md#listing-files-with-glob) |
 | `store.read` | `store.read(path)` | The whole file verbatim as a string | [The Store](09-the-store.md#writing-and-reading-files) |
 | `store.read` with a range | `store.read(path, start, end?)` | Lines `start` to `end`, 1-based and inclusive, joined with `"\n"` | [The Store](09-the-store.md#line-ranges-and-numbered-reads) |
 | `store.read_numbered` | `store.read_numbered(path)` | The whole file as `N\| text` lines numbered from 1 | [The Store](09-the-store.md#line-ranges-and-numbered-reads) |
@@ -165,11 +165,12 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | `tasks.spawn` option `item` | `{ item = v }` | JSON data that becomes the task's `item` | [Tasks](15-tasks.md#starting-a-task) |
 | `tasks.status` | `tasks.status(task)` | The status table of an owned task or of `sys.taskid` | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.status` fields | `tasks.status(t).state` | `target`, `origin`, `state`, `ok`, `section`, `blocked`, `turns`, `tasks`, `depth`, `note` | [Tasks](15-tasks.md#checking-on-tasks) |
-| `tasks.when_all` | `tasks.when_all(set, opts?)` | A results sequence in set order, then `timed_out` | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_all` result entry | `results[i]` | `{ task, ok, result }`, itself a Task handle | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_all` `timed_out` | `local results, timed_out = tasks.when_all(set, { timeout = 5 })` | `true` when the timeout expired first, else `false` | [Tasks](15-tasks.md#time-limits-on-waits) |
-| `tasks.when_any` | `tasks.when_any(set, opts?)` | The ended member's Task handle, `ok`, and its result text or error value | [Tasks](15-tasks.md#waiting-for-results) |
-| `tasks.when_any` with a timeout | `tasks.when_any(set, { timeout = 5 })` | `nil` when no member ended in time | [Tasks](15-tasks.md#time-limits-on-waits) |
+| `tasks.concurrency` | `tasks.concurrency(n?)` | The chain's effective admission limit, lowered by `n`, clamped to the parent's | [Tasks](15-tasks.md#the-concurrency-limit) |
+| `tasks.join` | `tasks.join(set, opts?)` | A results sequence in set order, then `timed_out` | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join` result entry | `results[i]` | `{ task, ok, result }`, itself a Task handle | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join` `timed_out` | `local results, timed_out = tasks.join(set, { timeout = 5 })` | `true` when the timeout expired first, else `false` | [Tasks](15-tasks.md#time-limits-on-waits) |
+| `tasks.join_any` | `tasks.join_any(set, opts?)` | The ended member's Task handle, `ok`, and its result text or error value | [Tasks](15-tasks.md#waiting-for-results) |
+| `tasks.join_any` with a timeout | `tasks.join_any(set, { timeout = 5 })` | `nil` when no member ended in time | [Tasks](15-tasks.md#time-limits-on-waits) |
 | wait option `timeout` | `{ timeout = seconds }` | A whole, fractional, or zero number of seconds | [Tasks](15-tasks.md#time-limits-on-waits) |
 
 ### sys
@@ -262,9 +263,9 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `err .. s` and `s .. err` | `'prefix: ' .. err` | concatenation with the error's message | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `err.finish_reason` | `err.finish_reason` | provider finish reason on `empty_model_reply`, when sent | [Conversations](11-conversations.md#empty-and-truncated-replies) |
 | `err.kind` and `err.message` | `local ok, err = pcall(f, ...)` | error kind tag; message string | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
-| `err.kind` tags | `err.kind == '{tag}'` | one of exactly twelve tags | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
+| `err.kind` tags | `err.kind == '{tag}'` | one of exactly thirteen tags | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `err.name` | `err.name` | requested tool name on `unbound_tool` and `out_of_scope_tool` | [Tools](12-tools.md#tool-failures) |
-| `err.reason` | `err.reason` | `precheck` or `provider` on `context_exhausted` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
+| `err.reason` | `err.reason` | `precheck` or `provider` on `context_exhausted`; a store reason such as `not_found`, `invalid_path`, or `anchor` on `store` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `err.task` | `err.task` | task id on `task_not_owned`, `task_consumed`, and a cancelled task | [Tasks](15-tasks.md#task-errors) |
 | `err.tasks` | `err.tasks` | leaked task ids joined with `, ` in spawn order, on `tasks_live` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `fanout` | `fanout(worker, collection)` | array of fanout results, one per member in collection order | [Fanout](14-fanout.md#the-fanout-call) |
@@ -325,7 +326,7 @@ Set by names the frontmatter key that sets a value, or says whether the host set
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
 | Cancel poll interval | 10,000 instructions | A host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| Fanout concurrency cap | 8 live arms | Per `fanout` call | host | [Fanout](14-fanout.md#concurrency) |
+| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | host | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
 | Host-set limits | Listed in the chapter | A prompt changes only the round cap | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
 | Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
@@ -362,15 +363,15 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | Cancelled outcome | The host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
 | `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Determinism` | Two live chains claim one store path in conflicting ways in block code; the call never returns, so no `pcall` catches it | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Input` | The host's input source fails a `user_input` request and the failure goes uncaught | The host's failure text, in `user input request was not answered: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Internal` | An engine invariant breaks, a fault in the engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, a failed `store` call, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | The host's store backend fails as the run starts or as the store opens for the H1 pass, the walk, or a task | Nothing, as in `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 

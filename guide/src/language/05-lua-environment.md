@@ -148,7 +148,7 @@ The failure is a Lua runtime error whose text includes your message, here `the a
 
 ### Failed host calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. One store failure is different: a conflict between two chains over the same store file, in block code, never raises at the call, and instead ends the run with run error kind `Determinism`.
+A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
 Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
 
@@ -850,9 +850,9 @@ The run result is:
 not an arm: runtime error: unknown sys field 'index'
 ````
 
-### The twelve error kinds
+### The thirteen error kinds
 
-`err.kind` is always one of exactly twelve tags. Each tag is raised by the feature its link points to:
+`err.kind` is always one of exactly thirteen tags. Each tag is raised by the feature its link points to:
 
 | Kind | Its own fields | Raised by |
 |---|---|---|
@@ -866,17 +866,18 @@ not an arm: runtime error: unknown sys field 'index'
 | `task_consumed` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `tasks_live` | `tasks` | [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) |
 | `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel) |
+| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | [Store errors](09-the-store.md#store-errors) |
 | `lua` | none | This chapter |
 | `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
 
-`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context, keeps its own kind and fields.
+`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
 ### Message, fields, and tostring
 
 - `err.message` is always a string. When the raiser gave no message, the message is the kind tag itself.
 - `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught host error shows exactly the host's message.
 - A caught error value joins with a string using `..` on either side, as `'prefix: ' .. err` or `err .. ' suffix'`, exactly as if it were its message string.
-- A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. Every such field is a string, and kinds without fields have only `kind` and `message`.
+- A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. A `store` value carries `reason`, `path`, and either `anchor` with `count` or `rule`. Every such field is a string except `count`, which is a number, and kinds without fields have only `kind` and `message`.
 
 A caught host-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the host's message verbatim from `tostring(err)`:
 
@@ -896,7 +897,7 @@ A `models.loop` failure works the same way: catch it with `pcall` and read `err.
 
 ### Catching at the call site
 
-An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site.
+An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
 
 Every string-argument failure has one of two shapes:
 
@@ -940,7 +941,7 @@ Only error values the host builds take a kind out of a block. A table you build 
 When a failed host call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
 
 - Raised again with `error(err)` before any other suspending call, an error value ends the run exactly as if it had never been caught, with the same run error kind.
-- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
+- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Store`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
 - A `lua`-kind error value that leaves a block surfaces as a Lua runtime error with the same message and the absolute prompt line.
 
 ### Uncaught failures

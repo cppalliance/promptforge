@@ -20,7 +20,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 return results[1].result .. ' + ' .. results[2].result
 ```
 
@@ -47,28 +47,29 @@ alpha text + beta text
 
 A task's result is the value its section returns, so `return 'alpha text'` makes `alpha text` the result of the first task. The [scalar return rule](04-how-a-prompt-runs.md#block-and-section-returns) applies as in any block, but a return ends the run only from the H1 pass or a section on the main walk: inside a task it becomes the task's result for its owner. An error raised in the task's section, such as `error('beta boom')`, makes the task fail instead.
 
-`tasks.when_all(set)` waits for every task in `set`, a Lua array of Task handles, and returns a results sequence with one `{ task, ok, result }` entry per member, in the order the set lists them. `ok` is `true` when the member succeeded, and `result` holds its result text, or its [error value](05-lua-environment.md#catching-and-inspecting-errors) when it failed. Each entry is itself a Task handle, so you can pass it to any other `tasks` function.
+`tasks.join(set)` waits for every task in `set`, a Lua array of Task handles, and returns a results sequence with one `{ task, ok, result }` entry per member, in the order the set lists them. `ok` is `true` when the member succeeded, and `result` holds its result text, or its [error value](05-lua-environment.md#catching-and-inspecting-errors) when it failed. Each entry is itself a Task handle, so you can pass it to any other `tasks` function.
 
 `## Main` ends with `return`, which ends the run, so the walk never reaches `## Alpha` or `## Beta` as walked sections. A section that runs as a task is still an ordinary section, and the walk would run it again as a walked section if it got there.
 
-`tasks.when_any(set)` waits for the first member of `set` to end instead of all of them. It returns three values: the Task handle of the task that ended, `ok`, and `result`, which is the result text when the task succeeded and its error value when it failed. When a member has already ended, it returns at once:
+`tasks.join_any(set)` waits for the first member of `set` to end instead of all of them. It returns three values: the Task handle of the task that ended, `ok`, and `result`, which is the result text when the task succeeded and its error value when it failed. When a member has already ended, it returns at once:
 
 ````lua
 local t = tasks.spawn('## Child')
-local first, ok, result = tasks.when_any({ t })
+local first, ok, result = tasks.join_any({ t })
 ````
 
 When `## Child` runs `return 'child-done'`, `first` is the handle of that task, `ok` is `true`, and `result` is `child-done`.
 
 Only the owner may wait on, inspect, or cancel a task. A chain ends cleanly when every task it spawned has been waited on or cancelled, and a chain that ends normally while a task it spawned is still live fails with an error value of kind `tasks_live`. In the prompt above, the owner is the run's main walk, and its wait leaves nothing live.
 
-The `tasks` global holds nine functions, where `?` marks an optional argument:
+The `tasks` global holds ten functions, where `?` marks an optional argument:
 
 | Function | What it does |
 |---|---|
 | `tasks.spawn(target, opts?)` | Starts a task and returns its Task handle |
-| `tasks.when_any(set, opts?)` | Waits for the first task in a set to end |
-| `tasks.when_all(set, opts?)` | Waits for every task in a set |
+| `tasks.join_any(set, opts?)` | Waits for the first task in a set to end |
+| `tasks.join(set, opts?)` | Waits for every task in a set |
+| `tasks.concurrency(n?)` | Lowers the chain's admission limit for the tasks it spawns, or reads it back |
 | `tasks.ready(task)` | Says whether a task has ended |
 | `tasks.status(task)` | Returns a task's status table |
 | `tasks.events(task, opts?)` | Returns what a task has reported so far |
@@ -100,7 +101,7 @@ promptforge: 0
 ```lua
 local pros = tasks.spawn('### Pros')
 local cons = tasks.spawn('### Cons')
-local results = tasks.when_all({ pros, cons })
+local results = tasks.join({ pros, cons })
 return 'Pros: ' .. results[1].result .. '\nCons: ' .. results[2].result
 ```
 
@@ -126,7 +127,7 @@ Cons: hard to maintain
 
 The walk never enters a child section by [falling through](04-how-a-prompt-runs.md#the-section-walk), so `### Pros` and `### Cons` run only as tasks, even in a prompt whose spawning section falls through to a later sibling. That matters because a target is an ordinary section. No syntax takes a section out of the walk, so if the main walk reaches a section that also runs as a task, the walk runs it again as a walked section. Keep task sections out of the walk's path by spawning child sections, as here, or by ending the spawning section with `return`, as the first prompt in this chapter does.
 
-The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run. So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
+The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
 
 A [local tool](12-tools.md#local-tools) handler runs inside the calling chain, so it can start and wait on tasks just as block code can, although `jump` stays unavailable there.
 
@@ -152,7 +153,7 @@ promptforge: 0
 ```lua
 var.k = 1
 local t = tasks.spawn('## Child', { input = 'child args', item = { name = 'alpha' }, index = 7 })
-local _, ok, result = tasks.when_any({ t })
+local _, ok, result = tasks.join_any({ t })
 return result
 ```
 
@@ -185,7 +186,7 @@ The owner's `var` is not an option. The task always starts from a deep copy of i
 
 ### Spawn errors
 
-Every spawn failure is raised at the `tasks.spawn` call, so `pcall(tasks.spawn, ...)` catches it and the run continues. That holds for each failure below, each an error value of kind `lua`, and also for a store refusal while the task is being set up and for any other setup error:
+Every spawn failure is raised at the `tasks.spawn` call, so `pcall(tasks.spawn, ...)` catches it and the run continues. Each failure below is an error value of kind `lua`, and a store refusal while the task is being set up is kind `store` with the message `store operation failed` ([Store errors](09-the-store.md#store-errors)):
 
 - The target is a string. Another type fails with `section target must be a string, got {type}`, such as `section target must be a string, got integer`, the same rule `call` applies to its target.
 - A heading that does not resolve fails with the message `call` gives, `` section heading `{heading}` not found ``, such as `` section heading `## Missing` not found ``.
@@ -213,7 +214,7 @@ local t = tasks.spawn('## Child')
 log('spawned ' .. t.task)
 ````
 
-For the first task the main walk spawns, this logs `spawned 0.0`. The handle `tasks.spawn` returns is a plain table, `{ task = id }`, with no metatable, no methods, and no other fields. Every `tasks` function that takes a task accepts either a Task handle or the bare id string, and so does each member of a wait set. Any table with a string `task` field works as a handle, which is why each entry `tasks.when_all` returns works as one too.
+For the first task the main walk spawns, this logs `spawned 0.0`. The handle `tasks.spawn` returns is a plain table, `{ task = id }`, with no metatable, no methods, and no other fields. Every `tasks` function that takes a task accepts either a Task handle or the bare id string, and so does each member of a wait set. Any table with a string `task` field works as a handle, which is why each entry `tasks.join` returns works as one too.
 
 Because a handle is plain data, it survives a trip through [`var`](05-lua-environment.md#keeping-values-in-var) unchanged and works in a later section. This prompt starts a task in one section and collects it in the next:
 
@@ -241,7 +242,7 @@ return 'job done'
 ## Finish
 
 ```lua
-local _, ok, result = tasks.when_any({ var.job })
+local _, ok, result = tasks.join_any({ var.job })
 return result
 ```
 ````
@@ -284,12 +285,14 @@ A value that is neither a handle nor a string fails with `{call} expects a Task 
 
 When a task's chain ends, its result text or its failure is held for the owner until a wait takes it. A wait parks the owner until tasks end and hands it their results, and a task whose result a wait has taken counts as delivered.
 
-`tasks.when_any(set)` parks the owner until a member of `set` ends, or returns at once when one already has. When several members have already ended, it delivers the first of them in the order the set lists them. Compare the `task` field of its first return value with your handles to learn which member ended:
+A delivery is a join: everything the delivered task did, its store writes included, happens before the owner's next step, so the very next store call sees them. A task notice delivered to the model joins that task, a chain's end joins every task it owns, and reading a task's store files without a delivery that joined it is a conflict ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)).
+
+`tasks.join_any(set)` parks the owner until a member of `set` ends, or returns at once when one already has. When several members have already ended, it delivers the first of them in the order the set lists them. Compare the `task` field of its first return value with your handles to learn which member ended:
 
 ````lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local first, ok, result = tasks.when_any({ a, b })
+local first, ok, result = tasks.join_any({ a, b })
 if first.task == a.task then
   log('alpha ended first: ' .. tostring(result))
 end
@@ -297,9 +300,9 @@ end
 
 A failed member comes back as `ok = false`, with its error value as the third return value. The error is returned, never raised, so your code decides what to do with it.
 
-The other members of the set keep running after `tasks.when_any` returns, and the owner waits on them later, for example with another `tasks.when_any` over the members that are left. Each of them still needs a wait or a cancel before the owner ends.
+The other members of the set keep running after `tasks.join_any` returns, and the owner waits on them later, for example with another `tasks.join_any` over the members that are left. Each of them still needs a wait or a cancel before the owner ends.
 
-`tasks.when_all(set)` collects an entry for every member, even when some members fail. This prompt joins two tasks, one of which fails, and reports how each one ended:
+`tasks.join(set)` collects an entry for every member, even when some members fail. This prompt joins two tasks, one of which fails, and reports how each one ended:
 
 ````markdown
 ---
@@ -315,7 +318,7 @@ promptforge: 0
 ```lua
 local a = tasks.spawn('## Alpha')
 local b = tasks.spawn('## Beta')
-local results = tasks.when_all({ a, b })
+local results = tasks.join({ a, b })
 local lines = {}
 for _, entry in ipairs(results) do
   if entry.ok then
@@ -340,7 +343,7 @@ error('beta boom')
 ```
 ````
 
-The first line of the result is `0.0 ok: alpha text`. The second starts `0.1 failed: ` and goes on with the error text, which contains `beta boom`. A failed member's entry holds `ok = false` and its error value, here of kind `lua`, and the call itself never raises because a member failed. `tasks.when_all` is built in Lua on top of `tasks.when_any`, so both apply the same checks and give the same messages, each naming its own call.
+The first line of the result is `0.0 ok: alpha text`. The second starts `0.1 failed: ` and goes on with the error text, which contains `beta boom`. A failed member's entry holds `ok = false` and its error value, here of kind `lua`, and the call itself never raises because a member failed. `tasks.join` is built in Lua on top of `tasks.join_any`, so both apply the same checks and give the same messages, each naming its own call.
 
 ### Each result is taken once
 
@@ -348,8 +351,8 @@ A result is taken exactly once. After a wait has delivered a task, waiting on it
 
 ````lua
 local t = tasks.spawn('## Child')
-local _, ok, result = tasks.when_any({ t })
-local ok2, err = pcall(tasks.when_any, { t })
+local _, ok, result = tasks.join_any({ t })
+local ok2, err = pcall(tasks.join_any, { t })
 ````
 
 Here `ok2` is `false`, `err.kind` is `task_consumed`, `err.task` is `0.0`, and `tostring(err)` is `` task `0.0` was already delivered: a task's result is taken by one wait ``.
@@ -360,7 +363,7 @@ So a loop that waits on several tasks one at a time drops each task from its set
 local left = { tasks.spawn('## Alpha'), tasks.spawn('## Beta'), tasks.spawn('## Gamma') }
 local order = {}
 while #left > 0 do
-  local done = tasks.when_any(left)
+  local done = tasks.join_any(left)
   order[#order + 1] = done.task
   for i, t in ipairs(left) do
     if t.task == done.task then
@@ -374,37 +377,37 @@ return table.concat(order, ' ')
 
 The result lists the three task ids in finish order, such as `0.1 0.0 0.2`, and each task is delivered exactly once, so nothing is left live.
 
-A task named more than once in a `tasks.when_all` set is waited on once and fills every position it was named at. `#results` then equals the length of the set, each position holds its own table, and the repeat raises no `task_consumed`: for `tasks.when_all({ a, b, a })`, `#results` is 3, and `results[1]` and `results[3]` are separate tables for the same task.
+A task named more than once in a `tasks.join` set is waited on once and fills every position it was named at. `#results` then equals the length of the set, each position holds its own table, and the repeat raises no `task_consumed`: for `tasks.join({ a, b, a })`, `#results` is 3, and `results[1]` and `results[3]` are separate tables for the same task.
 
 ### Wait errors
 
-Waiting on a task the chain does not own raises an error value of kind `task_not_owned`, with the message `` task `{task}` is not a task this chain owns ``, and waiting on a task already delivered raises `task_consumed`. The set is a table holding at least one task: a value that is not a table fails with `{call} expects a set of tasks, got {type}`, and an empty set fails with `{call} requires at least one task`, both error values of kind `lua`, where `{call}` is `tasks.when_any` or `tasks.when_all`. Each member is checked as a handle or id, as [Task handles and ids](#task-handles-and-ids) describes.
+Waiting on a task the chain does not own raises an error value of kind `task_not_owned`, with the message `` task `{task}` is not a task this chain owns ``, and waiting on a task already delivered raises `task_consumed`. The set is a table holding at least one task: a value that is not a table fails with `{call} expects a set of tasks, got {type}`, and an empty set fails with `{call} requires at least one task`, both error values of kind `lua`, where `{call}` is `tasks.join_any` or `tasks.join`. Each member is checked as a handle or id, as [Task handles and ids](#task-handles-and-ids) describes.
 
 ## Time limits on waits
 
-Pass `{ timeout = seconds }` as the second argument of `tasks.when_any` or `tasks.when_all` to limit how long the wait lasts. The timeout is a number of seconds: a whole number such as `5` or `30`, a fraction such as `1.5` or `0.05`, or `0`. A timeout only ends the wait and never cancels a member.
+Pass `{ timeout = seconds }` as the second argument of `tasks.join_any` or `tasks.join` to limit how long the wait lasts. The timeout is a number of seconds: a whole number such as `5` or `30`, a fraction such as `1.5` or `0.05`, or `0`. A timeout only ends the wait and never cancels a member.
 
-A timed `tasks.when_any` returns `nil` when no member ended in time, so `local first, ok, result = ...` reads three nils, and the members keep running. To collect a member that missed the limit, wait on it again without a timeout:
+A timed `tasks.join_any` returns `nil` when no member ended in time, so `local first, ok, result = ...` reads three nils, and the members keep running. To collect a member that missed the limit, wait on it again without a timeout:
 
 ````lua
 local t = tasks.spawn('## Slow')
-local first, ok, result = tasks.when_any({ t }, { timeout = 5 })
+local first, ok, result = tasks.join_any({ t }, { timeout = 5 })
 if first == nil then
   log('still working after 5 seconds')
-  first, ok, result = tasks.when_any({ t })
+  first, ok, result = tasks.join_any({ t })
 end
 return result
 ````
 
-The second wait returns the member's handle, its `ok` flag, and its result as usual, and nothing is left live at the end of the run. When a member ends before the limit, a timed `tasks.when_any` returns that member's handle, `ok`, and result as usual, and the pending timeout is dropped, so the run does not wait out the rest of it. A member that ends at the same moment the timeout expires wins, and the timeout never appears among the results.
+The second wait returns the member's handle, its `ok` flag, and its result as usual, and nothing is left live at the end of the run. When a member ends before the limit, a timed `tasks.join_any` returns that member's handle, `ok`, and result as usual, and the pending timeout is dropped, so the run does not wait out the rest of it. A member that ends at the same moment the timeout expires wins, and the timeout never appears among the results.
 
-One timeout covers a whole timed `tasks.when_all`, which returns a second value, `timed_out`. When the timeout expires, `timed_out` is `true` and the entries of the unfinished members are `nil`. When every member finishes first, `timed_out` is `false`, every entry is there in member order, and the pending timeout is dropped. `tasks.when_all` always returns `timed_out` as its second value, and it is `false` whenever no timeout fired, including calls with no options.
+One timeout covers a whole timed `tasks.join`, which returns a second value, `timed_out`. When the timeout expires, `timed_out` is `true` and the entries of the unfinished members are `nil`. When every member finishes first, `timed_out` is `false`, every entry is there in member order, and the pending timeout is dropped. `tasks.join` always returns `timed_out` as its second value, and it is `false` whenever no timeout fired, including calls with no options.
 
-After a timed-out `tasks.when_all`, the entries of the unfinished members are holes in the results sequence, and Lua's length rules make `#results` and `ipairs` unreliable across holes. Walk the positions of the set instead, and test each entry for `nil`:
+After a timed-out `tasks.join`, the entries of the unfinished members are holes in the results sequence, and Lua's length rules make `#results` and `ipairs` unreliable across holes. Walk the positions of the set instead, and test each entry for `nil`:
 
 ````lua
 local set = { tasks.spawn('## Quick'), tasks.spawn('## Slow') }
-local results, timed_out = tasks.when_all(set, { timeout = 5 })
+local results, timed_out = tasks.join(set, { timeout = 5 })
 local late = {}
 for i = 1, #set do
   if results[i] == nil then
@@ -412,11 +415,11 @@ for i = 1, #set do
   end
 end
 if #late > 0 then
-  tasks.when_all(late)
+  tasks.join(late)
 end
 ````
 
-Members that missed a `tasks.when_all` limit keep running, and a later `tasks.when_all`, like the last one here, gathers them. Members left running by a timeout still need a wait or a cancel before their owner ends.
+Members that missed a `tasks.join` limit keep running, and a later `tasks.join`, like the last one here, gathers them. Members left running by a timeout still need a wait or a cancel before their owner ends.
 
 ### Timeouts and task ids
 
@@ -424,13 +427,71 @@ Each timed wait takes one index from the owner's child counter, the same counter
 
 ### Timeout rules
 
-The options are a table, `timeout` is a number, and the number is a non-negative, finite count of seconds within the range a duration can hold. Each rule is checked at the call, before the wait starts, and a broken rule fails with an error value of kind `lua`, where `{call}` is `tasks.when_any` or `tasks.when_all`:
+The options are a table, `timeout` is a number, and the number is a non-negative, finite count of seconds within the range a duration can hold. Each rule is checked at the call, before the wait starts, and a broken rule fails with an error value of kind `lua`, where `{call}` is `tasks.join_any` or `tasks.join`:
 
 - Options that are not a table fail with `{call} opts must be a table, got {type}`.
-- A `timeout` that is not a number fails with `{call} timeout must be a number, got {type}`, such as `tasks.when_any timeout must be a number, got string`.
+- A `timeout` that is not a number fails with `{call} timeout must be a number, got {type}`, such as `tasks.join_any timeout must be a number, got string`.
 - Any other number fails with `timeout must be a non-negative finite number of seconds, got {seconds}`, naming the value.
 
 A refused option starts nothing: no timeout is set and the members are untouched, so after a `pcall` the owner can still wait on them.
+
+### Freeform tasks and pipelines
+
+Tasks generalize beyond `fanout`: spawn a set of worker tasks, join them all, and merge their work by index. In the freeform pattern, prepare each worker's input before you spawn it, and read its output after you join it. Each worker writes its own partition file, named from its `sys.index`, and the caller merges the partitions by index after the join:
+
+````markdown
+---
+name: freeform
+description: Runs one task per topic and merges their files by index
+promptforge: 0
+---
+
+# Freeform
+
+## Research
+
+```lua
+local topics = list_from_section('### Topics')
+local set = {}
+for i, topic in ipairs(topics) do
+  set[i] = tasks.spawn('### Worker', { item = topic, index = i })
+end
+tasks.join(set)
+local parts = {}
+for i = 1, #topics do
+  parts[i] = store.read('research/' .. i .. '.md')
+end
+return table.concat(parts, '\n\n')
+```
+
+### Worker
+
+```lua
+store.write('research/' .. sys.index .. '.md', item)
+```
+
+### Topics
+
+- alpha
+- beta
+````
+
+````text
+alpha
+
+beta
+````
+
+The join delivers and joins every member, so each worker's file is visible to the merge, and merging by index keeps the same order on every run. Freeform tasks count against the [concurrency limit](#the-concurrency-limit) like any other task.
+
+A pipeline chains stages through the owner. A task cannot join its sibling, so the owner orders them: spawn the first stage, join it, then spawn the second stage, which sees the first stage's files because the join ordered it after them:
+
+````lua
+local g = tasks.spawn('### Gather')
+tasks.join({ g })
+local s = tasks.spawn('### Summarize')
+tasks.join({ s })
+````
 
 ## Checking on tasks
 
@@ -460,7 +521,7 @@ local t = tasks.spawn('## Child')
 store.write('park', 'x')
 local s = tasks.status(t)
 log('state=' .. s.state .. ' section=' .. tostring(s.section) .. ' blocked=' .. tostring(s.blocked) .. ' note=' .. tostring(s.note))
-local _, ok, result = tasks.when_any({ t })
+local _, ok, result = tasks.join_any({ t })
 return result
 ```
 
@@ -510,6 +571,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - `user_input`: an answer from the operator
 - `store`: a store call
 - `tasks`: a wait on tasks, timed or not, or a history read
+- `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
 - `call`: a called chain
 
 `turns` is the task's round count so far: `0` while its first `models.infer` round is in flight, and `1` after that round returns. `tasks` lists the live tasks the task started itself, as id strings in spawn order, and never includes the timeout behind a timed wait. A task waiting with a timeout on the one task it spawned reads `blocked` `tasks`, and its `tasks` field lists that one task alone, such as `0.0.0`. A status table's `tasks` holds id strings, while `tasks.pending()` returns handles; both work as arguments to every `tasks` function.
@@ -540,8 +602,9 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 | Call | Returns |
 |---|---|
 | `tasks.spawn` | a Task handle |
-| `tasks.when_any` | the member's Task handle, its `ok` flag, and its result text or error value, or `nil` when a timeout ends the wait first |
-| `tasks.when_all` | the results sequence and `timed_out` |
+| `tasks.join_any` | the member's Task handle, its `ok` flag, and its result text or error value, or `nil` when a timeout ends the wait first |
+| `tasks.join` | the results sequence and `timed_out` |
+| `tasks.concurrency` | the chain's effective admission limit, after clamping when a limit was given |
 | `tasks.ready` | a boolean |
 | `tasks.status` | a status table |
 | `tasks.pending` | a sequence of Task handles, empty when nothing is live |
@@ -549,6 +612,14 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 | `tasks.cancel` | nothing |
 
 `tasks.spawn`, `tasks.ready`, `tasks.status`, `tasks.pending`, `tasks.note`, and `tasks.cancel` are answered at once, and so is a wait whose member has already ended.
+
+## The concurrency limit
+
+The host running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+
+`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the host's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. Under a host ceiling of 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable across hosts with different ceilings. The new limit gates admissions from then on only, and never preempts a task that is already running.
+
+An argument that is not a positive whole number raises an error value of kind `lua` at the call site with the message `tasks.concurrency limit must be a positive whole number, got {type}`, where a whole-number float such as `2.0` counts as a whole number and is accepted.
 
 ## Cancellation and task lifetimes
 
@@ -574,7 +645,7 @@ models.default('writer')
 ```lua
 local quick = tasks.spawn('### Quick')
 local careful = tasks.spawn('### Careful')
-local _, ok, result = tasks.when_any({ quick, careful })
+local _, ok, result = tasks.join_any({ quick, careful })
 for _, t in ipairs(tasks.pending()) do
   tasks.cancel(t)
 end
@@ -597,7 +668,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 ```
 ````
 
-`tasks.when_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
+`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
 A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
 
@@ -605,7 +676,7 @@ A wait on a cancelled task returns `ok = false` and an error value of kind `canc
 
 ````lua
 tasks.cancel(t)
-local _, ok, err = tasks.when_any({ t })
+local _, ok, err = tasks.join_any({ t })
 ````
 
 Here `ok` is `false`, `err.kind` is `cancelled`, `err.task` equals `t.task`, and `err.reason` is nil. After the cancel, `tasks.status(t)` reads `state` `cancelled` and `ok` `false`, `tasks.ready(t)` is `true`, `tasks.pending()` no longer lists the task, and the task's section never reaches its `return`. A cancelled task holds no result to consume, so waiting on it again returns the same `cancelled` error value and raises no `task_consumed`. Being cancelled is the only ending other than a finished result that a wait delivers.
@@ -725,7 +796,7 @@ A stopped chain's section does not finish. When a cancel stops a chain, whether 
 Every mistake in a `tasks` call raises an error value that [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches. A caught task error has a `kind`, a field naming the task where there is one, and a message you read with `tostring(err)`. For a second wait on a delivered task:
 
 ````lua
-local ok, err = pcall(tasks.when_any, { t })
+local ok, err = pcall(tasks.join_any, { t })
 return err.kind .. '|' .. err.task .. '|' .. tostring(err)
 ````
 
@@ -770,11 +841,11 @@ Argument checks made by the `tasks` functions themselves give a message that sta
 | `fanout recursion exceeded cap of 8` | `fanout`, when an arm would cross the cap |
 | `{call} expects a Task handle or task id, got {type}` | any call that takes a task |
 | `` `{text}` is not a task id: required a dot-separated path such as `0.1` `` | any call that takes a task |
-| `{call} expects a set of tasks, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `{call} requires at least one task` | `tasks.when_any`, `tasks.when_all` |
-| `{call} opts must be a table, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `{call} timeout must be a number, got {type}` | `tasks.when_any`, `tasks.when_all` |
-| `timeout must be a non-negative finite number of seconds, got {seconds}` | `tasks.when_any`, `tasks.when_all` |
+| `{call} expects a set of tasks, got {type}` | `tasks.join_any`, `tasks.join` |
+| `{call} requires at least one task` | `tasks.join_any`, `tasks.join` |
+| `{call} opts must be a table, got {type}` | `tasks.join_any`, `tasks.join` |
+| `{call} timeout must be a number, got {type}` | `tasks.join_any`, `tasks.join` |
+| `timeout must be a non-negative finite number of seconds, got {seconds}` | `tasks.join_any`, `tasks.join` |
 | `tasks.pending filter must be a table, got {type}` | `tasks.pending` |
 | `` pending filter origin must be `author` or `model`, got `{tag}` `` | `tasks.pending` |
 | `pending filter origin must be a string, got {type}` | `tasks.pending` |
@@ -936,11 +1007,11 @@ When the owner fails because its `models.loop` ran past the [round cap](11-conve
 
 ### Taking over the model's tasks
 
-The prompt can take over the model's tasks by listing them with `tasks.pending({ origin = "model" })`, and passing that list to `tasks.when_all` collects them:
+The prompt can take over the model's tasks by listing them with `tasks.pending({ origin = "model" })`, and passing that list to `tasks.join` collects them:
 
 ````lua
 local adopted = tasks.pending({ origin = 'model' })
-local results = tasks.when_all(adopted)
+local results = tasks.join(adopted)
 return tostring(results[1].ok) .. '|' .. results[1].result
 ````
 
@@ -993,7 +1064,7 @@ Each call to `task`, `task_status`, or `await_tasks` is an ordinary tool call: i
 
 ## The model's wait
 
-In a section that called `tools.allow_tasks`, the model can call `await_tasks`, which holds that tool call until one of the tasks the model started ends and then returns every task notice that has arrived, one per line. It needs no arguments, so the model calls it with `{}`. `await_tasks` waits on the same kind of task set as `tasks.when_any`, just as `task_status` and `task_cancel` apply the same rules as `tasks.status` and `tasks.cancel`, each narrowed to the model's own tasks.
+In a section that called `tools.allow_tasks`, the model can call `await_tasks`, which holds that tool call until one of the tasks the model started ends and then returns every task notice that has arrived, one per line. It needs no arguments, so the model calls it with `{}`. `await_tasks` waits on the same kind of task set as `tasks.join_any`, just as `task_status` and `task_cancel` apply the same rules as `tasks.status` and `tasks.cancel`, each narrowed to the model's own tasks.
 
 The wait wakes on the first task to end, not on all of them, and returns the notices that have arrived by then; with one task ended, that is its notice alone. Calling `await_tasks` once per task collects the results in finish order. Here the model starts two tasks and waits twice, and `## Quick` finishes before `## Slow`:
 
@@ -1006,7 +1077,7 @@ The wait wakes on the first task to end, not on all of them, and returns the not
 
 Each notice is delivered exactly once and in arrival order, by whichever takes it first, a `models.loop` round or `await_tasks`, so a notice that `await_tasks` returned is not added again to the next round. Notices already waiting are returned at once, even with other tasks still running and a timeout given, and then no timeout starts.
 
-The wait covers only the model's own tasks: tasks the prompt spawned are neither waited on nor listed as still running. Other chains, such as a task the prompt spawned, keep running while the model's call is held in `await_tasks`, and the owner's status `blocked` reads `tasks` meanwhile. A task that finishes while its owner is inside `await_tasks` keeps its result, so the prompt can still collect it later with `tasks.when_any`.
+The wait covers only the model's own tasks: tasks the prompt spawned are neither waited on nor listed as still running. Other chains, such as a task the prompt spawned, keep running while the model's call is held in `await_tasks`, and the owner's status `blocked` reads `tasks` meanwhile. A task that finishes while its owner is inside `await_tasks` keeps its result, so the prompt can still collect it later with `tasks.join_any`.
 
 The wait's own text is trusted engine text, while each task result inside a notice stays in the untrusted envelope, exactly as the next round would have received it.
 
