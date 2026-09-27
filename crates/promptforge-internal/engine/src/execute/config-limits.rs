@@ -23,7 +23,7 @@ nz!(nz_u64, NonZeroU64, u64);
 nz!(nz_usize, NonZeroUsize, usize);
 
 /// Resource ceilings a run honors at its bounded sites: per-section tool
-/// iterations, fanout concurrency, model response size, Lua memory, Lua log
+/// iterations, task concurrency, model response size, Lua memory, Lua log
 /// volume, and the model receive timeout.
 ///
 /// The defaults are safe, non-environment values that a clean build can use
@@ -45,7 +45,7 @@ nz!(nz_usize, NonZeroUsize, usize);
 #[non_exhaustive]
 pub struct RunLimits {
     max_tool_iterations: NonZeroU32,
-    fanout_concurrency: NonZeroUsize,
+    concurrency: NonZeroUsize,
     max_response_bytes: NonZeroU64,
     lua_memory_bytes: NonZeroUsize,
     lua_log_events: NonZeroU32,
@@ -53,7 +53,8 @@ pub struct RunLimits {
 }
 
 impl RunLimits {
-    /// Builds the default limits (24 tool iterations, 8-way fanout, 16 MiB
+    /// Builds the default limits (24 tool iterations, 8-way task
+    /// concurrency, 16 MiB
     /// response cap, 64 MiB Lua memory, 1024 Lua log events, and a 120 s
     /// longest wait for the next model receive).
     ///
@@ -67,7 +68,7 @@ impl RunLimits {
     pub fn new() -> RunLimits {
         RunLimits {
             max_tool_iterations: nz_u32(24),
-            fanout_concurrency: nz_usize(8),
+            concurrency: nz_usize(8),
             max_response_bytes: nz_u64(16 * 1024 * 1024),
             lua_memory_bytes: nz_usize(64 * 1024 * 1024),
             lua_log_events: nz_u32(1024),
@@ -82,10 +83,14 @@ impl RunLimits {
         self
     }
 
-    /// Sets the maximum number of concurrent fanout arms.
+    /// Sets the run's concurrency ceiling: the most tasks the scheduler
+    /// admits at once, across the whole run. Every spawned task counts
+    /// against its owner's limit and every ancestor's, so the ceiling
+    /// nests: a fanout inside an arm runs within the arm's remaining
+    /// share.
     #[must_use]
-    pub fn max_fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
-        self.fanout_concurrency = value;
+    pub fn max_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
+        self.concurrency = value;
         self
     }
 
@@ -125,10 +130,11 @@ impl RunLimits {
         self.max_tool_iterations
     }
 
-    /// Returns the maximum number of concurrent fanout arms.
+    /// Returns the run's concurrency ceiling: the most tasks the
+    /// scheduler admits at once across the whole run.
     #[must_use]
-    pub fn fanout_concurrency(&self) -> NonZeroUsize {
-        self.fanout_concurrency
+    pub fn concurrency(&self) -> NonZeroUsize {
+        self.concurrency
     }
 
     /// Returns the maximum accepted model response body size, in bytes.
@@ -170,7 +176,7 @@ mod tests {
     fn run_limits_pins_all_six_defaults_and_the_untested_builders() {
         let defaults = RunLimits::new();
         assert_eq!(defaults.tool_iterations().get(), 24);
-        assert_eq!(defaults.fanout_concurrency().get(), 8);
+        assert_eq!(defaults.concurrency().get(), 8);
         assert_eq!(defaults.response_bytes().get(), 16 * 1024 * 1024);
         assert_eq!(defaults.lua_memory().get(), 64 * 1024 * 1024);
         assert_eq!(defaults.lua_logs().get(), 1024);

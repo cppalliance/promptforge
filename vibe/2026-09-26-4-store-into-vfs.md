@@ -815,7 +815,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-6>
 
-### Step 6: One scheduler-wide concurrency limit
+### Step 6: One scheduler-wide concurrency limit [completed]
 
 - Component: Scheduler concurrency limit
 - Placement: third of five components. It needs only Step 4's `join_any`, landing it right after Step 5 closes the refill-window gap noted there, and it touches no store code, so the store component doesn't depend on it.

@@ -7,7 +7,8 @@
 //! behavior never depends on which backend serves the mount.
 //! A received `mcp` request is the protocol's typed reserved error. The
 //! `tool_call`, `local_tool_done`, `chat`, `spawn`, `timer`, `task_events`,
-//! `drain_task_notices`, and task wait, inspection, note, and cancel arms
+//! `drain_task_notices`, and task wait, inspection, note, concurrency, and
+//! cancel arms
 //! are defined in their own modules.
 
 use std::sync::Arc;
@@ -97,6 +98,7 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         | Request::Ready { .. }
         | Request::Status { .. }
         | Request::Pending { .. }
+        | Request::Concurrency { .. }
         | Request::Note { .. }
         | Request::Cancel { .. }
         | Request::DrainTaskNotices
@@ -151,7 +153,7 @@ impl Scheduler {
                     &target,
                     input.as_deref(),
                     TaskSeed { item, index },
-                    &var,
+                    var,
                     origin,
                     fanout,
                 );
@@ -175,6 +177,10 @@ impl Scheduler {
             }
             Request::Pending { origin } => {
                 self.dispatch_pending(id, origin);
+                Ok(())
+            }
+            Request::Concurrency { limit } => {
+                self.dispatch_concurrency(id, limit);
                 Ok(())
             }
             Request::Note { text } => {
@@ -359,6 +365,9 @@ impl Scheduler {
         // capability (the same serial thread of execution), so the caller's
         // standing claims never false-conflict with the child's ops.
         let access = chain.access.clone();
+        // A call chain's effective limit starts with its caller's: the
+        // tasks it spawns run within the caller's share.
+        let child_concurrency = chain.concurrency;
         // `chain`'s arena borrow ends here; the resolution names the
         // target's slice by path, so nothing borrows the arena across it.
         let target_section = self.resolve_chain_target(id, target)?;
@@ -373,8 +382,9 @@ impl Scheduler {
             target_section.slice,
             target_section.index,
             Some(id),
-            var,
+            var.clone(),
             depth,
+            child_concurrency,
         )?;
         self.chains[child.index()].access = access;
         Ok(child)

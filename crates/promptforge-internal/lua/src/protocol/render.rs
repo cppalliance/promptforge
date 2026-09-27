@@ -186,6 +186,11 @@ impl<E: ErrorValue> Answer<E> {
             Answer::Ready(Ok(ready)) => vec![Value::Boolean(ready)],
             Answer::Status(Ok(status)) => vec![Value::Table(task_status_table(lua, *status)?)],
             Answer::Pending(Ok(tasks)) => vec![Value::Table(task_id_sequence(lua, &tasks)?)],
+            // The effective limit resumes as a plain number, so the shim
+            // returns it as the call's value.
+            Answer::Concurrency(Ok(limit)) => {
+                vec![Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX))]
+            }
             Answer::Note(Ok(())) | Answer::Cancel(Ok(())) => vec![Value::Nil],
             // Always a sequence, empty included, so the shim's `#` and
             // `ipairs` need no nil check.
@@ -226,6 +231,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Ready(Err(error))
             | Answer::Status(Err(error))
             | Answer::Pending(Err(error))
+            | Answer::Concurrency(Err(error))
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
             | Answer::TaskEvents(Err(error))

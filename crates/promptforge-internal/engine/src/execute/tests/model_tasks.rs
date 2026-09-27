@@ -334,7 +334,7 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_exhausted_tool_loop_abandons_the_model_task_for_that_reason() {
+async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     let gateway = ScriptedGateway::start(vec![resp_tool_call(
         "call_1",
         "task",
@@ -367,14 +367,15 @@ async fn an_exhausted_tool_loop_abandons_the_model_task_for_that_reason() {
         Some(TaskState::Abandoned)
     );
     let records = recorder.records();
+    // The owner exhausted before the child ever ran - the loop fails on
+    // the round that answered the task call, with no suspension between -
+    // so the task was still queued for admission: it reports no start
+    // and no terminal, though its slot still reaches Abandoned.
     assert!(
-        records.iter().any(|(section, event)| section == "Child"
-            && *event
-                == Observation::TaskAbandoned {
-                    task: task("0.0"),
-                    reason: AbandonReason::ToolLoopExhausted,
-                }),
-        "the abandonment names the exhausted loop: {records:?}"
+        !records.iter().any(|(_, event)| {
+            matches!(event, Observation::TaskStarted { task: seen, .. } | Observation::TaskAbandoned { task: seen, .. } if seen == &task("0.0"))
+        }),
+        "a task that never ran reports no start and no terminal: {records:?}"
     );
     assert_eq!(
         AbandonReason::ToolLoopExhausted.why(),

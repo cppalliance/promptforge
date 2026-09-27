@@ -8,8 +8,10 @@
 //! key, a list section's pre-parsed items feeding in through
 //! `list_from_section`). The `fanout` shim itself is Lua over the task
 //! protocol (`promptforge-lua`'s `__impl_fanout.lua`): it spawns one task
-//! per member, keeps at most the run's `max_fanout_concurrency` live, and
-//! waits on the live set. This module defines [`resolve_sibling`], the one
+//! per member - every arm up front, before any join, so no arm is ordered
+//! after a sibling - and waits on the live set while the scheduler's
+//! admission limit bounds how many arms run at once. This module defines
+//! [`resolve_sibling`], the one
 //! heading resolution those surfaces share; the collection enumeration sits
 //! in the `promptforge-lua` crate, beside the VM and the coroutine protocol
 //! that consume it.

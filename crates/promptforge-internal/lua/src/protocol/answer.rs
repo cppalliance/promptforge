@@ -184,7 +184,8 @@ pub struct TaskStatus {
     /// inside one.
     pub section: Option<String>,
     /// What the backing chain is parked on (`chat`, `tool_call`,
-    /// `user_input`, `store`, `timer`, `tasks`, `call`), while it is.
+    /// `user_input`, `store`, `timer`, `tasks`, `call`), or `queued`
+    /// while it waits for a concurrency slot, while it is.
     pub blocked: Option<&'static str>,
     /// The task's model-turn count so far.
     pub turns: u32,
@@ -234,6 +235,10 @@ pub enum Answer<E> {
     /// The caller's live tasks in spawn order, for a `pending` request;
     /// the shim wraps each id in a `Task` handle.
     Pending(std::result::Result<Vec<TaskId>, E>),
+    /// The chain's effective admission limit, for a `concurrency`
+    /// request: the setter's clamped value, or the current one when the
+    /// call gave no argument.
+    Concurrency(std::result::Result<usize, E>),
     /// The unit outcome of a `note` request.
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
@@ -277,6 +282,7 @@ impl<E> Answer<E> {
             Answer::Ready(result) => Answer::Ready(result.map_err(map)),
             Answer::Status(result) => Answer::Status(result.map_err(map)),
             Answer::Pending(result) => Answer::Pending(result.map_err(map)),
+            Answer::Concurrency(result) => Answer::Concurrency(result.map_err(map)),
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
             Answer::TaskEvents(result) => Answer::TaskEvents(result.map_err(map)),

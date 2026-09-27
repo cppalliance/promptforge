@@ -1,5 +1,5 @@
 //! Scheduler-side tests, split by seam into the `walk`, `live_h1`, `fanout`,
-//! `store_gate`, and `failures` submodules. The context builders `writer_models`,
+//! `concurrency`, `store_gate`, and `failures` submodules. The context builders `writer_models`,
 //! `scheduler_context`, `scheduler_context_on`, and `scheduler_context_from`, the
 //! gateway-request helper `request_prompts`, and the task-lifecycle counter
 //! `terminal_count` with its labels live here because more than one submodule uses
@@ -107,6 +107,7 @@ fn terminal_count(recorder: &Recorder, label: &str) -> usize {
         .count()
 }
 
+mod concurrency;
 mod failures;
 mod fanout;
 mod live_h1;

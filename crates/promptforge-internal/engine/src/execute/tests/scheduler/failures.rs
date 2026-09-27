@@ -4,6 +4,7 @@ use std::num::NonZeroUsize;
 
 use super::*;
 use crate::execute::run::{EffectAnswer, EffectId};
+use crate::execute::scheduler::test_hooks::TaskState;
 use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
@@ -111,10 +112,11 @@ async fn sequential_fanouts_may_write_one_path() {
 #[tokio::test(flavor = "current_thread")]
 async fn fatal_arm_aborts_queued_siblings() {
     // Mirror of the legacy `fatal_arm_aborts_and_drops_blocked_siblings`:
-    // with the window at 1 the siblings stay queued, and once the first
-    // arm fails fatally they are never created - proven by the store
-    // side-channel only the fatal arm ever wrote to, and by the terminal
-    // observations: one FAILED, nothing else.
+    // with the ceiling at 1 the siblings stay queued, and once the first
+    // arm fails fatally they are cancelled before admission - proven by
+    // the store side-channel only the fatal arm ever wrote to, and by the
+    // terminal observations: one FAILED, nothing else. The start event
+    // fires at admission, so the queued siblings never report one.
     let store = TestStore::new();
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -131,9 +133,8 @@ async fn fatal_arm_aborts_queued_siblings() {
     let (ctx, host) = scheduler_context_from(
         &prompt,
         &store,
-        &test_context(EXECUTION).limits(
-            RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
-        ),
+        &test_context(EXECUTION)
+            .limits(RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero"))),
         RunHost::new().observer(recorder.clone()),
     );
     let error = TokioDriver::new(&ctx, host, None)
@@ -368,15 +369,16 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
+async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     // With the chain-count bound shrunk so the second arm's spawn fails
-    // while the shim fills its window, the shim must cancel the arm it
-    // already started before it re-raises: the parent catches the error
-    // exactly once, the started arm never runs its block (its chain gets
-    // at most the one step that enters its section before the spawner's
-    // cancel aborts it), and nothing is left live for the chain-end leak
-    // check. The second arm never reaches the arena, so only one
-    // TaskStarted fires.
+    // while the shim spawns its arms up front, the shim must cancel the
+    // arm it already started before it re-raises: the parent catches the
+    // error exactly once, and nothing is left live for the chain-end leak
+    // check. The first arm was still queued for admission - the spawn
+    // failure lands before the drain admits anything - so it never runs
+    // its block, and no TaskStarted or TaskCancelled fires for it: a task
+    // that never ran reports no start and no terminal, though its slot
+    // still reaches Cancelled.
     let gateway = ScriptedGateway::start(vec![resp_text("after-answer")]).await;
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -384,7 +386,7 @@ async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
         ## Parent\n\n\
         ```lua\n\
         local ok, err = pcall(fanout, '### Worker', {'one', 'two', 'three'})\n\
-        assert(not ok, 'the refill failure reaches the caller')\n\
+        assert(not ok, 'the spawn failure reaches the caller')\n\
         return 'caught:' .. models.infer('after')\n\
         ```\n\n\
         ### Worker\n\n\
@@ -407,15 +409,20 @@ async fn a_spawn_failure_mid_window_cancels_the_started_arms() {
         "no arm ran an infer; only the caller's own request fired"
     );
     assert_eq!(
+        scheduler.task_state_for_test(&"0.0".parse().expect("a task id parses")),
+        Some(TaskState::Cancelled),
+        "the shim cancelled the spawned arm before it re-raised"
+    );
+    assert_eq!(
         terminal_count(&recorder, TASK_STARTED),
-        1,
-        "only the first arm reached the arena: {:?}",
+        0,
+        "the arm was never admitted, so no start fired: {:?}",
         recorder.events()
     );
     assert_eq!(
         terminal_count(&recorder, TASK_CANCELLED),
-        1,
-        "the shim cancels the started arm before it re-raises: {:?}",
+        0,
+        "a task that never started reports no terminal: {:?}",
         recorder.events()
     );
     assert_eq!(

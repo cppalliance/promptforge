@@ -9,7 +9,7 @@
 //! a task spawned in H1 belongs to the walk after the hand-off; an aborted
 //! chain's owned tasks abort with it.
 
-use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
+use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use super::scheduler::scheduler_context_on;
 use super::*;
@@ -348,11 +348,12 @@ const PARKED_CHILD: &str = "store.write('park-' .. sys.id, 'x')\nreturn 'never'"
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_ids() {
-    // The spawner ends while both children are live (the first parked on
-    // its store write, the second not yet started): the run fails with
-    // `tasks_live` naming both ids in spawn order, and both tasks are
-    // abandoned - slot and terminal observation - because their owner
-    // returned.
+    // The spawner ends while both children are live - neither was ever
+    // admitted, since the spawner returned without suspending - so the
+    // run fails with `tasks_live` naming both ids in spawn order, and
+    // both tasks are abandoned because their owner returned. A task that
+    // never ran reports no start and no terminal, though its slot still
+    // reaches Abandoned.
     let md = spawner_prompt(
         "tasks.spawn('## Child')\n\
          tasks.spawn('## Child')\n\
@@ -393,21 +394,18 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
             Some(TaskState::Abandoned),
             "a leaked task's slot is Abandoned, not Done or Cancelled"
         );
-        recorder.position(
-            "Child",
-            &Observation::TaskAbandoned {
-                task: task(id),
-                reason: AbandonReason::OwnerReturned,
-            },
-        );
     }
     let records = recorder.records();
     assert!(
         !records.iter().any(|(_, event)| matches!(
             event,
-            Observation::TaskSucceeded { .. } | Observation::TaskFailed { .. }
+            Observation::TaskStarted { .. }
+                | Observation::TaskSucceeded { .. }
+                | Observation::TaskFailed { .. }
+                | Observation::TaskCancelled { .. }
+                | Observation::TaskAbandoned { .. }
         )),
-        "an abandoned task reports no other terminal event: {records:?}"
+        "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
 
@@ -415,8 +413,9 @@ async fn a_chain_ending_with_live_author_tasks_fails_as_tasks_live_naming_the_id
 async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_task() {
     // The spawner errors after spawning: the leak is the lesser fault, so
     // the run's error is the spawner's own, not `tasks_live`; the task
-    // still ends with its owner, its slot Abandoned and its terminal
-    // observation naming the failed owner.
+    // still ends with its owner, its slot Abandoned. The task was never
+    // admitted - the spawner failed without suspending - so it reports no
+    // start and no terminal.
     let md = spawner_prompt(
         "tasks.spawn('## Child')\n\
          error('spawner boom')",
@@ -448,20 +447,17 @@ async fn a_chain_failing_with_a_live_task_keeps_its_own_error_and_abandons_the_t
         Some(TaskState::Abandoned),
         "the task ended with its failed owner"
     );
-    recorder.position(
-        "Child",
-        &Observation::TaskAbandoned {
-            task: task("0.0"),
-            reason: AbandonReason::OwnerFailed,
-        },
-    );
     let records = recorder.records();
     assert!(
         !records.iter().any(|(_, event)| matches!(
             event,
-            Observation::TaskSucceeded { .. } | Observation::TaskFailed { .. }
+            Observation::TaskStarted { .. }
+                | Observation::TaskSucceeded { .. }
+                | Observation::TaskFailed { .. }
+                | Observation::TaskCancelled { .. }
+                | Observation::TaskAbandoned { .. }
         )),
-        "an abandoned task reports no other terminal event: {records:?}"
+        "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
 
@@ -488,7 +484,9 @@ fn moving_spawner_prompt(movement: &str) -> String {
 }
 
 /// Drives `md` and asserts that the run fails `tasks_live` naming `0.0`
-/// alone, with the task's slot Abandoned because its owner returned.
+/// alone, with the task's slot Abandoned because its owner returned. The
+/// task never ran - neither chain suspended between the spawn and the
+/// end - so it reports no start and no terminal.
 async fn assert_task_outlives_movement(md: &str) {
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
@@ -512,12 +510,17 @@ async fn assert_task_outlives_movement(md: &str) {
         Some(TaskState::Abandoned),
         "the task ended with the chain, not with the section that spawned it"
     );
-    recorder.position(
-        "Child",
-        &Observation::TaskAbandoned {
-            task: task("0.0"),
-            reason: AbandonReason::OwnerReturned,
-        },
+    let records = recorder.records();
+    assert!(
+        !records.iter().any(|(_, event)| matches!(
+            event,
+            Observation::TaskStarted { .. }
+                | Observation::TaskSucceeded { .. }
+                | Observation::TaskFailed { .. }
+                | Observation::TaskCancelled { .. }
+                | Observation::TaskAbandoned { .. }
+        )),
+        "a task that never ran reports no start and no terminal: {records:?}"
     );
     recorder.position("Sibling", &detail::SECTION_STARTED);
 }
@@ -592,7 +595,10 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
     // H1 spawns a child that parks; the walk's first section returns at
     // once. The hand-off made the walk the task's owner, so the walk's end
     // is the leak: without the reassignment the pass's task would belong
-    // to a chain that never finishes and the run would end `done`.
+    // to a chain that never finishes and the run would end `done`. The
+    // task was never admitted - neither the pass nor the walk suspended
+    // between the spawn and the walk's end - so it reports no start and
+    // no terminal, though its slot ends Abandoned.
     let md = "---\nname: h1\ndescription: d\npromptforge: 0\n---\n\n\
         # Tasks\n\n\
         ```lua\n\
@@ -624,21 +630,21 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
         Error::TasksLive { tasks } => assert_eq!(tasks, &[task("0.0")]),
         other => panic!("expected tasks_live, got {other:?}"),
     }
-    recorder.position(
-        "Tasks",
-        &Observation::TaskStarted {
-            task: task("0.0"),
-            target: "Child".to_owned(),
-            origin: TaskOrigin::Author,
-            input: None,
-            item: None,
-            index: None,
-            var: json!({}),
-        },
-    );
     assert_eq!(
         scheduler.task_state_for_test(&task("0.0")),
         Some(TaskState::Abandoned)
+    );
+    let records = recorder.records();
+    assert!(
+        !records.iter().any(|(_, event)| matches!(
+            event,
+            Observation::TaskStarted { .. }
+                | Observation::TaskSucceeded { .. }
+                | Observation::TaskFailed { .. }
+                | Observation::TaskCancelled { .. }
+                | Observation::TaskAbandoned { .. }
+        )),
+        "a task that never ran reports no start and no terminal: {records:?}"
     );
 }
 
@@ -646,9 +652,10 @@ async fn a_task_spawned_in_h1_belongs_to_the_main_walk() {
 async fn aborting_a_chain_abandons_the_tasks_it_owns() {
     // A fatal sibling arm makes the fanout shim cancel the spawning arm
     // before it resumes; the abort takes the arm's task with it: the
-    // task's slot is Abandoned because its owner was aborted, its terminal
-    // observation fires, and its chain never runs its block (it gets at
-    // most the one step that enters its section before the cancel lands).
+    // task's slot is Abandoned because its owner was aborted. The task
+    // was never admitted - the arm was cancelled while its spawn was
+    // still queued - so it reports no start and no terminal, and its
+    // chain never runs its block.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Tasks\n\n\
         ## Main\n\n\
@@ -690,14 +697,19 @@ async fn aborting_a_chain_abandons_the_tasks_it_owns() {
         Some(TaskState::Abandoned),
         "the aborted arm's task is Abandoned"
     );
-    recorder.position(
-        "Child",
-        &Observation::TaskAbandoned {
-            task: task("0.0.0"),
-            reason: AbandonReason::OwnerAborted,
-        },
-    );
     let records = recorder.records();
+    assert!(
+        !records.iter().any(|(section, event)| section == "Child"
+            && matches!(
+                event,
+                Observation::TaskStarted { .. }
+                    | Observation::TaskSucceeded { .. }
+                    | Observation::TaskFailed { .. }
+                    | Observation::TaskCancelled { .. }
+                    | Observation::TaskAbandoned { .. }
+            )),
+        "the abandoned task never ran, so it reports nothing: {records:?}"
+    );
     assert!(
         !records
             .iter()

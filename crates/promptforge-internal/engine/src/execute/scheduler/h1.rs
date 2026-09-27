@@ -42,7 +42,8 @@ impl Scheduler {
         );
         let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
         // The pass is the root chain: its one frame takes entry 0, and the
-        // walk that follows continues its counters as the same chain.
+        // walk that follows continues its counters as the same chain. Its
+        // admission limit is the run's ceiling.
         self.chains.push(Chain {
             lineage: ChainId::root(),
             counters: Counters::default(),
@@ -66,6 +67,11 @@ impl Scheduler {
             pending_prose: None,
             var: serde_json::json!({}),
             call_depth: 0,
+            concurrency: self.ctx.limits().concurrency().get(),
+            slots_used: 0,
+            holding: false,
+            admitted: false,
+            pending_spawn: None,
             parent: None,
             advertised: None,
             h1: true,
@@ -108,8 +114,11 @@ impl Scheduler {
         let walk_access = Arc::clone(chain.access()?);
         // The walk is the same root chain as the pass, so it continues the
         // pass's counters: the pass took entry 0, the first walked section
-        // takes entry 1, and a child the pass started keeps its index.
+        // takes entry 1, and a child the pass started keeps its index. Its
+        // admission limit continues too: the pass may have lowered it with
+        // `tasks.concurrency`.
         let counters = chain.counters;
+        let concurrency = chain.concurrency;
         if promptforge_parser::detail::sections(self.ctx.prompt()).is_empty() {
             // No walk follows, so the pass's end is the run's end: a task
             // the pass spawned and left live ends here under the same
@@ -128,8 +137,9 @@ impl Scheduler {
             SlicePath::root(),
             start,
             None,
-            &var,
+            var,
             0,
+            concurrency,
         )?;
         self.install_root_slots(root, Some(walk_access))?;
         // The walk is the pass's continuation, so the tasks the pass

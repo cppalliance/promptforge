@@ -1,7 +1,8 @@
 //! The task-operation request parsers: `spawn`'s target, seeds, var
 //! snapshot, origin, and fanout mark; the `timer` leaf request's
-//! author-supplied `seconds` and its domain checks; and the loop shim's
-//! `drain_task_notices` unit request.
+//! author-supplied `seconds` and its domain checks; the loop shim's
+//! `drain_task_notices` unit request; and `concurrency`'s optional
+//! shim-validated limit.
 
 use super::*;
 
@@ -273,6 +274,67 @@ fn task_events_last_out_of_domain_is_the_calls_error() {
             assert!(message.contains("is not a task id"), "got {message}");
         }
         other => panic!("expected the task id call error, got {other:?}"),
+    }
+}
+
+#[test]
+fn concurrency_parses_an_optional_positive_whole_number_limit() {
+    // `limit` is shim-produced - the shim has already refused every
+    // non-positive-whole-number argument at the call site - so an absent
+    // field is the read-only form and a positive integer is a limit;
+    // any other shape is a malformed yield.
+    let lua = Lua::new();
+    let table = request_table(&lua, "concurrency");
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::Concurrency { limit } => assert_eq!(limit, None, "no argument reads the limit"),
+        other => panic!("expected a concurrency request, got {other:?}"),
+    }
+    for (value, expected) in [(Value::Integer(1), 1), (Value::Integer(16), 16)] {
+        let table = request_table(&lua, "concurrency");
+        table.raw_set("limit", value).expect("raw_set");
+        match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+            Request::Concurrency { limit } => assert_eq!(limit, Some(expected)),
+            other => panic!("expected a concurrency request, got {other:?}"),
+        }
+    }
+    for value in [
+        Value::Integer(0),
+        Value::Integer(-2),
+        Value::Number(2.5),
+        Value::String(lua.create_string("two").expect("a string")),
+    ] {
+        let table = request_table(&lua, "concurrency");
+        table.raw_set("limit", value).expect("raw_set");
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Malformed(_) => {}
+            other => panic!("expected a malformed yield, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn concurrency_converts_a_whole_number_float_and_refuses_an_out_of_range_one() {
+    // A float with an integral value is the author writing `8.0`: the
+    // shim's whole-number check let it through, so the parser converts
+    // it. A whole-number float past `u64` (an author's `1e20`) is the
+    // call's error, raised at the call site like the shim's own refusal.
+    let lua = Lua::new();
+    let table = request_table(&lua, "concurrency");
+    table.raw_set("limit", Value::Number(8.0)).expect("raw_set");
+    match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
+        Request::Concurrency { limit } => assert_eq!(limit, Some(8)),
+        other => panic!("expected a concurrency request, got {other:?}"),
+    }
+    let table = request_table(&lua, "concurrency");
+    table
+        .raw_set("limit", Value::Number(1e20))
+        .expect("raw_set");
+    match Request::from_yield(&lua, &Value::Table(table)) {
+        YieldParse::Call(Answer::Concurrency(Err(Error::Lua(message)))) => assert!(
+            message.contains("positive whole number") && message.contains("64-bit"),
+            "the message names the requirement and the range: {message}"
+        ),
+        other => panic!("expected the concurrency call error, got {other:?}"),
     }
 }
 

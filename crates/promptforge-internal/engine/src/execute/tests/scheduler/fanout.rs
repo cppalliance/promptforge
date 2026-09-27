@@ -12,7 +12,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 // scheduler's arm chains.
 
 /// Builds the run context and its silent host for a scheduler fanout test
-/// with the given limits, so a window test can narrow the concurrency.
+/// with the given limits, so an admission test can narrow the ceiling.
 fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunState, RunHost) {
     scheduler_context_from(
         prompt,
@@ -119,11 +119,13 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fanout_concurrency_window_limits_active_arms() {
-    // The window mirror of the legacy `ArmWindow` contract: with the
-    // window at 1, each arm runs both of its infers before the next arm
-    // starts - a window that let arms overlap would interleave the
-    // requests (x:a, y:a, ...).
+async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
+    // The admission mirror of the legacy `ArmWindow` contract: with the
+    // run's concurrency ceiling at 1, the first arm runs both of its
+    // infers and ends before the second is admitted - admission that let
+    // arms overlap would interleave the requests (x:a, y:a, ...). The
+    // fanout spawns every arm up front, so the later arms wait queued,
+    // holding no Lua VM, until the ceiling admits them.
     let gateway = ScriptedGateway::start(vec![
         resp_text("r1"),
         resp_text("r2"),
@@ -149,18 +151,18 @@ async fn fanout_concurrency_window_limits_active_arms() {
     let prompt = parse(md);
     let (ctx, host) = scheduler_context_with_limits(
         &prompt,
-        RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+        RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("the windowed fanout completes on the scheduler");
+        .expect("the ceilinged fanout completes on the scheduler");
 
     assert_eq!(out, "r1r2|r3r4|r5r6");
     assert_eq!(
         request_prompts(&gateway),
         vec!["x:a", "x:b", "y:a", "y:b", "z:a", "z:b"],
-        "with the window at 1 each arm finishes before the next starts"
+        "with the ceiling at 1 each arm finishes before the next is admitted"
     );
 }
 
@@ -219,11 +221,18 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn fanout_over_a_large_collection_refills_the_window() {
-    // Mirror of the legacy `fanout_accepts_a_list_over_the_old_default_cap`:
-    // a 1025-member collection runs to completion past the 8-wide default
-    // window - a refill that lost track of the next index would stall the
-    // driver or drop results.
+async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
+    // Mirror of the legacy `fanout_accepts_a_list_over_the_old_default_cap`,
+    // plus the plan's VM-count pin: a 1025-member collection runs to
+    // completion under the 8-wide default ceiling - every arm spawns up
+    // front and the admission queue feeds them in as slots free. Each arm
+    // parks on one model round, so its Lua VM stays live from its
+    // admission to its end; the test-support tally of live section VMs
+    // must never exceed the ceiling's arms plus the parent. The completion
+    // assertion alone cannot see a regression that builds a VM per queued
+    // arm at spawn - all 1025 would complete regardless - but the tally's
+    // peak sees it, because every VM would be live at once.
+    let gateway = ScriptedGateway::start(vec![resp_text("r"); 1025]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -235,16 +244,25 @@ async fn fanout_over_a_large_collection_refills_the_window() {
         ```\n\n\
         ### Worker\n\n\
         ```lua\n\
+        models.infer(item)\n\
         return item\n\
         ```\n";
     let prompt = parse(md);
     let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    promptforge_lua::reset_section_vm_peak();
+    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("a collection over the window width completes");
+        .expect("a collection over the ceiling width completes");
 
     assert_eq!(out, "1025:1:1025");
+    let ceiling = RunLimits::new().concurrency().get();
+    let peak = promptforge_lua::section_vm_peak();
+    assert!(
+        (2..=ceiling + 1).contains(&peak),
+        "between the parent plus one admitted arm and the ceiling's arms plus the parent hold \
+         a Lua VM at once: peak {peak}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

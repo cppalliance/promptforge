@@ -95,11 +95,11 @@ impl Scheduler {
             Ok(ToolCallDispatch::Answered(answer)) => {
                 self.answer_inline(id, answer);
             }
-            // The caller runs first and the task when it suspends, the
+            // The caller runs first and the task waits for admission, the
             // order `tasks.spawn` keeps.
             Ok(ToolCallDispatch::Started(answer, child)) => {
                 self.answer_inline(id, answer);
-                self.ready.push_back(child);
+                self.spawned.push_back(child);
             }
             Err(error) => {
                 self.answer_inline(id, Answer::ToolCallResult(Err(error)));

@@ -35,12 +35,17 @@ impl Scheduler {
             self.drain();
         }
         // Every unfinished chain is ready, pending on an effect, blocked on
-        // a child, or waiting on a task, and a blocked or waiting chain
-        // transitively bottoms out in a ready or pending chain, so an
-        // empty ready queue with an empty pending table can only be a
+        // a child, waiting on a task, or queued for admission, and a
+        // blocked or waiting chain transitively bottoms out in a ready or
+        // pending chain, so an empty ready queue with an empty pending
+        // table and empty admission queues can only be a
         // scheduler bug (nothing ready, nothing pending, and whatever is
         // waiting can never be woken) - fail loudly rather than hang.
-        if matches!(self.phase, Phase::Running) && self.ready.is_empty() && self.pending.is_empty()
+        if matches!(self.phase, Phase::Running)
+            && self.ready.is_empty()
+            && self.pending.is_empty()
+            && self.resuming.is_empty()
+            && self.spawned.is_empty()
         {
             self.end(Err(Error::internal(
                 "the scheduler stalled with no ready chain and no in-flight request",
@@ -117,7 +122,11 @@ impl Scheduler {
     /// Runs every ready chain to its next suspension point. Cancellation
     /// is polled before each chain step: the instruction hook covers
     /// running Lua, and a host that cancels while every chain is
-    /// suspended is observed on its next `step`.
+    /// suspended is observed on its next `step`. When the queue empties,
+    /// the queued tasks that now fit are admitted and drained in turn:
+    /// admission is the one place a queued chain's Lua VM comes to be, and
+    /// deferring it to the drain's edge lets a woken owner cancel its
+    /// queued siblings before they start.
     fn drain(&mut self) {
         let mut root_result = None;
         loop {
@@ -126,7 +135,11 @@ impl Scheduler {
                 return;
             }
             let Some(id) = self.ready.pop_front() else {
-                return;
+                self.admit();
+                if self.ready.is_empty() {
+                    return;
+                }
+                continue;
             };
             if let Err(error) = self.step_chain(id, &mut root_result) {
                 self.finish(id, Err(error), &mut root_result);
@@ -176,6 +189,8 @@ impl Scheduler {
     /// happens-before record.
     fn teardown(&mut self) {
         self.ready.clear();
+        self.resuming.clear();
+        self.spawned.clear();
         self.stack.clear();
         for (index, chain) in self.chains.iter().enumerate() {
             let Some(access) = chain.access.as_ref() else {

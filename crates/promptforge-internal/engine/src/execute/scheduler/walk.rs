@@ -59,8 +59,9 @@ impl Scheduler {
             SlicePath::root(),
             0,
             None,
-            &serde_json::json!({}),
+            serde_json::json!({}),
             0,
+            self.ctx.limits().concurrency().get(),
         )?;
         self.install_root_slots(root, None)?;
         self.ready.push_back(root);

@@ -485,12 +485,12 @@ pub fn promptforge::RunError::is_cancelled(&self) -> bool
 pub fn promptforge::RunError::is_retryable(&self) -> bool
 pub fn promptforge::RunError::kind(&self) -> promptforge::RunErrorKind
 pub fn promptforge::RunError::location(&self) -> core::option::Option<promptforge::SourceLocation>
-pub fn promptforge::RunLimits::fanout_concurrency(&self) -> core::num::nonzero::NonZeroUsize
+pub fn promptforge::RunLimits::concurrency(&self) -> core::num::nonzero::NonZeroUsize
 pub fn promptforge::RunLimits::lua_log_events(self, value: core::num::nonzero::NonZeroU32) -> promptforge::RunLimits
 pub fn promptforge::RunLimits::lua_logs(&self) -> core::num::nonzero::NonZeroU32
 pub fn promptforge::RunLimits::lua_memory(&self) -> core::num::nonzero::NonZeroUsize
 pub fn promptforge::RunLimits::lua_memory_bytes(self, value: core::num::nonzero::NonZeroUsize) -> promptforge::RunLimits
-pub fn promptforge::RunLimits::max_fanout_concurrency(self, value: core::num::nonzero::NonZeroUsize) -> promptforge::RunLimits
+pub fn promptforge::RunLimits::max_concurrency(self, value: core::num::nonzero::NonZeroUsize) -> promptforge::RunLimits
 pub fn promptforge::RunLimits::max_response_bytes(self, value: core::num::nonzero::NonZeroU64) -> promptforge::RunLimits
 pub fn promptforge::RunLimits::max_tool_iterations(self, value: core::num::nonzero::NonZeroU32) -> promptforge::RunLimits
 pub fn promptforge::RunLimits::new() -> promptforge::RunLimits

@@ -50,7 +50,8 @@ const FANOUT_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_fan
 /// The `fanout` shim source: Lua over the task protocol (`spawn`,
 /// `join_any`, `cancel`), split from the prelude for the same file-ceiling
 /// reason. It runs over the prelude's failure helpers plus the collection
-/// enumerator, the item renderer, and the run's arm-concurrency cap.
+/// enumerator and the item renderer; the scheduler's admission limit, not
+/// a captured cap, bounds how many arms run at once.
 const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 
 /// The registry key for the shim's `loop`, stashed by the prelude install so
@@ -130,8 +131,8 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// namespace is a second chunk, run over the same `yield` and
 /// `var_snapshot` captures plus the prelude's returned failure helpers,
 /// and installed as the `tasks` global; `fanout` is a third, run over the
-/// same captures plus the collection enumerator, the item renderer, and
-/// `max_fanout_concurrency` (the run's cap on live arms), and installed
+/// same captures plus the collection enumerator and the item renderer,
+/// and installed
 /// as the `fanout` global. The `models.loop` shim is stashed in the
 /// registry for [`install_section_loop_shim`]. `max_tool_iterations` is
 /// the loop's round cap, the run's resolved value, captured by the chunk
@@ -157,7 +158,6 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 pub(crate) fn install_shim_prelude(
     lua: &Lua,
     max_tool_iterations: usize,
-    max_fanout_concurrency: usize,
     local_handler_depth: &Arc<AtomicU32>,
 ) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
@@ -236,7 +236,6 @@ pub(crate) fn install_shim_prelude(
             yield_fn,
             var_snapshot,
             helpers,
-            max_fanout_concurrency,
             collection_members,
             render_item,
         ))

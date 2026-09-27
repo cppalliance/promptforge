@@ -368,7 +368,6 @@ impl RunState {
             section_name,
             shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),
-            max_fanout_concurrency: self.limits.fanout_concurrency().get(),
             ui: self.ui.as_ref(),
             #[cfg(test)]
             raw_shims: self.raw_shims,

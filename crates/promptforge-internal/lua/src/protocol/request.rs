@@ -112,6 +112,14 @@ pub enum Request {
         /// `filter.origin`, when given.
         origin: Option<TaskOrigin>,
     },
+    /// `tasks.concurrency(limit?)`: set the chain's admission limit for
+    /// the tasks it spawns from here on, or read the effective limit back
+    /// with no argument. The limit is shim-validated (a positive whole
+    /// number) before the yield, so a present `limit` is always one.
+    Concurrency {
+        /// The author-supplied limit, absent for the read-only form.
+        limit: Option<u64>,
+    },
     /// `tasks.note(text)`: publish the caller's own task's latest progress
     /// note, read back by `tasks.status`.
     Note {

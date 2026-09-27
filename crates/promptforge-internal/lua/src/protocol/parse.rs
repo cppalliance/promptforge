@@ -15,8 +15,8 @@ use promptforge_types::ids::TaskOrigin;
 
 use chat::parse_chat;
 use tasks::{
-    parse_cancel, parse_join_any, parse_note, parse_pending, parse_ready, parse_status,
-    parse_task_events, parse_timer,
+    parse_cancel, parse_concurrency, parse_join_any, parse_note, parse_pending, parse_ready,
+    parse_status, parse_task_events, parse_timer,
 };
 
 use crate::tools::tool_alias;
@@ -205,6 +205,9 @@ impl Request {
             "status" => classify(parse_status(table), |error| Answer::Status(Err(error))),
             "pending" => classify(parse_pending(table), |error| Answer::Pending(Err(error))),
             "note" => classify(parse_note(table), |error| Answer::Note(Err(error))),
+            "concurrency" => classify(parse_concurrency(table), |error| {
+                Answer::Concurrency(Err(error))
+            }),
             "cancel" => classify(parse_cancel(table), |error| Answer::Cancel(Err(error))),
             "task_events" => classify(parse_task_events(table), |error| {
                 Answer::TaskEvents(Err(error))

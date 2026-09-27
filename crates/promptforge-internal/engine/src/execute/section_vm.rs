@@ -77,9 +77,6 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's resolved per-section tool-loop cap, captured by the
     /// `models.loop` shim as its round cap.
     pub(crate) max_tool_iterations: usize,
-    /// The run's cap on the arms one `fanout` keeps live at once, captured
-    /// by the `fanout` shim as its window.
-    pub(crate) max_fanout_concurrency: usize,
     /// The run's host-state snapshot, when the host supplied one: its
     /// presence gives the section VM the `ui()` global and the
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
@@ -138,7 +135,7 @@ where
         vm.set_global_json("item", item)?;
     }
     vm.install_scheduler_control_globals(list_callback)?;
-    vm.install_coro_shims(setup.max_tool_iterations, setup.max_fanout_concurrency)?;
+    vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
     crate::lua::install_section_user_input_shim(vm.lua())?;
     #[cfg(test)]

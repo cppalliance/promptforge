@@ -1,5 +1,6 @@
 //! Checkpoint acceptance tests for the shim-driven fanout over the task
-//! protocol: the window refills on any arm's completion (not the
+//! protocol: a queued arm is admitted when any arm frees its slot (not
+//! the
 //! lowest-index arm's), a fatal arm gives every started arm exactly one
 //! terminal task observation, a nested fanout nests its arm ids under the
 //! outer arm's chain, hierarchical ids are identical across two runs
@@ -74,31 +75,32 @@ fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// A scheduler context and its observing host with the fanout window
-/// narrowed to `window` live arms.
-fn windowed_context(
+/// A scheduler context and its observing host with the run's concurrency
+/// ceiling narrowed to `ceiling` admitted tasks.
+fn ceiling_context(
     prompt: &Prompt,
-    window: usize,
+    ceiling: usize,
     observer: Arc<dyn Observer>,
 ) -> (RunState, RunHost) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
-        &test_context(EXECUTION)
-            .limits(RunLimits::new().max_fanout_concurrency(
-                NonZeroUsize::new(window).expect("the window is non-zero"),
-            )),
+        &test_context(EXECUTION).limits(
+            RunLimits::new()
+                .max_concurrency(NonZeroUsize::new(ceiling).expect("the ceiling is non-zero")),
+        ),
         RunHost::new().observer(observer),
     )
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn the_window_refills_on_any_arms_completion_not_the_first_arms() {
-    // Window 2 over three arms. Arm `a` parks on a delayed first answer
-    // while arm `b` completes immediately; the shim must refill with `c`
-    // on `b`'s completion, so `c:1` reaches the gateway before `a`'s
-    // second infer. A refill keyed to the lowest-index arm would hold `c`
-    // until `a` finished: `[a:1, b:1, a:2, c:1]`.
+async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
+    // Ceiling 2 over three arms, all spawned up front. Arm `a` parks on a
+    // delayed first answer while arm `b` completes immediately; the
+    // scheduler admits `c` when `b`'s end frees its slot, so `c:1`
+    // reaches the gateway before `a`'s second infer. Admission keyed to
+    // the lowest-index arm's end would hold `c` until `a` finished:
+    // `[a:1, b:1, a:2, c:1]`.
     let gateway = ScriptedGateway::start(vec![
         resp_delayed_text("A1", PARKED),
         resp_text("B"),
@@ -121,11 +123,11 @@ async fn the_window_refills_on_any_arms_completion_not_the_first_arms() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("the windowed fanout completes");
+        .expect("the ceilinged fanout completes");
 
     assert_eq!(out, "A1A2|B|C", "results land by collection index");
     assert_eq!(
@@ -147,9 +149,10 @@ async fn the_window_refills_on_any_arms_completion_not_the_first_arms() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
-    // Fail-fast under a window of 2 over three arms: `boom` fails after
+    // Fail-fast under a ceiling of 2 over three arms: `boom` fails after
     // its infer while `slow` is parked on a 30-second answer and `queued`
-    // has not started. The shim cancels the live sibling and re-raises,
+    // has not been admitted. The shim cancels the live sibling and
+    // re-raises,
     // so the started arms report exactly one terminal each (`failed`,
     // `cancelled`), the queued arm never starts and reports nothing, and
     // the driver never waits on the aborted answer.
@@ -170,7 +173,7 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = windowed_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
         TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),

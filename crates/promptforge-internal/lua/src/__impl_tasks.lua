@@ -1,6 +1,6 @@
 -- The `tasks` namespace shims for a scheduler-mode section VM: spawn, the
 -- waits, the non-blocking checks, the event history read, the progress
--- note, and cancel.
+-- note, cancel, and the admission limit.
 --
 -- The host installs this after the coroutine prelude (`__impl_coro.lua`)
 -- and installs the returned table as the `tasks` global. The chunk
@@ -261,6 +261,25 @@ local function tasks_note(text)
   if not ok then fail(result) end
 end
 
+-- tasks.concurrency(limit?): set the chain's admission limit for the
+-- tasks it spawns from here on (clamped to the parent chain's limit, or
+-- the host's ceiling for the main walk), or read the effective limit
+-- back with no argument. Never preempts a running task: the limit gates
+-- future admissions only. The argument must be a positive whole number.
+local function tasks_concurrency(limit)
+  if limit ~= nil then
+    if type(limit) ~= "number" or limit % 1 ~= 0 or limit < 1 then
+      raise("lua", { message = "tasks.concurrency limit must be a positive whole number, got " .. host_type(limit) })
+    end
+    local ok, result = yield({ op = "concurrency", limit = limit })
+    if not ok then fail(result) end
+    return result
+  end
+  local ok, result = yield({ op = "concurrency" })
+  if not ok then fail(result) end
+  return result
+end
+
 -- tasks.cancel(task): end a task the caller owns. Idempotent: cancelling
 -- a task that already ended does nothing.
 local function tasks_cancel(task)
@@ -278,4 +297,5 @@ return {
   pending = tasks_pending,
   note = tasks_note,
   cancel = tasks_cancel,
+  concurrency = tasks_concurrency,
 }

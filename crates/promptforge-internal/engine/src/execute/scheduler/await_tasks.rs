@@ -136,6 +136,10 @@ impl Scheduler {
             seconds,
         });
         chain.blocked = Some("tasks");
+        // Parking over live model tasks gives the chain's admission slots
+        // back, exactly as an author's join does: the tasks it waits for
+        // need them. A timeout-only wait keeps its slots.
+        self.park_wait(id);
         BuiltinOutcome::Parked
     }
 
@@ -169,6 +173,6 @@ impl Scheduler {
             awaiting.turn,
             BuiltinAnswer::served(text),
         );
-        self.answer_inline(owner, answer);
+        self.wake_from_wait(owner, answer);
     }
 }

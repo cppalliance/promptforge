@@ -10,12 +10,11 @@
 -- trio (`raise(kind, fields)` builds and raises the structured error
 -- table, `fail(result)` raises an envelope's failure value, and
 -- `host_type(value)` names a value's type as the protocol parse would),
--- `max_fanout_concurrency` is the run's cap on live arms,
 -- `collection_members(collection)` enumerates a collection as `(members)`
 -- or `(nil, message)` - the array part in order, then the hash part as
 -- `{ key, value }` pairs sorted by key - and `render_item(item)` renders a
 -- member as `{{ item }}` would.
-local yield, var_snapshot, helpers, max_fanout_concurrency,
+local yield, var_snapshot, helpers,
   collection_members, render_item = ...
 
 local raise, fail = helpers.raise, helpers.fail
@@ -55,14 +54,16 @@ end
 -- fanout(worker, collection): run `worker` once per collection member as
 -- a task chain and return the results in collection order. The members
 -- enumerate (array part in order, then the hash part as `{ key, value }`
--- pairs sorted by key), an empty collection raises before any spawn, up to
--- `max_fanout_concurrency` arms are live at once (one spawned to refill
--- the window on every completion), each arm is spawned with the member as
+-- pairs sorted by key), an empty collection raises before any spawn, and
+-- every arm is spawned up front - before any join - so no arm is ordered
+-- after a sibling: arms never see each other's writes, whatever the
+-- scheduler's admission order. Each arm is spawned with the member as
 -- its `item`, its 1-based position as `sys.index`, and the `fanout` mark
 -- (so the spawn arm's depth-cap refusal is named after `fanout`, the name
 -- the cap always had on this path, and re-raises here as the retained
--- typed error), and `join_any` over the live set delivers the arms as
--- they end. A `tool_loop_exhausted` arm
+-- typed error). The scheduler admits the arms under the chain's
+-- concurrency limit, and `join_any` over the live set delivers the arms
+-- as they end. A `tool_loop_exhausted` arm
 -- becomes the incomplete stub and the fanout continues; any other arm
 -- failure cancels the live arms and re-raises. No arm outlives the call:
 -- every arm is delivered or cancelled before the function returns or
@@ -84,7 +85,6 @@ local function fanout(worker, collection)
   -- the ids in spawn order (the `join_any` set, so an earlier arm wins a
   -- tie).
   local slot_of, live = {}, {}
-  local next_index = 1
 
   -- Ends every live arm. Best effort on an error path: a refused cancel
   -- would only mask the failure already being raised.
@@ -95,9 +95,13 @@ local function fanout(worker, collection)
     live, slot_of = {}, {}
   end
 
-  local function spawn_next()
-    local index = next_index
-    next_index = index + 1
+  -- Every arm is spawned up front, before the first join: the waits
+  -- deliver and join the arms one by one, and a late arm that joined an
+  -- earlier one's writes would be ordered after it, making its reads
+  -- timing-dependent. The queued arms hold no Lua VM until the scheduler
+  -- admits them, so the run's concurrency limit bounds the fanout's
+  -- memory.
+  for index = 1, count do
     local ok, result = yield({
       op = "spawn",
       target = worker,
@@ -113,10 +117,6 @@ local function fanout(worker, collection)
     end
     slot_of[result] = index
     live[#live + 1] = result
-  end
-
-  while next_index <= count and #live < max_fanout_concurrency do
-    spawn_next()
   end
   while #live > 0 do
     local ok, task, arm_ok, result = yield({ op = "join_any", tasks = live })
@@ -140,7 +140,6 @@ local function fanout(worker, collection)
       cancel_live()
       fail(result)
     end
-    if next_index <= count then spawn_next() end
   end
   return results
 end

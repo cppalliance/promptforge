@@ -1,4 +1,4 @@
-//! The wait, inspection, note, and cancel arms over the task arena.
+//! The wait, inspection, note, concurrency, and cancel arms over the task arena.
 //!
 //! `join_any` is the one scheduler wait primitive: a chain names a set of
 //! tasks it owns and is resumed with the first member that ends - at once
@@ -99,7 +99,9 @@ impl Scheduler {
     /// Dispatches a `join_any` request: every member must be a task the
     /// chain owns and none may be delivered already; the first terminal
     /// member in set order is delivered at once, otherwise the chain parks
-    /// on the set until a member's chain end wakes it.
+    /// on the set until a member's chain end wakes it. Parking on a set
+    /// with real members gives the chain's admission slots back, so its
+    /// own tasks can run under its limit.
     pub(super) fn dispatch_join_any(&mut self, id: ChainIndex, tasks: Vec<TaskId>) {
         match self.first_terminal(id, &tasks) {
             Ok(Some(task)) => {
@@ -108,6 +110,7 @@ impl Scheduler {
             }
             Ok(None) => {
                 self.chains[id.index()].waiting_on = tasks;
+                self.park_wait(id);
             }
             Err(error) => self.answer_inline(id, Answer::JoinAny(Err(error))),
         }
@@ -187,7 +190,7 @@ impl Scheduler {
             return;
         }
         let delivery = self.deliver(task);
-        self.answer_inline(owner, Answer::JoinAny(Ok(delivery)));
+        self.wake_from_wait(owner, Answer::JoinAny(Ok(delivery)));
     }
 
     /// Dispatches a `ready` request: whether a task the chain owns has
@@ -246,6 +249,29 @@ impl Scheduler {
         self.answer_inline(id, Answer::Pending(Ok(tasks)));
     }
 
+    /// Dispatches a `concurrency` request: with a limit, the chain's
+    /// effective admission limit becomes the limit clamped to the
+    /// parent's (the host ceiling for the root, the enclosing chain's
+    /// current limit otherwise), so a prompt stays portable across hosts
+    /// with tighter ceilings; without one, the effective limit is read
+    /// back. The clamp never preempts a task already running - the limit
+    /// gates admissions from here on only.
+    pub(super) fn dispatch_concurrency(&mut self, id: ChainIndex, limit: Option<u64>) {
+        let effective = if let Some(limit) = limit {
+            let parent_limit = match self.enclosing(id) {
+                Some(parent) => self.chains[parent.index()].concurrency,
+                None => self.ctx.limits().concurrency().get(),
+            };
+            let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+            let effective = limit.min(parent_limit);
+            self.chains[id.index()].concurrency = effective;
+            effective
+        } else {
+            self.chains[id.index()].concurrency
+        };
+        self.answer_inline(id, Answer::Concurrency(Ok(effective)));
+    }
+
     /// Dispatches a `note` request: the text becomes the latest note of the
     /// task the chain runs inside - recorded on the task's backing chain,
     /// so a `call` child's note is the task's - or of the chain itself when
@@ -276,7 +302,9 @@ impl Scheduler {
     /// backing ends (a chain with everything it owns, a request dropped),
     /// and `TaskCancelled` fires once under the target - except for an
     /// internal timer, whose cancel is the wait shim's own bookkeeping and
-    /// reports nothing. A task already in a terminal state is left as it
+    /// reports nothing, and a task that was never admitted, which has no
+    /// start event and reports no terminal. A task already in a terminal
+    /// state is left as it
     /// is. Returns the target of a live model task this call ended, so
     /// the author's arm can queue its notice; `None` for every other
     /// outcome.
@@ -307,17 +335,22 @@ impl Scheduler {
         };
         // The terminal is stamped with the cancelled task's own
         // provenance: its backing chain's emitter, taken before the abort
-        // clears the chain's state.
+        // clears the chain's state. A task that was never admitted (still
+        // queued for a slot) has no start event, so it reports no
+        // terminal either.
+        let admitted = self.chains[backing_chain.index()].admitted;
         let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
         self.abort_subtree(backing_chain);
-        emitter.emit(&target, |execution, section, provenance| {
-            Event::TaskCancelled {
-                execution,
-                section,
-                provenance,
-                task: task.clone(),
-            }
-        });
+        if admitted {
+            emitter.emit(&target, |execution, section, provenance| {
+                Event::TaskCancelled {
+                    execution,
+                    section,
+                    provenance,
+                    task: task.clone(),
+                }
+            });
+        }
         Ok((origin == TaskOrigin::Model).then_some(target))
     }
 }

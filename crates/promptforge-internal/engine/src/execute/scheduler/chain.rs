@@ -40,13 +40,16 @@ impl Scheduler {
     /// `var` slot seeds from `var` (a call chain's or task chain's caller
     /// snapshot, discarded with the chain). The chain's task is its call
     /// parent's when it has one, else task `0`; a spawned chain's dispatch
-    /// overwrites it with the chain's own id.
+    /// overwrites it with the chain's own id. `concurrency` is the
+    /// chain's effective admission limit for the tasks it spawns: the
+    /// caller's own for a call child or a task, the run's ceiling for the
+    /// root.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, and depth explicit and linear"
+        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, depth, and limit explicit and linear"
     )]
     pub(super) fn start_chain(
         &mut self,
@@ -56,8 +59,9 @@ impl Scheduler {
         slice: SlicePath,
         index: usize,
         parent: Option<ChainIndex>,
-        var: &serde_json::Value,
+        var: serde_json::Value,
         call_depth: usize,
+        concurrency: usize,
     ) -> Result<ChainIndex> {
         if self.chains.len() >= self.max_chains {
             return Err(Error::internal("a run's chain count cannot exceed u32"));
@@ -91,8 +95,13 @@ impl Scheduler {
             coroutine: None,
             incoming: None,
             pending_prose: None,
-            var: var.clone(),
+            var,
             call_depth,
+            concurrency,
+            slots_used: 0,
+            holding: false,
+            admitted: false,
+            pending_spawn: None,
             parent,
             advertised: None,
             h1: false,
@@ -171,6 +180,10 @@ impl Scheduler {
             self.join_owned_tasks(id, access);
         }
         drop(access);
+        // A task chain that was holding admission slots releases them at
+        // its end, before its owner is woken: the owner's re-acquire and
+        // any queued sibling need the freed capacity.
+        self.release_chain_slots(id);
         if is_task {
             // A missing slot is a scheduler bug: fail the run loudly rather
             // than lose the task's outcome.
@@ -247,6 +260,11 @@ impl Scheduler {
             chain.frame = None;
             chain.access.take()
         };
+        // A queued chain aborted before admission leaves both queues, and
+        // a running task's held slots are given back.
+        self.resuming.retain(|queued| *queued != id);
+        self.spawned.retain(|queued| *queued != id);
+        self.release_chain_slots(id);
         // The chain-end join: the aborted chain's final clock still
         // transitively covers its tasks, for whoever joins the aborted
         // chain itself.

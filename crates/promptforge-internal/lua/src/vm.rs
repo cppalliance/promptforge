@@ -114,6 +114,76 @@ pub struct SectionVm {
     /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before host
     /// injection; unset everywhere else.
     raw_model_ids: bool,
+    /// Test-support only: the live-section-VM tally guard. Its presence
+    /// counts this VM as live from construction until the VM drops (its
+    /// teardown); the engine's scheduler suite reads the tally to pin the
+    /// admission ceiling's cost - a queued task holds no VM.
+    #[cfg(feature = "test-support")]
+    _vm_tally: vm_tally::Guard,
+}
+
+/// Test-support only: a per-thread tally of live section VMs.
+///
+/// The engine's scheduler suite drives one run on the test's own thread
+/// (the tokio driver is `current_thread`), and Rust's test harness gives
+/// each test its own thread, so thread-locals keep concurrent tests
+/// independent. A test resets the peak, drives a run, and reads back the
+/// most VMs alive at any moment.
+#[cfg(feature = "test-support")]
+mod vm_tally {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LIVE: Cell<usize> = const { Cell::new(0) };
+        static PEAK: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// One section VM holds one guard: entering counts it, dropping it
+    /// releases the count.
+    #[derive(Debug)]
+    pub(super) struct Guard;
+
+    impl Guard {
+        pub(super) fn enter() -> Self {
+            LIVE.with(|live| {
+                let now = live.get() + 1;
+                live.set(now);
+                PEAK.with(|peak| peak.set(peak.get().max(now)));
+            });
+            Self
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            LIVE.with(|live| live.set(live.get() - 1));
+        }
+    }
+
+    /// Resets the peak, so a test measures one run only.
+    pub(super) fn reset_peak() {
+        PEAK.with(|peak| peak.set(0));
+    }
+
+    /// The most section VMs alive at once since the last reset.
+    pub(super) fn peak() -> usize {
+        PEAK.with(Cell::get)
+    }
+}
+
+/// Test-support only: resets the live-section-VM peak tally, so a test
+/// measures the one run it drives next.
+#[cfg(feature = "test-support")]
+pub fn reset_section_vm_peak() {
+    vm_tally::reset_peak();
+}
+
+/// Test-support only: the most section VMs alive at once since the last
+/// [`reset_section_vm_peak`]: the admission test's cost pin.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn section_vm_peak() -> usize {
+    vm_tally::peak()
 }
 
 /// Local tool registrations owned by a section VM.
@@ -209,6 +279,8 @@ impl SectionVm {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn new(nonce: &GuardNonce, emitter: &Emitter, section: &str) -> Result<Self> {
+        #[cfg(feature = "test-support")]
+        let tally = vm_tally::Guard::enter();
         let lua = Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
@@ -239,6 +311,8 @@ impl SectionVm {
             local_tools: LocalTools::default(),
             instruction_budget: InstructionBudget::default(),
             raw_model_ids: false,
+            #[cfg(feature = "test-support")]
+            _vm_tally: tally,
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, emitter, section);
@@ -430,8 +504,8 @@ impl SectionVm {
     /// hidden data table behind it is what [`var`](Self::var) reads back.
     /// `access` is the chain step's VFS capability: the `store` table's
     /// closures share it, so a fanout arm's store ops are attributed to
-    /// the arm's spawned identity and a conflicting second live identity
-    /// surfaces as a write race.
+    /// the arm's spawned identity, and a conflicting access from an
+    /// identity not ordered after the arm's surfaces as a write race.
     ///
     /// `argv` is the parsed form of the args string, installed per its
     /// [`Argv`] mode: writable for the H1 pass (whose repaired value the
@@ -583,22 +657,12 @@ impl SectionVm {
     /// `fanout`, `tools.call`, the `tasks` namespace). `max_tool_iterations`
     /// is the run's resolved round cap for the `models.loop` shim a section
     /// install adds afterward; a VM that never installs the loop shim
-    /// passes any value. `max_fanout_concurrency` is the run's cap on the
-    /// arms one `fanout` keeps live at once.
+    /// passes any value.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
-    pub fn install_coro_shims(
-        &mut self,
-        max_tool_iterations: usize,
-        max_fanout_concurrency: usize,
-    ) -> Result<()> {
-        install_shim_prelude(
-            &self.lua,
-            max_tool_iterations,
-            max_fanout_concurrency,
-            &self.local_handler_depth,
-        )
+    pub fn install_coro_shims(&mut self, max_tool_iterations: usize) -> Result<()> {
+        install_shim_prelude(&self.lua, max_tool_iterations, &self.local_handler_depth)
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {

@@ -140,6 +140,8 @@ pub use protocol::{
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 pub use sys::enrich_sys_model;
 pub use vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
+#[cfg(feature = "test-support")]
+pub use vm::{reset_section_vm_peak, section_vm_peak};
 
 pub use program::LuaProgram;
 

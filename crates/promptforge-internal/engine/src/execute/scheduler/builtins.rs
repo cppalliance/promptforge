@@ -298,7 +298,7 @@ impl Scheduler {
             item: None,
             index: None,
         };
-        match self.prepare_spawn(id, target, input, seed, &var, TaskOrigin::Model, false) {
+        match self.prepare_spawn(id, target, input, seed, var, TaskOrigin::Model, false) {
             Ok((task, child)) => Ok(BuiltinAnswer {
                 text: format!("Task id={task} started"),
                 ok: true,

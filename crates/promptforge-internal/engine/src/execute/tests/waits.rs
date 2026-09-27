@@ -182,9 +182,11 @@ async fn join_any_returns_the_first_finished_member_and_the_rest_keep_running() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn status_reports_a_parked_task_and_then_a_finished_one() {
-    // The child parks on a slow model round; the spawner, resumed from a
-    // fast store write, reads its status mid-flight (running, blocked on
-    // `chat`, inside its section, with its note), waits on it, then reads
+    // The child parks on a slow model round; the spawner reads its status
+    // at once - the child is still queued for admission, so it reads
+    // `blocked = 'queued'` with no section - then resumes from a fast
+    // store write, reads the mid-flight status (running, blocked on
+    // `chat`, inside its section, with its note), waits on it, and reads
     // the terminal status (done, ok).
     let gateway = ScriptedGateway::start(vec![resp_delayed_text(
         "slow answer",
@@ -230,7 +232,7 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
     assert_eq!(
         logs,
         vec![
-            "fresh state=running section=nil blocked=nil".to_owned(),
+            "fresh state=running section=nil blocked=queued".to_owned(),
             "parked target=Child origin=author state=running ok=nil section=Child blocked=chat \
              turns=0 tasks=0 depth=1 note=working"
                 .to_owned(),

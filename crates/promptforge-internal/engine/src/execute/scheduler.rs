@@ -30,7 +30,9 @@
 //! itself outright.
 //!
 //! This file holds the scheduler core: the chain record and arena, the
-//! ready queue, the pending table, the call stack, the task arena, and
+//! ready queue, the admission queues (spawned tasks wait there until
+//! the run's concurrency limits admit them), the pending table, the call
+//! stack, the task arena, and
 //! the one `issue` path every leaf arm hands its effect through. The
 //! submodules hold the rest: `pending` the pending table's entry (the
 //! `Continuation` an answer is applied by), `drive` the run-level step
@@ -48,13 +50,14 @@
 //! tasks, `task_events` the fifth, the host-answered history read the
 //! author's `tasks.events` shares, `notices` the model-task notices
 //! (queued at a model task's end, drained into the owner's next round or
-//! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm, and
+//! its `await_tasks` answer), `tasks` the task arena, the `spawn` arm,
+//! the admission limits, and
 //! the chain-end rules for tasks, `waits` the `join_any` wait and the
-//! `ready`, `status`, `pending`, `note`, and `cancel` arms over the arena,
+//! `ready`, `status`, `pending`, `note`, `concurrency`, and `cancel` arms over the arena,
 //! `timer` the wait shims' internal timeout as an effect-backed slot, and
 //! `test_hooks` (test builds only) the seams the suites inspect the arena
 //! through. A fanout is Lua over those arms (the `fanout` shim spawns one
-//! task per member and waits on the live set).
+//! task per member, all up front, and waits on the live set).
 
 mod apply;
 mod await_tasks;
@@ -165,6 +168,21 @@ impl ChainIndex {
     }
 }
 
+/// A queued task chain's spawn record, held from spawn until its
+/// admission: the input override and the spawning section the start event
+/// reports. The `var` snapshot lives in the chain's `var` slot from spawn
+/// on, moved once out of the yield - never copied - so a queued chain
+/// shares it until admission installs it into the first section.
+#[derive(Debug)]
+struct SpawnRecord {
+    /// The `opts.input` override, reported in the start event.
+    input: Option<String>,
+    /// The spawner's section at spawn, reported as the start event's
+    /// section: a task admitted after its spawner moved on still reports
+    /// where it was spawned, not where the spawner is now.
+    section: String,
+}
+
 /// A chain's local id counters: the indices its next child chain and its
 /// next section entry take under its lineage. Set once at chain start:
 /// zero for a fresh chain (`Default`), or the values the chain continues
@@ -227,8 +245,10 @@ struct Chain {
     awaiting: Option<AwaitTasks>,
     /// What the chain's suspended request is parked on, as `tasks.status`
     /// reports it (`chat`, `tool_call`, `user_input`, `store`, `timer`,
-    /// `tasks`, `call`): set at dispatch, cleared when the answer resumes
-    /// the chain. `None` while the chain runs or between blocks.
+    /// `tasks`, `call`, or `queued` while the chain waits for a
+    /// concurrency slot): set at dispatch or spawn, cleared when the
+    /// answer resumes the chain. `None` while the chain runs or between
+    /// blocks.
     blocked: Option<&'static str>,
     /// Model-task notices not yet delivered into the chain's next model
     /// round, in arrival order: queued (with their task) when a model
@@ -295,6 +315,29 @@ struct Chain {
     /// not the stack, so only the field keeps the accounting across a
     /// spawn boundary.
     call_depth: usize,
+    /// The chain's effective admission limit: the most tasks this chain
+    /// may have admitted at once. The root's is the run's ceiling
+    /// ([`RunLimits::max_concurrency`](super::config_limits::RunLimits));
+    /// a spawned task and a call chain start with their parent's, and
+    /// `tasks.concurrency` lowers it, clamped to the parent's.
+    concurrency: usize,
+    /// The number of admitted tasks currently holding a slot against
+    /// this chain: the chain's own children and, transitively, every
+    /// descendant's. A task's admission takes a slot here and at every
+    /// enclosing ancestor, so the count never exceeds `concurrency`.
+    slots_used: usize,
+    /// Whether this chain currently holds its own admission slots: `true`
+    /// from admission until it ends or parks on a task wait, which gives
+    /// the slots back so its descendants can run.
+    holding: bool,
+    /// Whether the chain was admitted at least once: the start event has
+    /// fired, so its terminal event may fire too. A cancelled or
+    /// abandoned chain that never ran reports no terminal.
+    admitted: bool,
+    /// A queued task's spawn record, held from spawn until its
+    /// admission and consumed by the start event; `None` on every other
+    /// chain and after admission.
+    pending_spawn: Option<SpawnRecord>,
     /// The call parent blocked on this chain, if any.
     parent: Option<ChainIndex>,
     /// The tool scope the chain's last `chat` round advertised, keyed by
@@ -382,6 +425,14 @@ pub(crate) struct Scheduler {
     /// Chains eligible to resume (FIFO); the driver drains it before
     /// awaiting anything.
     ready: VecDeque<ChainIndex>,
+    /// Task chains waiting for admission, in queue order: resumptions (a
+    /// task parked on a task wait that gave its slots back) first, then
+    /// fresh spawns in spawn order. A queued chain holds no Lua VM and
+    /// no copied `var` snapshot: admission is what starts it.
+    resuming: VecDeque<ChainIndex>,
+    /// Freshly spawned task chains waiting for admission, in spawn order;
+    /// admitted after every resuming chain.
+    spawned: VecDeque<ChainIndex>,
     /// One entry per in-flight leaf effect, keyed by the effect's id:
     /// the parked chain and how the answer resumes it.
     pending: HashMap<EffectId, Pending>,
@@ -430,6 +481,8 @@ impl Scheduler {
             chains: Vec::new(),
             stack: Vec::new(),
             ready: VecDeque::new(),
+            resuming: VecDeque::new(),
+            spawned: VecDeque::new(),
             pending: HashMap::new(),
             tasks: HashMap::new(),
             issued: Vec::new(),
