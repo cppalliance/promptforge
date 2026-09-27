@@ -250,7 +250,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Add the hover-color token and correct the theming sentences
+### Step 2: Add the hover-color token and correct the theming sentences [completed]
 
 - Component: `none`
 

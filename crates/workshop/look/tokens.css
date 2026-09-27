@@ -93,6 +93,7 @@
   /* Accent and semantics */
   --accent: #e4b570;
   --accent-dim: #b89059;
+  --accent-bright: color-mix(in srgb, var(--accent) 88%, #ffffff);
   --danger: #E34671;
   --danger-text: #FC6B83;
   --on-danger: #ffffff;

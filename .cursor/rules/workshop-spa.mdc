@@ -17,6 +17,6 @@ alwaysApply: false
 ## CSS colocation and tokens
 
 - CSS lives beside its TypeScript, imported as a side-effect. Never a separate `styles/` tree. Every feature directory is self-contained: its `.ts` and `.css` sit together, plus an `index.ts` when the panel registry loads it lazily. A designer finds the styles for the agent chat at `parts/agent/agent-session.css`, not by grepping a flat directory.
-- No raw color, size, or spacing values in component CSS. Use `--ws-*` tokens. The sizes and semantic tiers live in `@workshop/look`: primitives in `look/sizes.css`, intent aliases in `look/semantic.css`. Per-component overrides live in `ui/src/tokens/component.css`. A designer themes the family by editing `look/semantic.css`.
+- No raw color, size, or spacing values in Workshop UI component CSS. Use `--ws-*` tokens. The sizes and semantic tiers live in `@workshop/look`: primitives in `look/sizes.css`, intent aliases in `look/semantic.css`. Per-component overrides live in `ui/src/tokens/component.css`. Sizes and elevation are themed in `look/semantic.css`, and colors in `look/tokens.css`, which `look`'s own component sheets read directly.
 - CSS classes use the `.ws-` project prefix (`.ws-agent-toolbar`). Design tokens use the `--ws-` prefix (`--ws-color-bg-surface`).
 - Directories and files are kebab-case (`agent-session-view.ts`, `agent-session.css`).

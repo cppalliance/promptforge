@@ -45,7 +45,7 @@
 		color: var(--cursor-chrome);
 	}
 	.button-primary:hover {
-		background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+		background: var(--accent-bright);
 	}
 	.button-outline {
 		border-color: var(--border);
