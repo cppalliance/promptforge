@@ -109,7 +109,6 @@ auto promptforge::effect::EffectAnswer: Freeze, !RefUnwindSafe, Send, Sync, Unpi
 auto promptforge::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::InputAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::effect::StoreAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::event::DebugMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::event::Event: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -233,7 +232,6 @@ derives promptforge::effect::EffectAnswer: Debug
 derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::effect::InputAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
-derives promptforge::effect::StoreAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::event::DebugMode: Clone, Copy, Debug, Default, Eq, PartialEq
 derives promptforge::event::Event: Clone, Debug, Deserialize, PartialEq, Serialize
@@ -319,7 +317,7 @@ derives promptforge::vfs::Origin: Clone, Debug
 derives promptforge::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::Stat: Clone, Debug
 derives promptforge::vfs::StoreOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
-derives promptforge::vfs::StoreOutcome: Debug
+derives promptforge::vfs::StoreOutcome: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsError: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
@@ -411,7 +409,6 @@ pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
 pub enum promptforge::effect::InputAnswerRecord
-pub enum promptforge::effect::StoreAnswerRecord
 pub enum promptforge::event::DebugMode
 pub enum promptforge::transport::ClientError
 pub enum promptforge::vfs::Mode
@@ -774,7 +771,7 @@ pub promptforge::effect::AnswerRecord::Chat(..)
 pub promptforge::effect::AnswerRecord::Chat::0: core::result::Result<promptforge::effect::ChatAnswerRecord, alloc::string::String>
 pub promptforge::effect::AnswerRecord::Dropped
 pub promptforge::effect::AnswerRecord::Store(..)
-pub promptforge::effect::AnswerRecord::Store::0: core::result::Result<promptforge::effect::StoreAnswerRecord, alloc::string::String>
+pub promptforge::effect::AnswerRecord::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, alloc::string::String>
 pub promptforge::effect::AnswerRecord::TaskEvents(..)
 pub promptforge::effect::AnswerRecord::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
 pub promptforge::effect::AnswerRecord::Timer
@@ -844,13 +841,6 @@ pub promptforge::effect::EffectRecord::UserInput::section: alloc::string::String
 pub promptforge::effect::InputAnswerRecord::Text(..)
 pub promptforge::effect::InputAnswerRecord::Text::0: alloc::string::String
 pub promptforge::effect::InputAnswerRecord::Unavailable
-pub promptforge::effect::StoreAnswerRecord::Bool(..)
-pub promptforge::effect::StoreAnswerRecord::Bool::0: bool
-pub promptforge::effect::StoreAnswerRecord::Paths(..)
-pub promptforge::effect::StoreAnswerRecord::Paths::0: alloc::vec::Vec<alloc::string::String>
-pub promptforge::effect::StoreAnswerRecord::Text(..)
-pub promptforge::effect::StoreAnswerRecord::Text::0: alloc::string::String
-pub promptforge::effect::StoreAnswerRecord::Unit
 pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
 pub promptforge::effect::ToolAnswerRecord::trusted: bool
 pub promptforge::event::DebugMode::Off
@@ -1025,6 +1015,14 @@ pub promptforge::event::Event::StoreDeleteSucceeded { .. }
 pub promptforge::event::Event::StoreDeleteSucceeded::execution: alloc::string::String
 pub promptforge::event::Event::StoreDeleteSucceeded::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::StoreDeleteSucceeded::section: alloc::string::String
+pub promptforge::event::Event::StoreExistsFailed { .. }
+pub promptforge::event::Event::StoreExistsFailed::execution: alloc::string::String
+pub promptforge::event::Event::StoreExistsFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreExistsFailed::section: alloc::string::String
+pub promptforge::event::Event::StoreExistsSucceeded { .. }
+pub promptforge::event::Event::StoreExistsSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::StoreExistsSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::StoreExistsSucceeded::section: alloc::string::String
 pub promptforge::event::Event::StoreGlobFailed { .. }
 pub promptforge::event::Event::StoreGlobFailed::execution: alloc::string::String
 pub promptforge::event::Event::StoreGlobFailed::provenance: promptforge::ids::Provenance

@@ -76,6 +76,8 @@ lifecycle_kinds! {
     STORE_DELETE_FAILED => "store_delete_failed",
     STORE_GLOB_SUCCEEDED => "store_glob_succeeded",
     STORE_GLOB_FAILED => "store_glob_failed",
+    STORE_EXISTS_SUCCEEDED => "store_exists_succeeded",
+    STORE_EXISTS_FAILED => "store_exists_failed",
 }
 
 /// The `kind` label an event serializes under.

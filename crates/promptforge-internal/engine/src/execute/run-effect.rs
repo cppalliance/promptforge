@@ -302,10 +302,7 @@ impl EffectAnswer {
                 Err(error) => Err(error.to_string()),
             }),
             EffectAnswer::Store(result) => AnswerRecord::Store(match result {
-                Ok(StoreOutcome::Unit) => Ok(StoreAnswerRecord::Unit),
-                Ok(StoreOutcome::Text(text)) => Ok(StoreAnswerRecord::Text(text.clone())),
-                Ok(StoreOutcome::Paths(paths)) => Ok(StoreAnswerRecord::Paths(paths.clone())),
-                Ok(StoreOutcome::Bool(flag)) => Ok(StoreAnswerRecord::Bool(*flag)),
+                Ok(outcome) => Ok(outcome.clone()),
                 Err(error) => Err(error.to_string()),
             }),
             EffectAnswer::Timer => AnswerRecord::Timer,
@@ -326,8 +323,9 @@ pub enum AnswerRecord {
     ToolCall(std::result::Result<ToolAnswerRecord, String>),
     /// The input wait's outcome.
     UserInput(std::result::Result<InputAnswerRecord, String>),
-    /// The store operation's outcome.
-    Store(std::result::Result<StoreAnswerRecord, String>),
+    /// The store operation's outcome, the [`StoreOutcome`] itself as the
+    /// success payload, or its failure's display text.
+    Store(std::result::Result<StoreOutcome, String>),
     /// The timer fired.
     Timer,
     /// The task's events after the read's `last`, in sequence order.
@@ -388,19 +386,6 @@ pub enum InputAnswerRecord {
     Text(String),
     /// The host had no input to give.
     Unavailable,
-}
-
-/// A store operation's outcome as the log records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StoreAnswerRecord {
-    /// The operation succeeded with no return value.
-    Unit,
-    /// A read's text.
-    Text(String),
-    /// A glob's matching paths.
-    Paths(Vec<String>),
-    /// An existence check's flag.
-    Bool(bool),
 }
 
 #[cfg(test)]

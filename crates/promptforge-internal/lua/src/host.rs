@@ -560,10 +560,16 @@ pub(crate) fn install_store_table(
 
     let handle = Arc::clone(&view);
     let exists_conflicts = Arc::clone(conflicts);
+    let report = Arc::clone(&reporter);
     let exists = lua
         .create_function(move |_, path: String| {
             let result = handle.exists(&path);
             record_store_conflict(&exists_conflicts, &result);
+            report.report(
+                result.is_ok(),
+                lifecycle::STORE_EXISTS_SUCCEEDED,
+                lifecycle::STORE_EXISTS_FAILED,
+            );
             result.map_err(|source| {
                 mlua::Error::external(Error::store(
                     &StoreOp::Exists { path: path.clone() },

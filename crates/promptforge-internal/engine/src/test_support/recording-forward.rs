@@ -78,6 +78,8 @@ lifecycle_pairs! {
     StoreDeleteFailed,
     StoreGlobSucceeded,
     StoreGlobFailed,
+    StoreExistsSucceeded,
+    StoreExistsFailed,
     UserInputWaitStarted,
 }
 

@@ -263,7 +263,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`EffectAnswer::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values: the task's events after the read's [`last`](Effect#variant.TaskEvents.field.last), in the host's log order. It answers an [`Effect::TaskEvents`].
 - [`EffectAnswer::Dropped`] carries no data. It answers any kind of effect without performing it, as [One answer per effect](#one-answer-per-effect) describes.
 
-[`EffectAnswer::record`] borrows the answer and returns its [`AnswerRecord`]. It cannot fail. A failure is recorded as its [`Display`](std::fmt::Display) text. A completion is recorded as a [`ChatAnswerRecord`], because the round's bodies travel as debug events and its metrics travel in the turn's event. A tool output becomes a [`ToolAnswerRecord`], input and store outcomes become an [`InputAnswerRecord`] and a [`StoreAnswerRecord`], and task events are cloned.
+[`EffectAnswer::record`] borrows the answer and returns its [`AnswerRecord`]. It cannot fail. A failure is recorded as its [`Display`](std::fmt::Display) text. A completion is recorded as a [`ChatAnswerRecord`], because the round's bodies travel as debug events and its metrics travel in the turn's event. A tool output becomes a [`ToolAnswerRecord`], input outcomes become an [`InputAnswerRecord`], a store outcome keeps its [`StoreOutcome`](crate::vfs::StoreOutcome), and task events are cloned.
 
 ## EffectRecord
 
@@ -299,7 +299,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`AnswerRecord::Chat`] holds a [`Result`] of a [`ChatAnswerRecord`] or the [`CompletionError`](crate::model::CompletionError)'s text. It is recorded from an [`EffectAnswer::Chat`].
 - [`AnswerRecord::ToolCall`] holds a [`Result`] of a [`ToolAnswerRecord`] or the [`ToolError`](crate::tools::ToolError)'s text. It is recorded from an [`EffectAnswer::ToolCall`]. The text is the model-safe message only, so a cause attached with [`ToolError::with_source`](crate::tools::ToolError::with_source) is not recorded.
 - [`AnswerRecord::UserInput`] holds a [`Result`] of an [`InputAnswerRecord`] or the [`InputError`](crate::input::InputError)'s message. It is recorded from an [`EffectAnswer::UserInput`].
-- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreAnswerRecord`] or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`].
+- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`]. The success payload's JSON is byte-identical to the retired `StoreAnswerRecord` shape: the outcome serializes through serde's externally tagged form.
 - [`AnswerRecord::Timer`] carries no data. It records that the timer fired.
 - [`AnswerRecord::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values, a clone of the answered events.
 - [`AnswerRecord::Dropped`] carries no data. It records that the host dropped the effect without performing it.
@@ -328,13 +328,4 @@ A [`CompletionResult`](crate::model::CompletionResult) variant that this build d
 
 - [`InputAnswerRecord::Text`] holds a [`String`], the operator's text, recorded byte-exact from [`InputOutcome::Text`](crate::input::InputOutcome::Text).
 - [`InputAnswerRecord::Unavailable`] records that the host had no input to give, from [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable). The fallback sentence that the section received is not stored.
-
-## StoreAnswerRecord
-
-[`StoreAnswerRecord`] is the successful outcome of a store operation as a run log records it, with one variant per [`StoreOutcome`](crate::vfs::StoreOutcome) variant. It is the success payload of [`AnswerRecord::Store`]. The host gets one from [`EffectAnswer::record`], builds one directly, or deserializes one. It uses serde's externally tagged form.
-
-- [`StoreAnswerRecord::Unit`] records a mutating operation that succeeded with no value, such as a write, append, string replace, or delete. It comes from [`StoreOutcome::Unit`](crate::vfs::StoreOutcome::Unit).
-- [`StoreAnswerRecord::Text`] holds a [`String`], the text of a read or a numbered read, which may be bounded. It comes from [`StoreOutcome::Text`](crate::vfs::StoreOutcome::Text).
-- [`StoreAnswerRecord::Paths`] holds a [`Vec`] of [`String`], the sorted paths that matched a glob. It comes from [`StoreOutcome::Paths`](crate::vfs::StoreOutcome::Paths).
-- [`StoreAnswerRecord::Bool`] holds a [`bool`], the result of an existence check. It comes from [`StoreOutcome::Bool`](crate::vfs::StoreOutcome::Bool).
 

@@ -23,9 +23,8 @@ pub(crate) use crate::error::{Error, Result};
 pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
     EffectRecord, Environment, InputAnswerRecord, ModelBindings, RequirementCheck, Requirements,
-    Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
-    StoreAnswerRecord, StoreOp, StoreOutcome, ToolAnswerRecord, ToolBindings, UnmetRequirement,
-    perform_store_op,
+    Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step, StoreOp,
+    StoreOutcome, ToolAnswerRecord, ToolBindings, UnmetRequirement, perform_store_op,
 };
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

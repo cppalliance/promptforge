@@ -2742,6 +2742,73 @@ fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
 }
 
 #[test]
+fn store_exists_reports_its_pair_from_the_shared_library() {
+    // The shared library loads through the direct store closures, before
+    // the yield shims install; `store.exists` must report its pair there
+    // exactly as it does from a chunk, for both a present and an absent
+    // file, and for a failure the library catches with `pcall`.
+    let shared = program("store.exists('seed.txt')\nstore.exists('missing.txt')");
+    let access = fresh_access();
+    store_view(&access)
+        .write("seed.txt", b"planted")
+        .expect("the memory store can prepare a file");
+    let recorder = Arc::new(Recorder::default());
+    let mut vm =
+        SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
+    vm.inject_host("", &json!({}), &access)
+        .expect("host values must inject");
+    let observer = recorder.emitter().clone();
+    vm.install_host_apis(&observer, "Shared")
+        .expect("host APIs must install");
+    vm.replay_shared(&shared, recorder.emitter(), "Shared")
+        .expect("the shared library must load");
+    vm.teardown(recorder.emitter(), "Shared");
+    assert_eq!(
+        recorder.observations(),
+        [
+            detail::LUA_SHARED_LOAD_STARTED,
+            detail::STORE_EXISTS_SUCCEEDED,
+            detail::STORE_EXISTS_SUCCEEDED,
+            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_TEARDOWN_STARTED,
+            detail::LUA_TEARDOWN_SUCCEEDED,
+        ]
+        .into_iter()
+        .map(|detail| ("Shared".to_owned(), detail.clone()))
+        .collect::<Vec<_>>()
+    );
+
+    let failing_shared = program(
+        "local ok = pcall(function() return store.exists('a.txt') end)\n\
+         assert(not ok, 'the failing backend must refuse the check')",
+    );
+    let recorder = Arc::new(Recorder::default());
+    let mut vm =
+        SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
+    vm.inject_host("", &json!({}), &failing_access())
+        .expect("host values must inject");
+    let observer = recorder.emitter().clone();
+    vm.install_host_apis(&observer, "Shared")
+        .expect("host APIs must install");
+    vm.replay_shared(&failing_shared, recorder.emitter(), "Shared")
+        .expect("the pcall-caught failure must not abort the load");
+    vm.teardown(recorder.emitter(), "Shared");
+    assert_eq!(
+        recorder.observations(),
+        [
+            detail::LUA_SHARED_LOAD_STARTED,
+            detail::STORE_EXISTS_FAILED,
+            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_TEARDOWN_STARTED,
+            detail::LUA_TEARDOWN_SUCCEEDED,
+        ]
+        .into_iter()
+        .map(|detail| ("Shared".to_owned(), detail.clone()))
+        .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn lua_runtime_error_preserves_its_mlua_source() {
     // F4: a Lua runtime failure is the source-bearing `LuaRuntime` variant and
     // retains the originating `mlua` error as a private `source()` instead of
@@ -2814,6 +2881,13 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
     }
 }
 
+/// One store operation's success and failure observation pair, driven
+/// through the block-code closures against both a working and a failing
+/// backend.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table holds every operation's pair beside its prepare step"
+)]
 #[test]
 fn every_store_operation_reports_its_exact_success_and_failure() {
     struct Case {
@@ -2884,6 +2958,12 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
             source: "local matches = store.glob('*.txt')",
             success: detail::STORE_GLOB_SUCCEEDED,
             failure: detail::STORE_GLOB_FAILED,
+            prepare: existing,
+        },
+        Case {
+            source: "store.exists('a.txt')",
+            success: detail::STORE_EXISTS_SUCCEEDED,
+            failure: detail::STORE_EXISTS_FAILED,
             prepare: existing,
         },
     ];

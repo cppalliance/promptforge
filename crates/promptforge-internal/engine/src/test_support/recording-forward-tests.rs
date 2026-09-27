@@ -246,6 +246,8 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
         StoreDeleteFailed,
         StoreGlobSucceeded,
         StoreGlobFailed,
+        StoreExistsSucceeded,
+        StoreExistsFailed,
         UserInputWaitStarted,
     ];
     let task: TaskId = "0.1".parse().expect("a task id parses");

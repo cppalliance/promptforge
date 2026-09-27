@@ -61,7 +61,7 @@ pub use error::{RunError, RunErrorKind, SourceLocation};
 pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
 pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
-    InputAnswerRecord, Run, Step, StoreAnswerRecord, ToolAnswerRecord,
+    InputAnswerRecord, Run, Step, ToolAnswerRecord,
 };
 // The store vocabulary a `Store` effect holds and its answer returns:
 // named here so a host's store performer can be written against this one

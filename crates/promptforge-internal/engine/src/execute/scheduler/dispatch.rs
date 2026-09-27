@@ -43,7 +43,7 @@ pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
 }
 
 /// The succeeded/failed observation pair one store operation reports;
-/// `exists` reports nothing.
+/// nothing for an op this crate does not name.
 fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
     let pair = match op {
         StoreOp::Write { .. } => (
@@ -74,9 +74,12 @@ fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
             lifecycle::STORE_GLOB_SUCCEEDED,
             lifecycle::STORE_GLOB_FAILED,
         ),
-        // `exists` reports nothing, and so does any op `promptforge-lua`
-        // adds behind its `#[non_exhaustive]` `StoreOp` before this crate
-        // names it.
+        StoreOp::Exists { .. } => (
+            lifecycle::STORE_EXISTS_SUCCEEDED,
+            lifecycle::STORE_EXISTS_FAILED,
+        ),
+        // Any op `promptforge-lua` adds behind its `#[non_exhaustive]`
+        // `StoreOp` before this crate names it reports nothing.
         _ => return None,
     };
     Some(pair)

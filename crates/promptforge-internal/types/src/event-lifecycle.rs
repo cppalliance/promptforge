@@ -86,6 +86,8 @@ lifecycle_constants! {
     STORE_DELETE_FAILED => StoreDeleteFailed,
     STORE_GLOB_SUCCEEDED => StoreGlobSucceeded,
     STORE_GLOB_FAILED => StoreGlobFailed,
+    STORE_EXISTS_SUCCEEDED => StoreExistsSucceeded,
+    STORE_EXISTS_FAILED => StoreExistsFailed,
     USER_INPUT_WAIT_STARTED => UserInputWaitStarted,
 }
 

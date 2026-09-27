@@ -906,7 +906,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-9>
 
-### Step 9: Store records and exists events
+### Step 9: Store records and exists events [completed]
 
 - Component: Declared store
 - Piece: records and events, sequential after the store switch: it edits the dispatch code and the Lua store closures Step 8 rewrote, and it compiles on its own, so it doesn't need to share Step 8's commit.

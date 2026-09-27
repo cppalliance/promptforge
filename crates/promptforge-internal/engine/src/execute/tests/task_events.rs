@@ -81,6 +81,42 @@ fn an_owner_reads_its_tasks_history_and_last_narrows_it_to_later_events() {
 }
 
 #[test]
+fn a_task_history_read_returns_the_store_exists_kinds() {
+    // The child's chunk runs three existence checks - a hit, a miss, and
+    // an invalid path - and the owner reads the child's history back, so
+    // the new succeeded and failed kinds reach `tasks.events` like every
+    // other store pair's.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Title\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local t = tasks.spawn('## Child')\n\
+        local _, ok, result = tasks.join_any({ t })\n\
+        assert(ok, tostring(result))\n\
+        local all = tasks.events(t)\n\
+        local kinds = {}\n\
+        for _, e in ipairs(all) do kinds[e.kind] = true end\n\
+        return tostring(kinds.store_exists_succeeded) .. '/' .. tostring(kinds.store_exists_failed) .. '/' .. result\n\
+        ```\n\n\
+        ## Child\n\n\
+        ```lua\n\
+        store.write('seed.txt', 'x')\n\
+        local hit = store.exists('seed.txt')\n\
+        local miss = store.exists('missing.txt')\n\
+        local ok = pcall(store.exists, '../escape.txt')\n\
+        return tostring(hit) .. '/' .. tostring(miss) .. '/' .. tostring(ok)\n\
+        ```\n";
+    let (result, events) = drive_plain(md);
+    assert_eq!(text_of(result), "true/true/true/false/false");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, Event::StoreExistsSucceeded { .. })),
+        "the run reports the existence checks"
+    );
+}
+
+#[test]
 fn a_task_may_read_itself_and_a_task_it_does_not_own_is_refused() {
     // The child reads its own record through `sys.taskid` and is refused
     // the parent's task, which it neither owns nor runs inside; the main

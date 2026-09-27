@@ -274,6 +274,10 @@ events! {
         StoreGlobSucceeded {},
         /// A harness-mediated store glob failed.
         StoreGlobFailed {},
+        /// A harness-mediated store existence check succeeded.
+        StoreExistsSucceeded {},
+        /// A harness-mediated store existence check failed.
+        StoreExistsFailed {},
         // Lifecycle: input and the author's checkpoints.
         /// A section began waiting on operator input.
         UserInputWaitStarted {},

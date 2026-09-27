@@ -27,7 +27,6 @@ pub mod effect {
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
     pub use promptforge_engine::InputAnswerRecord;
-    pub use promptforge_engine::StoreAnswerRecord;
     pub use promptforge_engine::ToolAnswerRecord;
 }
 

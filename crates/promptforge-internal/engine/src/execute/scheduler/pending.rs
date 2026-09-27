@@ -32,8 +32,8 @@ pub(super) enum Continuation {
     UserInput,
     /// A store operation: the operation itself (for the answer's rendered
     /// message and conflict classification) and the succeeded/failed
-    /// observation pair its outcome reports, `None` for `exists`, which
-    /// reports nothing.
+    /// observation pair its outcome reports; `None` for an op this crate
+    /// does not name.
     Store(StoreContinuation),
     /// The internal timer behind a timed wait: the firing completes the
     /// slot backed by the effect and wakes its waiting owner; no chain
@@ -51,7 +51,7 @@ pub(super) struct StoreContinuation {
     /// The operation the effect performs.
     pub(super) op: StoreOp,
     /// The succeeded/failed observation pair the outcome reports; `None`
-    /// for `exists`.
+    /// for an op this crate does not name.
     pub(super) observations: Option<(Lifecycle, Lifecycle)>,
 }
 
