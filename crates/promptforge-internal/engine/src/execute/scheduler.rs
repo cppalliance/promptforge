@@ -84,6 +84,7 @@ use std::sync::Arc;
 
 use mlua::Thread;
 use promptforge_types::ids::{ChainId, Provenance, TaskId};
+use promptforge_vfs::detail::ScopeHandle;
 use promptforge_vfs::{Access, Origin};
 
 use crate::parser::{Block, Prompt, Section};
@@ -464,6 +465,16 @@ pub(crate) struct Scheduler {
     /// The next effect id: a run-wide counter, so every effect the run
     /// issues has a distinct in-flight handle.
     next_effect: u64,
+    /// The run's scope, taken where the run acquires its root identity:
+    /// closed when the run reaches `Done` or is dropped before it, so a
+    /// store view a host still holds never outlives the run.
+    scope: Option<ScopeHandle>,
+}
+
+impl Drop for Scheduler {
+    fn drop(&mut self) {
+        self.end_scope();
+    }
 }
 
 impl Scheduler {
@@ -489,6 +500,15 @@ impl Scheduler {
             phase: Phase::Fresh,
             max_chains: u32::MAX as usize,
             next_effect: 0,
+            scope: None,
+        }
+    }
+
+    /// Ends the run's scope, once: every access still held in it refuses
+    /// its next operation, and its claims stop conflicting.
+    fn end_scope(&mut self) {
+        if let Some(scope) = self.scope.take() {
+            promptforge_vfs::detail::end_scope(&scope);
         }
     }
 

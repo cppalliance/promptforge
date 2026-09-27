@@ -105,8 +105,10 @@ pub enum Effect {
     /// access the engine derived from the chain's capability at dispatch,
     /// rooted at the handle's declared store. A host performing the
     /// effect uses it as given and never derives, widens, or retains
-    /// store scope from it. Dropping it no longer affects correctness:
-    /// claims follow happens-before within the run's scope.
+    /// store scope from it. When it drops never affects correctness:
+    /// claims follow happens-before within the run's scope, which the
+    /// run ends at `Done` or when it is dropped, after which the view
+    /// refuses every operation.
     Store {
         /// The chain's store view: the chain's identity over the store
         /// root alone.

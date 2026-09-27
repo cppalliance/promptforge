@@ -60,10 +60,9 @@ impl Drop for Answering {
 ///
 /// The access is this function's own parameter, so it drops when the
 /// function returns - after the operation, before the caller's
-/// [`Answering`] guard posts. The ordering is no longer load-bearing
-/// (claims follow happens-before within the run's scope and are ignored
-/// once the scope ends), but the early drop keeps the run's identity
-/// count tidy.
+/// [`Answering`] guard posts. The early drop is hygiene only: claims
+/// follow happens-before within the run's scope, and the run ends that
+/// scope at `Done` however long any access is held.
 pub(super) fn perform_store(
     store: &dyn StorePerformer,
     access: Arc<Access>,

@@ -3,11 +3,18 @@
 //! like papergate drives with no real files - prepare, seed the
 //! declared input through the run's handle, run, extract the declared
 //! output, and charge a missing output to the prompt's promise as an
-//! explicit contract error.
+//! explicit contract error. Then the run-bounded scope: a run's `Done`,
+//! or its drop before `Done`, ends its scope however long the host holds
+//! the store views it was handed.
 
+use crate::execute::RunResult;
+use crate::execute::run::{Effect, EffectId, Run, Step};
 use crate::parser::Prompt;
+use promptforge_types::ids::Provenance;
 use promptforge_vfs::{Access, HostBackend, Origin, VfsError, VfsRef};
 
+use super::super::context::{EXECUTION, parse, test_context};
+use super::super::serial_driver::perform_locally;
 use super::support::Recorder;
 use super::support::{RunOptions, drive, parse_execution_fixture, prepare_run, run_fixture};
 use std::sync::Arc;
@@ -293,4 +300,117 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
         temp.0.join("arm-1.md").is_file(),
         "the host backend must persist the arm's write under its root"
     );
+}
+
+const HELD_STORE: &str = "---\nname: held-store\ndescription: d\npromptforge: 0\n---\n\n\
+    # Title\n\n\
+    ## Only\n\n\
+    ```lua\n\
+    store.write('kept.txt', 'from the run')\n\
+    return store.read('kept.txt')\n\
+    ```\n";
+
+/// Starts the `HELD_STORE` run over `vfs`.
+fn held_store_run(vfs: &VfsRef) -> Run {
+    let ctx = test_context(EXECUTION).vfs(vfs.clone());
+    Run::new(Arc::new(parse(HELD_STORE)), "", ctx)
+}
+
+/// Answers `effects` through the local performer, keeping each one in
+/// `held` so the store views they carry outlive the answer.
+fn answer_holding(
+    run: &mut Run,
+    effects: Vec<(EffectId, Provenance, Effect)>,
+    held: &mut Vec<Effect>,
+) {
+    assert!(!effects.is_empty(), "every issued effect is answered");
+    for (id, _, effect) in effects {
+        let answer = perform_locally(&effect, &mut |effect| {
+            panic!("the fixture issues no model round: {effect:?}")
+        });
+        run.resume(id, answer);
+        held.push(effect);
+    }
+}
+
+/// Drives the `HELD_STORE` run over `vfs` to `Done`, keeping every
+/// effect, and returns the run itself too, so both the run and every
+/// store view it handed out are still alive when the caller asserts.
+fn drive_holding_effects(vfs: &VfsRef) -> (Run, RunResult, Vec<Effect>) {
+    let mut run = held_store_run(vfs);
+    let mut held = Vec::new();
+    loop {
+        match run.step() {
+            Step::Done { result, .. } => return (run, result, held),
+            Step::Pending { effects, .. } => answer_holding(&mut run, effects, &mut held),
+        }
+    }
+}
+
+#[test]
+fn a_run_ends_its_scope_at_done_while_the_host_still_holds_its_store_views() -> Result<(), VfsError>
+{
+    let vfs = VfsRef::default();
+    let (run, result, held) = drive_holding_effects(&vfs);
+    assert!(
+        matches!(&result, RunResult::Ok(text) if text == "from the run"),
+        "the run succeeds: {result:?}"
+    );
+    assert!(
+        held.iter()
+            .any(|effect| matches!(effect, Effect::Store { .. })),
+        "the host holds the run's store views past Done: {held:?}"
+    );
+    // A fresh scope reads the run's write without a conflict: the run's
+    // scope ended at Done, not when the run or the host's views dropped.
+    let fresh = vfs.acquire(Origin::new("after done"))?;
+    assert_eq!(fresh.read("/kept.txt")?, b"from the run");
+    drop(held);
+    drop(run);
+    Ok(())
+}
+
+#[test]
+fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothing()
+-> Result<(), VfsError> {
+    let vfs = VfsRef::default();
+    let (run, _, held) = drive_holding_effects(&vfs);
+    let Some(Effect::Store { access, .. }) = held.first() else {
+        panic!("the run's first effect is its store write: {held:?}");
+    };
+    match access.write("kept.txt", b"after the run") {
+        Err(VfsError::PermissionDenied { path, reason }) => {
+            assert_eq!(path, "kept.txt", "the refusal names the logical path");
+            assert!(reason.contains("has ended"), "{reason}");
+        }
+        other => panic!("a write through a view held past Done is refused, got {other:?}"),
+    }
+    let fresh = vfs.acquire(Origin::new("after done"))?;
+    assert_eq!(fresh.read("/kept.txt")?, b"from the run");
+    drop(held);
+    drop(run);
+    Ok(())
+}
+
+#[test]
+fn dropping_a_run_before_done_ends_its_scope_while_the_host_still_holds_its_store_views()
+-> Result<(), VfsError> {
+    let vfs = VfsRef::default();
+    let mut run = held_store_run(&vfs);
+    let mut held = Vec::new();
+    let Step::Pending { effects, .. } = run.step() else {
+        panic!("the run parks on its store write");
+    };
+    answer_holding(&mut run, effects, &mut held);
+    let Step::Pending { effects, .. } = run.step() else {
+        panic!("the run parks on its store read");
+    };
+    held.extend(effects.into_iter().map(|(_, _, effect)| effect));
+    drop(run);
+    // A fresh scope reads the dropped run's write without a conflict,
+    // though the host still holds every store view the run handed out.
+    let fresh = vfs.acquire(Origin::new("after drop"))?;
+    assert_eq!(fresh.read("/kept.txt")?, b"from the run");
+    drop(held);
+    Ok(())
 }

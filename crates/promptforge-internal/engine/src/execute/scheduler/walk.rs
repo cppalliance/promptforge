@@ -93,7 +93,9 @@ impl Scheduler {
             let blocks: &[Block] =
                 promptforge_parser::detail::entry(prompt).map_or(&[], |section| section.blocks());
             let origin = prompt_origin(prompt, prompt.title(), blocks);
-            Arc::new(self.ctx.vfs().acquire(origin).map_err(Error::store)?)
+            let access = self.ctx.vfs().acquire(origin).map_err(Error::store)?;
+            self.scope = Some(promptforge_vfs::detail::scope_handle(&access));
+            Arc::new(access)
         };
         self.chains[root.index()].access = Some(access);
         Ok(())

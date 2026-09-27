@@ -3,10 +3,44 @@
 //! The `promptforge` facade never re-exports this module, so nothing here
 //! is reachable from a host: a host passes a run's capability through, and
 //! the engine alone forks it for concurrent arms, joins the arms'
-//! identities back on delivery, and derives the store view for store
-//! calls.
+//! identities back on delivery, derives the store view for store
+//! calls, and ends the run's scope when the run ends.
 
+use std::fmt;
+use std::sync::{Arc, Weak};
+
+use crate::handle::Scope;
 use crate::{Access, ExecId, Origin, VfsError};
+
+/// An opaque handle on the scope an [`Access`] belongs to, which the
+/// engine holds for the life of a run so [`end_scope`] can close it. It
+/// never keeps the scope alive.
+#[derive(Clone)]
+pub struct ScopeHandle(Weak<Scope>);
+
+impl fmt::Debug for ScopeHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ScopeHandle").finish_non_exhaustive()
+    }
+}
+
+/// The handle on `access`'s scope: the scope of every identity spawned
+/// from it, however deep.
+#[must_use]
+pub fn scope_handle(access: &Access) -> ScopeHandle {
+    ScopeHandle(Arc::downgrade(access.scope()))
+}
+
+/// Ends the scope behind `scope`: its claims stop conflicting at once,
+/// and every access still held in it - a store view a host kept past the
+/// run, a forwarded mount session - refuses its next operation, spawn,
+/// or store view with [`VfsError::PermissionDenied`]. Idempotent, and a
+/// no-op once every access in the scope has dropped.
+pub fn end_scope(scope: &ScopeHandle) {
+    if let Some(scope) = scope.0.upgrade() {
+        scope.close();
+    }
+}
 
 /// Derives the store view from a chain's [`Access`]: an ordinary
 /// [`Access`] rooted at the handle's declared store root, whose
@@ -60,7 +94,7 @@ pub const fn access_id(access: &Access) -> ExecId {
 
 #[cfg(test)]
 mod tests {
-    use super::store_view;
+    use super::{access_spawn, end_scope, scope_handle, store_view};
     use crate::grep::GrepQuery;
     use crate::path::canonicalize_absolute;
     use crate::{Access, MemoryBackend, Origin, PathReason, VfsError, VfsPathBuf, VfsRef};
@@ -81,6 +115,35 @@ mod tests {
             .expect("the stock backend acquires");
         let view = store_view(&access).expect("the handle declares a store");
         (access, view)
+    }
+
+    #[test]
+    fn an_ended_scope_refuses_spawns_views_and_arm_operations_and_frees_its_claims()
+    -> Result<(), VfsError> {
+        let vfs = stock();
+        let (access, view) = chain(&vfs);
+        view.write("a.txt", b"run")?;
+        let arm = access_spawn(&access, Origin::new("arm"))?;
+        end_scope(&scope_handle(&access));
+        let ended = |result: Result<Access, VfsError>| match result {
+            Err(VfsError::PermissionDenied { reason, .. }) => {
+                assert!(reason.contains("has ended"), "{reason}");
+            }
+            other => panic!("expected an ended-run refusal, got {other:?}"),
+        };
+        ended(access_spawn(&access, Origin::new("late arm")));
+        ended(store_view(&access));
+        ended(store_view(&arm));
+        match arm.read("/my/store/a.txt") {
+            Err(VfsError::PermissionDenied { path, .. }) => assert_eq!(path, "/my/store/a.txt"),
+            other => panic!("expected an ended-run refusal, got {other:?}"),
+        }
+        // Another scope writes the path at once: the ended scope's claim
+        // no longer conflicts, though its accesses are still held.
+        let (_other, other_view) = chain(&vfs);
+        other_view.write("a.txt", b"next")?;
+        assert_eq!(other_view.read("a.txt")?, b"next");
+        Ok(())
     }
 
     #[test]

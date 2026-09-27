@@ -358,7 +358,7 @@ Every regression test below must fail at `3088311d` and pass after its work item
 
 <step-2>
 
-### Step 2: End the run's scope when the run ends (C-33)
+### Step 2: End the run's scope when the run ends (C-33) [completed]
 
 - Component: Scope lifecycle
 

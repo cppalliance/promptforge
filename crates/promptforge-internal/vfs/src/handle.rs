@@ -27,8 +27,10 @@
 //! a fanout shares one map instead of copying it per arm. Claims are never
 //! released during a scope's life. An identity ends when its last
 //! [`Access`] drops, its final clock stays in the scope for late joins,
-//! and a scope ends with its last identity; its claims are then ignored
-//! and purged lazily. Two live scopes never order each other, so their
+//! and a scope ends with its last identity or when its run closes it
+//! through [`crate::detail::end_scope`], whichever comes first; its
+//! claims are then ignored and purged lazily, and a closed scope's
+//! accesses refuse every later operation. Two live scopes never order each other, so their
 //! claims always conflict. See the reference docs on the facade for the
 //! region model: a read claims the path, directory children, or pattern
 //! it observes; a write claims its path, the ancestors it may create, or
@@ -36,7 +38,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use crate::error::{PathReason, VfsError};
@@ -88,6 +90,10 @@ pub(crate) struct Scope {
     /// scope's liveness without taking its lock (which the checker's own
     /// scope lock would deadlock against).
     live: AtomicUsize,
+    /// Set when the run that owns the scope ends: the scope has ended
+    /// however many accesses a host still holds. Separate from `live`
+    /// so a later release still balances the count.
+    closed: AtomicBool,
     /// Per-identity state, behind the scope's own lock.
     inner: Mutex<ScopeInner>,
 }
@@ -169,6 +175,7 @@ impl Scope {
         Arc::new(Scope {
             id: next_scope_id(),
             live: AtomicUsize::new(0),
+            closed: AtomicBool::new(false),
             inner: Mutex::new(ScopeInner {
                 identities: HashMap::new(),
             }),
@@ -180,15 +187,41 @@ impl Scope {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether the scope has ended: every identity's last access dropped.
+    /// Whether the scope has ended: its run closed it, or every
+    /// identity's last access dropped.
     fn ended(&self) -> bool {
-        self.live.load(Ordering::Acquire) == 0
+        self.closed.load(Ordering::Acquire) || self.live.load(Ordering::Acquire) == 0
+    }
+
+    /// Ends the scope for good: its claims are ignored from here on, and
+    /// every access still held refuses its next operation.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// Refuses an operation on `path` once the scope is closed, before
+    /// any claim or backend call.
+    fn refuse_if_closed(&self, path: &VfsPath) -> Result<(), VfsError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason: format!(
+                    "the run that owned this access has ended, so {path} can no longer be \
+                     touched through it; acquire a fresh access"
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Adds one access's reference to `id`: the identity registers fresh
     /// on its first access, and a mounted-handle forward of an existing
     /// identity joins its scope with one more reference.
-    fn attach(&self, id: ExecId) {
+    ///
+    /// # Errors
+    /// Returns [`VfsError::PermissionDenied`] when the scope is closed.
+    fn attach(&self, id: ExecId) -> Result<(), VfsError> {
+        self.refuse_if_closed(&VfsPath::root())?;
         let mut inner = self.lock();
         match inner.identities.entry(id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
@@ -209,6 +242,7 @@ impl Scope {
                 self.live.fetch_add(1, Ordering::AcqRel);
             }
         }
+        Ok(())
     }
 
     /// Forks `child` from `parent`: the child shares the parent's seen
@@ -1302,13 +1336,22 @@ impl VfsRef {
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity;
-    /// see [`VfsRef::acquire`].
+    /// see [`VfsRef::acquire`]. Returns [`VfsError::PermissionDenied`],
+    /// before any backend call, when the scope in `cx` belongs to a run
+    /// that has ended.
     pub(crate) fn acquire_with(
         &self,
         cx: &AcquireContext,
         origin: Option<Origin>,
     ) -> Result<Access, VfsError> {
-        let inner = self.backend().acquire(cx)?;
+        let scope = self.join_scope(cx)?;
+        let inner = match self.backend().acquire(cx) {
+            Ok(inner) => inner,
+            Err(err) => {
+                scope.release(cx.id());
+                return Err(err);
+            }
+        };
         Ok(Access {
             id: cx.id(),
             origin,
@@ -1316,18 +1359,19 @@ impl VfsRef {
             store_root: None,
             volume: self.volume.clone(),
             policy: self.policy.clone(),
-            scope: self.join_scope(cx),
+            scope,
             inner: Mutex::new(inner),
         })
     }
 
-    /// Joins the scope in `cx`: registers it in this handle's claims
-    /// tables and attaches the identity, fresh or forwarded.
-    fn join_scope(&self, cx: &AcquireContext) -> Arc<Scope> {
+    /// Joins the scope in `cx`: attaches the identity, fresh or
+    /// forwarded, and registers the scope in this handle's claims
+    /// tables. A closed scope is refused before either.
+    fn join_scope(&self, cx: &AcquireContext) -> Result<Arc<Scope>, VfsError> {
         let scope = Arc::clone(cx.scope());
+        scope.attach(cx.id())?;
         self.volume.claims.register_scope(&scope);
-        scope.attach(cx.id());
-        scope
+        Ok(scope)
     }
 
     /// Builds a handle over a router with a fresh claims table and the
@@ -1401,10 +1445,14 @@ impl Access {
     /// identity; see [`VfsRef::acquire`]. A failed spawn still advances
     /// this capability's own clock entry, which orders nothing new: its
     /// later accesses are merely no longer ordered before a child that
-    /// never ran.
+    /// never ran. Returns [`VfsError::PermissionDenied`], before the
+    /// fork, when the run that owned this capability has ended.
     ///
     /// Crate-internal: backs [`crate::detail::access_spawn`].
     pub(crate) fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
+        self.scope
+            .refuse_if_closed(&self.root)
+            .map_err(|err| self.relativize(err))?;
         let id = ExecId::vend();
         // The fork comes first so a wrapped handle acquiring the child
         // finds it already registered in the scope.
@@ -1449,20 +1497,30 @@ impl Access {
         self.id
     }
 
+    /// The scope this identity belongs to. Crate-internal: backs
+    /// [`crate::detail::scope_handle`].
+    pub(crate) const fn scope(&self) -> &Arc<Scope> {
+        &self.scope
+    }
+
     /// Crate-internal: backs [`crate::detail::access_join`].
     pub(crate) fn join(&self, child: ExecId) {
         self.scope.join(self.id, child);
     }
 
-    /// The claims-table half of one operation: runs `claim` against
-    /// this access's identity and scope, and re-spells a store view's
-    /// error paths into the caller's logical form.
+    /// The claims-table half of one operation: refuses once the run that
+    /// owned this access has ended, runs `claim` against this access's
+    /// identity and scope, and re-spells a store view's error paths into
+    /// the caller's logical form.
     fn admit(
         &self,
         claim: impl FnOnce(&Claims, &Arc<Scope>, ExecId, &VfsPath) -> Result<(), VfsError>,
         path: &VfsPath,
     ) -> Result<(), VfsError> {
-        claim(&self.volume.claims, &self.scope, self.id, path).map_err(|err| self.relativize(err))
+        self.scope
+            .refuse_if_closed(path)
+            .and_then(|()| claim(&self.volume.claims, &self.scope, self.id, path))
+            .map_err(|err| self.relativize(err))
     }
 
     /// Re-spells an error's paths for the store view's caller; a plain
@@ -1482,8 +1540,13 @@ impl Access {
     /// Crate-internal: backs [`crate::detail::store_view`].
     ///
     /// # Errors
-    /// Returns an error when the handle declares no store.
+    /// Returns an error when the handle declares no store, or
+    /// [`VfsError::PermissionDenied`], before any backend call, when the
+    /// run that owned this access has ended.
     pub(crate) fn store_view(&self) -> Result<Access, VfsError> {
+        self.scope
+            .refuse_if_closed(&self.root)
+            .map_err(|err| self.relativize(err))?;
         let Some(store) = &self.volume.store else {
             return Err(VfsError::Unsupported {
                 path: self.root.to_string(),
@@ -1496,11 +1559,17 @@ impl Access {
         let mut mounts = Mounts::new();
         mounts.insert(store.root.to_buf(), Arc::clone(&store.mount));
         let mut router = Router::new(mounts);
-        let inner = router.acquire(&AcquireContext::new(self.id, Arc::clone(&self.scope)))?;
         // The view holds one more reference to the identity, like a
         // mount forward: the identity - and its scope - ends with its
         // last access, the view included.
-        self.scope.attach(self.id);
+        self.scope.attach(self.id)?;
+        let inner = match router.acquire(&AcquireContext::new(self.id, Arc::clone(&self.scope))) {
+            Ok(inner) => inner,
+            Err(err) => {
+                self.scope.release(self.id);
+                return Err(err);
+            }
+        };
         Ok(Access {
             id: self.id,
             // The view keeps the chain's origin: store operations fire
@@ -3003,6 +3072,31 @@ mod tests {
             }
             other => panic!("expected a backend refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_mounted_handle_whose_backend_refuses_releases_the_identity_it_joined()
+    -> Result<(), VfsError> {
+        let vfs = VfsRef::builder()
+            .mount("/", StubFs::default())
+            .mount("/m", VfsRef::new(RefusingFs))
+            .build();
+        let access = vfs.acquire(test_origin())?;
+        access.write("/a.txt", b"1")?;
+        match access.read("/m/x.txt") {
+            Err(VfsError::Backend { message }) => {
+                assert_eq!(message, "the backend refuses acquisition");
+            }
+            other => panic!("expected a backend refusal, got {other:?}"),
+        }
+        let scope = Arc::clone(&access.scope);
+        drop(access);
+        // The refused mount's join was released, so the scope ends with
+        // the caller's last access and its claims stop conflicting.
+        assert_eq!(scope.live.load(Ordering::Acquire), 0);
+        let fresh = vfs.acquire(test_origin())?;
+        fresh.write("/a.txt", b"2")?;
+        Ok(())
     }
 
     #[test]

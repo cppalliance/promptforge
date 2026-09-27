@@ -40,9 +40,9 @@ impl TimerPerformer for TokioTimer {
 /// Performs a store operation through the engine's store facade over the
 /// store view the effect carries.
 ///
-/// Synchronous: the loop runs it on the blocking pool. Dropping the
-/// access when the operation completes never affects correctness: claims
-/// follow happens-before within the run's scope.
+/// Synchronous: the loop runs it on the blocking pool. When the access
+/// drops never affects correctness: claims follow happens-before within
+/// the run's scope, and the run ends that scope at `Done`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct VfsStore;
 

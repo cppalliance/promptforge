@@ -58,6 +58,10 @@ impl Scheduler {
                 let Phase::Ending(result) = std::mem::replace(&mut self.phase, Phase::Done) else {
                     unreachable!("the phase was matched as ending");
                 };
+                // Only here, with every pending and orphaned effect
+                // answered, so an orphan's store effect still runs in the
+                // live scope.
+                self.end_scope();
                 Step::Done {
                     result: match result {
                         Ok(text) => RunResult::Ok(text),

@@ -94,9 +94,9 @@ pub trait InputPerformer: Send + Sync {
 /// view the effect carries.
 ///
 /// Synchronous: the loop runs it on the blocking pool. Dropping the
-/// access when the operation completes is good hygiene, but it never
-/// affects correctness: claims follow happens-before within the run's
-/// scope.
+/// access when the operation completes is good hygiene, but when it
+/// drops never affects correctness: claims follow happens-before within
+/// the run's scope, and the run ends that scope at `Done`.
 pub trait StorePerformer: Send + Sync {
     /// Performs `op` through `access`, the store view the effect
     /// carries. The performer uses the capability as given and never
