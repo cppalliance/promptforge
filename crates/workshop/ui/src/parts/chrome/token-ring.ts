@@ -7,7 +7,7 @@
 
 import "./token-ring.css";
 
-import { Disposable } from "../../base/lifecycle";
+import { Disposable } from "@workshop/platform/lifecycle";
 
 /** Supplies the context-usage percentage (0-100) the ring displays. */
 export type TokenRingPercentageProvider = () => number;

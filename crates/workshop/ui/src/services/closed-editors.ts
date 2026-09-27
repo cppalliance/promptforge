@@ -5,7 +5,7 @@
 // workspace-scoped stores; only the token and the stack's public shapes
 // live here, in the DOM-free services layer.
 
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /** One closed editor: a file to reopen by path, or an untitled buffer's text. */
 export type ClosedEditor =

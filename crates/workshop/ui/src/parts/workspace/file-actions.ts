@@ -10,13 +10,13 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { errorText } from "../../services/error-catalog";
 import { DOCK } from "../../services/panel-registry";
-import { getService, getServiceOrNull } from "../../services/service-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
 import { fetchTree } from "../../services/workspace-api";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { asEditor } from "../editor/editor-commands";
 import { openInZone } from "../layout/zones";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { addFolderToWorkspace } from "./add-folder";
 import { grantPath } from "./workspace-drops";
 import { focusWorkshopTree } from "./workshop-panel";

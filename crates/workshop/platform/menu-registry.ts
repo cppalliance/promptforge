@@ -11,9 +11,9 @@
 // composition root and feature contribution files populate; tests
 // construct their own.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { toDisposable, type IDisposable } from "../base/lifecycle";
+import { toDisposable, type IDisposable } from "./lifecycle";
 
 /**
  * The well-known menu ids. Features add their own ids - the type is

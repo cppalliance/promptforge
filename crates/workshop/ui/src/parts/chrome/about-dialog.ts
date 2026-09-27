@@ -5,7 +5,7 @@
 
 import "./about-dialog.css";
 
-import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
+import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import type { UpdateService } from "../../services/update-service";
 
 // The crate version, substituted by the esbuild define in build.mjs and

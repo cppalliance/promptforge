@@ -5,7 +5,23 @@
   "type": "module",
   "description": "PromptForge Workshop family platform: the browser-side UI mechanics shared by the Workshop's UIs, with no visuals and no product vocabulary.",
   "exports": {
-    "./result": "./result.ts"
+    "./event": "./event.ts",
+    "./lifecycle": "./lifecycle.ts",
+    "./result": "./result.ts",
+    "./service-registry": "./service-registry.ts",
+    "./command-registry": "./command-registry.ts",
+    "./menu-registry": "./menu-registry.ts",
+    "./keybinding-parser": "./keybinding-parser.ts",
+    "./keybinding-resolver": "./keybinding-resolver.ts",
+    "./keybinding-registry": "./keybinding-registry.ts",
+    "./context-key-expr": "./context-key-expr.ts",
+    "./context-key-service": "./context-key-service.ts",
+    "./action-registry": "./action-registry.ts",
+    "./quick-access-registry": "./quick-access-registry.ts",
+    "./reconnect-backoff": "./reconnect-backoff.ts",
+    "./text-control-service": "./text-control-service.ts",
+    "./status-bar": "./status-bar.ts",
+    "./workshop-part": "./workshop-part.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

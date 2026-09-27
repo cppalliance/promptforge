@@ -23,16 +23,16 @@
 // to string, never cast. Neither is f1 - a palette row cannot supply a
 // path argument, and Go to File... already owns that surface.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { KeybindingWeight } from "../../services/keybinding-registry";
-import { MenuId, Menus } from "../../services/menu-registry";
-import { QuickAccessRegistry } from "../../services/quick-access-registry";
+import { KeybindingWeight } from "@workshop/platform/keybinding-registry";
+import { MenuId, Menus } from "@workshop/platform/menu-registry";
+import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
-import { getService } from "../../services/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { createFileQuickAccessProvider, createRecentMenuProvider } from "./open-recent";
 import { focusWorkshopTree, toggleWorkshopPanel } from "./workshop-panel";

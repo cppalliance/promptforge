@@ -14,8 +14,8 @@
 
 import type { DockviewApi, IContentRenderer } from "dockview";
 
-import { DisposableStore, type IDisposable } from "../base/lifecycle";
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 import type { ZoneName } from "./zone-state-service";
 
 /** The registered name of the close-button-free tab renderer. */

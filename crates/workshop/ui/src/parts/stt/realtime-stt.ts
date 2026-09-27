@@ -1,5 +1,5 @@
-import { Emitter } from "../../base/event";
-import { DisposableStore } from "../../base/lifecycle";
+import { Emitter } from "@workshop/platform/event";
+import { DisposableStore } from "@workshop/platform/lifecycle";
 import { RealtimeTranscriptionService } from "../../services/realtime-transcription";
 import {
   SpeechCaptureService,

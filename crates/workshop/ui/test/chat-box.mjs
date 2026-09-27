@@ -44,11 +44,11 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { ChatBox, clampPromptInputHeight, stubMentionSource } from "./src/parts/chatbox/chat-box.ts";
       export { renderDraft } from "./src/parts/chatbox/chat-box-view.ts";
-      export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
+      export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(testDir, ".."),
     loader: "ts",

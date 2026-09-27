@@ -1,5 +1,5 @@
-// Object lifetime primitives for the workshop UI. Generic and DOM-free:
-// nothing here may import from the app layers.
+// Object lifetime primitives for the Workshop family's UIs. Generic and
+// DOM-free: imports only this package's own files.
 
 /** A resource that frees itself when dispose() is called. */
 export interface IDisposable {

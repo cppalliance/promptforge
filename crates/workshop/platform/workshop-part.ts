@@ -8,8 +8,8 @@
 // panel registers through _register tears down with one dispose() from
 // the dock.
 //
-// Generic panel infrastructure: nothing here may import from the feature
-// directories.
+// Generic panel infrastructure: imports only this package's own files and
+// type-only `dockview`.
 
 import type { GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 

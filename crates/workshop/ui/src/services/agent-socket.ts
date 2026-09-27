@@ -29,8 +29,8 @@
 // socket is constructed and subscribed by its owning view before
 // `connect()` is called, so no push can precede its handlers.
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable, toDisposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import {
   AGENT_FRAME_GUARDS,
   type AgentCancelFrame,
@@ -42,7 +42,7 @@ import {
   type LaunchFrame,
   narrowFrame,
 } from "./protocol";
-import { ReconnectBackoff } from "./reconnect-backoff";
+import { ReconnectBackoff } from "@workshop/platform/reconnect-backoff";
 
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/agents/ws`;

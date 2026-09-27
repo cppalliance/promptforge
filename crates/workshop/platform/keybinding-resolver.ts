@@ -11,7 +11,7 @@
 // swallow a key whose rule is context-gated, so a claimed chord never
 // falls through to CodeMirror or the webview default.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
 import { chordsEqual, type Chord } from "./keybinding-parser";
 import type { ContextKeyExpression } from "./context-key-expr";

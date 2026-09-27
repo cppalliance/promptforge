@@ -13,8 +13,8 @@
 
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-import { toDisposable } from "../../base/lifecycle";
-import type { IDisposable } from "../../base/lifecycle";
+import { toDisposable } from "@workshop/platform/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 
 /** The writer each zoom change hands the new factor to. */
 export type ZoomWriter = (value: unknown) => void;

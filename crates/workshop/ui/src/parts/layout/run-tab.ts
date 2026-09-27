@@ -11,7 +11,7 @@
 
 import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
-import { Disposable } from "../../base/lifecycle";
+import { Disposable } from "@workshop/platform/lifecycle";
 
 /** The shimmer period, matching the 2s loop in @workshop/look/shimmer.css. */
 const SHIMMER_PERIOD_MS = 2000;

@@ -1,5 +1,5 @@
 // Unit test for the context-key expression parser and service
-// (src/services/context-key-expr.ts, src/services/context-key-service.ts):
+// (context-key-expr.ts, context-key-service.ts):
 // the `when` expression language (key, !key, == / != against a string
 // literal, &&, ||, parentheses, true, false) parsed into an evaluable
 // expression that names the keys it reads, and the service that holds
@@ -10,21 +10,21 @@
 // parentheses, keys() collection, parse failures returned as Result
 // values (never thrown), createKey defaults visible through getValue,
 // set/get/reset, and affectsSome on the change event.
-// Run: node --test test/context-keys.mjs
+// Run: node --test test/context-keys.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { ContextKeyExpr } from "./src/services/context-key-expr.ts";
-      export { ContextKeyService, CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { ContextKeyExpr } from "./context-key-expr.ts";
+      export { ContextKeyService, CONTEXT_KEY_SERVICE } from "./context-key-service.ts";
+      export { getService } from "./service-registry.ts";
     `,
-    resolveDir: path.join(uiDir, ".."),
+    resolveDir: platformDir,
     loader: "ts",
   },
   bundle: true,

@@ -7,7 +7,7 @@
 
 import "./agent-toolbar.css";
 
-import { Disposable } from "../../base/lifecycle";
+import { Disposable } from "@workshop/platform/lifecycle";
 import type { ModelService } from "../../services/model-service";
 import { ModeChip } from "./mode-chip";
 import { ModelPickerTrigger } from "../chrome/model-picker-trigger";

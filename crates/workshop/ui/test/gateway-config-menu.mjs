@@ -32,12 +32,12 @@ const bundle = await esbuild.build({
       import "./src/parts/status/status.contribution.ts";
       import "./src/parts/agent/agent.contribution.ts";
       import "./src/parts/gateway/gateway.contribution.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus } from "./src/services/menu-registry.ts";
-      export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
-      export { getService, registerService } from "./src/services/service-registry.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus } from "@workshop/platform/menu-registry";
+      export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+      export { getService, registerService } from "@workshop/platform/service-registry";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
       export { Menu } from "./src/parts/menu/menu.ts";
       export { KeybindingDispatcher } from "./src/parts/layout/keybinding-dispatcher.ts";
       export { initZones } from "./src/parts/layout/zones.ts";

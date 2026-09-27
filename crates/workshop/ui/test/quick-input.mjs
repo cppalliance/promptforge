@@ -39,20 +39,20 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { QuickInputService } from "./src/parts/quickinput/quick-input.ts";
-      export { createQuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { createQuickAccessRegistry } from "@workshop/platform/quick-access-registry";
       export { CommandsHistory } from "./src/parts/quickinput/commands-history.ts";
       export { COMMANDS_HISTORY } from "./src/services/commands-history.ts";
-      export { getService, registerService } from "./src/services/service-registry.ts";
+      export { getService, registerService } from "@workshop/platform/service-registry";
       export {
         createCommandPaletteProvider,
         createHelpProvider,
         createPlaceholderProvider,
         createQuickAccessProviderDescriptors,
       } from "./src/parts/quickinput/quick-access-providers.ts";
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { MenuRegistry, MenuId } from "@workshop/platform/menu-registry";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

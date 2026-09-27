@@ -19,15 +19,15 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
 
-import { toDisposable } from "../../base/lifecycle";
-import { WorkshopPart } from "../../base/workshop-part";
+import { toDisposable } from "@workshop/platform/lifecycle";
+import { WorkshopPart } from "@workshop/platform/workshop-part";
 import { errorText } from "../../services/error-catalog";
 import { fetchPromptContract, type RunContract } from "../../services/run-api";
-import { getServiceOrNull } from "../../services/service-registry";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { fetchFile } from "../../services/workspace-api";
 import { showPanelDialog } from "../shared/panel-dialog";
 import { setRunTabLoading } from "../layout/run-tab";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { grantPath, WORKSPACE_FILE_DROP_EVENT } from "../workspace/workspace-drops";
 import { renderContractRows } from "./run-rows";
 import "./run-panel.css";

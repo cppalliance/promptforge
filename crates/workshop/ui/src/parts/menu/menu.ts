@@ -21,15 +21,15 @@
 
 import "./window-menu.css";
 
-import { Emitter } from "../../base/event";
-import { Disposable, DisposableStore, toDisposable } from "../../base/lifecycle";
-import { Commands, type CommandRegistry } from "../../services/command-registry";
-import { CONTEXT_KEY_SERVICE, type ContextKeyService } from "../../services/context-key-service";
-import { ContextKeyExpr } from "../../services/context-key-expr";
-import { KeybindingsRegistry } from "../../services/keybinding-registry";
-import { Menus, type MenuId, type MenuItem, type MenuRegistry, type MenuRow, type SubmenuItem } from "../../services/menu-registry";
-import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../../services/status-bar";
+import { Emitter } from "@workshop/platform/event";
+import { Disposable, DisposableStore, toDisposable } from "@workshop/platform/lifecycle";
+import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { CONTEXT_KEY_SERVICE, type ContextKeyService } from "@workshop/platform/context-key-service";
+import { ContextKeyExpr } from "@workshop/platform/context-key-expr";
+import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+import { Menus, type MenuId, type MenuItem, type MenuRegistry, type MenuRow, type SubmenuItem } from "@workshop/platform/menu-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 
 /** Where the popover opens: below an element, or at a pointer position. */
 export type MenuAnchor = HTMLElement | { readonly x: number; readonly y: number };

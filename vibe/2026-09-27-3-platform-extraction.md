@@ -462,7 +462,7 @@ Four components, built in dependency order. Each is useful on its own and resemb
 
 <step-2>
 
-### Step 2: Move the mechanics into `@workshop/platform`
+### Step 2: Move the mechanics into `@workshop/platform` [completed]
 
 - Component: `platform` package
 - Piece: mechanics move. Sequential after step 1. No behavior change.

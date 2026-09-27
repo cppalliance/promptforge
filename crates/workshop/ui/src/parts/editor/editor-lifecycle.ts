@@ -13,9 +13,9 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview";
 
-import { DisposableStore, type IDisposable } from "../../base/lifecycle";
-import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
-import { getService } from "../../services/service-registry";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+import { getService } from "@workshop/platform/service-registry";
 import { openInZone } from "../layout/zones";
 import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { asEditor } from "./editor-commands";

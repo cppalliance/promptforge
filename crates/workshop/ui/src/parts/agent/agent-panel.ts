@@ -4,7 +4,7 @@
 // Closing the panel disposes the tree and closes its socket; every new
 // panel gets a fresh socket and therefore a fresh server session.
 
-import { WorkshopPart } from "../../base/workshop-part";
+import { WorkshopPart } from "@workshop/platform/workshop-part";
 import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
 import type { ModelService } from "../../services/model-service";

@@ -13,13 +13,13 @@
 // The run bodies resolve the service at call time; this module pulls
 // no widget code into the initial bundle.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { MenuId } from "../../services/menu-registry";
-import { getService } from "../../services/service-registry";
-import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
+import { MenuId } from "@workshop/platform/menu-registry";
+import { getService } from "@workshop/platform/service-registry";
+import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 
 /** Registers one action, reporting a malformed descriptor instead of throwing. */
 function addAction(action: ActionDescriptor): void {

@@ -37,7 +37,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { ChatBox } from "./src/parts/chatbox/chat-box.ts";
     `,
     resolveDir: path.join(testDir, ".."),

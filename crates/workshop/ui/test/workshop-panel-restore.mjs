@@ -45,7 +45,7 @@ const bundle = await esbuild.build({
     contents: `
       export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
       export { TreeStateService, TREE_STATE } from "./src/services/tree-state-service.ts";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { registerService } from "@workshop/platform/service-registry";
       export { WORKSPACE_CHANGED_EVENT } from "./src/services/workspace-events.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

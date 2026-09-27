@@ -39,11 +39,11 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { CommandCenter, WindowTitle } from "./src/parts/chrome/command-center.ts";
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { MenuRegistry, MenuId } from "@workshop/platform/menu-registry";
       export { WORKSPACE_CHANGED_EVENT } from "./src/services/workspace-events.ts";
       export { TREE_STATE } from "./src/services/tree-state-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

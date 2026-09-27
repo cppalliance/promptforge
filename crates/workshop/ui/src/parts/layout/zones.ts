@@ -46,9 +46,9 @@ import "./zones.css";
 
 import type { Direction, DockviewApi, IDockviewGroupPanel, IDockviewPanel } from "dockview";
 
-import { DisposableStore, type IDisposable } from "../../base/lifecycle";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
 import { DOCK, isPanelType, panelTypeEntry, type PanelType } from "../../services/panel-registry";
-import { getService, registerService } from "../../services/service-registry";
+import { getService, registerService } from "@workshop/platform/service-registry";
 import {
   ZONE_NAMES,
   ZoneStateService,

@@ -17,7 +17,7 @@ import {
   createElement,
 } from "lucide";
 import type { IconNode } from "lucide";
-import { Disposable, toDisposable } from "../../base/lifecycle";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { DropdownMenu } from "@workshop/look/dropdown";
 import type { DropdownItem } from "@workshop/look/dropdown";
 

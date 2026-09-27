@@ -21,7 +21,7 @@ import {
   COMMANDS_HISTORY,
   type CommandsHistory as CommandsHistoryContract,
 } from "../../services/commands-history";
-import { registerService } from "../../services/service-registry";
+import { registerService } from "@workshop/platform/service-registry";
 
 /** The most ids the store keeps; adding past the cap drops the oldest. */
 const MAX_ENTRIES = 50;

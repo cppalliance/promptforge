@@ -7,7 +7,7 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { UpdateService } from "./src/services/update-service.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

@@ -9,7 +9,7 @@
 
 import "./gateway-config-panel.css";
 
-import { WorkshopPart } from "../../base/workshop-part";
+import { WorkshopPart } from "@workshop/platform/workshop-part";
 
 /** Injectable seams for tests. */
 export interface GatewayConfigPanelDeps {

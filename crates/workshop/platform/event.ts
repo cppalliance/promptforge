@@ -1,5 +1,5 @@
-// Minimal typed event primitive for the workshop UI. Generic and DOM-free:
-// nothing here may import from the app layers.
+// Minimal typed event primitive for the Workshop family's UIs. Generic and
+// DOM-free: imports only this package's own files.
 
 import type { IDisposable } from "./lifecycle";
 

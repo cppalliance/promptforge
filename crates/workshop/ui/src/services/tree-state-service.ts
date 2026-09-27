@@ -23,10 +23,10 @@
 // Generic and DOM-free: the initial value and the writer are injected,
 // and nothing here may import from the app layers.
 
-import { Emitter } from "../base/event";
-import type { Event } from "../base/event";
-import type { IDisposable } from "../base/lifecycle";
-import { createServiceToken, registerService } from "./service-registry";
+import { Emitter } from "@workshop/platform/event";
+import type { Event } from "@workshop/platform/event";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { createServiceToken, registerService } from "@workshop/platform/service-registry";
 import { fetchTree, type TreeListing } from "./workspace-api";
 
 /** Cache key for the synthetic granted-roots listing, which has no path. */

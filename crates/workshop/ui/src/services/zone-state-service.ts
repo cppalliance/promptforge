@@ -10,10 +10,10 @@
 //
 // The service owns state only: Dockview placement APIs stay in zones.ts.
 
-import { Emitter } from "../base/event";
-import type { Event } from "../base/event";
-import type { IDisposable } from "../base/lifecycle";
-import { createServiceToken, registerService } from "./service-registry";
+import { Emitter } from "@workshop/platform/event";
+import type { Event } from "@workshop/platform/event";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { createServiceToken, registerService } from "@workshop/platform/service-registry";
 
 export const ZONE_NAMES = ["left", "main", "right"] as const;
 export type ZoneName = (typeof ZONE_NAMES)[number];

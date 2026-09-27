@@ -36,15 +36,15 @@
 // grants only; the page is the single writer of that fact. Duplicate
 // copies the file wholesale, state included, and touches nothing here.
 
-import { DisposableStore, type IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import { errorText, isCatalogError, type Result } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
-import { MenuId } from "../../services/menu-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
 import { DOCK } from "../../services/panel-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
-import { getService, getServiceOrNull } from "../../services/service-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
 import { UI_STORAGE } from "../../services/ui-storage";
 import {
@@ -57,7 +57,7 @@ import {
 import { CLOSED_EDITORS } from "../../services/closed-editors";
 import { applyLayoutOrDefault } from "../layout/layout-boot";
 import { buildLayoutEnvelope } from "../layout/layout-persistence";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import type { WorkspaceChangedDetail } from "../workspace/workspace-drops";
 

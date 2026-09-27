@@ -23,7 +23,7 @@
 
 import { errorText } from "./error-catalog";
 import { isRecord } from "./json-request";
-import { createServiceToken, registerService } from "./service-registry";
+import { createServiceToken, registerService } from "@workshop/platform/service-registry";
 
 /** Which bucket a value belongs to: the user, or the open workspace file. */
 export type Bucket = "user" | "workspace";

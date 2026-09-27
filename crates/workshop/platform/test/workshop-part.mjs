@@ -1,17 +1,17 @@
-// Unit test for the WorkshopPart base class (src/base/workshop-part.ts):
+// Unit test for the WorkshopPart base class (workshop-part.ts):
 // the Part/Composite hierarchy root every dockview panel extends. Bundles
 // the module with esbuild and drives a concrete subclass against jsdom.
 // Covers: the element exists before init, init runs create() exactly once
 // with the element as the parent (a second init does not rebuild),
 // layout() accepts a dimension, and dispose() releases children registered
 // through the inherited _register.
-// Run: node test/workshop-part.mjs
+// Run: node test/workshop-part.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { JSDOM } from "jsdom";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
 globalThis.window = dom.window;
@@ -19,7 +19,7 @@ globalThis.document = dom.window.document;
 globalThis.HTMLElement = dom.window.HTMLElement;
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "base", "workshop-part.ts")],
+  entryPoints: [path.join(platformDir, "workshop-part.ts")],
   bundle: true,
   write: false,
   format: "esm",

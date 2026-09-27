@@ -10,11 +10,11 @@
 
 import { createStatusBarView, type StatusBarView } from "@workshop/look/status-bar";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { CONTEXT_KEY_SERVICE, type ContextKey } from "../../services/context-key-service";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { CONTEXT_KEY_SERVICE, type ContextKey } from "@workshop/platform/context-key-service";
 import type { StatusFrame } from "../../services/protocol";
-import { getService } from "../../services/service-registry";
-import type { StatusBar as StatusBarContract } from "../../services/status-bar";
+import { getService } from "@workshop/platform/service-registry";
+import type { StatusBar as StatusBarContract } from "@workshop/platform/status-bar";
 
 type PulseActivity = "thinking" | "generating";
 

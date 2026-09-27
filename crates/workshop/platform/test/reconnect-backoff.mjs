@@ -1,25 +1,21 @@
-// Unit test for the shared reconnect backoff (src/services/reconnect-backoff.ts,
-// consumed by workshop-socket.ts and agent-socket.ts): exponential growth,
+// Unit test for the shared reconnect backoff (reconnect-backoff.ts,
+// consumed by the Workshop UI's workshop and agent sockets): exponential growth,
 // the cap, and the reset that a successful open triggers. Bundles the module
 // with esbuild and drives it against scripted fake timers, so the growth,
 // cap, and reset are pinned deterministically without waiting on a real
 // clock: the delay argument each schedule hands to setTimeout is captured,
 // and the queued callback is fired by hand.
-// Run: node --test test/reconnect-backoff.mjs
+// Run: node --test test/reconnect-backoff.mjs (from crates/workshop/platform).
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
 
-const testDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
-  stdin: {
-    contents: `export { ReconnectBackoff } from "./src/services/reconnect-backoff.ts";`,
-    resolveDir: path.join(testDir, ".."),
-    loader: "ts",
-  },
+  entryPoints: [path.join(platformDir, "reconnect-backoff.ts")],
   bundle: true,
   write: false,
   format: "esm",

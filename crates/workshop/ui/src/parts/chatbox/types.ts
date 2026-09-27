@@ -2,12 +2,12 @@
 // gives out (events), and exposes (the handle), plus the chip model and
 // the persisted draft shape. Everything the host and the component
 // share is declared here and nowhere else. `chatbox/` imports only
-// `base/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two host types
+// `@workshop/platform/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two host types
 // this file mirrors - the text-control adapter and dictation's input
 // target - are declared structurally so neither side imports the other.
 
 import type { JSONContent } from "@tiptap/core";
-import type { IDisposable } from "../../base/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 
 /** Any JSON value: the shape of a chip's opaque host payload. */
 export type JsonValue =
@@ -122,7 +122,7 @@ export interface ChatBoxProps {
 /**
  * The edit surface the box registers with the host's text-control
  * service. Declared structurally: it mirrors `TextControl` in
- * `services/text-control-service.ts` field for field so the host's
+ * `@workshop/platform/text-control-service` field for field so the host's
  * bound `register` type-checks here without an import across the
  * boundary.
  */

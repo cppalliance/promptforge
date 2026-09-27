@@ -23,7 +23,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { AgentSocket } from "./src/services/agent-socket.ts";
       export { AGENT_FRAME_GUARDS } from "./src/services/protocol.ts";
     `,

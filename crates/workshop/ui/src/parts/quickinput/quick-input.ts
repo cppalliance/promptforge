@@ -19,8 +19,8 @@
 
 import "./quick-input.css";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { QuickAccessRegistry } from "../../services/quick-access-registry";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import {
   type QuickAccessProvider,
   type QuickInputItem,

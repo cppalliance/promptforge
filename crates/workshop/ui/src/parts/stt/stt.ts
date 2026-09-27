@@ -2,7 +2,7 @@
 
 import "./stt.css";
 
-import type { IDisposable } from "../../base/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 import type { SttInsertionContext } from "../take/take-registry-types";
 export { setupStt } from "./realtime-stt";
 

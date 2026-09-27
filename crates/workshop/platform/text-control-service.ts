@@ -15,10 +15,10 @@
 // boot. The tracker also remembers the last editable target, because
 // clicking a menu row moves focus to the menu before the command runs.
 //
-// DOM-aware but app-free: nothing here may import from the ui/ layers.
+// DOM-aware but app-free: imports only this package's own files.
 
-import { toDisposable } from "../base/lifecycle";
-import type { IDisposable } from "../base/lifecycle";
+import { toDisposable } from "./lifecycle";
+import type { IDisposable } from "./lifecycle";
 import { CONTEXT_KEY_SERVICE } from "./context-key-service";
 import type { ContextKey, ContextKeyService } from "./context-key-service";
 import { createServiceToken, getService, registerService } from "./service-registry";

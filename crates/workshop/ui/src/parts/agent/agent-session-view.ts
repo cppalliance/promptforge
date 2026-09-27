@@ -23,16 +23,16 @@
 
 import "./agent-session.css";
 
-import { Disposable } from "../../base/lifecycle";
+import { Disposable } from "@workshop/platform/lifecycle";
 import type {
   AgentSessionService,
   ToolCallItem,
   TranscriptItem,
 } from "../../services/agent-session";
 import type { ModelService } from "../../services/model-service";
-import { getServiceOrNull } from "../../services/service-registry";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { SpeechCaptureService } from "../../services/speech-capture";
-import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
+import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
 import { ChatBox } from "../chatbox/chat-box";

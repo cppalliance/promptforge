@@ -20,13 +20,13 @@
 // The composition root constructs one dispatcher at boot; tests inject
 // their own registries and a recording status sink.
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { Commands, type CommandRegistry } from "../../services/command-registry";
-import { CONTEXT_KEY_SERVICE, type ContextKey, type ContextKeyService } from "../../services/context-key-service";
-import { chordFromKeyboardEvent, formatChord, formatKeybinding, type Chord } from "../../services/keybinding-parser";
-import { KeybindingsRegistry } from "../../services/keybinding-registry";
-import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../../services/status-bar";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import { CONTEXT_KEY_SERVICE, type ContextKey, type ContextKeyService } from "@workshop/platform/context-key-service";
+import { chordFromKeyboardEvent, formatChord, formatKeybinding, type Chord } from "@workshop/platform/keybinding-parser";
+import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 
 /** How long a chord prefix waits for its second key. */
 const CHORD_TIMEOUT_MS = 5000;

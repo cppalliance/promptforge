@@ -26,7 +26,7 @@ import {
   type ClosedEditors as ClosedEditorsContract,
   type ClosedEditorsSnapshot,
 } from "../../services/closed-editors";
-import { registerService } from "../../services/service-registry";
+import { registerService } from "@workshop/platform/service-registry";
 
 /** The most closed editors the stack retains; older entries drop. */
 const MAX_CLOSED_EDITORS = 50;

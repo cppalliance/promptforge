@@ -4,8 +4,8 @@
 // feeds it from the socket's onWorkbench handler, and hands it to the
 // Model menu and the chat-gating hook through their constructors.
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 import type { WorkbenchFrame } from "./protocol";
 
 /**

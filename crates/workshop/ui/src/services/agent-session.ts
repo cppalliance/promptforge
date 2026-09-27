@@ -9,8 +9,8 @@
 // the change events and read the snapshots; nothing here touches the
 // DOM.
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 import type {
   AgentDeltaFrame,
   AgentEventFrame,

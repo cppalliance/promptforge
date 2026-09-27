@@ -20,7 +20,7 @@
 import "./typeahead-popup.css";
 
 import type { SuggestionKeyDownProps, SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
-import { Disposable, toDisposable } from "../../base/lifecycle";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { renderChipIcon } from "./chip-view";
 import { type ChipNodeAttrs, attrsFromChip } from "./mention-chip";
 import type { ChipRef } from "./types";

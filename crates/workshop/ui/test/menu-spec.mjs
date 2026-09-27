@@ -41,9 +41,9 @@ const bundle = await esbuild.build({
       import "./src/parts/gateway/gateway.contribution.ts";
       import "./src/parts/run/run.contribution.ts";
       import "./src/parts/quickinput/quickinput.contribution.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus, MenuId } from "./src/services/menu-registry.ts";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus, MenuId } from "@workshop/platform/menu-registry";
+      export { registerService } from "@workshop/platform/service-registry";
       export { TREE_STATE } from "./src/services/tree-state-service.ts";
       export { RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
     `,

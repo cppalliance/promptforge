@@ -50,9 +50,9 @@ import { search, searchKeymap, highlightSelectionMatches } from "@codemirror/sea
 import { lintKeymap } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { getServiceOrNull } from "../../services/service-registry";
-import { TEXT_CONTROL_SERVICE } from "../../services/text-control-service";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
+import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import {
   DEFAULT_EDITOR_SETTINGS,
   EDITOR_SETTINGS_SERVICE,

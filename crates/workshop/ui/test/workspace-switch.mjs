@@ -48,15 +48,15 @@ const bundle = await esbuild.build({
     contents: `
       import "./src/parts/workspace-document/workspace-document.contribution.ts";
       export { register } from "./src/parts/workspace-document/index.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { registerService } from "@workshop/platform/service-registry";
       export { UI_STORAGE } from "./src/services/ui-storage.ts";
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
       export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
       export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
       export { LAYOUT_SCHEMA_VERSION, startLayoutPersistence } from "./src/parts/layout/layout-persistence.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
       export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
       export { WindowTitle } from "./src/parts/chrome/command-center.ts";
     `,

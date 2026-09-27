@@ -10,7 +10,7 @@
 import "./model-picker-trigger.css";
 
 import { ChevronDown, createElement } from "lucide";
-import { Disposable, toDisposable } from "../../base/lifecycle";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import type { ModelService } from "../../services/model-service";
 import { DropdownMenu } from "@workshop/look/dropdown";
 import type { DropdownItem } from "@workshop/look/dropdown";

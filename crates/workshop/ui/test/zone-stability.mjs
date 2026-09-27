@@ -39,7 +39,7 @@ const bundle = await esbuild.build({
       } from "./src/parts/layout/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";
       export { restoreLayout, buildLayoutEnvelope } from "./src/parts/layout/layout-persistence.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { getService } from "@workshop/platform/service-registry";
       export { ZONE_STATE } from "./src/services/zone-state-service.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

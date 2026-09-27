@@ -1,6 +1,6 @@
 // Unit test for the keybinding parser, resolver, and registry
-// (src/services/keybinding-parser.ts, src/services/keybinding-resolver.ts,
-// src/services/keybinding-registry.ts): chord-string parsing with the
+// (keybinding-parser.ts, keybinding-resolver.ts,
+// keybinding-registry.ts): chord-string parsing with the
 // ctrlcmd token resolved per platform, KeyboardEvent mapping through
 // event.code (never event.key, so Ctrl+Shift+= reads as = and Numpad0 is
 // distinct from Digit0), the pure resolver's NoMatchingKb /
@@ -8,22 +8,22 @@
 // tiers, and the registry's mac/linux overrides, disposable
 // unregistration, and per-platform lookupKeybinding labels. Bundles the
 // modules with esbuild and drives them.
-// Run: node --test test/keybindings.mjs
+// Run: node --test test/keybindings.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { parseKeybinding, chordFromKeyboardEvent, formatChord, formatKeybinding, detectPlatform } from "./src/services/keybinding-parser.ts";
-      export { KeybindingResolver } from "./src/services/keybinding-resolver.ts";
-      export { KeybindingsRegistry, KeybindingWeight, createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { parseKeybinding, chordFromKeyboardEvent, formatChord, formatKeybinding, detectPlatform } from "./keybinding-parser.ts";
+      export { KeybindingResolver } from "./keybinding-resolver.ts";
+      export { KeybindingsRegistry, KeybindingWeight, createKeybindingsRegistry } from "./keybinding-registry.ts";
+      export { ContextKeyService } from "./context-key-service.ts";
     `,
-    resolveDir: path.join(uiDir, ".."),
+    resolveDir: platformDir,
     loader: "ts",
   },
   bundle: true,

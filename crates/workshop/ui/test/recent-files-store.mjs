@@ -23,7 +23,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { RecentFilesStore, RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

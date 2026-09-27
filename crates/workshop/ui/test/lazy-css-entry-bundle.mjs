@@ -2,8 +2,9 @@
 // composition: `crates/workshop/ui/src/main.ts` and the
 // `*.contribution.ts` modules it imports. Lazy panels never import a
 // module inside it, directly or through another import. Everything else
-// that eager and lazy code both import, such as `services/`, `base/`,
-// and shared parts modules like `parts/layout/zones.ts`, is shared code.
+// that eager and lazy code both import, such as `@workshop/platform`,
+// `services/`, `base/`, and shared parts modules like
+// `parts/layout/zones.ts`, is shared code.
 // The lazy feature directories (one marker below per directory) import
 // their stylesheets beside their TypeScript, and esbuild hoists CSS
 // reachable through dynamic imports into the entry's app-*.css - no

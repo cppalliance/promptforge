@@ -34,18 +34,18 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/workspace/workspace.contribution.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus } from "./src/services/menu-registry.ts";
-      export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { QuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus } from "@workshop/platform/menu-registry";
+      export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
       export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { registerService } from "@workshop/platform/service-registry";
       export { DOCK } from "./src/services/panel-registry.ts";
       export { QUICK_INPUT_SERVICE } from "./src/services/quick-input-service.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { initZones } from "./src/parts/layout/zones.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

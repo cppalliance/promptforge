@@ -1,5 +1,5 @@
-// Unit test for the command and menu registries in their services/ home
-// (src/services/command-registry.ts, src/services/menu-registry.ts): the
+// Unit test for the command and menu registries in their platform home
+// (`@workshop/platform/command-registry`, `@workshop/platform/menu-registry`): the
 // CommandAction shape (run plus title/category/precondition/toggled
 // metadata, no label/shortcut/enabled), execute dispatching arguments and
 // awaiting async runs, upsert-by-id with self-only disposal; the MenuId
@@ -22,8 +22,8 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { CommandRegistry, Commands, registerCommand, executeCommand } from "./src/services/command-registry.ts";
-      export { MenuRegistry, Menus, MenuId, appendMenuItem } from "./src/services/menu-registry.ts";
+      export { CommandRegistry, Commands, registerCommand, executeCommand } from "@workshop/platform/command-registry";
+      export { MenuRegistry, Menus, MenuId, appendMenuItem } from "@workshop/platform/menu-registry";
       export { createRecentMenuProvider } from "./src/parts/workspace/open-recent.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

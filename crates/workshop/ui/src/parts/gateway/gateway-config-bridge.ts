@@ -9,7 +9,7 @@
 // only when event.origin equals the workshop's own origin, and every
 // reply is posted with that exact origin as its targetOrigin - never "*".
 
-import { toDisposable, type IDisposable } from "../../base/lifecycle";
+import { toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { forwardGatewayRequest, type FetchLike } from "../../services/gateway-config-api";
 
 /** The status surface the panel's action notifications land on. */

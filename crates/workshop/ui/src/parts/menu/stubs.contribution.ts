@@ -21,11 +21,11 @@
 // its when fails, so a Tab rule would eat Tab in every editor. The row
 // renders without a shortcut label until it is implemented.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { appendMenuItem, MenuId } from "../../services/menu-registry";
+import { appendMenuItem, MenuId } from "@workshop/platform/menu-registry";
 
 /** One stub row: a disabled command with its menu placement and shortcut label. */
 interface StubRow {

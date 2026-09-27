@@ -1,4 +1,4 @@
-// Unit test for the action registry (src/services/action-registry.ts):
+// Unit test for the action registry (action-registry.ts):
 // registerAction fans one descriptor out into the command, menu, and
 // keybinding registries - the command with its metadata, one menu row
 // per menu entry plus a CommandPalette row when f1 is set, and the
@@ -7,23 +7,23 @@
 // malformed when/precondition/toggled/keybinding strings come back as
 // ParseError values at registration with nothing registered. Bundles
 // the modules with esbuild and drives them.
-// Run: node --test test/actions.mjs
+// Run: node --test test/actions.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { createActionRegistry, registerAction } from "./src/services/action-registry.ts";
-      export { CommandRegistry, Commands } from "./src/services/command-registry.ts";
-      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
+      export { createActionRegistry, registerAction } from "./action-registry.ts";
+      export { CommandRegistry, Commands } from "./command-registry.ts";
+      export { MenuRegistry, MenuId } from "./menu-registry.ts";
+      export { createKeybindingsRegistry } from "./keybinding-registry.ts";
+      export { ContextKeyService } from "./context-key-service.ts";
     `,
-    resolveDir: path.join(uiDir, ".."),
+    resolveDir: platformDir,
     loader: "ts",
   },
   bundle: true,

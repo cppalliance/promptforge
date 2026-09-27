@@ -18,8 +18,8 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
-      export { Emitter } from "./src/base/event.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
+      export { Emitter } from "@workshop/platform/event";
       export { AgentMenu } from "./src/parts/agent/agent-menu.ts";
     `,
     resolveDir: path.join(testDir, ".."),

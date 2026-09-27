@@ -24,13 +24,13 @@ const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { DisposableStore } from "./src/base/lifecycle.ts";
-      export { Emitter } from "./src/base/event.ts";
+      export { DisposableStore } from "@workshop/platform/lifecycle";
+      export { Emitter } from "@workshop/platform/event";
       export { WorkshopSocket } from "./src/services/workshop-socket.ts";
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { MenuRegistry, MenuId } from "@workshop/platform/menu-registry";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { StatusBar } from "./src/parts/status/status-bar.ts";
       export { Menubar } from "./src/parts/menu/menubar.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";

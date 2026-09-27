@@ -1,21 +1,21 @@
-// Unit test for the lifecycle primitives (src/base/lifecycle.ts) and the
-// event emitter (src/base/event.ts). Bundles each TS module with esbuild
+// Unit test for the lifecycle primitives (lifecycle.ts) and the
+// event emitter (event.ts). Bundles each TS module with esbuild
 // and imports it via a data URL. Covers: _register ties children to the
 // parent and dispose cascades down the tree; DisposableStore disposes all
 // held items in insertion order, tolerates double-dispose, and disposes
 // late additions immediately;
 // Emitter delivers to subscribers, the returned disposable unsubscribes,
 // and nothing is delivered after the emitter is disposed.
-// Run: node test/lifecycle.mjs
+// Run: node test/lifecycle.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-async function loadModule(relative) {
+async function loadModule(file) {
   const bundle = await esbuild.build({
-    entryPoints: [path.join(uiDir, "..", "src", relative)],
+    entryPoints: [path.join(platformDir, file)],
     bundle: true,
     write: false,
     format: "esm",
@@ -27,10 +27,8 @@ async function loadModule(relative) {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-const { Disposable, DisposableStore } = await loadModule(
-  path.join("base", "lifecycle.ts"),
-);
-const { Emitter } = await loadModule(path.join("base", "event.ts"));
+const { Disposable, DisposableStore } = await loadModule("lifecycle.ts");
+const { Emitter } = await loadModule("event.ts");
 
 const failures = [];
 function check(name, condition) {

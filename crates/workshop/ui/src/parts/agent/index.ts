@@ -4,10 +4,10 @@
 
 import { registerPanelFactory } from "../../services/panel-registry";
 import { MODEL_SERVICE } from "../../services/model-service";
-import { getServiceOrNull } from "../../services/service-registry";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { SPEECH_CAPTURE } from "../../services/speech-capture";
-import type { IDisposable } from "../../base/lifecycle";
-import { STATUS_BAR } from "../../services/status-bar";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { AgentPanel } from "./agent-panel";
 import { markdownReady } from "./markdown-render";
 

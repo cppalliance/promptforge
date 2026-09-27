@@ -9,7 +9,7 @@
 
 import "../workbench.contributions";
 
-import type { IDisposable } from "../../base/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 import { Menubar } from "./menubar";
 
 /**

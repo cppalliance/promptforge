@@ -23,11 +23,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // appended export named `name` assigns that variable, or, for a `read`
 // seam, answers it.
 const SEAMS = [
-  // src/base/lifecycle.ts: the DisposableStore constructor's tracker call.
+  // @workshop/platform/lifecycle: the DisposableStore constructor's tracker call.
   { name: "__setDisposableTracker", callSite: /([\w$]+)\?\.trackCreated\(this\)/ },
-  // src/services/service-registry.ts: getService's observer call.
+  // @workshop/platform/service-registry: getService's observer call.
   { name: "__setServiceObserver", callSite: /([\w$]+)\?\.serviceResolved\([\w$]+\.id\)/ },
-  // src/services/service-registry.ts: getService's lookup in the
+  // @workshop/platform/service-registry: getService's lookup in the
   // registrations map, followed by its unregistered-token throw. Read
   // seam: a boot test resolves any registered store by token id.
   {

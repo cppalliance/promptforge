@@ -14,10 +14,9 @@
 // Parsing returns a Result - a malformed string is a value the registrar
 // reports once at registration, never an exception thrown at dispatch.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { err, ok, type Result } from "@workshop/platform/result";
-
+import { err, ok, type Result } from "./result";
 import type { ParseError } from "./context-key-expr";
 
 /** The platforms keybindings resolve against. */

@@ -10,9 +10,9 @@
 // lookup and names the keys it reads through keys(), so subscribers can
 // re-evaluate only when a relevant key changes.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { err, ok, type Result } from "@workshop/platform/result";
+import { err, ok, type Result } from "./result";
 
 /** A parse failure: what went wrong and where in the source string. */
 export interface ParseError {

@@ -9,7 +9,7 @@ const uiDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { SpeechCaptureService } from "./src/services/speech-capture.ts";
     `,
     resolveDir: uiDir,

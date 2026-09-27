@@ -13,10 +13,10 @@
 // onModels push, so a gateway returning after an outage heals a
 // boot-time empty catalog in place.
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 import type { CatalogModel } from "./protocol";
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /**
  * Owns the model catalog and the current model selection shared by every

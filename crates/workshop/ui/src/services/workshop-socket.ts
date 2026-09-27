@@ -5,8 +5,8 @@
 // send. Chat goes over the /agents/ws socket (agent-socket.ts). The
 // frame shapes themselves live in protocol.ts.
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable, toDisposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import {
   type CatalogModel,
   narrowFrame,
@@ -16,7 +16,7 @@ import {
   WORKSHOP_FRAME_GUARDS,
   type WorkbenchFrame,
 } from "./protocol";
-import { ReconnectBackoff } from "./reconnect-backoff";
+import { ReconnectBackoff } from "@workshop/platform/reconnect-backoff";
 
 function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;

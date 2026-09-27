@@ -2,11 +2,11 @@
 // activation hook. Importers point at the source files directly; this
 // module re-exports nothing.
 
-import { DisposableStore, type IDisposable } from "../../base/lifecycle";
-import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import { registerPanelFactory } from "../../services/panel-registry";
-import { getService, getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../../services/status-bar";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WorkshopTreePanel } from "./workshop-panel";
 
 /**

@@ -1,4 +1,4 @@
-// Unit test for the service registry (src/services/service-registry.ts):
+// Unit test for the service registry (service-registry.ts):
 // the token-keyed registry every subsystem self-registers into. Bundles
 // the module with esbuild and drives the public API. Covers: lookup of an
 // unregistered token (null from getServiceOrNull, a naming throw from
@@ -6,15 +6,15 @@
 // replacement semantics when a token is re-registered (the stale cached
 // instance is dropped), unregistering through the registration's
 // disposable, and independence between tokens.
-// Run: node test/service-registry.mjs
+// Run: node test/service-registry.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "services", "service-registry.ts")],
+  entryPoints: [path.join(platformDir, "service-registry.ts")],
   bundle: true,
   write: false,
   format: "esm",

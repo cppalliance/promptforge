@@ -10,13 +10,13 @@
 // first toggle; the workspace directory's register() binds it at chunk
 // load so the Appearance checkbox reads true from first paint.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { MenuId } from "../../services/menu-registry";
-import { getService } from "../../services/service-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { openInZone, toggleZoneVisibility } from "./zones";
 
 /** The Appearance flyout's id; the menubar contribution declares the submenu. */

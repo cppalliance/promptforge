@@ -1,8 +1,8 @@
 // The status bar service contract: the shape panels resolve through the
-// registry to paint action outcomes onto the bar. The implementation
-// (parts/status/status-bar.ts) is DOM-bound - it builds the shared status
-// bar view and appends it to the body - so only this interface and the
-// token live here, in the DOM-free services layer.
+// registry to paint action outcomes onto the bar. The Workshop UI's
+// implementation is DOM-bound - it builds the shared status bar view and
+// appends it to the body - so only this interface and the token live
+// here, in the DOM-free platform package.
 
 import { createServiceToken, type ServiceToken } from "./service-registry";
 

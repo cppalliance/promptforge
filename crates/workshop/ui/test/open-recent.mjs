@@ -21,8 +21,8 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { createRecentMenuProvider, createFileQuickAccessProvider, isWorkspaceFilePath } from "./src/parts/workspace/open-recent.ts";
-      export { registerService } from "./src/services/service-registry.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { registerService } from "@workshop/platform/service-registry";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

@@ -11,8 +11,8 @@
 // to generated buttons. The shipped nav is empty; the menu feature's
 // bootstrap (parts/menu/index.ts) fills it through this generator at boot.
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { MenuId, Menus, type SubmenuItem } from "../../services/menu-registry";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { MenuId, Menus, type SubmenuItem } from "@workshop/platform/menu-registry";
 import { Menu, type MenuDependencies } from "./menu";
 
 /** The menu id's last segment: "menubar/file" -> "file". */

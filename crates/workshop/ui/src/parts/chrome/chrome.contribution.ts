@@ -15,13 +15,13 @@
 // are the conventional zoom-in chord. The first rule registered for a
 // command becomes its menu label, so Reset Zoom shows Ctrl+NumPad0.
 
-import type { IDisposable } from "../../base/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 import { invoke } from "@tauri-apps/api/core";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { KeybindingsRegistry } from "../../services/keybinding-registry";
-import { MenuId } from "../../services/menu-registry";
+import { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
 import { showAboutDialog } from "./about-dialog";
 import { closeWindow, toggleFullScreen } from "./window-chrome";
 import { resetZoom, zoomIn, zoomOut } from "./zoom";

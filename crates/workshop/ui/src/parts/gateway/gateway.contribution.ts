@@ -8,11 +8,11 @@
 // second activation focuses the existing panel because the config panel
 // is a singleton.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { MenuId } from "../../services/menu-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
 import { openInZone } from "../layout/zones";
 
 /** The Preferences flyout's id; the menubar contribution declares the submenu. */

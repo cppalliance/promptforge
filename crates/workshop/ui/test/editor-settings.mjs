@@ -27,11 +27,11 @@ const bundle = await esbuild.build({
       export { CodeMirrorSurface } from "./src/parts/editor/editor-surface.ts";
       export { EditorSettingsService } from "./src/parts/editor/editor-settings-service.ts";
       export { DEFAULT_EDITOR_SETTINGS, EDITOR_SETTINGS_SERVICE } from "./src/services/editor-settings-service.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus, MenuId } from "./src/services/menu-registry.ts";
-      export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { getService } from "@workshop/platform/service-registry";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus, MenuId } from "@workshop/platform/menu-registry";
+      export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { EditorView } from "@codemirror/view";
     `,
     resolveDir: path.join(uiDir, ".."),

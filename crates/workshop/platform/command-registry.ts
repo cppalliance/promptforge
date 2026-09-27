@@ -12,9 +12,9 @@
 // widget, the keybinding dispatcher, and quick input read it. Tests
 // construct their own instances for isolation.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { toDisposable, type IDisposable } from "../base/lifecycle";
+import { toDisposable, type IDisposable } from "./lifecycle";
 
 /** One invocable action. */
 export interface CommandAction {

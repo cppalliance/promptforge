@@ -22,12 +22,12 @@
 // shared singletons, resolved at call time; tests inject their own.
 
 import { baseName } from "../../base/paths";
-import { Commands, type CommandRegistry } from "../../services/command-registry";
-import type { MenuItem, MenuItemsProvider } from "../../services/menu-registry";
+import { Commands, type CommandRegistry } from "@workshop/platform/command-registry";
+import type { MenuItem, MenuItemsProvider } from "@workshop/platform/menu-registry";
 import { RECENT_FILES_STORE, type RecentFilesStore } from "../../services/recent-files-store";
-import { getService, getServiceOrNull } from "../../services/service-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { ROOTS_KEY, TREE_STATE, type TreeStateService } from "../../services/tree-state-service";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import type { QuickAccessProvider, QuickInputItem } from "../../services/quick-input-service";
 
 /** The stores the providers read; tests inject their own. */

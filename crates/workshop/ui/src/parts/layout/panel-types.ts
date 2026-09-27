@@ -15,7 +15,7 @@ import type {
   TabPartInitParameters,
 } from "dockview";
 
-import { Disposable } from "../../base/lifecycle";
+import { Disposable } from "@workshop/platform/lifecycle";
 import {
   AGENT_TAB,
   PERMANENT_TAB,

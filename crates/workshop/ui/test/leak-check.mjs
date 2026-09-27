@@ -1,5 +1,5 @@
 // Covering test for the shared leak-check helper
-// (test/helpers/leak-check.mjs). Bundles src/base/lifecycle.ts with
+// (test/helpers/leak-check.mjs). Bundles `@workshop/platform/lifecycle` with
 // esbuild and imports it via a data URL, then drives assertNoLeaks
 // through both verdicts. Covers: a clean sync run passes, a clean async
 // run through a Disposable subclass passes, a leaking run throws with
@@ -14,9 +14,13 @@ import { assertNoLeaks } from "./helpers/leak-check.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
-async function loadModule(relative) {
+async function loadModule(specifier) {
   const bundle = await esbuild.build({
-    entryPoints: [path.join(uiDir, "..", "src", relative)],
+    stdin: {
+      contents: `export * from "${specifier}";`,
+      resolveDir: path.join(uiDir, ".."),
+      loader: "ts",
+    },
     bundle: true,
     write: false,
     format: "esm",
@@ -28,7 +32,7 @@ async function loadModule(relative) {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-const lifecycle = await loadModule(path.join("base", "lifecycle.ts"));
+const lifecycle = await loadModule("@workshop/platform/lifecycle");
 const { Disposable, DisposableStore } = lifecycle;
 
 const failures = [];

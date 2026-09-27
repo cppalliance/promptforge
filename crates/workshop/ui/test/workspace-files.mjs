@@ -50,12 +50,12 @@ const bundle = await esbuild.build({
       // live adapter.
       import "./src/parts/editor/closed-editors.ts";
       export { register } from "./src/parts/workspace-document/index.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus } from "./src/services/menu-registry.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus } from "@workshop/platform/menu-registry";
       export { RECENT_FILES_STORE, RecentFilesStore } from "./src/services/recent-files-store.ts";
-      export { registerService } from "./src/services/service-registry.ts";
+      export { registerService } from "@workshop/platform/service-registry";
       export { currentWorkspaceFile, putWindowState } from "./src/services/workspace-file-client.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
       export { initZones } from "./src/parts/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

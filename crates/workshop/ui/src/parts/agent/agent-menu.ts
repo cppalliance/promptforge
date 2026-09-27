@@ -9,8 +9,8 @@
 
 import "./agent-session.css";
 
-import type { Event } from "../../base/event";
-import { Disposable } from "../../base/lifecycle";
+import type { Event } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 
 /**
  * The slice of agent-session state the menu reads and dispatches

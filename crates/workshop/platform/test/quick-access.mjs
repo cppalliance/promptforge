@@ -1,22 +1,22 @@
 // Unit test for the quick-access registry
-// (src/services/quick-access-registry.ts): longest-prefix routing of an
+// (quick-access-registry.ts): longest-prefix routing of an
 // input value to its provider, upsert-by-prefix registration with
 // disposables that unregister only their own registration, and the
 // provider listing that feeds the ? help list. Bundles the module with
 // esbuild and drives it.
-// Run: node --test test/quick-access.mjs
+// Run: node --test test/quick-access.mjs (from crates/workshop/platform).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-const uiDir = path.dirname(fileURLToPath(import.meta.url));
+const platformDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { QuickAccessRegistry, createQuickAccessRegistry } from "./src/services/quick-access-registry.ts";
+      export { QuickAccessRegistry, createQuickAccessRegistry } from "./quick-access-registry.ts";
     `,
-    resolveDir: path.join(uiDir, ".."),
+    resolveDir: platformDir,
     loader: "ts",
   },
   bundle: true,

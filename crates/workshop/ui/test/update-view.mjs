@@ -24,7 +24,7 @@ globalThis.Node = window.Node;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { UpdateService } from "./src/services/update-service.ts";
       export { UpdateView } from "./src/parts/chrome/update-view.ts";
     `,

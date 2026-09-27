@@ -17,10 +17,10 @@
 
 import { err, ok } from "@workshop/platform/result";
 
-import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
+import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { CatalogError, ErrorCatalog, errorText, type Result } from "../../services/error-catalog";
 import { isRecord } from "../../services/json-request";
-import type { StatusBar } from "../../services/status-bar";
+import type { StatusBar } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The native event the app dispatches when files land on the window. */

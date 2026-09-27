@@ -50,8 +50,8 @@ const bundle = await esbuild.build({
       } from "./src/parts/layout/layout-persistence.ts";
       export { applyLayoutOrDefault } from "./src/parts/layout/layout-boot.ts";
       export { KeybindingDispatcher } from "./src/parts/layout/keybinding-dispatcher.ts";
-      export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+      export { getService } from "@workshop/platform/service-registry";
       import "./src/parts/editor/editor.contribution.ts";
       import "./src/parts/layout/layout.contribution.ts";
       import "./src/parts/workspace/workspace.contribution.ts";

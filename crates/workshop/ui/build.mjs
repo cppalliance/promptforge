@@ -53,8 +53,9 @@ const STATIC_FILES = [
 // loaded composition: `crates/workshop/ui/src/main.ts` and the
 // `*.contribution.ts` modules it imports. Lazy panels never import a
 // module inside it, directly or through another import. Everything else
-// that eager and lazy code both import, such as `services/`, `base/`, and
-// shared parts modules like `parts/layout/zones.ts`, is shared code.
+// that eager and lazy code both import, such as `@workshop/platform`,
+// `services/`, `base/`, and shared parts modules like
+// `parts/layout/zones.ts`, is shared code.
 // Every bundle file is content-hashed (the entry under bundle/, the chunks
 // under chunks/), so the server can mark them Cache-Control: immutable;
 // dist/manifest.json maps the logical names (app.js, app.css) to the

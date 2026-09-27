@@ -19,7 +19,7 @@
 // nested row names its parent menu's group so the separators fall where
 // the spec has them.
 
-import { appendMenuItem, MenuId } from "../../services/menu-registry";
+import { appendMenuItem, MenuId } from "@workshop/platform/menu-registry";
 
 /** One submenu declaration: the parent menu, the flyout it opens, and the row's placement. */
 interface SubmenuRow {

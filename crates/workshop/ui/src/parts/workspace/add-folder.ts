@@ -10,10 +10,10 @@
 
 import { open } from "@tauri-apps/plugin-dialog";
 
-import type { IDisposable } from "../../base/lifecycle";
-import { getServiceOrNull } from "../../services/service-registry";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { showPanelDialog } from "../shared/panel-dialog";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { grantPath } from "./workspace-drops";
 

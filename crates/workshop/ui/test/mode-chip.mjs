@@ -18,7 +18,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { AGENT_MODE_CHANGED_EVENT, ModeChip, UNIFIED_MODES } from "./src/parts/agent/mode-chip.ts";
     `,
     resolveDir: path.join(testDir, ".."),

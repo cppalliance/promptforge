@@ -13,13 +13,13 @@
 // command. The disabled debug stubs in stubs.contribution.ts stay
 // untouched; this row lands in its own group above them.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { MenuId } from "../../services/menu-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
 import { DOCK } from "../../services/panel-registry";
-import { getService } from "../../services/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { openInZone } from "../layout/zones";
 
 const action: ActionDescriptor = {

@@ -1,7 +1,7 @@
-import { Emitter, type Event } from "../base/event";
-import { Disposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 import { errorText } from "./error-catalog";
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 const OUTPUT_SAMPLE_RATE = 24_000;
 const FLUSH_TIMEOUT_MS = 1_000;

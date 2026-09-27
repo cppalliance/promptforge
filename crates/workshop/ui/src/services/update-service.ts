@@ -6,8 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 
-import { Emitter, type Event } from "../base/event";
-import { Disposable, toDisposable } from "../base/lifecycle";
+import { Emitter, type Event } from "@workshop/platform/event";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { errorText } from "./error-catalog";
 
 export type UpdatePhase =

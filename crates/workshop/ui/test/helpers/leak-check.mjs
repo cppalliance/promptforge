@@ -1,6 +1,6 @@
 // Shared leak check for workshop UI tests: assertNoLeaks(lifecycle, run)
 // fails when `run` creates DisposableStores it never disposes. Each test
-// bundles its own copy of src/base/lifecycle.ts, so the caller hands in
+// bundles its own copy of `@workshop/platform/lifecycle`, so the caller hands in
 // that bundled module and the tracker lands on the exact class instance
 // the code under test uses. This helper is the only consumer of the
 // setDisposableTracker seam in lifecycle.ts.
@@ -10,7 +10,7 @@
 
 /**
  * Runs `run` (sync or async) with DisposableStore tracking enabled on
- * `lifecycle` - a loaded copy of src/base/lifecycle.ts exposing
+ * `lifecycle` - a loaded copy of `@workshop/platform/lifecycle` exposing
  * setDisposableTracker - and throws if any store created during the run
  * is still undisposed afterwards, naming each leak by its construction
  * site. The tracker is uninstalled on the way out even when `run` throws.

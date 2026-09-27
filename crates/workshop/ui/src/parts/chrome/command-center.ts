@@ -22,12 +22,12 @@
 
 import "./command-center.css";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
-import { CommandRegistry, Commands } from "../../services/command-registry";
-import { MenuId, Menus, type MenuItem, type MenuRegistry } from "../../services/menu-registry";
-import { getService, getServiceOrNull } from "../../services/service-registry";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
+import { CommandRegistry, Commands } from "@workshop/platform/command-registry";
+import { MenuId, Menus, type MenuItem, type MenuRegistry } from "@workshop/platform/menu-registry";
+import { getService, getServiceOrNull } from "@workshop/platform/service-registry";
 import { TREE_STATE } from "../../services/tree-state-service";
-import { STATUS_BAR } from "../../services/status-bar";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The title shown when no workspace folder is granted. */

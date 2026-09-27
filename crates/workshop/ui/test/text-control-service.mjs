@@ -1,5 +1,5 @@
 // Unit test for the text-control service
-// (src/services/text-control-service.ts): per-widget undo/redo/select-all
+// (`@workshop/platform/text-control-service`): per-widget undo/redo/select-all
 // adapters registered on DOM roots, focus tracking across the document,
 // the inputFocus / editorTextFocus / textInputFocus context keys, and the
 // execCommand fallback for native editables (including the remembered
@@ -20,11 +20,11 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { TextControlService, TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { getService } from "./src/services/service-registry.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus, MenuId } from "./src/services/menu-registry.ts";
+      export { TextControlService, TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { getService } from "@workshop/platform/service-registry";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus, MenuId } from "@workshop/platform/menu-registry";
       import "./src/parts/menu/edit.contribution.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

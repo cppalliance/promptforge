@@ -14,9 +14,9 @@
 // The module-level KeybindingsRegistry singleton resolves against the
 // detected platform; tests build their own with createKeybindingsRegistry.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { toDisposable, type IDisposable } from "../base/lifecycle";
+import { toDisposable, type IDisposable } from "./lifecycle";
 import { ContextKeyExpr, type ContextKeyExpression } from "./context-key-expr";
 import { detectPlatform, formatKeybinding, parseKeybinding, type KeybindingPlatform } from "./keybinding-parser";
 import { KeybindingResolver, type ResolvedKeybindingRule } from "./keybinding-resolver";

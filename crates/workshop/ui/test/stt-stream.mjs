@@ -14,7 +14,7 @@ const fixtures = path.join(uiDir, "..", "..", "..", "gateway", "stt", "api", "te
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export * as lifecycle from "./src/base/lifecycle.ts";
+      export * as lifecycle from "@workshop/platform/lifecycle";
       export { RealtimeTranscriptionService } from "./src/services/realtime-transcription.ts";
       export { SpeechCaptureService } from "./src/services/speech-capture.ts";
       export { setupStt, textareaSttTarget } from "./src/parts/stt/stt.ts";

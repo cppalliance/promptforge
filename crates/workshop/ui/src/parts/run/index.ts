@@ -2,7 +2,7 @@
 // activation hook. Importers point at the source files directly; this
 // module re-exports nothing.
 
-import type { IDisposable } from "../../base/lifecycle";
+import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerPanelFactory } from "../../services/panel-registry";
 import { RunPanel } from "./run-panel";
 

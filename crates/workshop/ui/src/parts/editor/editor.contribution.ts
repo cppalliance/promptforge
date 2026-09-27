@@ -12,14 +12,14 @@
 // (Duplicate Selection, Add Previous Occurrence, Select All Occurrences)
 // register none.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { KeybindingsRegistry, KeybindingWeight } from "../../services/keybinding-registry";
-import { MenuId } from "../../services/menu-registry";
-import { QuickAccessRegistry } from "../../services/quick-access-registry";
-import { getService } from "../../services/service-registry";
+import { KeybindingsRegistry, KeybindingWeight } from "@workshop/platform/keybinding-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
+import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "../../services/editor-settings-service";
 import { createGotoLineProvider } from "./goto-line";

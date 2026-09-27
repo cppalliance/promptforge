@@ -9,10 +9,10 @@ import "./window-chrome.css";
 
 import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 
-import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
-import { CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
-import { detectPlatform } from "../../services/keybinding-parser";
-import { getService } from "../../services/service-registry";
+import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+import { detectPlatform } from "@workshop/platform/keybinding-parser";
+import { getService } from "@workshop/platform/service-registry";
 
 declare global {
   interface Window {

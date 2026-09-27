@@ -1,5 +1,5 @@
 // Unit test for the workbench menu registries
-// (src/services/command-registry.ts, src/services/menu-registry.ts) and
+// (`@workshop/platform/command-registry`, `@workshop/platform/menu-registry`) and
 // the menubar's button generation (src/parts/menu/menubar.ts). Commands are
 // actions keyed by id in the command registry; menu rows are command
 // references or submenu pointers per menu id in the menu registry; the
@@ -33,10 +33,10 @@ globalThis.Node = window.Node;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { MenuRegistry, MenuId } from "./src/services/menu-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { MenuRegistry, MenuId } from "@workshop/platform/menu-registry";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { Menubar, appendMenubarButtons } from "./src/parts/menu/menubar.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

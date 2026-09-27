@@ -19,11 +19,10 @@
 // and KeybindingsRegistry singletons; tests build their own with
 // createActionRegistry.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { err, ok, type Result } from "@workshop/platform/result";
-
-import { DisposableStore, type IDisposable } from "../base/lifecycle";
+import { err, ok, type Result } from "./result";
+import { DisposableStore, type IDisposable } from "./lifecycle";
 import { Commands, type CommandRegistry } from "./command-registry";
 import { ContextKeyExpr, type ParseError } from "./context-key-expr";
 import { detectPlatform, parseKeybinding, type KeybindingPlatform } from "./keybinding-parser";

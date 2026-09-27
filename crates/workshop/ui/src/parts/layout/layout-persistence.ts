@@ -15,7 +15,7 @@
 
 import type { DockviewApi, SerializedDockview } from "dockview";
 
-import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
+import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
 // v4: the placeholder panel type is gone - an emptied zone persists as a

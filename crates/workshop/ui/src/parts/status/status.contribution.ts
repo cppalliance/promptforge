@@ -6,13 +6,13 @@
 // checkbox. With no composition root (a standalone widget test) there is
 // no bar to flip and the row is inert.
 
-import type { IDisposable } from "../../base/lifecycle";
-import { registerAction, type ActionDescriptor } from "../../services/action-registry";
-import type { ParseError } from "../../services/context-key-expr";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
+import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
-import { MenuId } from "../../services/menu-registry";
-import { getServiceOrNull } from "../../services/service-registry";
-import { STATUS_BAR } from "../../services/status-bar";
+import { MenuId } from "@workshop/platform/menu-registry";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
+import { STATUS_BAR } from "@workshop/platform/status-bar";
 
 /** The Appearance flyout's id; the menubar contribution declares the submenu. */
 const APPEARANCE_MENU: MenuId = "menubar/view/appearance";

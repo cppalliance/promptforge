@@ -38,17 +38,17 @@ const bundle = await esbuild.build({
       export { javascript } from "@codemirror/lang-javascript";
       export { ensureSyntaxTree } from "@codemirror/language";
       export { setDiagnostics } from "@codemirror/lint";
-      export { registerService, getService } from "./src/services/service-registry.ts";
+      export { registerService, getService } from "@workshop/platform/service-registry";
       export { DOCK } from "./src/services/panel-registry.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { CodeMirrorSurface } from "./src/parts/editor/editor-surface.ts";
-      export { Commands } from "./src/services/command-registry.ts";
-      export { Menus, MenuId } from "./src/services/menu-registry.ts";
-      export { KeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { QuickAccessRegistry } from "./src/services/quick-access-registry.ts";
-      export { CONTEXT_KEY_SERVICE } from "./src/services/context-key-service.ts";
+      export { Commands } from "@workshop/platform/command-registry";
+      export { Menus, MenuId } from "@workshop/platform/menu-registry";
+      export { KeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
+      export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
       export { RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
-      export { TEXT_CONTROL_SERVICE } from "./src/services/text-control-service.ts";
+      export { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
       export { initZones } from "./src/parts/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

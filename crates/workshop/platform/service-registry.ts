@@ -7,9 +7,9 @@
 // lifetime, which is what lets session state (zone placement, the tree's
 // expansion) survive the panels that own it closing and reopening.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { toDisposable, type IDisposable } from "../base/lifecycle";
+import { toDisposable, type IDisposable } from "./lifecycle";
 
 /**
  * The identity of one service. The type parameter is phantom: it only

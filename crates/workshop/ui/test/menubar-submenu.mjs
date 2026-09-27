@@ -31,12 +31,12 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { Menu } from "./src/parts/menu/menu.ts";
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { MenuRegistry } from "./src/services/menu-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
-      export { registerService } from "./src/services/service-registry.ts";
-      export { STATUS_BAR } from "./src/services/status-bar.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { MenuRegistry } from "@workshop/platform/menu-registry";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
+      export { registerService } from "@workshop/platform/service-registry";
+      export { STATUS_BAR } from "@workshop/platform/status-bar";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

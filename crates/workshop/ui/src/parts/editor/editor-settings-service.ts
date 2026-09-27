@@ -19,10 +19,10 @@
 //
 // DOM-free: the initial value and the writer are injected.
 
-import { Emitter } from "../../base/event";
-import type { Event } from "../../base/event";
-import { ContextKeyService, CONTEXT_KEY_SERVICE } from "../../services/context-key-service";
-import type { ContextKey } from "../../services/context-key-service";
+import { Emitter } from "@workshop/platform/event";
+import type { Event } from "@workshop/platform/event";
+import { ContextKeyService, CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
+import type { ContextKey } from "@workshop/platform/context-key-service";
 import {
   DEFAULT_EDITOR_SETTINGS,
   EDITOR_SETTING_CONTEXT_KEYS,
@@ -31,7 +31,7 @@ import {
   type EditorSettings,
   type EditorSettingsService as EditorSettingsServiceContract,
 } from "../../services/editor-settings-service";
-import { getServiceOrNull, registerService } from "../../services/service-registry";
+import { getServiceOrNull, registerService } from "@workshop/platform/service-registry";
 
 /** The setting names, in declaration order. */
 const SETTING_NAMES = [

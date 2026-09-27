@@ -5,9 +5,9 @@
 // the defaults, the service interface, and the token live here, in the
 // DOM-free services layer.
 
-import type { Event } from "../base/event";
-import type { IDisposable } from "../base/lifecycle";
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import type { Event } from "@workshop/platform/event";
+import type { IDisposable } from "@workshop/platform/lifecycle";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /** The four editor settings, one boolean per toggle action. */
 export interface EditorSettings {

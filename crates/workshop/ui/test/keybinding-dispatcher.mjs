@@ -34,9 +34,9 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { KeybindingDispatcher } from "./src/parts/layout/keybinding-dispatcher.ts";
-      export { CommandRegistry } from "./src/services/command-registry.ts";
-      export { ContextKeyService } from "./src/services/context-key-service.ts";
-      export { createKeybindingsRegistry } from "./src/services/keybinding-registry.ts";
+      export { CommandRegistry } from "@workshop/platform/command-registry";
+      export { ContextKeyService } from "@workshop/platform/context-key-service";
+      export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

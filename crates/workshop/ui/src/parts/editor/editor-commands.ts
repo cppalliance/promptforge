@@ -31,7 +31,7 @@ import { nextDiagnostic, previousDiagnostic } from "@codemirror/lint";
 import { openSearchPanel, SearchCursor, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 
 import { DOCK, resolvePanelContent } from "../../services/panel-registry";
-import { getService } from "../../services/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { EditorPanel } from "./editor-panel";
 
 // The built-in CodeMirror commands behind the catalog rows, re-exported

@@ -15,11 +15,11 @@
 // The service self-registers with a default factory, so any bundle that
 // touches it gets the singleton without composition-root wiring.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { Emitter } from "../base/event";
-import type { Event } from "../base/event";
-import type { IDisposable } from "../base/lifecycle";
+import { Emitter } from "./event";
+import type { Event } from "./event";
+import type { IDisposable } from "./lifecycle";
 import { ContextKeyExpr } from "./context-key-expr";
 import type { ContextKeyExpression } from "./context-key-expr";
 import { createServiceToken, registerService } from "./service-registry";

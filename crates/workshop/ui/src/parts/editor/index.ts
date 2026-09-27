@@ -2,9 +2,9 @@
 // activation hook. Importers point at the source files directly; this
 // module re-exports nothing.
 
-import { DisposableStore, type IDisposable } from "../../base/lifecycle";
+import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
 import { DOCK, registerPanelFactory } from "../../services/panel-registry";
-import { getService } from "../../services/service-registry";
+import { getService } from "@workshop/platform/service-registry";
 import { bindEditorContextKeys, installClosedEditorTracking } from "./editor-lifecycle";
 import { EditorPanel } from "./editor-panel";
 

@@ -5,7 +5,7 @@
 // the other user-scoped stores; only the interface and the token live here,
 // in the DOM-free services layer.
 
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /** The palette recency list consumers resolve from the registry. */
 export interface CommandsHistory {

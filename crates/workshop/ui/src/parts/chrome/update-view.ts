@@ -9,7 +9,7 @@ import "./update-view.css";
 import { createProgressBar } from "@workshop/look/progress";
 import type { ToastStack } from "@workshop/look/toast";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { UpdateService, type UpdateSnapshot } from "../../services/update-service";
 
 function percentage(snapshot: UpdateSnapshot): number | null {

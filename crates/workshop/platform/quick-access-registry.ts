@@ -16,9 +16,9 @@
 // The registry never calls the factory; the quick input widget owns the
 // provider shape and narrows what the factory returns.
 //
-// Generic and DOM-free: nothing here may import from the app layers.
+// Generic and DOM-free: imports only this package's own files.
 
-import { toDisposable, type IDisposable } from "../base/lifecycle";
+import { toDisposable, type IDisposable } from "./lifecycle";
 
 /** One row in the ? help list. */
 export interface QuickAccessHelpEntry {

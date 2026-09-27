@@ -8,7 +8,7 @@
 
 import { openModal } from "@workshop/look/modal";
 
-import { toDisposable, type IDisposable } from "../../base/lifecycle";
+import { toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 
 /**
  * One dialog action. `run` executes after the dialog dismisses, receiving

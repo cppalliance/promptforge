@@ -26,7 +26,7 @@ const bundle = await esbuild.build({
     contents: `
       export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
       export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
-      export { getService } from "./src/services/service-registry.ts";
+      export { getService } from "@workshop/platform/service-registry";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

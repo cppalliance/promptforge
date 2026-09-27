@@ -1,10 +1,10 @@
-import { Emitter, type Event as ServiceEvent } from "../base/event";
-import { Disposable } from "../base/lifecycle";
+import { Emitter, type Event as ServiceEvent } from "@workshop/platform/event";
+import { Disposable } from "@workshop/platform/lifecycle";
 import {
   decodeRealtimeEvent,
   type RealtimeEvent,
 } from "./realtime-event-decoder";
-import { ReconnectBackoff } from "./reconnect-backoff";
+import { ReconnectBackoff } from "@workshop/platform/reconnect-backoff";
 
 const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
 

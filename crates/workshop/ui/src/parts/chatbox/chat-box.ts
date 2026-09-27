@@ -24,7 +24,7 @@ import { Placeholder } from "@tiptap/extension-placeholder";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { EditorState } from "@tiptap/pm/state";
-import { Disposable, type IDisposable, toDisposable } from "../../base/lifecycle";
+import { Disposable, type IDisposable, toDisposable } from "@workshop/platform/lifecycle";
 import { ICON_MIC, ICON_SEND } from "@workshop/look/icons";
 import { renderChip } from "./chip-view";
 import {

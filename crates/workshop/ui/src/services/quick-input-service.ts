@@ -5,7 +5,7 @@
 // live here, in the DOM-free services layer, so menu and quick-access
 // contributions can name the contract without pulling the widget chunk.
 
-import { createServiceToken, type ServiceToken } from "./service-registry";
+import { createServiceToken, type ServiceToken } from "@workshop/platform/service-registry";
 
 /** One row in the quick input list. */
 export interface QuickInputItem {

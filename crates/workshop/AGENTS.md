@@ -17,7 +17,7 @@ The Workshop family: the desktop app, the in-process server, the subsystems the 
 - `support` (vocabulary): shared primitives (including the retained broadcast bus and its `recv_or_pending` helper) and test fixtures.
 - `ui` (not a Rust crate): the TypeScript SPA. The workspace tree panel lives in `parts/workspace/`, the File menu's open, save-as, and duplicate workspace commands in `parts/workspace-document/`, and the panel dialog helper in `parts/shared/`.
 - `look` (not a Rust crate): `@workshop/look`, the family's visual layer, forked from `crates/shared-ui` - the palette, sizes, and semantic tokens, the icon strings, and the shared components (modal, dropdown, toast stack, status bar view, progress bar, button and input bases). The SPA consumes it through the npm workspace below.
-- `platform` (not a Rust crate): `@workshop/platform`, the family's browser-side UI mechanics, with no visuals and no product vocabulary. It holds the `Result` type and its `ok` and `err` constructors, imports only its own files and type-only `dockview`, and never imports `look`. The SPA consumes it through the npm workspace below.
+- `platform` (not a Rust crate): `@workshop/platform`, the family's browser-side UI mechanics, with no visuals and no product vocabulary. It holds lifecycle and events, the `Result` type, the command, menu, keybinding, quick-access, and service registries, the context-key and text-control services, the status bar contract, and the `WorkshopPart` base class. It imports only its own files and type-only `dockview`, and never imports `look`. The SPA consumes it through the npm workspace below.
 
 ## npm workspace
 

@@ -11,14 +11,14 @@ import "./editor-panel.css";
 import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
 import type { EditorView } from "@codemirror/view";
 
-import { Emitter } from "../../base/event";
+import { Emitter } from "@workshop/platform/event";
 import { baseName } from "../../base/paths";
-import { toDisposable } from "../../base/lifecycle";
-import { WorkshopPart } from "../../base/workshop-part";
-import { Commands } from "../../services/command-registry";
+import { toDisposable } from "@workshop/platform/lifecycle";
+import { WorkshopPart } from "@workshop/platform/workshop-part";
+import { Commands } from "@workshop/platform/command-registry";
 import { errorText } from "../../services/error-catalog";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
-import { getServiceOrNull } from "../../services/service-registry";
+import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { showPanelDialog } from "../shared/panel-dialog";
 import { CodeMirrorSurface, languageIdForPath, type EditorSurface } from "./editor-surface";
 import {
