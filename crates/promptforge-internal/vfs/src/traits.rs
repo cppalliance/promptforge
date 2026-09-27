@@ -5,17 +5,20 @@
 //! `Policy` is the per-handle hook consulted before the claims check, and
 //! `ExecId` is the identity every operation is attributed to.
 
+use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::VfsError;
 use crate::grep::{GrepMatch, GrepQuery, GrepResults};
+use crate::handle::Scope;
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
 
 /// Identity of one serial thread of execution. Process-unique, vended
 /// from a process-global monotonic counter. Opaque: no public constructor -
-/// it must be nameable (it appears in [`Vfs::acquire`]), but only the
-/// handle vends them.
+/// it must be nameable (it appears in [`Vfs::release`] and
+/// [`AcquireContext::id`]), but only the handle vends them.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ExecId(u64);
 
@@ -27,6 +30,44 @@ impl ExecId {
     }
 }
 
+/// What [`Vfs::acquire`] receives: the identity being acquired and,
+/// opaquely, the scope it belongs to. Opaque: no public constructor -
+/// only the handle builds one. A backend that wraps another [`Vfs`]
+/// forwards the context unchanged, so a wrapped handle joins the
+/// caller's scope and its claims stay ordered with the caller's.
+#[derive(Clone)]
+pub struct AcquireContext {
+    id: ExecId,
+    scope: Arc<Scope>,
+}
+
+impl AcquireContext {
+    /// A context acquiring `id` into `scope`.
+    pub(crate) fn new(id: ExecId, scope: Arc<Scope>) -> Self {
+        Self { id, scope }
+    }
+
+    /// The identity being acquired. Every operation on the access
+    /// object the backend returns is attributed to it.
+    #[must_use]
+    pub fn id(&self) -> ExecId {
+        self.id
+    }
+
+    /// The scope the identity belongs to.
+    pub(crate) fn scope(&self) -> &Arc<Scope> {
+        &self.scope
+    }
+}
+
+impl fmt::Debug for AcquireContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AcquireContext")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// One backend behind the virtual namespace.
 ///
 /// Sync by design: the Lua VM and the executor's single driver thread are
@@ -34,14 +75,16 @@ impl ExecId {
 /// is not: the handle serializes access. The only way to touch storage is
 /// to acquire an access object bound to an identity.
 pub trait Vfs: Send {
-    /// Acquires an access object bound to `id`. Every operation on the
-    /// returned object is attributed to that identity: backends that
-    /// care can know who is touching what; the rest ignore it.
+    /// Acquires an access object bound to the identity in `cx`. Every
+    /// operation on the returned object is attributed to
+    /// [`AcquireContext::id`]: backends that care can know who is
+    /// touching what; the rest ignore it. A backend that wraps another
+    /// [`Vfs`] passes `cx` through unchanged.
     ///
     /// # Errors
     ///
     /// Returns an error when the backend cannot open a session.
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError>;
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError>;
 
     /// Releases `id`. Called from the access object's Drop - through a
     /// router, once per mount the identity touched - so teardown paths

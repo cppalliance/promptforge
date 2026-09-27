@@ -6,7 +6,7 @@ use super::*;
 use crate::program::map_chunk_line_to_absolute;
 use crate::vm::{LocalTools, LuaOutcome, run_chunk};
 use promptforge_types::tools::ToolDescriptor;
-use promptforge_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
+use promptforge_vfs::{AcquireContext, ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 use serde_json::json;
 
 #[path = "tests-recording.rs"]
@@ -57,8 +57,11 @@ impl FailingBackend {
 }
 
 impl Vfs for FailingBackend {
-    fn acquire(&mut self, id: ExecId) -> std::result::Result<Box<dyn VfsAccess>, VfsError> {
-        let _ = id;
+    fn acquire(
+        &mut self,
+        cx: &AcquireContext,
+    ) -> std::result::Result<Box<dyn VfsAccess>, VfsError> {
+        let _ = cx;
         Ok(Box::new(FailingAccess))
     }
 

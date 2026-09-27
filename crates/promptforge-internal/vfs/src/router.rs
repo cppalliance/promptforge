@@ -19,7 +19,7 @@ use crate::handle::VfsRef;
 use crate::observe::{OpEvent, OpSink};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
 use crate::stat::{Entry, Stat};
-use crate::traits::{AllowAll, ExecId, Policy, Vfs, VfsAccess};
+use crate::traits::{AcquireContext, AllowAll, ExecId, Policy, Vfs, VfsAccess};
 
 /// One mounted backend behind a shared lock.
 type Mounted = Arc<Mutex<Box<dyn Vfs>>>;
@@ -97,9 +97,9 @@ impl Router {
 }
 
 impl Vfs for Router {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         Ok(Box::new(RoutingAccess {
-            id,
+            cx: cx.clone(),
             mounts: Arc::clone(&self.mounts),
             acquired: RefCell::new(BTreeMap::new()),
         }))
@@ -120,7 +120,8 @@ impl Vfs for Router {
 /// mount per operation and acquires each backend's access lazily on
 /// first touch of that mount.
 struct RoutingAccess {
-    id: ExecId,
+    /// The caller's context, passed to each mount's lazy acquire.
+    cx: AcquireContext,
     mounts: Arc<Mounts>,
     /// Per-mount sessions, keyed by mount prefix. `RefCell` because
     /// read-only trait methods take `&self`; the enclosing capability
@@ -142,7 +143,7 @@ impl RoutingAccess {
             })?;
         let mut acquired = self.acquired.borrow_mut();
         if !acquired.contains_key(prefix) {
-            let session = lock(backend).acquire(self.id)?;
+            let session = lock(backend).acquire(&self.cx)?;
             acquired.insert(prefix.clone(), session);
         }
         let Some(session) = acquired.get_mut(prefix) else {
@@ -357,7 +358,7 @@ impl Drop for RoutingAccess {
         for (prefix, session) in std::mem::take(self.acquired.get_mut()) {
             drop(session);
             if let Some(backend) = self.mounts.get(&prefix) {
-                let _ = lock(backend).release(self.id);
+                let _ = lock(backend).release(self.cx.id());
             }
         }
     }
@@ -491,12 +492,12 @@ mod tests {
 
     use super::{Mounts, Router};
     use crate::error::VfsError;
-    use crate::handle::VfsRef;
+    use crate::handle::{Scope, VfsRef};
     use crate::memory::MemoryBackend;
     use crate::observe::Origin;
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::{Entry, FileType, Stat};
-    use crate::traits::{ExecId, Vfs, VfsAccess};
+    use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
     /// A recording in-memory stub. Files are keyed by the exact paths
     /// the backend is handed, so tests observe prefix stripping
@@ -542,8 +543,8 @@ mod tests {
     }
 
     impl Vfs for StubFs {
-        fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-            let _ = id;
+        fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+            let _ = cx;
             *self.acquires.lock().unwrap_or_else(PoisonError::into_inner) += 1;
             Ok(Box::new(StubAccess {
                 files: Arc::clone(&self.files),
@@ -898,7 +899,7 @@ mod tests {
             Arc::new(Mutex::new(Box::new(base.clone()))),
         );
         let mut router = Router::new(mounts);
-        let mut session = router.acquire(ExecId::vend())?;
+        let mut session = router.acquire(&AcquireContext::new(ExecId::vend(), Scope::start()))?;
         assert!(matches!(
             session.remove(&canonicalize_absolute("/base/missing.txt")?, false),
             Err(VfsError::NotFound { .. })

@@ -14,7 +14,9 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use super::*;
-use promptforge_vfs::{Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath};
+use promptforge_vfs::{
+    AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
+};
 
 /// A one-shot gate for the first backend write or append: the first
 /// write-intent op the backend serves parks until a [`GateObserver`]
@@ -124,9 +126,12 @@ pub(in super::super) fn gated_store(gate: &Arc<StoreGate>) -> TestStore {
 }
 
 impl Vfs for GatedStore {
-    fn acquire(&mut self, id: ExecId) -> std::result::Result<Box<dyn VfsAccess>, VfsError> {
+    fn acquire(
+        &mut self,
+        cx: &AcquireContext,
+    ) -> std::result::Result<Box<dyn VfsAccess>, VfsError> {
         Ok(Box::new(GatedAccess {
-            inner: self.inner.acquire(id)?,
+            inner: self.inner.acquire(cx)?,
             gate: Arc::clone(&self.gate),
         }))
     }

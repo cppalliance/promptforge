@@ -15,7 +15,7 @@ use crate::error::{PathReason, VfsError};
 use crate::glob::{compile_glob, matches_tokens, validate_glob_pattern};
 use crate::path::VfsPath;
 use crate::stat::{Entry, FileType, Stat};
-use crate::traits::{ExecId, Vfs, VfsAccess};
+use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
 /// The storage one backend shares with every session it vends. `BTreeMap`
 /// and `BTreeSet` keep listing and glob results ordered without a sort
@@ -160,11 +160,11 @@ impl MemoryBackend {
 }
 
 impl Vfs for MemoryBackend {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         // Attribution is accepted as a no-op: every session shares the
         // one map, and the claims model above the backend enforces
         // conflicts.
-        let _ = id;
+        let _ = cx;
         Ok(Box::new(MemoryAccess {
             tree: Arc::clone(&self.tree),
         }))
@@ -461,19 +461,26 @@ impl VfsAccess for MemoryAccess {
 mod tests {
     use super::MemoryBackend;
     use crate::error::{PathReason, VfsError};
+    use crate::handle::Scope;
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
-    use crate::traits::{ExecId, Vfs, VfsAccess};
+    use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
         canonicalize_absolute(s)
+    }
+
+    /// A fresh identity in a fresh scope, for acquiring the backend
+    /// directly.
+    fn context() -> AcquireContext {
+        AcquireContext::new(ExecId::vend(), Scope::start())
     }
 
     /// Returns a session on a backend pre-populated through the write
     /// path, so seeding exercises the same code the tests do.
     fn seeded(files: &[(&str, &str)]) -> Result<Box<dyn VfsAccess>, VfsError> {
         let mut backend = MemoryBackend::new();
-        let mut access = backend.acquire(ExecId::vend())?;
+        let mut access = backend.acquire(&context())?;
         for (name, text) in files {
             access.write(&path(name)?, text.as_bytes())?;
         }
@@ -483,7 +490,7 @@ mod tests {
     #[test]
     fn read_returns_the_exact_bytes_stored() -> Result<(), VfsError> {
         let mut backend = MemoryBackend::new();
-        let mut access = backend.acquire(ExecId::vend())?;
+        let mut access = backend.acquire(&context())?;
         let bytes = [0x00_u8, 0xff, 0x00, 0x7f];
         access.write(&path("/bin.dat")?, &bytes)?;
         assert_eq!(access.read(&path("/bin.dat")?)?, bytes);
@@ -856,10 +863,10 @@ mod tests {
     #[test]
     fn acquire_and_release_accept_attribution_as_a_no_op() -> Result<(), VfsError> {
         let mut backend = MemoryBackend::new();
-        let mut first = backend.acquire(ExecId::vend())?;
+        let mut first = backend.acquire(&context())?;
         first.write(&path("/f.txt")?, b"shared")?;
         // A second identity's session sees the same map.
-        let second = backend.acquire(ExecId::vend())?;
+        let second = backend.acquire(&context())?;
         assert_eq!(second.read(&path("/f.txt")?)?, b"shared");
         drop(first);
         drop(second);
@@ -870,7 +877,7 @@ mod tests {
     #[test]
     fn the_default_is_a_meaningful_empty_backend() -> Result<(), VfsError> {
         let mut backend = MemoryBackend::default();
-        let access = backend.acquire(ExecId::vend())?;
+        let access = backend.acquire(&context())?;
         assert!(access.exists(&path("/")?)?);
         assert!(!access.exists(&path("/anything")?)?);
         assert!(access.list(&path("/")?)?.is_empty());

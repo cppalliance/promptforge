@@ -179,7 +179,7 @@ assert!(matches!(reader.read("/scratch/tmp.txt"), Err(VfsError::NotFound { .. })
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-A [`VfsRef`] itself implements [`Vfs`], so one handle can be mounted inside another builder or overlay. The inner handle's policy and claims then apply under the caller's identity, which the mounted handle finds through a process-wide map keyed by [`ExecId`], consulted only at acquire time. For example, when an outer handle mounts a base handle at `/base`, a second identity reading `/base/f.txt` through the outer handle conflicts with a first identity's write to it.
+A [`VfsRef`] itself implements [`Vfs`], so one handle can be mounted inside another builder or overlay. The inner handle's policy and claims then apply under the caller's identity and scope, which the mounted handle receives in the [`AcquireContext`] passed to its [`Vfs::acquire`]. For example, when an outer handle mounts a base handle at `/base`, a second identity reading `/base/f.txt` through the outer handle conflicts with a first identity's write to it.
 
 # Read-only mounts
 
@@ -190,14 +190,16 @@ Only a router enforces the flag. A backend wrapped directly by [`VfsRef::new`] h
 This backend wraps a memory backend and declares itself read-only. The example seeds its storage through a clone first:
 
 ````
-use promptforge::vfs::{ExecId, MemoryBackend, Origin, Vfs, VfsAccess, VfsError, VfsRef};
+use promptforge::vfs::{
+    AcquireContext, ExecId, MemoryBackend, Origin, Vfs, VfsAccess, VfsError, VfsRef,
+};
 
 /// Serves a memory backend's files and refuses every mutation.
 struct Sealed(MemoryBackend);
 
 impl Vfs for Sealed {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-        self.0.acquire(id)
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+        self.0.acquire(cx)
     }
 
     fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
@@ -371,7 +373,7 @@ assert!(matches!(error, VfsError::NotFound { .. }));
 
 # Implementing a backend
 
-A backend implements two traits. [`Vfs`] is the backend itself. [`Vfs::acquire`] opens a session for one [`ExecId`] and returns it boxed, and [`Vfs::release`] ends the session. [`Vfs::read_only`] defaults to `false`. A [`Vfs`] must be [`Send`] but need not be [`Sync`], because the handle serializes access to it. [`VfsAccess`] is one identity's session, and it declares every filesystem operation. Paths arrive validated, canonical, and relative to the backend's mount, so a backend never checks them again.
+A backend implements two traits. [`Vfs`] is the backend itself. [`Vfs::acquire`] opens a session for the identity named in an [`AcquireContext`] and returns it boxed, and [`Vfs::release`] ends the session for that [`ExecId`]. A backend that wraps another [`Vfs`] passes the context through unchanged. [`Vfs::read_only`] defaults to `false`. A [`Vfs`] must be [`Send`] but need not be [`Sync`], because the handle serializes access to it. [`VfsAccess`] is one identity's session, and it declares every filesystem operation. Paths arrive validated, canonical, and relative to the backend's mount, so a backend never checks them again.
 
 - Eleven methods are required: [`VfsAccess::read`], [`VfsAccess::write`], [`VfsAccess::append`], [`VfsAccess::remove`], [`VfsAccess::exists`], [`VfsAccess::glob`], [`VfsAccess::list`], [`VfsAccess::stat`], [`VfsAccess::mkdir`], [`VfsAccess::rename`], and [`VfsAccess::copy`].
 - Seven have default bodies, and a backend overrides any of them to push work down: [`VfsAccess::read_range`], [`VfsAccess::str_replace`], [`VfsAccess::grep`], [`VfsAccess::symlink`], [`VfsAccess::read_link`], [`VfsAccess::chmod`], and [`VfsAccess::glob_kind`]. For example, a backend can add regex search by overriding [`VfsAccess::grep`], or seeking reads by overriding [`VfsAccess::read_range`], as [`HostBackend`] does.
@@ -382,7 +384,8 @@ This backend refuses any single write or append over a byte limit, and delegates
 
 ````
 use promptforge::vfs::{
-    Entry, ExecId, MemoryBackend, Origin, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+    AcquireContext, Entry, ExecId, MemoryBackend, Origin, Stat, Vfs, VfsAccess, VfsError,
+    VfsPath, VfsRef,
 };
 
 /// Refuses any single write or append larger than `limit` bytes.
@@ -397,8 +400,8 @@ struct CappedSession {
 }
 
 impl Vfs for Capped {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-        let inner = self.inner.acquire(id)?;
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+        let inner = self.inner.acquire(cx)?;
         Ok(Box::new(CappedSession { inner, limit: self.limit }))
     }
 
@@ -496,7 +499,7 @@ This part covers every item in the module, grouped by task: handles and access f
 - [`VfsRef::builder`] returns an empty [`VfsRefBuilder`], with no mounts, no policy, no sink, and no store.
 - `VfsRef` implements [`Default`](std::default::Default): [`Default::default`](std::default::Default::default) returns a fresh handle with one mount, a memory backend at `/`, declared as the store, and nothing else.
 - [`VfsRef::overlay`] takes `&self`, a `prefix` of type [`&str`](str), and a `backend` that is any `'static` [`Vfs`]. The prefix is the absolute virtual path to mount the backend at. It returns a new handle whose namespace is this handle's namespace with the backend mounted at the prefix, sharing this handle's claims table, policy, op sink, and store declaration. Operations outside the prefix route through this handle. It panics with "invalid overlay prefix {prefix:?}: {err}" when the prefix does not canonicalize, and with "an overlay at / would replace the base entirely; use VfsRef::new instead" for `/`.
-- [`VfsRef::acquire`] takes `&self` and an [`Origin`], and returns a new [`Access`] bound to a fresh [`ExecId`]. It starts a *scope*: the acquired identity is the scope's root, and every identity forked from it joins the scope. Nothing orders two scopes, so two live scopes' claims always conflict. The origin labels every operation the access performs. It fails with the backend's own error when a directly wrapped backend's [`Vfs::acquire`] refuses the identity. A router acquires each mount lazily, so a mount's refusal surfaces from the first operation on that mount.
+- [`VfsRef::acquire`] takes `&self` and an [`Origin`], and returns a new [`Access`] bound to a fresh [`ExecId`]. It starts a *scope*: the acquired identity is the scope's root, and every identity forked from it joins the scope. Nothing orders two scopes, so two live scopes' claims always conflict. The origin labels every operation the access performs. A directly wrapped backend's [`Vfs::acquire`] receives the new identity and its scope as an [`AcquireContext`], and when it refuses, the acquire fails with the backend's own error. A router acquires each mount lazily, so a mount's refusal surfaces from the first operation on that mount.
 
 [`VfsRef`] implements [`Vfs`], and its [`Vfs::read_only`] reports the wrapped backend's flag.
 
@@ -558,7 +561,11 @@ Dropping an [`Access`] drops one reference to its identity and releases its back
 
 ## ExecId
 
-[`ExecId`] is the opaque identity of one serial thread of execution, and every operation and claim is attributed to one. The handle vends each one from a process-wide counter, so each is unique in the process. Hosts never build one. A backend receives it as the `id` argument of [`Vfs::acquire`] and [`Vfs::release`], and can use it to tell sessions apart. It is [`Copy`](std::marker::Copy) and [`Hash`](std::hash::Hash), so it works as a map key for per-identity state. Its [`Debug`](std::fmt::Debug) form appears in [`VfsError::Conflict`] messages. The engine forks an identity at each spawn and joins each task's identity back at delivery; a host never performs either.
+[`ExecId`] is the opaque identity of one serial thread of execution, and every operation and claim is attributed to one. The handle vends each one from a process-wide counter, so each is unique in the process. Hosts never build one. A backend reads it from [`AcquireContext::id`] in [`Vfs::acquire`] and receives it as the `id` argument of [`Vfs::release`], and can use it to tell sessions apart. It is [`Copy`](std::marker::Copy) and [`Hash`](std::hash::Hash), so it works as a map key for per-identity state. Its [`Debug`](std::fmt::Debug) form appears in [`VfsError::Conflict`] messages. The engine forks an identity at each spawn and joins each task's identity back at delivery; a host never performs either.
+
+## AcquireContext
+
+[`AcquireContext`] is what [`Vfs::acquire`] receives: the [`ExecId`] being acquired and, opaquely, the scope that identity belongs to. The handle builds one for every acquire, spawn, and store view, and hosts never build one. [`AcquireContext::id`] returns the identity. It is [`Clone`](std::clone::Clone), [`Debug`](std::fmt::Debug), [`Send`], and [`Sync`]. A backend that wraps another [`Vfs`] passes the context through unchanged, as the `Sealed` and `Capped` examples do. That is how a mounted [`VfsRef`] joins the caller's scope, so its claims stay ordered with the caller's.
 
 ## VfsError
 
@@ -844,7 +851,7 @@ Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute"
 
 [`Vfs`] is one backend behind the virtual namespace. The only way to reach its storage is to acquire a per-identity session, a [`VfsAccess`]. A host implements it for a custom backend. The trait requires [`Send`] but not [`Sync`], because the handle serializes access. The crate implements it for [`MemoryBackend`], [`HostBackend`], and [`VfsRef`]. Pass an implementation to [`VfsRef::new`], [`VfsRef::with_policy`], [`VfsRefBuilder::mount`], or [`VfsRef::overlay`], all of which require `'static`.
 
-- [`Vfs::acquire`] is required. It takes `&mut self` and `id`, the [`ExecId`] that every operation on the new session is attributed to, and returns a [`Box`] of a [`VfsAccess`]. A backend that tracks who touches what keys on the id, and others ignore it. Return any [`VfsError`] when the backend cannot open a session, and the caller of [`VfsRef::acquire`] receives it, or the first operation on the mount through a router. It is called once per [`VfsRef::acquire`] for a directly wrapped backend, and lazily on first touch for a mounted one.
+- [`Vfs::acquire`] is required. It takes `&mut self` and `cx`, an [`AcquireContext`] whose [`AcquireContext::id`] is the [`ExecId`] that every operation on the new session is attributed to, and returns a [`Box`] of a [`VfsAccess`]. A backend that tracks who touches what keys on the id, and others ignore it. A backend that wraps another [`Vfs`] passes `cx` through unchanged. Return any [`VfsError`] when the backend cannot open a session, and the caller of [`VfsRef::acquire`] receives it, or the first operation on the mount through a router. It is called once per [`VfsRef::acquire`] for a directly wrapped backend, and lazily on first touch for a mounted one.
 - [`Vfs::release`] is required. It takes `&mut self` and the `id` being released, and returns `()` on success. Return a [`VfsError`] when the identity cannot be released, though the caller ignores it, because the release runs when the [`Access`] is dropped. So cancellation, panics, and early returns cannot skip it. It ends the backend session only; the happens-before state lives and dies with the scope. Through a router, it is called at each mount the identity touched, after that mount's session is dropped.
 - [`Vfs::read_only`] has a default body that returns `false`. It takes `&self` and returns whether the backend rejects all mutations. On a read-only mount, a router refuses [`Access::write`], [`Access::append`], [`Access::remove`], [`Access::mkdir`], [`Access::str_replace`], the destination of [`Access::copy`], and either end of [`Access::rename`] before the backend is touched. A backend used alone through [`VfsRef::new`] must reject mutations itself.
 

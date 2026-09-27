@@ -138,6 +138,7 @@ pub mod vfs {
     pub use promptforge_lua::StoreOp;
     pub use promptforge_lua::StoreOutcome;
     pub use promptforge_vfs::Access;
+    pub use promptforge_vfs::AcquireContext;
     pub use promptforge_vfs::AllowAll;
     pub use promptforge_vfs::Entry;
     pub use promptforge_vfs::ExecId;

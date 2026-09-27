@@ -37,7 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use crate::error::{PathReason, VfsError};
 use crate::glob::{compile_glob, matches_tokens, validate_glob_grammar, validate_glob_pattern};
@@ -46,7 +46,7 @@ use crate::observe::{OpEvent, OpSink, Origin};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize, canonicalize_absolute};
 use crate::router::{Mounts, Router, StoreDecl, VfsRefBuilder};
 use crate::stat::{Entry, Stat};
-use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
+use crate::traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
 /// Whether an operation claims read or write intent on its region.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -80,7 +80,7 @@ type ScopeId = u64;
 /// A scope: the root identity from [`VfsRef::acquire`] together with
 /// every identity forked from it. Every [`Access`] in the scope holds an
 /// `Arc` of this, so the scope dies with its last access.
-struct Scope {
+pub(crate) struct Scope {
     /// The scope's id, for the per-ledger registries.
     id: ScopeId,
     /// The number of identities whose accesses still live; the scope ends
@@ -163,6 +163,18 @@ impl View {
 }
 
 impl Scope {
+    /// A fresh scope with no identities yet: its first attach makes it
+    /// live.
+    pub(crate) fn start() -> Arc<Scope> {
+        Arc::new(Scope {
+            id: next_scope_id(),
+            live: AtomicUsize::new(0),
+            inner: Mutex::new(ScopeInner {
+                identities: HashMap::new(),
+            }),
+        })
+    }
+
     /// Poison-safe lock on the scope's identities.
     fn lock(&self) -> MutexGuard<'_, ScopeInner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
@@ -307,32 +319,6 @@ impl Scope {
             identity.own = identity.own.max(tick + 1);
         }
     }
-}
-
-/// Scopes by [`ExecId`], for the mounted-handle forward: a mounted
-/// [`VfsRef`] receiving a forwarded identity finds the scope its original
-/// acquire started. Weak entries die with their scope and are swept on
-/// the next registration. Consulted only at acquire time, never per
-/// operation.
-fn scopes() -> &'static Mutex<HashMap<ExecId, Weak<Scope>>> {
-    static SCOPES: OnceLock<Mutex<HashMap<ExecId, Weak<Scope>>>> = OnceLock::new();
-    SCOPES.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Remembers the scope `id` was acquired into, sweeping dead entries.
-fn remember_scope(id: ExecId, scope: &Arc<Scope>) {
-    let mut map = scopes().lock().unwrap_or_else(PoisonError::into_inner);
-    map.retain(|_, weak| weak.upgrade().is_some());
-    map.insert(id, Arc::downgrade(scope));
-}
-
-/// The live scope `id` was acquired into, if the process still holds one.
-fn forwarded_scope(id: ExecId) -> Option<Arc<Scope>> {
-    scopes()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&id)
-        .and_then(Weak::upgrade)
 }
 
 /// The next scope id: process-wide, so scope ids stay unique across
@@ -1299,60 +1285,48 @@ impl VfsRef {
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity.
     pub fn acquire(&self, origin: Origin) -> Result<Access, VfsError> {
-        self.acquire_with(ExecId::vend(), Some(origin))
+        self.acquire_with(
+            &AcquireContext::new(ExecId::vend(), Scope::start()),
+            Some(origin),
+        )
     }
 
-    /// Acquires the capability under a given identity: how a mounted
-    /// handle forwards the caller's attribution. The forward finds the
-    /// identity's scope through a process-wide map keyed by [`ExecId`],
-    /// consulted only here, never per operation, so the forwarded
-    /// capability joins its scope and its claims conflict across both
-    /// views of the same storage. A `None` origin is the
-    /// mount forward: the outer handle already fired the caller's origin,
-    /// so the forward fires nothing rather than double the event with a
-    /// fabricated, less precise one.
+    /// Acquires the capability for the identity and scope in `cx`: a
+    /// fresh acquire passes a new scope, and a mounted handle receives
+    /// the caller's context, so the forwarded capability joins the
+    /// caller's scope and its claims conflict across both views of the
+    /// same storage. A `None` origin is the mount forward: the outer
+    /// handle already fired the caller's origin, so the forward fires
+    /// nothing rather than double the event with a fabricated, less
+    /// precise one.
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity;
     /// see [`VfsRef::acquire`].
     pub(crate) fn acquire_with(
         &self,
-        id: ExecId,
+        cx: &AcquireContext,
         origin: Option<Origin>,
     ) -> Result<Access, VfsError> {
-        let inner = self.backend().acquire(id)?;
+        let inner = self.backend().acquire(cx)?;
         Ok(Access {
-            id,
+            id: cx.id(),
             origin,
             root: VfsPath::root(),
             store_root: None,
             volume: self.volume.clone(),
             policy: self.policy.clone(),
-            scope: self.join_scope(id),
+            scope: self.join_scope(cx),
             inner: Mutex::new(inner),
         })
     }
 
-    /// Finds or starts the scope for `id`: a forwarded identity (the
-    /// mounted-handle forward) rejoins the scope its original acquire
-    /// started, through the process-wide map; a fresh identity starts
-    /// one.
-    fn join_scope(&self, id: ExecId) -> Arc<Scope> {
-        if let Some(scope) = forwarded_scope(id) {
-            self.volume.claims.register_scope(&scope);
-            scope.attach(id);
-            return scope;
-        }
-        let scope = Arc::new(Scope {
-            id: next_scope_id(),
-            live: AtomicUsize::new(0),
-            inner: Mutex::new(ScopeInner {
-                identities: HashMap::new(),
-            }),
-        });
-        remember_scope(id, &scope);
-        scope.attach(id);
+    /// Joins the scope in `cx`: registers it in this handle's claims
+    /// tables and attaches the identity, fresh or forwarded.
+    fn join_scope(&self, cx: &AcquireContext) -> Arc<Scope> {
+        let scope = Arc::clone(cx.scope());
         self.volume.claims.register_scope(&scope);
+        scope.attach(cx.id());
         scope
     }
 
@@ -1424,15 +1398,27 @@ impl Access {
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the child's
-    /// identity; see [`VfsRef::acquire`]. A failed spawn leaves this
-    /// capability's clock untouched.
+    /// identity; see [`VfsRef::acquire`]. A failed spawn still advances
+    /// this capability's own clock entry, which orders nothing new: its
+    /// later accesses are merely no longer ordered before a child that
+    /// never ran.
     ///
     /// Crate-internal: backs [`crate::detail::access_spawn`].
     pub(crate) fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
         let id = ExecId::vend();
-        let inner = self.backend().acquire(id)?;
+        // The fork comes first so a wrapped handle acquiring the child
+        // finds it already registered in the scope.
         self.scope.fork(self.id, id);
-        remember_scope(id, &self.scope);
+        let inner = match self
+            .backend()
+            .acquire(&AcquireContext::new(id, Arc::clone(&self.scope)))
+        {
+            Ok(inner) => inner,
+            Err(err) => {
+                self.scope.release(id);
+                return Err(err);
+            }
+        };
         // A store view's arms keep the view's confinement to the store
         // mount and its logical error paths.
         let inner: Box<dyn VfsAccess> = match &self.store_root {
@@ -1510,7 +1496,7 @@ impl Access {
         let mut mounts = Mounts::new();
         mounts.insert(store.root.to_buf(), Arc::clone(&store.mount));
         let mut router = Router::new(mounts);
-        let inner = router.acquire(self.id)?;
+        let inner = router.acquire(&AcquireContext::new(self.id, Arc::clone(&self.scope)))?;
         // The view holds one more reference to the identity, like a
         // mount forward: the identity - and its scope - ends with its
         // last access, the view included.
@@ -1995,11 +1981,11 @@ impl Drop for Access {
 /// across two views of the same storage - routes operations through the
 /// base's policy and claims under the caller's identity.
 impl Vfs for VfsRef {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         // The mount forward leaves the origin unset: the outer handle already
         // fired the caller's, and a fabricated one here would double the
         // event with a less precise label.
-        Ok(Box::new(HandleAccess(self.acquire_with(id, None)?)))
+        Ok(Box::new(HandleAccess(self.acquire_with(cx, None)?)))
     }
 
     fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
@@ -2202,6 +2188,7 @@ impl VfsAccess for StoreScoped {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
     use super::{Access, VfsRef};
@@ -2209,7 +2196,7 @@ mod tests {
     use crate::observe::{OpEvent, Origin};
     use crate::path::VfsPath;
     use crate::stat::{Entry, FileType, Stat};
-    use crate::traits::{ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
+    use crate::traits::{AcquireContext, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
     /// Minimal in-memory backend shared between the `Vfs` and the access
     /// objects it vends. Releases are recorded so tests can observe the
@@ -2243,8 +2230,8 @@ mod tests {
     }
 
     impl Vfs for StubFs {
-        fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-            let _ = id;
+        fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+            let _ = cx;
             Ok(Box::new(StubAccess {
                 files: Arc::clone(&self.files),
             }))
@@ -2662,6 +2649,19 @@ mod tests {
     }
 
     #[test]
+    fn a_child_of_a_directly_wrapped_handle_reads_its_parents_pre_spawn_write()
+    -> Result<(), VfsError> {
+        // The wrapped handle keeps its own claims table, so the child
+        // must reach it in the parent's scope or the read conflicts.
+        let vfs = VfsRef::new(handle(&StubFs::default()));
+        let parent = vfs.acquire(test_origin())?;
+        parent.write("/p", b"1")?;
+        let child = parent.spawn(test_origin())?;
+        assert_eq!(child.read("/p")?, b"1");
+        Ok(())
+    }
+
+    #[test]
     fn a_forked_child_shares_its_parents_clock_snapshot_instead_of_copying_it()
     -> Result<(), VfsError> {
         // The Memory item: a spawn reuses the parent's seen snapshot -
@@ -2972,6 +2972,7 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<VfsRef>();
         assert_send_sync::<Access>();
+        assert_send_sync::<AcquireContext>();
     }
 
     /// A backend that refuses every acquisition: the trait's contract
@@ -2980,8 +2981,8 @@ mod tests {
     struct RefusingFs;
 
     impl Vfs for RefusingFs {
-        fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-            let _ = id;
+        fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+            let _ = cx;
             Err(VfsError::Backend {
                 message: "the backend refuses acquisition".to_owned(),
             })
@@ -3005,8 +3006,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backend_refusal_fails_spawn_and_keeps_the_parents_clock_untouched() -> Result<(), VfsError>
-    {
+    fn a_backend_refusal_fails_spawn_and_releases_the_refused_child() -> Result<(), VfsError> {
         /// A backend that refuses exactly its second acquisition: the
         /// spawn is the second.
         struct RefuseSecond {
@@ -3014,8 +3014,8 @@ mod tests {
         }
 
         impl Vfs for RefuseSecond {
-            fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
-                let _ = id;
+            fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+                let _ = cx;
                 let mut vended = self.vended.lock().unwrap_or_else(PoisonError::into_inner);
                 *vended += 1;
                 if *vended == 2 {
@@ -3045,9 +3045,10 @@ mod tests {
             }
             other => panic!("expected a backend refusal, got {other:?}"),
         }
-        // The failed spawn forked nothing, so the parent's write still
-        // conflicts with another live scope's: the refusal changed no
-        // happens-before state.
+        // The refused child's reference was released, so only the
+        // parent keeps the scope live, and the parent's write still
+        // conflicts with another live scope's.
+        assert_eq!(parent.scope.live.load(Ordering::Acquire), 1);
         let other = vfs.acquire(test_origin())?;
         let message = conflict_message(other.write("/f.txt", b"2"));
         assert!(message.contains("/f.txt"), "{message}");

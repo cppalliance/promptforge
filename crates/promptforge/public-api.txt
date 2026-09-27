@@ -176,6 +176,7 @@ auto promptforge::tools::ToolOutput: Freeze, RefUnwindSafe, Send, Sync, Unpin, U
 auto promptforge::transport::ClientError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::transport::ClientTimeout: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::Access: !Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::AcquireContext: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Entry: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::ExecId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -299,6 +300,7 @@ derives promptforge::tools::ToolOutput: Clone, Debug, Eq, PartialEq
 derives promptforge::transport::ClientError: Debug
 derives promptforge::transport::ClientTimeout: Debug
 derives promptforge::vfs::Access: Debug
+derives promptforge::vfs::AcquireContext: Clone, Debug
 derives promptforge::vfs::AllowAll: Debug, Default
 derives promptforge::vfs::Entry: Clone, Debug
 derives promptforge::vfs::ExecId: Clone, Copy, Debug, Eq, Hash, PartialEq
@@ -650,6 +652,7 @@ pub fn promptforge::vfs::Access::rename(&self, from: &str, to: &str) -> core::re
 pub fn promptforge::vfs::Access::stat(&self, path: &str) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::str_replace(&self, path: &str, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::write(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::AcquireContext::id(&self) -> promptforge::vfs::ExecId
 pub fn promptforge::vfs::HostBackend::identity() -> promptforge::vfs::HostBackend
 pub fn promptforge::vfs::HostBackend::rooted(dir: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<promptforge::vfs::HostBackend, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::HostBackend::with_read_only(self, read_only: bool) -> promptforge::vfs::HostBackend
@@ -666,7 +669,7 @@ pub fn promptforge::vfs::Origin::new(label: impl core::convert::Into<alloc::stri
 pub fn promptforge::vfs::PathReason::from_tag(tag: &str) -> core::option::Option<promptforge::vfs::PathReason>
 pub fn promptforge::vfs::PathReason::tag(self) -> &'static str
 pub fn promptforge::vfs::Policy::check(&self, op: promptforge::vfs::Op, path: &promptforge::vfs::VfsPath) -> promptforge::vfs::Verdict
-pub fn promptforge::vfs::Vfs::acquire(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<alloc::boxed::Box<dyn promptforge::vfs::VfsAccess>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Vfs::acquire(&mut self, cx: &promptforge::vfs::AcquireContext) -> core::result::Result<alloc::boxed::Box<dyn promptforge::vfs::VfsAccess>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Vfs::read_only(&self) -> bool { .. }
 pub fn promptforge::vfs::Vfs::release(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::append(&mut self, path: &promptforge::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
@@ -1440,6 +1443,7 @@ pub struct promptforge::replay::Flags(/* private fields */)
 pub struct promptforge::timestamp::Timestamp(/* private fields */)
 pub struct promptforge::transport::ClientTimeout(..)
 pub struct promptforge::vfs::Access { /* private fields */ }
+pub struct promptforge::vfs::AcquireContext { /* private fields */ }
 pub struct promptforge::vfs::AllowAll;
 pub struct promptforge::vfs::ExecId(/* private fields */)
 pub struct promptforge::vfs::ModeHandle { /* private fields */ }

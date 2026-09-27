@@ -37,7 +37,7 @@ pub use observe::{OpEvent, OpSink, Origin};
 pub use path::{VfsPath, VfsPathBuf};
 pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
-pub use traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
+pub use traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
 /// The default handle: a memory store at `/` and nothing else.
 ///

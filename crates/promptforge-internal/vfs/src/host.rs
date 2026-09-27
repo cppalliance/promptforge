@@ -24,7 +24,7 @@ use crate::error::{PathReason, VfsError};
 use crate::glob::{compile_glob, matches_tokens, validate_glob_pattern};
 use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
-use crate::traits::{ExecId, Vfs, VfsAccess};
+use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
 /// Maps an I/O failure to the error kind the trait surface promises.
 /// Each `path` field holds the canonical path alone, so a host reading
@@ -358,11 +358,11 @@ impl HostBackend {
 }
 
 impl Vfs for HostBackend {
-    fn acquire(&mut self, id: ExecId) -> Result<Box<dyn VfsAccess>, VfsError> {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         // Attribution is accepted as a no-op: the host filesystem holds
         // no per-identity state, and the claims model above the backend
         // enforces conflicts.
-        let _ = id;
+        let _ = cx;
         Ok(Box::new(HostAccess {
             root: self.root.clone(),
             read_only: self.read_only,
@@ -650,12 +650,19 @@ mod tests {
 
     use super::{HostBackend, atomic_write, identity_to_virtual, map_io};
     use crate::error::{PathReason, VfsError};
+    use crate::handle::Scope;
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
-    use crate::traits::{ExecId, Vfs, VfsAccess};
+    use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
         canonicalize_absolute(s)
+    }
+
+    /// A fresh identity in a fresh scope, for acquiring the backend
+    /// directly.
+    fn context() -> AcquireContext {
+        AcquireContext::new(ExecId::vend(), Scope::start())
     }
 
     /// A unique temporary directory that removes itself on drop.
@@ -687,7 +694,7 @@ mod tests {
     /// Acquires a session on a rooted backend over `dir`.
     fn rooted_access(dir: &Path) -> Result<Box<dyn VfsAccess>, VfsError> {
         let mut backend = HostBackend::rooted(dir)?;
-        backend.acquire(ExecId::vend())
+        backend.acquire(&context())
     }
 
     /// Asserts no failure-atomic temp file survived under `dir`.
@@ -874,7 +881,7 @@ mod tests {
             .map_err(|err| map_io("seeding the kept file", &err))?;
         let mut backend = HostBackend::rooted(temp.path())?.with_read_only(true);
         assert!(Vfs::read_only(&backend));
-        let mut access = backend.acquire(ExecId::vend())?;
+        let mut access = backend.acquire(&context())?;
         assert_eq!(access.read(&path("/keep.txt")?)?, b"keep");
         assert!(access.exists(&path("/keep.txt")?)?);
         assert_eq!(access.stat(&path("/keep.txt")?)?.size, 4);
@@ -903,7 +910,7 @@ mod tests {
         let host_file = temp.path().join("identity.txt");
         let virtual_spelling = identity_to_virtual(&host_file);
         let mut backend = HostBackend::identity();
-        let mut access = backend.acquire(ExecId::vend())?;
+        let mut access = backend.acquire(&context())?;
         access.write(&path(&virtual_spelling)?, b"direct")?;
         assert_eq!(
             fs::read(&host_file).map_err(|err| map_io("reading the host file", &err))?,
