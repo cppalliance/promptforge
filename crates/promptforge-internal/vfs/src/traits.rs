@@ -187,9 +187,15 @@ pub trait VfsAccess: Send {
     ///
     /// # Errors
     ///
-    /// Returns an error when the file is not UTF-8, when the match
-    /// count is not exactly one, or when the read or write fails.
+    /// Returns an error when `old` is empty, when the file is not UTF-8,
+    /// when the match count is not exactly one, or when the read or
+    /// write fails.
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
+        if old.is_empty() {
+            return Err(VfsError::Backend(format!(
+                "str_replace requires a non-empty anchor: {path}"
+            )));
+        }
         let bytes = self.read(path)?;
         let text = String::from_utf8(bytes).map_err(|source| {
             VfsError::Backend(format!("str_replace requires UTF-8 text: {path}: {source}"))
@@ -546,6 +552,35 @@ mod tests {
         let result = backend.str_replace(&path("/a.txt")?, "foo", "bar");
         assert!(matches!(result, Err(VfsError::Backend(_))));
         assert_eq!(backend.read(&path("/a.txt")?)?, b"foo and foo");
+        Ok(())
+    }
+
+    #[test]
+    fn the_default_str_replace_refuses_an_empty_anchor_on_an_empty_file() -> Result<(), VfsError> {
+        let mut backend = stub(&[("/a.txt", "")]);
+        let result = backend.str_replace(&path("/a.txt")?, "", "x");
+        match result {
+            Err(VfsError::Backend(message)) => {
+                assert_eq!(message, "str_replace requires a non-empty anchor: /a.txt");
+            }
+            other => panic!("expected the empty-anchor refusal, got {other:?}"),
+        }
+        assert_eq!(backend.read(&path("/a.txt")?)?, b"");
+        Ok(())
+    }
+
+    #[test]
+    fn the_default_str_replace_refuses_an_empty_anchor_on_a_non_empty_file() -> Result<(), VfsError>
+    {
+        let mut backend = stub(&[("/a.txt", "alpha beta")]);
+        let result = backend.str_replace(&path("/a.txt")?, "", "x");
+        match result {
+            Err(VfsError::Backend(message)) => {
+                assert_eq!(message, "str_replace requires a non-empty anchor: /a.txt");
+            }
+            other => panic!("expected the empty-anchor refusal, got {other:?}"),
+        }
+        assert_eq!(backend.read(&path("/a.txt")?)?, b"alpha beta");
         Ok(())
     }
 

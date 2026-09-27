@@ -444,13 +444,19 @@ impl Access {
     }
 
     /// Replaces the unique occurrence of `old` with `new` in the file at
-    /// `path`. Zero matches and multiple matches are both errors.
+    /// `path`. An empty `old` is refused. Zero matches and multiple
+    /// matches are both errors.
     ///
     /// # Errors
-    /// Returns an error when the policy denies the write, when another
-    /// live identity holds a claim on `path`, when the match count is not
-    /// exactly one, or when the backend fails.
+    /// Returns an error when `old` is empty, when the policy denies the
+    /// write, when another live identity holds a claim on `path`, when the
+    /// match count is not exactly one, or when the backend fails.
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), VfsError> {
+        if old.is_empty() {
+            return Err(VfsError::Backend(format!(
+                "str_replace requires a non-empty anchor: {path}"
+            )));
+        }
         let path = self.gate(Op::Write, path, ClaimKind::Write)?;
         self.fire(Op::Write, &path);
         self.inner().str_replace(&path, old, new)
@@ -967,6 +973,36 @@ mod tests {
         access.write("/f.txt", b"two")?;
         access.append("/f.txt", b"!")?;
         assert_eq!(access.read("/f.txt")?, b"two!");
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_anchor_on_an_empty_file_is_refused_and_leaves_the_file_empty()
+    -> Result<(), VfsError> {
+        let vfs = handle(&StubFs::seeded(&[("/f.txt", "")]));
+        let access = vfs.acquire(test_origin())?;
+        match access.str_replace("/f.txt", "", "x") {
+            Err(VfsError::Backend(message)) => {
+                assert_eq!(message, "str_replace requires a non-empty anchor: /f.txt");
+            }
+            other => panic!("expected the empty-anchor refusal, got {other:?}"),
+        }
+        assert_eq!(access.read("/f.txt")?, b"");
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_anchor_on_a_non_empty_file_is_refused_and_leaves_it_unchanged()
+    -> Result<(), VfsError> {
+        let vfs = handle(&StubFs::seeded(&[("/f.txt", "hello")]));
+        let access = vfs.acquire(test_origin())?;
+        match access.str_replace("/f.txt", "", "x") {
+            Err(VfsError::Backend(message)) => {
+                assert_eq!(message, "str_replace requires a non-empty anchor: /f.txt");
+            }
+            other => panic!("expected the empty-anchor refusal, got {other:?}"),
+        }
+        assert_eq!(access.read("/f.txt")?, b"hello");
         Ok(())
     }
 
