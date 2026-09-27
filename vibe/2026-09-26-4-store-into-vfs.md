@@ -1026,6 +1026,22 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 </step-12>
 
+<step-13>
+
+### Step 13: Drop the store view before answering in the test driver
+
+- Component: Test support
+- Placement: appended after the run closed, when a post-run full-suite failure showed the tokio test driver answers a store effect before dropping the effect's access, so the run's scope can outlive drive() and a fresh-scope read right after the run conflicts, depending on blocking-pool timing. Safe to fix now: the production harness already drops before posting (perform_store), and no later step exists to disturb it.
+- Piece: one fix and its regression evidence, built in one commit.
+- Work items: driver-access-drop.
+- Code: in [tokio_driver.rs](promptforge/crates/promptforge-internal/engine/src/test_support/tokio_driver.rs), the Effect::Store arm's spawn_blocking closure drops the store view before posting the answer: drop(access); between un_store_op(&access, op) and post(...), with a comment naming the invariant and the harness's perform_store as the production mirror. The answer then implies the access is dropped, so the run's scope ends before drive() returns and every post-run fresh-scope read is deterministic.
+- Tests: the existing anout_arms_take_child_ids_in_collection_order_per_fanout_index_and_structured_results is the regression: it failed in the wild with ead on ids-1.txt by ExecId(4) conflicts with a write claim by ExecId(2). The race window (answer post to closure end) admits no hook to widen, so no new test can fail deterministically against the old code; the step runs the failing test plus the fanout and post-run-read suites and states that deviation.
+- Docs: the comment on the Effect::Store arm in 	okio_driver.rs.
+- Verify: cargo nextest run --locked -p promptforge-engine --all-features, plus the focused fanout filter run a few times to exercise the race; no surface change, so no public-api.txt regeneration.
+- Commit: one commit with this step's code and docs.
+
+</step-13>
+
 The three blocks below hold the doc pass that Steps 11 and 12 run. Each block opens and closes with a tag on its own line, so a sub-agent reads only its own block by grepping for its tag.
 
 <doc-pass>
