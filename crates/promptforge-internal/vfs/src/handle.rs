@@ -43,8 +43,8 @@ use crate::error::{PathReason, VfsError};
 use crate::glob::{compile_glob, matches_tokens, validate_glob_grammar, validate_glob_pattern};
 use crate::grep::{GrepQuery, GrepResults};
 use crate::observe::{OpEvent, OpSink, Origin};
-use crate::path::{VfsPath, canonicalize, canonicalize_absolute};
-use crate::router::{Mounts, Router, VfsRefBuilder};
+use crate::path::{VfsPath, VfsPathBuf, canonicalize, canonicalize_absolute};
+use crate::router::{Mounts, Router, StoreDecl, VfsRefBuilder};
 use crate::stat::{Entry, Stat};
 use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
@@ -1051,6 +1051,139 @@ fn strip_root(root: &str, matched: &str) -> Option<String> {
     matched.strip_prefix(&prefix).map(str::to_owned)
 }
 
+/// The largest logical store path, in bytes, accepted by the store
+/// view: the ceiling the retired store facade enforced
+/// (`MAX_STORE_PATH_BYTES`), kept so a store path stays a bounded
+/// denial-of-service lever.
+const MAX_STORE_PATH_BYTES: usize = 1024;
+
+/// The store's strict logical-path rules, applied by the store view
+/// before a path reaches canonicalization, in the store contract's
+/// check order: the first rule broken is the one reported, with the
+/// path exactly as supplied.
+fn validate_store_path(raw: &str) -> Result<(), VfsError> {
+    let reject = |reason| {
+        Err(VfsError::InvalidPath {
+            path: raw.to_owned(),
+            reason,
+        })
+    };
+    if raw.is_empty() {
+        return reject(PathReason::Empty);
+    }
+    if raw.len() > MAX_STORE_PATH_BYTES {
+        return reject(PathReason::TooLong);
+    }
+    if raw.starts_with('/') {
+        return reject(PathReason::Absolute);
+    }
+    if raw.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return reject(PathReason::Control);
+    }
+    // A backslash is a separator on some backends and a literal on
+    // others; refuse it so a canonical `/`-separated path cannot be
+    // reinterpreted.
+    if raw.contains('\\') {
+        return reject(PathReason::Backslash);
+    }
+    for segment in raw.split('/') {
+        if segment.is_empty() {
+            return reject(PathReason::EmptySegment);
+        }
+        if segment == "." || segment == ".." {
+            return reject(PathReason::Traversal);
+        }
+        // Trailing `.`/space are stripped by some backends, so the
+        // stored name would not round-trip.
+        if segment.ends_with('.') || segment.ends_with(' ') {
+            return reject(PathReason::UnsafeSuffix);
+        }
+        if is_reserved_device_name(segment) {
+            return reject(PathReason::ReservedName);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `segment` is a platform-reserved device name. Windows
+/// treats names like `CON`, `NUL`, `COM1`, and `LPT1` as devices even
+/// with an extension (`con.txt`), so the base name before the first
+/// `.` is checked case-insensitively.
+fn is_reserved_device_name(segment: &str) -> bool {
+    let base = segment.split('.').next().unwrap_or(segment);
+    let upper = base.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || is_numbered_device(&upper, "COM")
+        || is_numbered_device(&upper, "LPT")
+}
+
+/// Whether `name` is `<prefix>N` for a single digit `1..=9`.
+fn is_numbered_device(name: &str, prefix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|rest| rest.parse::<u8>().ok().filter(|_| rest.len() == 1))
+        .is_some_and(|n| (1..=9).contains(&n))
+}
+
+/// Re-spells an error's paths for a store view's caller: a canonical
+/// path under the store root and a mount-relative backend path both
+/// become the logical form the caller supplied, and prose fields that
+/// embed the path (a conflict's diagnosis, a denial's reason) follow.
+fn relativize_error(err: VfsError, root: &str) -> VfsError {
+    let logical = |path: &str| {
+        strip_root(root, path).unwrap_or_else(|| path.trim_start_matches('/').to_owned())
+    };
+    match err {
+        VfsError::NotFound { path } => VfsError::NotFound {
+            path: logical(&path),
+        },
+        VfsError::AlreadyExists { path } => VfsError::AlreadyExists {
+            path: logical(&path),
+        },
+        VfsError::NotADirectory { path } => VfsError::NotADirectory {
+            path: logical(&path),
+        },
+        VfsError::IsADirectory { path } => VfsError::IsADirectory {
+            path: logical(&path),
+        },
+        VfsError::DirectoryNotEmpty { path } => VfsError::DirectoryNotEmpty {
+            path: logical(&path),
+        },
+        VfsError::NotUtf8 { path } => VfsError::NotUtf8 {
+            path: logical(&path),
+        },
+        VfsError::InvalidPath { path, reason } => VfsError::InvalidPath {
+            path: logical(&path),
+            reason,
+        },
+        VfsError::InvalidRange { path, reason } => VfsError::InvalidRange {
+            path: logical(&path),
+            reason,
+        },
+        VfsError::Anchor {
+            path,
+            anchor,
+            count,
+        } => VfsError::Anchor {
+            path: logical(&path),
+            anchor,
+            count,
+        },
+        VfsError::PermissionDenied { path, reason } => VfsError::PermissionDenied {
+            reason: reason.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::Unsupported { path, detail } => VfsError::Unsupported {
+            detail: detail.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::Conflict { path, detail } => VfsError::Conflict {
+            detail: detail.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::Backend { message } => VfsError::Backend { message },
+    }
+}
+
 /// One mounted filesystem instance: its backend and the ledger of who is
 /// touching what. The two are separately `Arc`-shareable so `overlay()`
 /// (a later step) can share the claims table while swapping the backend.
@@ -1058,6 +1191,10 @@ struct Volume {
     backend: Arc<Mutex<Box<dyn Vfs>>>,
     claims: Arc<Claims>,
     sink: Option<OpSink>,
+    /// The declared store, when the builder that built this handle
+    /// declared one. The store view derives from it; a mounted
+    /// handle's declaration stays invisible behind its backend.
+    store: Option<StoreDecl>,
 }
 
 /// The cloneable handle over one backend and its claims ledger.
@@ -1097,6 +1234,7 @@ impl VfsRef {
                 backend: Arc::new(Mutex::new(Box::new(backend))),
                 claims: Arc::new(Claims::new()),
                 sink: None,
+                store: None,
             }),
             policy: Arc::new(policy),
         }
@@ -1112,7 +1250,8 @@ impl VfsRef {
 
     /// Returns a handle with `backend` mounted at `prefix` over this
     /// handle's namespace. The claims table is shared: conflicts are
-    /// detected across both views of the same storage.
+    /// detected across both views of the same storage. The overlay
+    /// inherits this handle's store declaration, when it has one.
     ///
     /// # Panics
     /// Panics when `prefix` is not an absolute virtual path or is the
@@ -1142,6 +1281,7 @@ impl VfsRef {
                 // One sink observes both views of the same storage, fired
                 // by the outer capability with the caller's origin.
                 sink: self.volume.sink.clone(),
+                store: self.volume.store.clone(),
             }),
             policy: Arc::clone(&self.policy),
         }
@@ -1185,6 +1325,7 @@ impl VfsRef {
             id,
             origin,
             root: VfsPath::root(),
+            store_root: None,
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             scope: self.join_scope(id),
@@ -1216,17 +1357,20 @@ impl VfsRef {
     }
 
     /// Builds a handle over a router with a fresh claims table and the
-    /// installed policy and op sink: the builder's exit.
+    /// installed policy, op sink, and store declaration: the builder's
+    /// exit.
     pub(crate) fn from_router(
         router: Router,
         policy: Arc<dyn Policy + Sync>,
         sink: Option<OpSink>,
+        store: Option<StoreDecl>,
     ) -> VfsRef {
         VfsRef {
             volume: Arc::new(Volume {
                 backend: Arc::new(Mutex::new(Box::new(router))),
                 claims: Arc::new(Claims::new()),
                 sink,
+                store,
             }),
             policy,
         }
@@ -1256,6 +1400,11 @@ pub struct Access {
     /// The root that relative paths and patterns join onto, fixed for
     /// the access's life. A plain acquire roots at `/`.
     root: VfsPath,
+    /// The declared store root, when this access is a store view:
+    /// relative paths join onto it, the strict store-path rules gate
+    /// every path, and errors come back in the caller's logical form.
+    /// Plain accesses have `None`.
+    store_root: Option<VfsPath>,
     volume: Arc<Volume>,
     policy: Arc<dyn Policy + Sync>,
     /// The scope this identity belongs to: its vector clock and its
@@ -1284,12 +1433,22 @@ impl Access {
         let inner = self.backend().acquire(id)?;
         self.scope.fork(self.id, id);
         remember_scope(id, &self.scope);
+        // A store view's arms keep the view's confinement to the store
+        // mount and its logical error paths.
+        let inner: Box<dyn VfsAccess> = match &self.store_root {
+            Some(root) => Box::new(StoreScoped {
+                root: root.as_str().to_owned(),
+                inner,
+            }),
+            None => inner,
+        };
         Ok(Access {
             id,
             origin: Some(origin),
             // The child shares the parent's root: a store view's arms
             // see the same store.
             root: self.root.clone(),
+            store_root: self.store_root.clone(),
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             scope: Arc::clone(&self.scope),
@@ -1309,6 +1468,75 @@ impl Access {
         self.scope.join(self.id, child);
     }
 
+    /// The claims-table half of one operation: runs `claim` against
+    /// this access's identity and scope, and re-spells a store view's
+    /// error paths into the caller's logical form.
+    fn admit(
+        &self,
+        claim: impl FnOnce(&Claims, &Arc<Scope>, ExecId, &VfsPath) -> Result<(), VfsError>,
+        path: &VfsPath,
+    ) -> Result<(), VfsError> {
+        claim(&self.volume.claims, &self.scope, self.id, path).map_err(|err| self.relativize(err))
+    }
+
+    /// Re-spells an error's paths for the store view's caller; a plain
+    /// access's errors pass through untouched.
+    fn relativize(&self, err: VfsError) -> VfsError {
+        match &self.store_root {
+            Some(root) => relativize_error(err, root.as_str()),
+            None => err,
+        }
+    }
+
+    /// The store view: an access rooted at the declared store root
+    /// whose operations reach the store's own mount alone, sharing
+    /// this access's identity, scope, claims table, policy, and op
+    /// sink. The view applies the store's strict logical-path rules
+    /// and reports error paths in the caller's logical form.
+    /// Crate-internal: backs [`crate::detail::store_view`].
+    ///
+    /// # Errors
+    /// Returns an error when the handle declares no store.
+    pub(crate) fn store_view(&self) -> Result<Access, VfsError> {
+        let Some(store) = &self.volume.store else {
+            return Err(VfsError::Unsupported {
+                path: self.root.to_string(),
+                detail: "the handle declares no store".to_owned(),
+            });
+        };
+        // One mount - the store's own - behind a fresh router:
+        // operations are confined to the store mount, so a store at
+        // `/` never reaches a host directory mounted beneath it.
+        let mut mounts = Mounts::new();
+        mounts.insert(store.root.to_buf(), Arc::clone(&store.mount));
+        let mut router = Router::new(mounts);
+        let inner = router.acquire(self.id)?;
+        // The view holds one more reference to the identity, like a
+        // mount forward: the identity - and its scope - ends with its
+        // last access, the view included.
+        self.scope.attach(self.id);
+        Ok(Access {
+            id: self.id,
+            // The view keeps the chain's origin: store operations fire
+            // the op sink under the chain's label.
+            origin: self.origin.clone(),
+            root: store.root.clone(),
+            store_root: Some(store.root.clone()),
+            volume: Arc::new(Volume {
+                backend: Arc::new(Mutex::new(Box::new(router))),
+                claims: Arc::clone(&self.volume.claims),
+                sink: self.volume.sink.clone(),
+                store: None,
+            }),
+            policy: Arc::clone(&self.policy),
+            scope: Arc::clone(&self.scope),
+            inner: Mutex::new(Box::new(StoreScoped {
+                root: store.root.as_str().to_owned(),
+                inner,
+            })),
+        })
+    }
+
     /// Reads the file at `path` as stored.
     ///
     /// # Errors
@@ -1317,7 +1545,7 @@ impl Access {
     /// when the backend fails.
     pub fn read(&self, path: &str) -> Result<Vec<u8>, VfsError> {
         let path = self.gate(Op::Read, path)?;
-        self.volume.claims.claim_read(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_read, &path)?;
         self.fire(Op::Read, &path);
         self.inner().read(&path)
     }
@@ -1383,9 +1611,7 @@ impl Access {
     /// when the backend fails.
     pub fn write(&self, path: &str, contents: &[u8]) -> Result<(), VfsError> {
         let path = self.gate(Op::Write, path)?;
-        self.volume
-            .claims
-            .claim_write(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_write, &path)?;
         self.fire(Op::Write, &path);
         self.inner().write(&path, contents)
     }
@@ -1398,9 +1624,7 @@ impl Access {
     /// when the backend fails.
     pub fn append(&self, path: &str, contents: &[u8]) -> Result<(), VfsError> {
         let path = self.gate(Op::Append, path)?;
-        self.volume
-            .claims
-            .claim_write(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_write, &path)?;
         self.fire(Op::Append, &path);
         self.inner().append(&path, contents)
     }
@@ -1415,6 +1639,11 @@ impl Access {
     /// claim on `path`, when the match count is not exactly one, or when
     /// the backend fails.
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), VfsError> {
+        // The store view validates the path before the anchor, in the
+        // store contract's order.
+        if self.store_root.is_some() {
+            validate_store_path(path)?;
+        }
         if old.is_empty() {
             return Err(VfsError::Anchor {
                 path: path.to_owned(),
@@ -1423,9 +1652,7 @@ impl Access {
             });
         }
         let path = self.gate(Op::Write, path)?;
-        self.volume
-            .claims
-            .claim_write(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_write, &path)?;
         self.fire(Op::Write, &path);
         self.inner().str_replace(&path, old, new)
     }
@@ -1442,13 +1669,9 @@ impl Access {
     pub fn remove(&self, path: &str, recursive: bool) -> Result<bool, VfsError> {
         let path = self.gate(Op::Delete, path)?;
         if recursive {
-            self.volume
-                .claims
-                .claim_subtree(&self.scope, self.id, &path)?;
+            self.admit(Claims::claim_subtree, &path)?;
         } else {
-            self.volume
-                .claims
-                .claim_write(&self.scope, self.id, &path)?;
+            self.admit(Claims::claim_write, &path)?;
         }
         self.fire(Op::Delete, &path);
         match self.inner().remove(&path, recursive) {
@@ -1468,7 +1691,7 @@ impl Access {
     /// when the backend fails.
     pub fn exists(&self, path: &str) -> Result<bool, VfsError> {
         let path = self.gate(Op::Exists, path)?;
-        self.volume.claims.claim_read(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_read, &path)?;
         self.fire(Op::Exists, &path);
         self.inner().exists(&path)
     }
@@ -1484,10 +1707,11 @@ impl Access {
     ///
     /// # Errors
     /// Returns an error when the pattern is empty, over-long,
-    /// control-bearing, backslash-bearing, or grammar-invalid, when the
-    /// policy denies the glob, when an access unordered with this one
-    /// holds a conflicting claim (the pattern is the claim, not each
-    /// match), or when the backend fails. Each malformed
+    /// control-bearing, backslash-bearing, or grammar-invalid, when a
+    /// store view's strict path rules refuse it, when the policy denies
+    /// the glob, when an access unordered with this one holds a
+    /// conflicting claim (the pattern is the claim, not each match), or
+    /// when the backend fails. Each malformed
     /// pattern reports the rule it broke as a [`PathReason`] in the
     /// [`VfsError::InvalidPath`].
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
@@ -1520,9 +1744,7 @@ impl Access {
         // The claim key is the canonicalized pattern; the backend
         // receives it canonical too.
         let claimed = self.gate(Op::Glob, pattern)?;
-        self.volume
-            .claims
-            .claim_glob(&self.scope, self.id, &claimed)?;
+        self.admit(Claims::claim_glob, &claimed)?;
         self.fire(Op::Glob, &claimed);
         let mut matches = self.inner().glob_kind(claimed.as_str(), dirs_only)?;
         if relative {
@@ -1543,7 +1765,7 @@ impl Access {
     /// directory's children, or when the backend fails.
     pub fn list(&self, path: &str) -> Result<Vec<Entry>, VfsError> {
         let path = self.gate(Op::List, path)?;
-        self.volume.claims.claim_list(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_list, &path)?;
         self.fire(Op::List, &path);
         self.inner().list(&path)
     }
@@ -1556,7 +1778,7 @@ impl Access {
     /// when the backend fails.
     pub fn stat(&self, path: &str) -> Result<Stat, VfsError> {
         let path = self.gate(Op::Stat, path)?;
-        self.volume.claims.claim_read(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_read, &path)?;
         self.fire(Op::Stat, &path);
         self.inner().stat(&path)
     }
@@ -1569,9 +1791,7 @@ impl Access {
     /// when the backend fails.
     pub fn mkdir(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
         let path = self.gate(Op::Mkdir, path)?;
-        self.volume
-            .claims
-            .claim_write(&self.scope, self.id, &path)?;
+        self.admit(Claims::claim_write, &path)?;
         self.fire(Op::Mkdir, &path);
         self.inner().mkdir(&path, recursive)
     }
@@ -1590,10 +1810,8 @@ impl Access {
         // Both paths gated, so the operation is admitted: the source
         // subtree and the destination are claimed, then one event per
         // canonical path.
-        self.volume
-            .claims
-            .claim_subtree(&self.scope, self.id, &from)?;
-        self.volume.claims.claim_write(&self.scope, self.id, &to)?;
+        self.admit(Claims::claim_subtree, &from)?;
+        self.admit(Claims::claim_write, &to)?;
         self.fire(Op::Rename, &from);
         self.fire(Op::Rename, &to);
         self.inner().rename(&from, &to)
@@ -1609,8 +1827,8 @@ impl Access {
     pub fn copy(&self, from: &str, to: &str) -> Result<(), VfsError> {
         let from = self.gate(Op::Copy, from)?;
         let to = self.gate(Op::Copy, to)?;
-        self.volume.claims.claim_read(&self.scope, self.id, &from)?;
-        self.volume.claims.claim_write(&self.scope, self.id, &to)?;
+        self.admit(Claims::claim_read, &from)?;
+        self.admit(Claims::claim_write, &to)?;
         self.fire(Op::Copy, &from);
         self.fire(Op::Copy, &to);
         self.inner().copy(&from, &to)
@@ -1619,13 +1837,22 @@ impl Access {
     /// Searches files under the query's root.
     ///
     /// # Errors
-    /// Returns an error when the policy denies the search, when an access
+    /// Returns an error when a store view's strict path rules refuse
+    /// the root, when the policy denies the search, when an access
     /// unordered with this one holds a conflicting claim on what the
     /// search observes (the root and the filter, as a pattern), or when
     /// the backend fails.
     pub fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
+        // The store view runs the strict rules on the root before
+        // canonicalization: an absolute root is the one shape that
+        // would canonicalize namespace-absolute and carry the grep's
+        // claims outside the store mount.
+        if self.store_root.is_some() {
+            validate_store_path(query.root.as_str())?;
+        }
         let root = canonicalize(&self.root, query.root.as_str())?;
-        self.check_policy(Op::Grep, &root)?;
+        self.check_policy(Op::Grep, &root)
+            .map_err(|err| self.relativize(err))?;
         // The search observes every file its glob pattern covers: the
         // root and the filter, as the default body composes them.
         let base = match root.as_str() {
@@ -1637,13 +1864,10 @@ impl Access {
             None => format!("{base}/**/*"),
         };
         match canonicalize(&self.root, &pattern) {
-            Ok(pattern) => self
-                .volume
-                .claims
-                .claim_glob(&self.scope, self.id, &pattern)?,
+            Ok(pattern) => self.admit(Claims::claim_glob, &pattern)?,
             // A filter the canonicalizer cannot hold (a traversal, for
             // example) falls back to the root alone, conservatively.
-            Err(_) => self.volume.claims.claim_read(&self.scope, self.id, &root)?,
+            Err(_) => self.admit(Claims::claim_read, &root)?,
         }
         self.fire(Op::Grep, &root);
         self.inner().grep(query)
@@ -1652,10 +1876,21 @@ impl Access {
     /// Canonicalizes at receipt and consults the policy - in that order,
     /// so a denied operation never registers a claim and every claim key
     /// is the canonical path. A path without a leading `/` joins onto the
-    /// access's root.
+    /// access's root. The store view applies the store's strict
+    /// logical-path rules before canonicalization, and re-spells its
+    /// policy denials into the caller's logical form.
     fn gate(&self, op: Op, path: &str) -> Result<VfsPath, VfsError> {
+        // The strict rules run on every caller-supplied path, glob
+        // patterns included: a leading `/` is the one pattern shape
+        // that would canonicalize namespace-absolute and carry the
+        // claim outside the store mount. A pattern's wildcard grammar
+        // is validated separately, in `Access::glob`, before the gate.
+        if self.store_root.is_some() {
+            validate_store_path(path)?;
+        }
         let path = canonicalize(&self.root, path)?;
-        self.check_policy(op, &path)?;
+        self.check_policy(op, &path)
+            .map_err(|err| self.relativize(err))?;
         Ok(path)
     }
 
@@ -1693,6 +1928,11 @@ impl Access {
         end: Option<usize>,
         render: impl FnOnce(&[&str], usize) -> String,
     ) -> Result<String, VfsError> {
+        // The store view validates the path before the bounds, in the
+        // store contract's order.
+        if self.store_root.is_some() {
+            validate_store_path(path)?;
+        }
         if start < 1 {
             return Err(VfsError::InvalidRange {
                 path: path.to_owned(),
@@ -1848,6 +2088,114 @@ impl VfsAccess for HandleAccess {
 
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
         self.0.grep(query)
+    }
+}
+
+/// The store view's backend session: the store's own mount behind a
+/// one-mount router, whose error paths come back mount-relative and
+/// are re-spelled into the caller's logical form.
+struct StoreScoped {
+    /// The declared store root, for re-spelling error paths.
+    root: String,
+    inner: Box<dyn VfsAccess>,
+}
+
+impl StoreScoped {
+    /// Re-spells one error into the caller's logical form.
+    fn logical(&self, err: VfsError) -> VfsError {
+        relativize_error(err, &self.root)
+    }
+}
+
+impl VfsAccess for StoreScoped {
+    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
+        self.inner.read(path).map_err(|err| self.logical(err))
+    }
+
+    fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
+        self.inner
+            .read_range(path, offset, len)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.inner
+            .write(path, contents)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.inner
+            .append(path, contents)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner
+            .remove(path, recursive)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
+        self.inner.exists(path).map_err(|err| self.logical(err))
+    }
+
+    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        self.inner.glob(pattern).map_err(|err| self.logical(err))
+    }
+
+    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        self.inner
+            .glob_kind(pattern, dirs_only)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
+        self.inner.list(path).map_err(|err| self.logical(err))
+    }
+
+    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
+        self.inner.stat(path).map_err(|err| self.logical(err))
+    }
+
+    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner
+            .mkdir(path, recursive)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.rename(from, to).map_err(|err| self.logical(err))
+    }
+
+    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.copy(from, to).map_err(|err| self.logical(err))
+    }
+
+    fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
+        self.inner
+            .str_replace(path, old, new)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
+        self.inner.grep(query).map_err(|err| self.logical(err))
+    }
+
+    fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
+        self.inner
+            .symlink(target, link)
+            .map_err(|err| self.logical(err))
+    }
+
+    fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
+        self.inner.read_link(path).map_err(|err| self.logical(err))
+    }
+
+    fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
+        self.inner
+            .chmod(path, mode)
+            .map_err(|err| self.logical(err))
     }
 }
 

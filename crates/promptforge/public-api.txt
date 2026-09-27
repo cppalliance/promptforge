@@ -339,7 +339,7 @@ derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsError: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::VfsPathBuf: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
-derives promptforge::vfs::VfsRef: Clone, Debug
+derives promptforge::vfs::VfsRef: Clone, Debug, Default
 derives promptforge::vfs::VfsRefBuilder: Debug
 impl core::convert::From<&promptforge::model::Completion> for promptforge::effect::ChatAnswerRecord
 impl core::convert::From<promptforge::ids::ChainId> for promptforge::ids::TaskId
@@ -724,6 +724,7 @@ pub fn promptforge::vfs::VfsRefBuilder::build(self) -> promptforge::vfs::VfsRef
 pub fn promptforge::vfs::VfsRefBuilder::mount(self, prefix: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::on_op(self, sink: impl core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::policy(self, policy: impl promptforge::vfs::Policy + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
+pub fn promptforge::vfs::VfsRefBuilder::store(self, root: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::perform_store_op(access: &promptforge::vfs::Access, op: promptforge::vfs::StoreOp) -> core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::StoreError>
 pub mod promptforge::cancel
 pub mod promptforge::capabilities

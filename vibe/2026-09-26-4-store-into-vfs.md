@@ -841,7 +841,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-7>
 
-### Step 7: Declare the store on VfsRef
+### Step 7: Declare the store on VfsRef [completed]
 
 - Component: Declared store
 - Placement: fourth of five components. The store view needs Step 2's roots and Step 5's scopes, and the docs component describes this component's final behavior.

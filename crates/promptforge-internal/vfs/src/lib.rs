@@ -6,7 +6,10 @@
 //! The crate root holds promptforge policy: the `/_promptforge` mount
 //! layout, the [`empty`] stock handle, and [`ModePolicy`], the editor mode
 //! gate. The machinery modules hold no promptforge policy (no
-//! `/_promptforge` paths, no Store, no run concepts).
+//! `/_promptforge` paths, no run concepts). The declared store is generic
+//! machinery: [`VfsRefBuilder::store`] names any mount as the store, and
+//! the store view's strict logical-path rules are the store's caller
+//! contract, not promptforge policy.
 //!
 //! This crate is the permanent bottom of the dependency stack: std only,
 //! no workspace or external crates.
@@ -50,6 +53,17 @@ pub fn empty() -> VfsRef {
     VfsRef::builder()
         .mount(STORE_MOUNT, MemoryBackend::new())
         .build()
+}
+
+/// The default handle: a memory store at `/` and nothing else.
+///
+/// [`VfsRefBuilder::store`] mounts the backend at the root and
+/// declares it the store, so relative paths address the store
+/// directly.
+impl Default for VfsRef {
+    fn default() -> VfsRef {
+        VfsRef::builder().store("/", MemoryBackend::new()).build()
+    }
 }
 
 /// The editor mode: what the model may mutate right now.

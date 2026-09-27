@@ -370,6 +370,20 @@ pub struct VfsRefBuilder {
     mounts: Mounts,
     policy: Option<Arc<dyn Policy + Sync>>,
     sink: Option<OpSink>,
+    store: Option<StoreDecl>,
+}
+
+/// The handle's declared store: the mount serving the run's store,
+/// when the builder declared one. `root` is the canonical store root
+/// the store view joins logical paths onto; `mount` is the store's
+/// backend, shared with the mount table. Only the declaration of the
+/// handle a builder builds counts: an overlay inherits its base's,
+/// while a handle mounted as a backend keeps its declaration to
+/// itself.
+#[derive(Clone)]
+pub(crate) struct StoreDecl {
+    pub(crate) root: VfsPath,
+    pub(crate) mount: Mounted,
 }
 
 impl fmt::Debug for VfsRefBuilder {
@@ -384,6 +398,7 @@ impl VfsRefBuilder {
             mounts: BTreeMap::new(),
             policy: None,
             sink: None,
+            store: None,
         }
     }
     /// Mounts `backend` at `prefix`, consuming and returning the
@@ -404,6 +419,34 @@ impl VfsRefBuilder {
         );
         self.mounts
             .insert(key, Arc::new(Mutex::new(Box::new(backend))));
+        self
+    }
+
+    /// Mounts `backend` at `root` and declares that mount the handle's
+    /// store, consuming and returning the builder. The store is the
+    /// mount every store call is scoped to. Only the outermost built
+    /// handle's declaration counts: an overlay inherits its base's,
+    /// and a handle mounted as a backend keeps its declaration to
+    /// itself.
+    ///
+    /// # Panics
+    /// Panics when `root` is not an absolute virtual path or a mount
+    /// already sits at `root`: both are construction-time bugs.
+    #[must_use]
+    pub fn store(mut self, root: &str, backend: impl Vfs + 'static) -> VfsRefBuilder {
+        let canonical = canonicalize_absolute(root)
+            .unwrap_or_else(|err| panic!("invalid store root {root:?}: {err}"));
+        let key = canonical.to_buf();
+        assert!(
+            !self.mounts.contains_key(&key),
+            "a mount already sits at {root:?}"
+        );
+        let mount: Mounted = Arc::new(Mutex::new(Box::new(backend)));
+        self.mounts.insert(key, Arc::clone(&mount));
+        self.store = Some(StoreDecl {
+            root: canonical,
+            mount,
+        });
         self
     }
 
@@ -437,7 +480,7 @@ impl VfsRefBuilder {
     #[must_use]
     pub fn build(self) -> VfsRef {
         let policy = self.policy.unwrap_or_else(|| Arc::new(AllowAll));
-        VfsRef::from_router(Router::new(self.mounts), policy, self.sink)
+        VfsRef::from_router(Router::new(self.mounts), policy, self.sink, self.store)
     }
 }
 
@@ -915,5 +958,19 @@ mod tests {
     #[should_panic(expected = "invalid mount prefix")]
     fn the_builder_rejects_a_relative_mount_prefix() {
         let _ = VfsRef::builder().mount("relative", StubFs::default());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid store root")]
+    fn the_builder_rejects_a_relative_store_root() {
+        let _ = VfsRef::builder().store("relative", StubFs::default());
+    }
+
+    #[test]
+    #[should_panic(expected = "a mount already sits at")]
+    fn the_builder_rejects_a_store_root_that_already_has_a_mount() {
+        let _ = VfsRef::builder()
+            .mount("/s", StubFs::default())
+            .store("/s", StubFs::default());
     }
 }
