@@ -40,7 +40,7 @@ impl Scheduler {
             self.ctx.prompt().title(),
             promptforge_parser::detail::h1_blocks(self.ctx.prompt()),
         );
-        let access = self.ctx.vfs().acquire(origin).map_err(Error::Store)?;
+        let access = self.ctx.vfs().acquire(origin).map_err(Error::store)?;
         // The pass is the root chain: its one frame takes entry 0, and the
         // walk that follows continues its counters as the same chain. Its
         // admission limit is the run's ceiling.

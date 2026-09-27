@@ -3,7 +3,7 @@
 //! [`Error`] is a `pub(crate)` internal error type, never part of the public API.
 //! Every public boundary returns its own typed error ([`crate::RunError`],
 //! [`crate::ParseError`], [`crate::CompletionError`],
-//! [`promptforge_types::tools::ToolError`], [`promptforge_store::StoreError`]); those wrappers
+//! [`promptforge_types::tools::ToolError`]); those wrappers
 //! classify this internal type and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the error type.
 
@@ -446,12 +446,21 @@ pub(crate) enum Error {
     /// A run-scoped store operation failed at the virtual filesystem layer,
     /// retaining the concrete [`promptforge_vfs::VfsError`] as the `#[source]`
     /// cause so a backend failure survives the public wrappers instead of
-    /// being flattened to a string. The message names only the operation;
-    /// a renderer that wants the backend's diagnosis walks `source()`.
-    #[error("store operation failed")]
-    Store(#[source] promptforge_vfs::VfsError),
+    /// being flattened to a string. The message is the model-facing
+    /// rendering for the operation (or the fixed probe text for a run
+    /// whose handle declares no store), kept beside the error because the
+    /// error alone does not name the operation.
+    #[error("{message}")]
+    Store {
+        /// The rendered store failure message, from the Lua crate's
+        /// `store_error_message` or the fixed probe text.
+        message: String,
+        /// The structured failure the message renders.
+        #[source]
+        source: promptforge_vfs::VfsError,
+    },
 
-    /// Two live execution identities claimed one store path: the claims
+    /// Two execution identities claimed one store path: the claims
     /// model's conflict, mapped from the store's write-race vocabulary at
     /// the yield-answer boundary. Fatal to the run on the spot and never
     /// resumed into Lua, so no author `pcall` can catch it; the message is
@@ -495,6 +504,28 @@ impl Error {
             message,
             file: location.file(),
             line: location.line(),
+        }
+    }
+
+    /// Wraps a store failure that has no operation to render - a handle
+    /// acquisition, the declared-store probe - as [`Error::Store`] with
+    /// the fixed probe message.
+    pub(crate) fn store(source: promptforge_vfs::VfsError) -> Error {
+        Error::Store {
+            message: "store operation failed".to_owned(),
+            source,
+        }
+    }
+
+    /// Wraps one store operation's failure as [`Error::Store`], rendering
+    /// the model-facing message with the operation for its wording.
+    pub(crate) fn store_op(
+        op: &promptforge_lua::StoreOp,
+        source: promptforge_vfs::VfsError,
+    ) -> Error {
+        Error::Store {
+            message: crate::lua::store_error_message(op, &source),
+            source,
         }
     }
 
@@ -629,6 +660,7 @@ impl From<LuaError> for Error {
             LuaError::ContextExhausted { reason } => Error::ContextExhausted { reason },
             LuaError::Interrupted => Error::Interrupted,
             LuaError::Tool { message, source } => Error::Tool { message, source },
+            LuaError::Store { message, source } => Error::Store { message, source },
             LuaError::Internal(message) => Error::internal(message),
             LuaError::Raised(raised) => Error::from_raised(raised),
         }
@@ -637,7 +669,77 @@ impl From<LuaError> for Error {
 
 /// The `task` field of a raised task-error table, when it parses.
 fn raised_task(raised: &promptforge_lua::Raised) -> Option<TaskId> {
-    raised.fields.get("task").and_then(|task| task.parse().ok())
+    raised
+        .fields
+        .get("task")
+        .and_then(promptforge_lua::ErrorField::as_str)
+        .and_then(|task| task.parse().ok())
+}
+
+/// The `path` field of a raised error table, when it is a string.
+fn raised_field<'a>(raised: &'a promptforge_lua::Raised, name: &str) -> Option<&'a str> {
+    raised
+        .fields
+        .get(name)
+        .and_then(promptforge_lua::ErrorField::as_str)
+}
+
+/// Rebuilds the structured [`promptforge_vfs::VfsError`] a raised store
+/// error table stands in for, from its `reason`, its fields, and its
+/// message. The table was built from the same variant by this crate's own
+/// [`ErrorValue`] rendering, so the reconstruction is exact where the
+/// fields round-trip; a malformed table degrades to the closest variant
+/// rather than panicking.
+fn raised_store_error(raised: &promptforge_lua::Raised) -> promptforge_vfs::VfsError {
+    use promptforge_vfs::{PathReason, VfsError};
+    let path = raised_field(raised, "path").unwrap_or_default().to_owned();
+    match raised_field(raised, "reason") {
+        Some("not_found") => VfsError::NotFound { path },
+        Some("anchor") => VfsError::Anchor {
+            path,
+            anchor: raised_field(raised, "anchor")
+                .unwrap_or_default()
+                .to_owned(),
+            count: raised
+                .fields
+                .get("count")
+                .and_then(promptforge_lua::ErrorField::as_integer)
+                .and_then(|count| usize::try_from(count).ok())
+                .unwrap_or(0),
+        },
+        Some("invalid_path") => VfsError::InvalidPath {
+            path,
+            reason: raised_field(raised, "rule")
+                .and_then(PathReason::from_tag)
+                .unwrap_or(PathReason::Empty),
+        },
+        Some("invalid_range") => VfsError::InvalidRange {
+            path,
+            reason: "the bounds are invalid",
+        },
+        Some("not_utf8") => VfsError::NotUtf8 { path },
+        Some("is_a_directory") => VfsError::IsADirectory { path },
+        Some("not_a_directory") => VfsError::NotADirectory { path },
+        Some("directory_not_empty") => VfsError::DirectoryNotEmpty { path },
+        Some("already_exists") => VfsError::AlreadyExists { path },
+        // `permission_denied` and `unsupported` carry only `path` beside
+        // the message, so their text fields degrade to empty here.
+        Some("permission_denied") => VfsError::PermissionDenied {
+            path,
+            reason: String::new(),
+        },
+        Some("unsupported") => VfsError::Unsupported {
+            path,
+            detail: String::new(),
+        },
+        Some("conflict") => VfsError::Conflict {
+            path,
+            detail: raised.message.clone(),
+        },
+        _ => VfsError::Backend {
+            message: raised.message.clone(),
+        },
+    }
 }
 
 impl Error {
@@ -655,7 +757,11 @@ impl Error {
                 None => Error::Lua(raised.message),
             },
             promptforge_lua::ErrorKind::EmptyModelReply => Error::EmptyModelReply {
-                finish_reason: raised.fields.get("finish_reason").cloned(),
+                finish_reason: raised
+                    .fields
+                    .get("finish_reason")
+                    .and_then(promptforge_lua::ErrorField::as_str)
+                    .map(str::to_owned),
                 detail: Cow::Owned(raised.message),
             },
             promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
@@ -671,6 +777,10 @@ impl Error {
                 Some(task) => Error::TaskConsumed { task },
                 None => Error::Lua(raised.message),
             },
+            promptforge_lua::ErrorKind::Store => Error::Store {
+                message: raised.message.clone(),
+                source: raised_store_error(&raised),
+            },
             promptforge_lua::ErrorKind::OutOfScopeTool
             | promptforge_lua::ErrorKind::UnboundTool
             | promptforge_lua::ErrorKind::TasksLive
@@ -682,8 +792,10 @@ impl Error {
 
 /// The internal type's rendering into the Lua error table: the kind an author
 /// branches on and the kind's fields. Host-side failures the author cannot
-/// act on (transport, backend, configuration, store, input) render as
-/// `internal`; every Lua-phase failure renders as `lua`.
+/// act on (transport, backend, configuration, input) render as
+/// `internal`; every Lua-phase failure renders as `lua`; a store
+/// operation's own failure renders as `store` with its `reason` and the
+/// structured variant's fields.
 impl promptforge_lua::ErrorValue for Error {
     fn kind(&self) -> promptforge_lua::ErrorKind {
         use promptforge_lua::ErrorKind;
@@ -703,6 +815,7 @@ impl promptforge_lua::ErrorValue for Error {
             Error::OutOfScopeToolCall { .. } => ErrorKind::OutOfScopeTool,
             Error::UnboundToolCall { .. } => ErrorKind::UnboundTool,
             Error::Tool { .. } => ErrorKind::Tool,
+            Error::Store { .. } => ErrorKind::Store,
             Error::ParseFrontmatter { .. }
             | Error::ParseStructured { .. }
             | Error::MissingEnv(_)
@@ -721,29 +834,38 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::RequirementsUnmet { .. }
             | Error::Internal { .. }
             | Error::Input { .. }
-            | Error::Store(_)
             | Error::Determinism(_) => ErrorKind::Internal,
         }
     }
 
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, promptforge_lua::ErrorField)> {
+        use promptforge_lua::ErrorField;
         match self {
             Error::ContextExhausted { reason } => {
-                vec![("reason".to_owned(), reason.tag().to_owned())]
+                vec![(
+                    "reason".to_owned(),
+                    ErrorField::String(reason.tag().to_owned()),
+                )]
             }
             Error::EmptyModelReply {
                 finish_reason: Some(finish_reason),
                 ..
-            } => vec![("finish_reason".to_owned(), finish_reason.clone())],
+            } => vec![(
+                "finish_reason".to_owned(),
+                ErrorField::String(finish_reason.clone()),
+            )],
             Error::OutOfScopeToolCall { name, .. } | Error::UnboundToolCall { name, .. } => {
-                vec![("name".to_owned(), name.clone())]
+                vec![("name".to_owned(), ErrorField::String(name.clone()))]
             }
-            Error::TasksLive { tasks } => vec![("tasks".to_owned(), join_task_ids(tasks))],
+            Error::TasksLive { tasks } => {
+                vec![("tasks".to_owned(), ErrorField::String(join_task_ids(tasks)))]
+            }
             Error::TaskNotOwned { task }
             | Error::TaskConsumed { task }
             | Error::TaskCancelled { task } => {
-                vec![("task".to_owned(), task.to_string())]
+                vec![("task".to_owned(), ErrorField::String(task.to_string()))]
             }
+            Error::Store { source, .. } => promptforge_lua::store_error_value_fields(source),
             _ => Vec::new(),
         }
     }

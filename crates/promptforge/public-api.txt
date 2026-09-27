@@ -24,23 +24,12 @@
 #[non_exhaustive] pub enum promptforge::tools::ToolIdErrorKind
 #[non_exhaustive] pub enum promptforge::vfs::FileType
 #[non_exhaustive] pub enum promptforge::vfs::PathReason
-#[non_exhaustive] pub enum promptforge::vfs::StoreError
-#[non_exhaustive] pub enum promptforge::vfs::StoreErrorKind
 #[non_exhaustive] pub enum promptforge::vfs::StoreOp
 #[non_exhaustive] pub enum promptforge::vfs::VfsError
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::InvalidWireName { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::AnchorAmbiguous { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::AnchorNotFound { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::Backend { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::InvalidAnchor { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::InvalidPath { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::InvalidPattern { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::InvalidRange { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::NotFound { .. }
-#[non_exhaustive] pub promptforge::vfs::StoreError::WriteRace { .. }
 #[non_exhaustive] pub struct promptforge::CapabilityConflict { .. }
 #[non_exhaustive] pub struct promptforge::Environment { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::ParseError { /* private fields */ }
@@ -90,7 +79,7 @@
 #[non_exhaustive] pub struct promptforge::vfs::Origin { .. }
 #[non_exhaustive] pub struct promptforge::vfs::Stat { .. }
 auto promptforge::CapabilityConflict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::Environment: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::Environment: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Prompt: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -205,8 +194,6 @@ auto promptforge::vfs::OpEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwind
 auto promptforge::vfs::Origin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::PathReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Stat: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::StoreError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
-auto promptforge::vfs::StoreErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::StoreOp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::StoreOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Verdict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -331,8 +318,6 @@ derives promptforge::vfs::OpEvent: Debug
 derives promptforge::vfs::Origin: Clone, Debug
 derives promptforge::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::Stat: Clone, Debug
-derives promptforge::vfs::StoreError: Debug
-derives promptforge::vfs::StoreErrorKind: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::StoreOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::vfs::StoreOutcome: Debug
 derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
@@ -363,7 +348,6 @@ impl core::error::Error for promptforge::tools::ToolError
 impl core::error::Error for promptforge::tools::ToolIdError
 impl core::error::Error for promptforge::transport::ClientError
 impl core::error::Error for promptforge::transport::ClientTimeout
-impl core::error::Error for promptforge::vfs::StoreError
 impl core::error::Error for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::ParseError
 impl core::fmt::Display for promptforge::RunError
@@ -389,7 +373,6 @@ impl core::fmt::Display for promptforge::tools::ToolIdError
 impl core::fmt::Display for promptforge::transport::ClientError
 impl core::fmt::Display for promptforge::transport::ClientTimeout
 impl core::fmt::Display for promptforge::vfs::PathReason
-impl core::fmt::Display for promptforge::vfs::StoreError
 impl core::fmt::Display for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::vfs::VfsPath
 impl core::fmt::Display for promptforge::vfs::VfsPathBuf
@@ -436,11 +419,9 @@ pub enum promptforge::vfs::Op
 pub enum promptforge::vfs::StoreOutcome
 pub enum promptforge::vfs::Verdict
 pub fn promptforge::CapabilityConflict::new(first: promptforge::capabilities::CapabilityId, second: promptforge::capabilities::CapabilityId) -> promptforge::CapabilityConflict
-pub fn promptforge::Environment::base_vfs(self, vfs: promptforge::vfs::VfsRef) -> promptforge::Environment
 pub fn promptforge::Environment::max_depth(self, max_depth: u32) -> promptforge::Environment
 pub fn promptforge::Environment::new() -> promptforge::Environment
 pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
-pub fn promptforge::Environment::run_vfs(&self) -> promptforge::vfs::VfsRef
 pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment
 pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
 pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
@@ -685,12 +666,9 @@ pub fn promptforge::vfs::OpEvent::origin(&self) -> &'a promptforge::vfs::Origin
 pub fn promptforge::vfs::OpEvent::path(&self) -> &'a promptforge::vfs::VfsPath
 pub fn promptforge::vfs::Origin::at(label: impl core::convert::Into<alloc::string::String>, file: impl core::convert::Into<alloc::string::String>, line: u32) -> promptforge::vfs::Origin
 pub fn promptforge::vfs::Origin::new(label: impl core::convert::Into<alloc::string::String>) -> promptforge::vfs::Origin
+pub fn promptforge::vfs::PathReason::from_tag(tag: &str) -> core::option::Option<promptforge::vfs::PathReason>
+pub fn promptforge::vfs::PathReason::tag(self) -> &'static str
 pub fn promptforge::vfs::Policy::check(&self, op: promptforge::vfs::Op, path: &promptforge::vfs::VfsPath) -> promptforge::vfs::Verdict
-pub fn promptforge::vfs::StoreError::backend(source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::StoreError
-pub fn promptforge::vfs::StoreError::conflict_detail(&self) -> core::option::Option<&str>
-pub fn promptforge::vfs::StoreError::is_not_found(&self) -> bool
-pub fn promptforge::vfs::StoreError::kind(&self) -> promptforge::vfs::StoreErrorKind
-pub fn promptforge::vfs::StoreError::path(&self) -> core::option::Option<&str>
 pub fn promptforge::vfs::Vfs::acquire(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<alloc::boxed::Box<dyn promptforge::vfs::VfsAccess>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Vfs::read_only(&self) -> bool { .. }
 pub fn promptforge::vfs::Vfs::release(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<(), promptforge::vfs::VfsError>
@@ -725,7 +703,7 @@ pub fn promptforge::vfs::VfsRefBuilder::mount(self, prefix: &str, backend: impl 
 pub fn promptforge::vfs::VfsRefBuilder::on_op(self, sink: impl core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::policy(self, policy: impl promptforge::vfs::Policy + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::store(self, root: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRefBuilder
-pub fn promptforge::vfs::perform_store_op(access: &promptforge::vfs::Access, op: promptforge::vfs::StoreOp) -> core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::StoreError>
+pub fn promptforge::vfs::perform_store_op(access: &promptforge::vfs::Access, op: promptforge::vfs::StoreOp) -> core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::VfsError>
 pub mod promptforge::cancel
 pub mod promptforge::capabilities
 pub mod promptforge::effect
@@ -833,7 +811,7 @@ pub promptforge::effect::EffectAnswer::Chat(..)
 pub promptforge::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxed::Box<promptforge::model::Completion>, promptforge::model::CompletionError>
 pub promptforge::effect::EffectAnswer::Dropped
 pub promptforge::effect::EffectAnswer::Store(..)
-pub promptforge::effect::EffectAnswer::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::StoreError>
+pub promptforge::effect::EffectAnswer::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::VfsError>
 pub promptforge::effect::EffectAnswer::TaskEvents(..)
 pub promptforge::effect::EffectAnswer::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
 pub promptforge::effect::EffectAnswer::Timer
@@ -1370,31 +1348,6 @@ pub promptforge::vfs::Stat::file_type: promptforge::vfs::FileType
 pub promptforge::vfs::Stat::mode: core::option::Option<u32>
 pub promptforge::vfs::Stat::modified: core::option::Option<std::time::SystemTime>
 pub promptforge::vfs::Stat::size: u64
-pub promptforge::vfs::StoreError::AnchorAmbiguous::anchor: alloc::string::String
-pub promptforge::vfs::StoreError::AnchorAmbiguous::count: usize
-pub promptforge::vfs::StoreError::AnchorAmbiguous::path: alloc::string::String
-pub promptforge::vfs::StoreError::AnchorNotFound::anchor: alloc::string::String
-pub promptforge::vfs::StoreError::AnchorNotFound::path: alloc::string::String
-pub promptforge::vfs::StoreError::Backend::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
-pub promptforge::vfs::StoreError::InvalidAnchor::path: alloc::string::String
-pub promptforge::vfs::StoreError::InvalidAnchor::reason: &'static str
-pub promptforge::vfs::StoreError::InvalidPath::path: alloc::string::String
-pub promptforge::vfs::StoreError::InvalidPath::reason: promptforge::vfs::PathReason
-pub promptforge::vfs::StoreError::InvalidPattern::pattern: alloc::string::String
-pub promptforge::vfs::StoreError::InvalidPattern::reason: alloc::string::String
-pub promptforge::vfs::StoreError::InvalidRange::path: alloc::string::String
-pub promptforge::vfs::StoreError::InvalidRange::reason: &'static str
-pub promptforge::vfs::StoreError::NotFound::path: alloc::string::String
-pub promptforge::vfs::StoreError::WriteRace::detail: alloc::string::String
-pub promptforge::vfs::StoreError::WriteRace::path: alloc::string::String
-pub promptforge::vfs::StoreErrorKind::Anchor
-pub promptforge::vfs::StoreErrorKind::Backend
-pub promptforge::vfs::StoreErrorKind::InvalidAnchor
-pub promptforge::vfs::StoreErrorKind::InvalidPath
-pub promptforge::vfs::StoreErrorKind::InvalidPattern
-pub promptforge::vfs::StoreErrorKind::InvalidRange
-pub promptforge::vfs::StoreErrorKind::NotFound
-pub promptforge::vfs::StoreErrorKind::WriteRace
 pub promptforge::vfs::StoreOp::Append { .. }
 pub promptforge::vfs::StoreOp::Append::contents: alloc::string::String
 pub promptforge::vfs::StoreOp::Append::path: alloc::string::String

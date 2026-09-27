@@ -98,7 +98,7 @@ fn scheduler_vm_with_tools(
     let shared = LuaProgram::empty().expect("the empty shared program compiles");
     let sys = json!({});
     let access = Arc::new(
-        promptforge_vfs::empty()
+        promptforge_vfs::VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("coroutine test fixture"))
             .expect("the stock backend acquires"),
     );

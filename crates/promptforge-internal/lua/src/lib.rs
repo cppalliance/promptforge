@@ -17,11 +17,12 @@
 //!
 //! The `store` table is a deterministic host capability (like `var`), always
 //! present and independent of tool scoping. Its methods are backed by the
-//! [`Store`] facade over the run's VFS access capability, threaded in from
-//! the executor, so every section
+//! store view derived from the run's VFS access capability, threaded in
+//! from the executor, so every section
 //! in a run shares one set of virtual files even though contexts clear on each
-//! transition. A failed store op raises a Lua error, which surfaces from
-//! `SectionVm::run_chunk` as [`Error::Lua`].
+//! transition. A failed store op raises a structured error value of kind
+//! `store` carrying its `reason` and fields, which surfaces from
+//! `SectionVm::run_chunk` as a Lua-category error.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
@@ -43,11 +44,11 @@ pub(crate) use mlua::{
 pub(crate) use serde_json::Value as Json;
 
 pub(crate) use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
-pub(crate) use promptforge_store::{Access, Store};
 pub(crate) use promptforge_types::emitter::Emitter;
 pub(crate) use promptforge_types::event::lifecycle;
 pub(crate) use promptforge_types::tools::ToolId;
 pub(crate) use promptforge_types::untrusted::GuardNonce;
+pub(crate) use promptforge_vfs::Access;
 
 pub(crate) use crate::compactors::install_compactors;
 pub(crate) use crate::error::Result;
@@ -90,7 +91,10 @@ pub mod detail;
 mod error;
 #[path = "error-value.rs"]
 mod error_value;
-pub use error_value::{ErrorKind, ErrorValue, Raised, error_table};
+pub use error_value::{
+    ErrorField, ErrorKind, ErrorValue, Raised, error_table, store_error_fields, store_error_reason,
+    store_error_value_fields,
+};
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
@@ -128,7 +132,7 @@ pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
-pub use host::run_store_op;
+pub use host::{run_store_op, store_error_message};
 pub use models::ModelRuntime;
 pub use projection::project_messages;
 pub use prose::ProseState;

@@ -122,7 +122,7 @@ impl RunError {
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal { .. } => RunErrorKind::Internal,
-            Error::Store(_) => RunErrorKind::Store,
+            Error::Store { .. } => RunErrorKind::Store,
             Error::Determinism(_) => RunErrorKind::Determinism,
             Error::BindSchema { .. } | Error::ModelRequired { .. } => RunErrorKind::Binding,
         }

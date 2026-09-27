@@ -5,19 +5,19 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::lua::{SectionVm, ToolSet, resolve_model_binding};
-use crate::store::Access;
 use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use promptforge_model_client::model::{CompletionOptions, ModelInvocation};
 use promptforge_types::emitter::Emitter;
+use promptforge_vfs::Access;
 use serde_json::json;
 
-/// A fresh stock handle's access capability, for tests that inject host
+/// A fresh default handle's access capability, for tests that inject host
 /// values into a standalone VM.
 fn fresh_access() -> Arc<Access> {
     Arc::new(
-        promptforge_vfs::empty()
+        promptforge_vfs::VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("model test fixture"))
             .expect("the stock backend acquires"),
     )

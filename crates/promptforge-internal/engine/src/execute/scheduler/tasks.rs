@@ -239,7 +239,7 @@ impl Scheduler {
             &spawner_access,
             prompt_origin(&prompt, worker.name(), worker.blocks()),
         )
-        .map_err(Error::Store)?;
+        .map_err(Error::store)?;
         // The task's happens-before identity, recorded before the access
         // moves into the chain: every delivery joins it, and the chain
         // end joins it last.

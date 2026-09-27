@@ -20,7 +20,7 @@ use crate::parser::Block;
 use crate::{Error, Result};
 
 use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
-use crate::store::Access;
+use promptforge_vfs::Access;
 
 /// A heading resolved against a chain's visible set: the slice the walk or
 /// a contained chain continues on, the target's index in it, and whether
@@ -93,7 +93,7 @@ impl Scheduler {
             let blocks: &[Block] =
                 promptforge_parser::detail::entry(prompt).map_or(&[], |section| section.blocks());
             let origin = prompt_origin(prompt, prompt.title(), blocks);
-            Arc::new(self.ctx.vfs().acquire(origin).map_err(Error::Store)?)
+            Arc::new(self.ctx.vfs().acquire(origin).map_err(Error::store)?)
         };
         self.chains[root.index()].access = Some(access);
         Ok(())

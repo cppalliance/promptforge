@@ -50,7 +50,7 @@ fn builder_vm() -> SectionVm {
         "",
         &json!({}),
         &std::sync::Arc::new(
-            promptforge_vfs::empty()
+            promptforge_vfs::VfsRef::default()
                 .acquire(promptforge_vfs::Origin::new("surface bench"))
                 .expect("the stock backend acquires"),
         ),

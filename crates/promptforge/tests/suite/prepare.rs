@@ -68,16 +68,19 @@ impl Drop for TempDir {
 #[test]
 fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
     let temp = TempDir::new("shared-base");
-    let base = VfsRef::builder()
+    // The host's handle: its base at `/` beside a declared store at
+    // `/my/store` - the plan's host shape - shared by every run.
+    let vfs = VfsRef::builder()
         .mount(
             "/",
             HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
         )
+        .store("/my/store", promptforge::vfs::MemoryBackend::new())
         .build();
-    let env = Environment::new().base_vfs(base);
+    let env = Environment::new();
     let prompt = parse(DECLARES_NOTHING, "declares-nothing");
-    let (ctx_a, _) = env.prepare(&prompt, context("run-a"));
-    let (ctx_b, _) = env.prepare(&prompt, context("run-b"));
+    let (ctx_a, _) = env.prepare(&prompt, context("run-a").vfs(vfs.clone()));
+    let (ctx_b, _) = env.prepare(&prompt, context("run-b").vfs(vfs));
     let access_a = ctx_a
         .vfs_handle()
         .acquire(Origin::new("run-a"))

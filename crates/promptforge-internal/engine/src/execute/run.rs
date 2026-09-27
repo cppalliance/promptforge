@@ -21,7 +21,6 @@ pub use effect::{
 
 use crate::cancel::CancelHandle;
 use crate::parser::{ParseErrorKind, Prompt};
-use crate::store::VfsRef;
 use crate::{Error, Result};
 
 use super::RunResult;
@@ -106,15 +105,19 @@ impl Run {
     /// never passed through
     /// [`Environment::prepare`](super::Environment::prepare) runs
     /// capability-free (empty tool and model sets). A prompt without a
-    /// supported `promptforge:` version, or a store handle whose mounted
-    /// backend fails, yields a run whose first `step` is `Done` with the
-    /// failure.
+    /// supported `promptforge:` version, or a handle that declares no
+    /// store or whose store backend fails the probe, yields a run whose
+    /// first `step` is `Done` with the failure.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the host API takes the context by value: Run::new owns the run's inputs"
+    )]
     #[must_use]
     pub fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
         // The context's one flag, held here so a stillborn run still has
         // the handle `cancel` and `cancel_handle` name.
         let cancel = ctx.cancel.clone();
-        match prepare_state(prompt, args, ctx) {
+        match prepare_state(prompt, args, &ctx) {
             Ok(state) => Self::from_state(state),
             Err(error) => Run {
                 scheduler: None,
@@ -220,15 +223,15 @@ impl Run {
 }
 
 /// Assembles the run state from the host's context: the version gate, the
-/// shared library, and the store mount, in the order the run has always
-/// checked them.
+/// shared library, and the declared store, in the order the run has
+/// always checked them.
 ///
 /// # Errors
 /// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
 /// prompt that is not a supported promptforge prompt, the Lua error when
 /// the empty shared chunk cannot compile, or [`Error::Store`] when the
-/// mounted store backend fails the mount probe.
-fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result<RunState> {
+/// handle declares no store or the store's backend fails the probe.
+fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<RunState> {
     match prompt.frontmatter().promptforge() {
         Some(0) => {}
         Some(other) => return Err(Error::UnsupportedVersion(other)),
@@ -247,36 +250,16 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Result
         Some(program) => program.clone(),
         None => crate::lua::LuaProgram::empty()?,
     };
-    // The stock handle includes the store mount; a hand-built router lacking
-    // it gets a fresh memory store overlaid as a defensive fallback, so a
-    // run never fails for want of the mount. A mounted-but-failing backend
-    // is never shadowed by the throwaway overlay: its error fails the run.
-    if !store_mount_present(&ctx.vfs).map_err(Error::Store)? {
-        ctx.vfs = ctx.vfs.overlay(
-            promptforge_vfs::STORE_MOUNT,
-            promptforge_vfs::MemoryBackend::new(),
-        );
-    }
-    Ok(RunState::new(prompt, args, &ctx.vfs, shared, &ctx))
-}
-
-/// Whether the handle already serves the store mount. The probe stats the
-/// mount root through a throwaway capability: a mounted backend answers
-/// (the memory backend's root always exists), an unmounted path is
-/// `NotFound`. Only `NotFound` means "mount absent": any other error is the
-/// mounted backend's own failure and propagates, so a loud backend failure
-/// is never converted into the run silently reading and writing a
-/// throwaway overlay. The probe's access is a scope of its own, which
-/// ends with the access.
-fn store_mount_present(vfs: &VfsRef) -> std::result::Result<bool, promptforge_vfs::VfsError> {
-    match vfs
-        .acquire(promptforge_vfs::Origin::new("store mount probe"))?
-        .stat(promptforge_vfs::STORE_MOUNT)
-    {
-        Ok(_) => Ok(true),
-        Err(promptforge_vfs::VfsError::NotFound { .. }) => Ok(false),
-        Err(error) => Err(error),
-    }
+    // Every run and every store call needs a declared store: the probe
+    // derives the store view through a throwaway capability, so a handle
+    // with no declaration fails here rather than on the first store call,
+    // and a declared-but-failing backend's error fails the run.
+    let probe = ctx
+        .vfs
+        .acquire(promptforge_vfs::Origin::new("store mount probe"))
+        .map_err(Error::store)?;
+    let _ = promptforge_vfs::detail::store_view(&probe).map_err(Error::store)?;
+    Ok(RunState::new(prompt, args, &ctx.vfs, shared, ctx))
 }
 
 #[cfg(test)]

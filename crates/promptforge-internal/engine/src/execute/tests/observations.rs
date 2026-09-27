@@ -29,7 +29,7 @@ const STREAM_FIXTURES: [(&str, &str); 4] = [
 fn drive_serially(md: &str) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
     let env = Environment::new();
-    let ctx = test_context(EXECUTION).vfs(env.run_vfs());
+    let ctx = test_context(EXECUTION);
     let (ctx, requirements) = env.prepare(&prompt, ctx);
     assert!(
         requirements.refusal().is_none(),

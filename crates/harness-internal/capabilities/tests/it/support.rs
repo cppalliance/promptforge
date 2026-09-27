@@ -19,11 +19,6 @@ use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::{Origin, perform_store_op};
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
-/// The run's store mount inside its VFS, where `store.read('x')` resolves
-/// `x`. The engine's private `promptforge-vfs` crate names it; the harness
-/// cannot, so the suite pins the path.
-pub(super) const STORE_MOUNT: &str = "/_promptforge/store";
-
 /// A [`RunContext`] for the run `name` under fixed host inputs: no fixture
 /// here asserts on the nonce or `sys.when`.
 pub(super) fn context(name: impl Into<String>) -> RunContext {
@@ -38,23 +33,23 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
 }
 
 /// The harness's activate-then-prepare ceremony spelled out, so a test can
-/// inspect what the run path folds into one refusal: builds the run's VFS
-/// from `env`, activates the prompt's declared capabilities against
-/// `registry` with the run's own services, installs the resulting catalog,
-/// prepares the context over that VFS, and merges activation's report
-/// into prepare's. Returns the prepared context, the merged report, and
-/// the activation (for its implementation table).
+/// inspect what the run path folds into one refusal: activates the
+/// prompt's declared capabilities against `registry` with the run's own
+/// services - its filesystem handle and cancel flag - installs the
+/// resulting catalog, prepares the context over the handle it already
+/// holds, and merges activation's report into prepare's. Returns the
+/// prepared context, the merged report, and the activation (for its
+/// implementation table).
 pub(super) fn prepare_activated(
     env: Environment,
     registry: Option<&CapabilityRegistry>,
     prompt: &Prompt,
     ctx: RunContext,
 ) -> (RunContext, Requirements, Activation) {
-    let vfs = env.run_vfs();
-    let services = RunServices::new(vfs.clone(), ctx.cancel_handle());
+    let services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
     let activation = activate(registry, prompt, &services);
     let env = env.tools(activation.catalog.clone());
-    let (ctx, mut requirements) = env.prepare(prompt, ctx.vfs(vfs));
+    let (ctx, mut requirements) = env.prepare(prompt, ctx);
     requirements.merge(activation.requirements.clone());
     (ctx, requirements, activation)
 }
@@ -140,7 +135,9 @@ impl Capability for Fixture {
         if self.fail {
             return Err(CapabilityError::message("the fixture cannot activate"));
         }
-        let path = format!("{STORE_MOUNT}/activated.txt");
+        // The run's filesystem is the services VFS, with the declared
+        // store at its root: a relative path lands in the store, which is
+        // where the prompt's `store.read` sees it.
         let access = services
             .vfs
             .acquire(Origin::new("fixture activation"))
@@ -148,10 +145,10 @@ impl Capability for Fixture {
                 CapabilityError::with_source("the fixture could not acquire", error)
             })?;
         access
-            .write(&path, b"active")
+            .write("activated.txt", b"active")
             .map_err(|error| CapabilityError::with_source("the fixture could not write", error))?;
         let marker = access
-            .read(&path)
+            .read("activated.txt")
             .ok()
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         self.activations

@@ -115,7 +115,8 @@ pub trait Capability: Send + Sync {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct RunServices {
-    /// The run's filesystem.
+    /// The run's whole filesystem: the host roots and the declared store,
+    /// built by the host before activation.
     pub vfs: VfsRef,
     /// The run's cancellation flag: the same synchronous handle the engine
     /// polls, so a capability observes the host's cancel by polling too.
@@ -131,7 +132,7 @@ impl RunServices {
     /// use harness_capabilities::RunServices;
     /// use promptforge::cancel::CancelHandle;
     ///
-    /// let services = RunServices::new(promptforge::vfs::VfsRef::builder().build(), CancelHandle::new());
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     /// assert!(!services.cancel.is_cancelled());
     /// ```
     #[must_use]

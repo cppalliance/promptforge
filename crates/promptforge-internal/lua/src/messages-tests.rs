@@ -8,10 +8,10 @@ use super::install_messages;
 use crate::protocol::{Answer, MessageRecord, Request, ToolCallRecord, YieldParse};
 use crate::{Error, SectionVm};
 
-/// A fresh stock handle's access capability for a test VM.
-fn fresh_access() -> std::sync::Arc<promptforge_store::Access> {
+/// A fresh default handle's access capability for a test VM.
+fn fresh_access() -> std::sync::Arc<crate::Access> {
     std::sync::Arc::new(
-        promptforge_vfs::empty()
+        promptforge_vfs::VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("messages test fixture"))
             .expect("the stock backend acquires"),
     )

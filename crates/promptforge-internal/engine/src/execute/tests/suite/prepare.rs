@@ -48,13 +48,16 @@ fn two_runs_writing_the_same_store_path_do_not_conflict() {
         .vfs_handle()
         .acquire(Origin::new("run-b"))
         .expect("run b acquires");
-    let path = format!("{}/paper.md", promptforge_vfs::STORE_MOUNT);
+    let store_a =
+        promptforge_vfs::detail::store_view(&access_a).expect("run a's handle declares a store");
+    let store_b =
+        promptforge_vfs::detail::store_view(&access_b).expect("run b's handle declares a store");
     // Both writes proceed while both accesses are live: each run's store
     // is its own storage under its own claims table.
-    access_a.write(&path, b"from a").expect("run a writes");
-    access_b.write(&path, b"from b").expect("run b writes");
-    assert_eq!(access_a.read(&path).expect("run a reads"), b"from a");
-    assert_eq!(access_b.read(&path).expect("run b reads"), b"from b");
+    store_a.write("paper.md", b"from a").expect("run a writes");
+    store_b.write("paper.md", b"from b").expect("run b writes");
+    assert_eq!(store_a.read("paper.md").expect("run a reads"), b"from a");
+    assert_eq!(store_b.read("paper.md").expect("run b reads"), b"from b");
 }
 
 /// A prompt declaring one model role with a hard keyword and a context

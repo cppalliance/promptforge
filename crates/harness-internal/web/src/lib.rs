@@ -140,12 +140,9 @@ mod tests {
 
     use crate::Web;
 
-    /// Fresh run services over an empty VFS and a live cancel handle.
+    /// Fresh run services over the default VFS and a live cancel handle.
     fn services() -> RunServices {
-        RunServices::new(
-            promptforge::vfs::VfsRef::builder().build(),
-            CancelHandle::new(),
-        )
+        RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
     }
 
     #[test]
@@ -196,7 +193,7 @@ mod tests {
         let capability = Web::new("http://localhost", "tok").expect("valid configuration");
         let cancel = CancelHandle::new();
         cancel.cancel();
-        let services = RunServices::new(promptforge::vfs::VfsRef::builder().build(), cancel);
+        let services = RunServices::new(promptforge::vfs::VfsRef::default(), cancel);
 
         let err = capability
             .create(&services)

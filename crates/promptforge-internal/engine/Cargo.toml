@@ -16,7 +16,6 @@ documentation = "https://cppalliance.github.io/promptforge/"
 promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
-promptforge-store.workspace = true
 promptforge-types.workspace = true
 promptforge-vfs.workspace = true
 serde.workspace = true

@@ -145,9 +145,9 @@ The run counts the call when it issues the effect, before the host runs the tool
 
 A blocking host may hold the effect until the operator answers, and the rest of the run keeps moving meanwhile. The [`input`](crate::input) module page covers the outcomes.
 
-**Store.** [`Effect::Store`] is one store operation under the chain's access capability. The host sees one for every `store.*` call, whatever backend serves the store. Answer it with [`EffectAnswer::Store`], which holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`StoreError`](crate::vfs::StoreError). To produce the answer, pass a reference to the effect's [`access`](Effect#variant.Store.field.access) and its [`op`](Effect#variant.Store.field.op) to [`perform_store_op`](crate::vfs::perform_store_op). Its return value is exactly the variant's payload, so wrap it in [`EffectAnswer::Store`] as it is.
+**Store.** [`Effect::Store`] is one store operation through the chain's store view. The host sees one for every `store.*` call, whatever backend serves the store. Answer it with [`EffectAnswer::Store`], which holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError). To produce the answer, pass a reference to the effect's [`access`](Effect#variant.Store.field.access) and its [`op`](Effect#variant.Store.field.op) to [`perform_store_op`](crate::vfs::perform_store_op). Its return value is exactly the variant's payload, so wrap it in [`EffectAnswer::Store`] as it is.
 
-Use the access capability exactly as given. Never derive, widen, or keep store scope from it. Drop your handle to it when the operation completes; the drop no longer affects correctness, because claims follow happens-before within the run's scope. [`perform_store_op`](crate::vfs::perform_store_op) is synchronous, because the store is synchronous by design, so an async host runs it off its executor, for example with tokio's [`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html). A store answer that reports a conflicting access ends the run at once with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism).
+Use the store view exactly as given. Never derive, widen, or keep store scope from it. Drop your handle to it when the operation completes; the drop no longer affects correctness, because claims follow happens-before within the run's scope. [`perform_store_op`](crate::vfs::perform_store_op) is synchronous, because the store is synchronous by design, so an async host runs it off its executor, for example with tokio's [`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html). A store answer that reports a conflicting access ends the run at once with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism).
 
 **Timer.** [`Effect::Timer`] is one sleep of [`seconds`](Effect#variant.Timer.field.seconds). It is the internal timeout behind a timed wait, which an author sets with `opts.timeout` and a model sets with the timeout of its `await_tasks` call. Answer it with [`EffectAnswer::Timer`], which carries no data, once that many seconds have passed. The example converts the value with [`Duration::try_from_secs_f64`](std::time::Duration::try_from_secs_f64) and sleeps with [`sleep`](std::thread::sleep).
 
@@ -161,7 +161,7 @@ Commit each step's events to the log before performing that step's effects, so t
 
 # Logging effects and answers
 
-[`Effect`] and [`EffectAnswer`] do not serialize, and they are not [`Clone`]. An effect can hold a live handle such as the store access capability, and an answer can hold values that a log cannot keep whole, such as a completion's bodies or an error's boxed cause. So a logging host projects each one onto a record.
+[`Effect`] and [`EffectAnswer`] do not serialize, and they are not [`Clone`]. An effect can hold a live handle such as the store view, and an answer can hold values that a log cannot keep whole, such as a completion's bodies or an error's boxed cause. So a logging host projects each one onto a record.
 
 - [`Effect::record`] returns an [`EffectRecord`], the same request minus its live handles.
 - [`EffectAnswer::record`] returns an [`AnswerRecord`], the same outcome with every failure rendered as its [`Display`](std::fmt::Display) text.
@@ -240,8 +240,8 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`Effect::UserInput`]: one wait for operator input on behalf of one section. The host sees one for every `user_input()` call. Answer it with [`EffectAnswer::UserInput`].
   - [`Effect::UserInput::execution`](Effect#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, which is the `name` the host passed to [`RunContext::new`](crate::RunContext::new).
   - [`Effect::UserInput::section`](Effect#variant.UserInput.field.section), a [`String`], is the name of the section asking for input.
-- [`Effect::Store`]: one store operation under the chain's access capability. The host sees one for every `store.*` call. Answer it with [`EffectAnswer::Store`].
-  - [`Effect::Store::access`](Effect#variant.Store.field.access), an [`Arc`](std::sync::Arc) of an [`Access`](crate::vfs::Access), is the chain's access capability, minted by the engine under the chain's identity. Pass a reference to it to [`perform_store_op`](crate::vfs::perform_store_op). It is not recorded, and dropping it no longer affects correctness: claims follow happens-before within the run's scope.
+- [`Effect::Store`]: one store operation through the chain's store view. The host sees one for every `store.*` call. Answer it with [`EffectAnswer::Store`].
+  - [`Effect::Store::access`](Effect#variant.Store.field.access), an [`Arc`](std::sync::Arc) of an [`Access`](crate::vfs::Access), is the chain's store view: an ordinary access rooted at the handle's declared store, confined to its mount, under the chain's identity, derived by the engine at dispatch. Pass a reference to it to [`perform_store_op`](crate::vfs::perform_store_op). It is not recorded, and dropping it no longer affects correctness: claims follow happens-before within the run's scope.
   - [`Effect::Store::op`](Effect#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation: a write, append, read, numbered read, string replace, delete, glob, or existence check. Pass it by value to [`perform_store_op`](crate::vfs::perform_store_op).
 - [`Effect::Timer`]: one sleep, the internal timeout behind a timed wait. Answer it with [`EffectAnswer::Timer`].
   - [`Effect::Timer::seconds`](Effect#variant.Timer.field.seconds), an [`f64`], is the sleep duration in seconds. It is non-negative and finite, because the run checks it with [`Duration::try_from_secs_f64`](std::time::Duration::try_from_secs_f64) before issuing the effect.
@@ -258,7 +258,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`EffectAnswer::Chat`] holds a [`Result`] of a [`Box`] of a [`Completion`](crate::model::Completion) or a [`CompletionError`](crate::model::CompletionError). It answers an [`Effect::Chat`], including one from a nested `models.infer`. The completion is boxed because it holds both the request and response bodies.
 - [`EffectAnswer::ToolCall`] holds a [`Result`] of the tool's own [`ToolOutput`](crate::tools::ToolOutput) or [`ToolError`](crate::tools::ToolError). It answers an [`Effect::ToolCall`], and the run applies its trust rule after it arrives.
 - [`EffectAnswer::UserInput`] holds a [`Result`] of an [`InputOutcome`](crate::input::InputOutcome) or an [`InputError`](crate::input::InputError). It answers an [`Effect::UserInput`].
-- [`EffectAnswer::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`StoreError`](crate::vfs::StoreError), which is exactly the return type of [`perform_store_op`](crate::vfs::perform_store_op). It answers an [`Effect::Store`].
+- [`EffectAnswer::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError), which is exactly the return type of [`perform_store_op`](crate::vfs::perform_store_op). It answers an [`Effect::Store`].
 - [`EffectAnswer::Timer`] carries no data. It answers an [`Effect::Timer`] once the effect's [`seconds`](Effect#variant.Timer.field.seconds) have passed.
 - [`EffectAnswer::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values: the task's events after the read's [`last`](Effect#variant.TaskEvents.field.last), in the host's log order. It answers an [`Effect::TaskEvents`].
 - [`EffectAnswer::Dropped`] carries no data. It answers any kind of effect without performing it, as [One answer per effect](#one-answer-per-effect) describes.
@@ -284,7 +284,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`EffectRecord::UserInput`]: one wait for operator input, recorded from an [`Effect::UserInput`] with both fields cloned.
   - [`EffectRecord::UserInput::execution`](EffectRecord#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, the name given to [`RunContext::new`](crate::RunContext::new).
   - [`EffectRecord::UserInput::section`](EffectRecord#variant.UserInput.field.section), a [`String`], is the name of the section that asked.
-- [`EffectRecord::Store`]: one store operation, recorded from an [`Effect::Store`] without its access capability.
+- [`EffectRecord::Store`]: one store operation, recorded from an [`Effect::Store`] without its store view.
   - [`EffectRecord::Store::op`](EffectRecord#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation. It serializes through its own serde form.
 - [`EffectRecord::Timer`]: one sleep, recorded from an [`Effect::Timer`].
   - [`EffectRecord::Timer::seconds`](EffectRecord#variant.Timer.field.seconds), an [`f64`], is the duration in seconds.
@@ -299,7 +299,7 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`AnswerRecord::Chat`] holds a [`Result`] of a [`ChatAnswerRecord`] or the [`CompletionError`](crate::model::CompletionError)'s text. It is recorded from an [`EffectAnswer::Chat`].
 - [`AnswerRecord::ToolCall`] holds a [`Result`] of a [`ToolAnswerRecord`] or the [`ToolError`](crate::tools::ToolError)'s text. It is recorded from an [`EffectAnswer::ToolCall`]. The text is the model-safe message only, so a cause attached with [`ToolError::with_source`](crate::tools::ToolError::with_source) is not recorded.
 - [`AnswerRecord::UserInput`] holds a [`Result`] of an [`InputAnswerRecord`] or the [`InputError`](crate::input::InputError)'s message. It is recorded from an [`EffectAnswer::UserInput`].
-- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreAnswerRecord`] or the [`StoreError`](crate::vfs::StoreError)'s text. It is recorded from an [`EffectAnswer::Store`].
+- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreAnswerRecord`] or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`].
 - [`AnswerRecord::Timer`] carries no data. It records that the timer fired.
 - [`AnswerRecord::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values, a clone of the answered events.
 - [`AnswerRecord::Dropped`] carries no data. It records that the host dropped the effect without performing it.

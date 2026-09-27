@@ -6,8 +6,7 @@
 //! explicit contract error.
 
 use crate::parser::Prompt;
-use promptforge_store::{Store, StoreError};
-use promptforge_vfs::{HostBackend, Origin, VfsRef};
+use promptforge_vfs::{Access, HostBackend, Origin, VfsError, VfsRef};
 
 use super::support::Recorder;
 use super::support::{RunOptions, drive, parse_execution_fixture, prepare_run, run_fixture};
@@ -54,22 +53,33 @@ const MISSING_OUTPUT: &str = concat!(
     "```\n",
 );
 
+/// The store view derived from a fresh access on the run's handle: the
+/// host's seeding and extraction half of the seed-run-extract round trip.
+fn fresh_store_view(vfs: &VfsRef, origin: &str) -> Access {
+    let access = vfs
+        .acquire(Origin::new(origin))
+        .expect("the prepared backend acquires");
+    promptforge_vfs::detail::store_view(&access).expect("the handle declares a store")
+}
+
 /// The production host's extraction rule (pattern: papergate's app.rs): a
 /// declared output the run did not leave behind is an explicit contract
 /// error naming the prompt's promise, never a bare not-found.
-fn extract_declared_output(store: &Store, prompt: &Prompt) -> Result<String, String> {
+fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, String> {
     let output = prompt
         .frontmatter()
         .output()
         .expect("the fixture declares an output");
-    store.read(output.path()).map_err(|error| match error {
-        StoreError::NotFound { .. } => format!(
-            "the prompt promised output '{}' ({}) but the run left no such file",
-            output.path(),
-            output.description()
-        ),
-        other => format!("extracting the declared output failed: {other}"),
-    })
+    store
+        .read_string(output.path())
+        .map_err(|error| match error {
+            VfsError::NotFound { .. } => format!(
+                "the prompt promised output '{}' ({}) but the run left no such file",
+                output.path(),
+                output.description()
+            ),
+            other => format!("extracting the declared output failed: {other}"),
+        })
 }
 
 /// Seeds the prompt's declared input through the run's prepared handle.
@@ -80,11 +90,8 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
         .frontmatter()
         .input()
         .expect("the fixture declares an input");
-    let access = vfs
-        .acquire(Origin::new("seed_declared_input"))
-        .expect("the stock backend acquires");
-    Store::new(&access)
-        .write(input.path(), contents)
+    fresh_store_view(vfs, "seed_declared_input")
+        .write(input.path(), contents.as_bytes())
         .expect("the declared input seeds");
 }
 
@@ -145,12 +152,9 @@ return store.read('handoff.txt')\n\
     assert_eq!(result, "across the reset");
     // Extraction after the run takes a fresh access: the run's identities
     // dropped with it, so nothing the run touched can conflict here.
-    let access = vfs
-        .acquire(Origin::new("prepared handle extraction"))
-        .expect("the prepared backend acquires");
     assert_eq!(
-        Store::new(&access)
-            .read("handoff.txt")
+        fresh_store_view(&vfs, "prepared handle extraction")
+            .read_string("handoff.txt")
             .expect("the run's write persists on the handle"),
         "across the reset"
     );
@@ -169,11 +173,9 @@ async fn a_host_seeds_and_extracts_through_the_prepared_handle_with_no_real_file
     seed_declared_input(&vfs, &prompt, "the paper body");
     let result = run.await.expect("the seeded run executes offline");
     assert_eq!(result, "done");
-    let access = vfs
-        .acquire(Origin::new("round-trip extraction"))
-        .expect("the prepared backend acquires");
-    let report = extract_declared_output(&Store::new(&access), &prompt)
-        .expect("the run left its promised output");
+    let store = fresh_store_view(&vfs, "round-trip extraction");
+    let report =
+        extract_declared_output(&store, &prompt).expect("the run left its promised output");
     assert_eq!(report, "report on: the paper body");
 }
 
@@ -192,10 +194,8 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     // the host's extraction is where the broken promise surfaces.
     let result = run.await.expect("the run itself succeeds");
     assert_eq!(result, "read: the paper body");
-    let access = vfs
-        .acquire(Origin::new("missing-output extraction"))
-        .expect("the prepared backend acquires");
-    let error = extract_declared_output(&Store::new(&access), &prompt)
+    let store = fresh_store_view(&vfs, "missing-output extraction");
+    let error = extract_declared_output(&store, &prompt)
         .expect_err("the missing output is a contract error");
     assert!(
         error.contains("report.md"),
@@ -244,13 +244,13 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
     const FANOUT_STORE_WRITES: &str =
         include_str!("../../../../tests/prompts/execution/fanout-store-writes.md");
     // Both arms drive the raw host-handle contract (no prepare pass), so
-    // the caller's own backend serves the store mount in each.
+    // the caller's own backend serves the declared store in each.
     let memory = run_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
         "vfs-invariance-memory",
         "",
-        Some(promptforge_vfs::empty()),
+        Some(VfsRef::default()),
     )
     .await;
     let memory_result = memory
@@ -259,8 +259,8 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
 
     let temp = TempDir::new("host-backend");
     let host_vfs = VfsRef::builder()
-        .mount(
-            promptforge_vfs::STORE_MOUNT,
+        .store(
+            "/",
             HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
         )
         .build();

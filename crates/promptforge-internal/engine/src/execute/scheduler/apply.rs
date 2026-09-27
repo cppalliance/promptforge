@@ -15,15 +15,14 @@
 //! whatever it was parked on.
 
 use promptforge_types::tools::{ToolError, ToolOutput};
+use promptforge_vfs::VfsError;
 
 use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
 use crate::execute::tools::accept_infer;
 use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
 use crate::lua::{ModelReport, UserInputOutcome, prepare_dispatch, prepare_model_dispatch};
 use crate::model::{Completion, CompletionError};
-use crate::store::StoreError;
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle::Lifecycle;
 
 use super::dispatch::classify_store_failure;
 use super::tasks::{TaskBacking, TaskState};
@@ -89,8 +88,8 @@ impl Scheduler {
             (Continuation::UserInput, EffectAnswer::UserInput(result)) => {
                 Answer::UserInput(self.accept_user_input(chain, result))
             }
-            (Continuation::Store(observations), EffectAnswer::Store(result)) => {
-                match self.accept_store(chain, observations, result) {
+            (Continuation::Store(continuation), EffectAnswer::Store(result)) => {
+                match self.accept_store(chain, &continuation, result) {
                     // A claims-model conflict is fatal: the suspended
                     // chains drop unarmed in the run's teardown, exactly
                     // as on the cancellation path.
@@ -217,21 +216,22 @@ impl Scheduler {
     /// Applies a store operation's answer: the operation's succeeded or
     /// failed observation (pushed before the chain resumes, so the op's
     /// outcome precedes the chunk's closing boundary), then the outcome,
-    /// with a failure classified for the answer channel.
+    /// with a failure classified for the answer channel under the
+    /// operation's own wording.
     fn accept_store(
         &self,
         chain: ChainIndex,
-        observations: Option<(Lifecycle, Lifecycle)>,
-        result: std::result::Result<StoreOutcome, StoreError>,
+        continuation: &super::StoreContinuation,
+        result: std::result::Result<StoreOutcome, VfsError>,
     ) -> Result<StoreOutcome> {
         let chain = &self.chains[chain.index()];
-        if let Some((succeeded, failed)) = observations {
+        if let Some((succeeded, failed)) = continuation.observations {
             chain.ctx.emitter().report(
                 chain.section_name(),
                 if result.is_ok() { succeeded } else { failed },
             );
         }
-        result.map_err(|error| classify_store_failure(&error))
+        result.map_err(|error| classify_store_failure(&continuation.op, &error))
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to

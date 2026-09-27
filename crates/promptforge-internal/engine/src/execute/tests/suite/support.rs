@@ -9,9 +9,8 @@ use crate::parser::Prompt;
 use crate::test_support::recording::{Observation, Observer};
 use crate::test_support::{RunHost, TestTool, run_host};
 use crate::{Environment, RunContext, RunError, RunResult};
-use promptforge_store::{Store, StoreError};
 use promptforge_types::timestamp::Timestamp;
-use promptforge_vfs::{Origin, VfsRef};
+use promptforge_vfs::{Origin, VfsError, VfsRef};
 
 /// A [`RunContext`] for the run `name` under the fixed host inputs every
 /// fixture shares: the engine takes its seed and clock from the host, and
@@ -175,13 +174,11 @@ fn with_test_title(source: &str) -> std::borrow::Cow<'_, str> {
 pub(super) struct FixtureStore(VfsRef);
 
 impl FixtureStore {
-    /// Reads a store path through a fresh, immediately dropped access.
-    pub(super) fn read(&self, path: &str) -> Result<String, StoreError> {
-        let access = self
-            .0
-            .acquire(Origin::new("FixtureStore::read"))
-            .map_err(StoreError::backend)?;
-        Store::new(&access).read(path)
+    /// Reads a store path through a fresh, immediately dropped access and
+    /// its store view.
+    pub(super) fn read(&self, path: &str) -> Result<String, VfsError> {
+        let access = self.0.acquire(Origin::new("FixtureStore::read"))?;
+        promptforge_vfs::detail::store_view(&access)?.read_string(path)
     }
 }
 

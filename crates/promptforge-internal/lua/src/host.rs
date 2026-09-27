@@ -1,10 +1,14 @@
 //! Host callbacks installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
 
+use std::fmt::Write as _;
+
 use promptforge_types::event::lifecycle::Lifecycle;
+
+use crate::protocol::StoreOp;
 
 use super::{
     Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
-    LuaSerdeExt, MultiValue, Ordering, Result, Store, Value, lifecycle,
+    LuaSerdeExt, MultiValue, Mutex, Ordering, Result, Value, lifecycle,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
@@ -141,38 +145,110 @@ impl StoreReporter {
     }
 }
 
+/// The model-facing message for a failed store operation: what failed and,
+/// when there is a fix, how to make it, so the text a model reads names
+/// both. The operation supplies the wording its call surface promises (a
+/// glob reports "invalid glob pattern", a path reports "invalid path"), and
+/// the structured [`VfsError`](promptforge_vfs::VfsError) supplies the
+/// path, rule, anchor, and count.
+#[must_use]
+pub fn store_error_message(
+    op: &crate::protocol::StoreOp,
+    error: &promptforge_vfs::VfsError,
+) -> String {
+    use promptforge_vfs::VfsError;
+    match error {
+        VfsError::NotFound { path } => format!("file not found in store: {path}"),
+        VfsError::AlreadyExists { path } => format!("file already exists in store: {path}"),
+        VfsError::NotADirectory { path } => format!("not a directory in store: {path}"),
+        VfsError::IsADirectory { path } => format!("is a directory in store: {path}"),
+        VfsError::DirectoryNotEmpty { path } => format!("directory not empty in store: {path}"),
+        VfsError::NotUtf8 { path } => format!("file in store is not UTF-8: {path}"),
+        VfsError::InvalidPath { path, reason } => {
+            if matches!(op, crate::protocol::StoreOp::Glob { .. }) {
+                format!("invalid glob pattern {path:?}: {reason}")
+            } else {
+                format!("invalid path {path:?}: {reason}")
+            }
+        }
+        VfsError::InvalidRange { path, reason } => {
+            format!("invalid line range for {path}: {reason}")
+        }
+        VfsError::Anchor {
+            path,
+            anchor,
+            count,
+        } => {
+            if anchor.is_empty() {
+                format!("str_replace requires a non-empty anchor: {path}")
+            } else if *count == 0 {
+                format!("anchor {anchor:?} was not found in {path}, expected exactly one")
+            } else {
+                format!(
+                    "anchor {anchor:?} occurs {count} times in {path}, expected exactly one; \
+                     include more surrounding text so it matches once"
+                )
+            }
+        }
+        VfsError::PermissionDenied { path, reason } => {
+            format!("permission denied for store path {path}: {reason}")
+        }
+        VfsError::Unsupported { path, detail } => {
+            format!("unsupported store operation on {path}: {detail}")
+        }
+        VfsError::Conflict { path, detail } => format!("store conflict on {path}: {detail}"),
+        VfsError::Backend { message } => format!("store backend failure: {message}"),
+        _ => "store operation failed".to_owned(),
+    }
+}
+
+/// Records a store conflict in the shared slot the engine reads when a
+/// shared library load returns: a conflict the author caught with `pcall`
+/// must still end the run with a determinism violation, so the direct
+/// closures write it here rather than only raising it.
+fn record_store_conflict<T>(
+    conflicts: &Mutex<Option<String>>,
+    result: &std::result::Result<T, promptforge_vfs::VfsError>,
+) {
+    if let Err(promptforge_vfs::VfsError::Conflict { detail, .. }) = result
+        && let Ok(mut slot) = conflicts.lock()
+    {
+        *slot = Some(detail.clone());
+    }
+}
+
 /// Shared body of the persistent per-section `store.read` host callback.
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
-/// inclusive line range. A negative bound converts to 0, which
-/// [`Store::read_range`] rejects with the same error a zero bound produces,
-/// and an `end` without a `start` is refused rather than silently ignored.
+/// inclusive line range. A negative bound converts to 0, which the range
+/// validation rejects with the same error a zero bound produces, and an
+/// `end` without a `start` is refused rather than silently ignored.
 fn read_store_bounded(
-    store: &Store,
+    view: &Access,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
     numbered: bool,
-) -> std::result::Result<String, promptforge_store::StoreError> {
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
     match start {
         None if end.is_none() => {
             if numbered {
-                store.read_range_numbered(path, 1, None)
+                read_range_numbered(view, path, 1, None)
             } else {
-                store.read(path)
+                view.read_string(path)
             }
         }
-        None => Err(promptforge_store::detail::store_error_invalid_range(
-            path,
-            "start is required when end is given",
-        )),
+        None => Err(promptforge_vfs::VfsError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start is required when end is given",
+        }),
         Some(start) => {
             let start = usize::try_from(start).unwrap_or(0);
             let end = end.map(|line| usize::try_from(line).unwrap_or(0));
             if numbered {
-                store.read_range_numbered(path, start, end)
+                read_range_numbered(view, path, start, end)
             } else {
-                store.read_range(path, start, end)
+                read_range(view, path, start, end)
             }
         }
     }
@@ -180,28 +256,120 @@ fn read_store_bounded(
 
 /// Shared body of the persistent per-section `store.read` host callback.
 fn read_store(
-    store: &Store,
+    view: &Access,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
-) -> std::result::Result<String, promptforge_store::StoreError> {
-    read_store_bounded(store, path, start, end, false)
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
+    read_store_bounded(view, path, start, end, false)
 }
 
 /// Shared body of the persistent per-section `store.read_numbered` callback.
 fn read_store_numbered(
-    store: &Store,
+    view: &Access,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
-) -> std::result::Result<String, promptforge_store::StoreError> {
-    read_store_bounded(store, path, start, end, true)
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
+    read_store_bounded(view, path, start, end, true)
+}
+
+/// Reads lines `start..=end` of the file at `path`, 1-based and inclusive,
+/// joined with `"\n"` and no trailing newline.
+fn read_range(
+    view: &Access,
+    path: &str,
+    start: usize,
+    end: Option<usize>,
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
+    with_read_range(view, path, start, end, |lines, _| lines.join("\n"))
+}
+
+/// Reads lines `start..=end` of the file at `path` numbered absolutely
+/// from `start`, each number right-aligned to the width of the largest
+/// emitted number, followed by `"| "`.
+fn read_range_numbered(
+    view: &Access,
+    path: &str,
+    start: usize,
+    end: Option<usize>,
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
+    with_read_range(view, path, start, end, number_lines_from)
+}
+
+/// Reads and resolves one line range while its owned contents remain live.
+fn with_read_range(
+    view: &Access,
+    path: &str,
+    start: usize,
+    end: Option<usize>,
+    render: impl FnOnce(&[&str], usize) -> String,
+) -> std::result::Result<String, promptforge_vfs::VfsError> {
+    let contents = view.read_string(path)?;
+    let lines: Vec<&str> = contents.lines().collect();
+    let Some((start, end)) = resolve_line_range(path, lines.len(), start, end)? else {
+        return Ok(String::new());
+    };
+    Ok(render(&lines[start - 1..end], start))
+}
+
+/// Resolves 1-based inclusive bounds against `line_count` into the
+/// effective `(start, end)`, or `None` when the range falls entirely past
+/// the last line. Evaluation order is fixed: a `start` below 1 is an
+/// error; a `start` past the last line reads as empty; an omitted `end`
+/// means the last line, and a given `end` clamps down to it; an `end`
+/// before `start` at that point is an error.
+fn resolve_line_range(
+    path: &str,
+    line_count: usize,
+    start: usize,
+    end: Option<usize>,
+) -> std::result::Result<Option<(usize, usize)>, promptforge_vfs::VfsError> {
+    if start == 0 {
+        return Err(promptforge_vfs::VfsError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start must be at least 1",
+        });
+    }
+    if start > line_count {
+        return Ok(None);
+    }
+    let end = end.unwrap_or(line_count).min(line_count);
+    if end < start {
+        return Err(promptforge_vfs::VfsError::InvalidRange {
+            path: path.to_owned(),
+            reason: "end must not be before start",
+        });
+    }
+    Ok(Some((start, end)))
+}
+
+/// Renders `lines` numbered absolutely from `start`, each number
+/// right-aligned to the width of the largest emitted number, followed by
+/// `"| "`; lines are joined with `"\n"` and there is no trailing newline.
+fn number_lines_from(lines: &[&str], start: usize) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let last = start + lines.len() - 1;
+    let width = last.to_string().len();
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let number = start + index;
+        // Writing to a String is infallible, so the result is discarded.
+        let _ = write!(out, "{number:>width$}| {line}");
+    }
+    out
 }
 
 /// Exposes an always-on `store` table whose methods (`write`, `append`,
 /// `read`, `read_numbered`, `str_replace`, `delete`,
-/// `glob`, `exists`) are backed by the [`Store`] facade over the caller's
-/// VFS access capability.
+/// `glob`, `exists`) are backed by the store view derived from the
+/// caller's VFS access capability, so each operation runs under the
+/// caller's own identity and the store's strict path rules.
 /// Installed once per section with [`Lua::create_function`], so the table
 /// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
 ///
@@ -211,23 +379,28 @@ fn read_store_numbered(
 /// inclusive line range (`read(path, start)` reads to end of file,
 /// `read(path, start, end)` slices); `read_numbered` returns it with
 /// absolute line numbers under the same optional bounds; `glob` returns an
-/// array table of matching paths. A [`StoreError`] from any op is mapped into
-/// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
-/// surfaces as [`Error::Lua`].
+/// array table of matching paths. A [`VfsError`] from any op is raised as
+/// a structured error value of kind `store` via
+/// [`Error::store`], so it aborts the chunk and a `pcall` caller reads
+/// `err.kind`, `err.reason`, and the variant's fields.
 ///
-/// Every closure captures an `Arc` clone of the section's [`Access`]
-/// capability and builds the borrowing facade per call. The capability
-/// locks the backend per call and is synchronous, so nothing is held across
-/// an await. The capability's identity is what the claims model attributes
-/// operations to: a fanout arm's access is spawned from the caller's, so
-/// two live arms touching one path surface the conflict as
-/// [`StoreError::WriteRace`].
+/// Every closure captures an `Arc` clone of the section's store view.
+/// The view locks the backend per call and is synchronous, so nothing is
+/// held across an await. The view carries the caller's identity, which is
+/// what the claims model attributes operations to: a fanout arm's view is
+/// spawned from the caller's, so two unordered arms touching one path
+/// surface the conflict as [`VfsError::Conflict`]. A conflict these direct
+/// closures see - during a shared library load, before the yield shims
+/// install - is recorded in `conflicts`, the shared slot the engine reads
+/// when the load returns, so the run ends with a determinism violation
+/// even if author code caught the error.
 ///
-/// [`StoreError`]: promptforge_store::StoreError
+/// [`VfsError`]: promptforge_vfs::VfsError
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the `store` table or any of its functions cannot
-/// be created or installed into the sandbox globals.
+/// be created or installed into the sandbox globals, or
+/// [`Error::Store`] if the handle the access came from declares no store.
 #[expect(
     clippy::too_many_lines,
     reason = "one table installs all store operations beside their matching observation outcomes"
@@ -238,12 +411,22 @@ pub(crate) fn install_store_table(
     access: &Arc<Access>,
     emitter: &Emitter,
     section: &str,
+    conflicts: &Arc<Mutex<Option<String>>>,
 ) -> Result<()> {
     let table = lua.create_table().map_err(Error::lua)?;
     let reporter = Arc::new(StoreReporter {
         emitter: emitter.clone(),
         section: section.to_owned(),
     });
+    // One store view for the section's whole life: derived once from the
+    // chain's access, so the closures share it and the strict path rules
+    // run on every operation through it.
+    let view = Arc::new(
+        promptforge_vfs::detail::store_view(access).map_err(|source| Error::Store {
+            message: "store operation failed".to_owned(),
+            source,
+        })?,
+    );
 
     macro_rules! install_reported_store_fn {
         (
@@ -253,15 +436,18 @@ pub(crate) fn install_store_table(
             $argument_type:ty,
             $success:expr,
             $failure:expr,
+            $op:expr,
             $operation:block
         ) => {{
-            let $handle = Arc::clone(access);
+            let $handle = Arc::clone(&view);
             let report = Arc::clone(&reporter);
+            let conflicts = Arc::clone(conflicts);
             let function = lua
                 .create_function(move |_, $arguments: $argument_type| {
                     let result = $operation;
+                    record_store_conflict(&conflicts, &result);
                     report.report(result.is_ok(), $success, $failure);
-                    result.map_err(mlua::Error::external)
+                    result.map_err(|source| mlua::Error::external(Error::store(&$op, source)))
                 })
                 .map_err(Error::lua)?;
             table.set($name, function).map_err(Error::lua)?;
@@ -275,7 +461,11 @@ pub(crate) fn install_store_table(
         (String, String),
         lifecycle::STORE_WRITE_SUCCEEDED,
         lifecycle::STORE_WRITE_FAILED,
-        { Store::new(&handle).write(&path, &contents) }
+        StoreOp::Write {
+            path: path.clone(),
+            contents: contents.clone(),
+        },
+        { handle.write(&path, contents.as_bytes()) }
     );
     install_reported_store_fn!(
         "append",
@@ -284,7 +474,11 @@ pub(crate) fn install_store_table(
         (String, String),
         lifecycle::STORE_APPEND_SUCCEEDED,
         lifecycle::STORE_APPEND_FAILED,
-        { Store::new(&handle).append(&path, &contents) }
+        StoreOp::Append {
+            path: path.clone(),
+            contents: contents.clone(),
+        },
+        { handle.append(&path, contents.as_bytes()) }
     );
     install_reported_store_fn!(
         "read",
@@ -293,7 +487,12 @@ pub(crate) fn install_store_table(
         (String, Option<i64>, Option<i64>),
         lifecycle::STORE_READ_SUCCEEDED,
         lifecycle::STORE_READ_FAILED,
-        { read_store(&Store::new(&handle), &path, start, end) }
+        StoreOp::Read {
+            path: path.clone(),
+            start,
+            end,
+        },
+        { read_store(&handle, &path, start, end) }
     );
     install_reported_store_fn!(
         "read_numbered",
@@ -302,7 +501,12 @@ pub(crate) fn install_store_table(
         (String, Option<i64>, Option<i64>),
         lifecycle::STORE_READ_NUMBERED_SUCCEEDED,
         lifecycle::STORE_READ_NUMBERED_FAILED,
-        { read_store_numbered(&Store::new(&handle), &path, start, end) }
+        StoreOp::ReadNumbered {
+            path: path.clone(),
+            start,
+            end,
+        },
+        { read_store_numbered(&handle, &path, start, end) }
     );
     install_reported_store_fn!(
         "str_replace",
@@ -311,7 +515,12 @@ pub(crate) fn install_store_table(
         (String, String, String),
         lifecycle::STORE_REPLACE_SUCCEEDED,
         lifecycle::STORE_REPLACE_FAILED,
-        { Store::new(&handle).str_replace(&path, &old, &new) }
+        StoreOp::StrReplace {
+            path: path.clone(),
+            old: old.clone(),
+            new: new.clone(),
+        },
+        { handle.str_replace(&path, &old, &new) }
     );
     install_reported_store_fn!(
         "delete",
@@ -320,31 +529,47 @@ pub(crate) fn install_store_table(
         String,
         lifecycle::STORE_DELETE_SUCCEEDED,
         lifecycle::STORE_DELETE_FAILED,
-        { Store::new(&handle).delete(&path) }
+        StoreOp::Delete { path: path.clone() },
+        { handle.remove(&path, false).map(|_| ()) }
     );
 
-    let handle = Arc::clone(access);
+    let handle = Arc::clone(&view);
     let report = Arc::clone(&reporter);
+    let glob_conflicts = Arc::clone(conflicts);
     let glob = lua
         .create_function(move |lua, pattern: String| {
-            let result = Store::new(&handle).glob(&pattern);
+            let result = handle.glob(&pattern);
+            record_store_conflict(&glob_conflicts, &result);
             report.report(
                 result.is_ok(),
                 lifecycle::STORE_GLOB_SUCCEEDED,
                 lifecycle::STORE_GLOB_FAILED,
             );
-            let paths = result.map_err(mlua::Error::external)?;
+            let paths = result.map_err(|source| {
+                mlua::Error::external(Error::store(
+                    &StoreOp::Glob {
+                        pattern: pattern.clone(),
+                    },
+                    source,
+                ))
+            })?;
             lua.create_sequence_from(paths)
         })
         .map_err(Error::lua)?;
     table.set("glob", glob).map_err(Error::lua)?;
 
-    let handle = Arc::clone(access);
+    let handle = Arc::clone(&view);
+    let exists_conflicts = Arc::clone(conflicts);
     let exists = lua
         .create_function(move |_, path: String| {
-            Store::new(&handle)
-                .exists(&path)
-                .map_err(mlua::Error::external)
+            let result = handle.exists(&path);
+            record_store_conflict(&exists_conflicts, &result);
+            result.map_err(|source| {
+                mlua::Error::external(Error::store(
+                    &StoreOp::Exists { path: path.clone() },
+                    source,
+                ))
+            })
         })
         .map_err(Error::lua)?;
     table.set("exists", exists).map_err(Error::lua)?;
@@ -353,41 +578,42 @@ pub(crate) fn install_store_table(
     Ok(())
 }
 
-/// Executes one validated store operation against the facade: the single
-/// implementation behind both the legacy direct closures and the
+/// Executes one validated store operation against the store view: the
+/// single implementation behind both the direct closures and the
 /// executor's leaf-yield dispatch, so the two paths cannot drift. The
 /// bounded-read argument rules (a negative bound converts to 0, an `end`
 /// without a `start` is refused) sit in the shared `read_store_bounded`
 /// helper above; the read ops route through their named wrappers as the
-/// closures do.
+/// closures do. `view` is the store view the caller derived; every
+/// operation maps onto one [`Access`] call over it.
 ///
 /// # Errors
-/// Returns the [`StoreError`](promptforge_store::StoreError) the facade
-/// produces for the operation: path validation, not-found, anchor, range,
-/// write-race, or backend failure, as the legacy closures surfaced it.
+/// Returns the [`VfsError`](promptforge_vfs::VfsError) the operation
+/// produces: path or pattern validation, not-found, anchor, range,
+/// conflict, or backend failure.
 pub fn run_store_op(
-    store: &Store,
+    view: &Access,
     op: crate::protocol::StoreOp,
-) -> std::result::Result<crate::protocol::StoreOutcome, promptforge_store::StoreError> {
+) -> std::result::Result<crate::protocol::StoreOutcome, promptforge_vfs::VfsError> {
     use crate::protocol::{StoreOp, StoreOutcome};
     match op {
-        StoreOp::Write { path, contents } => {
-            store.write(&path, &contents).map(|()| StoreOutcome::Unit)
-        }
-        StoreOp::Append { path, contents } => {
-            store.append(&path, &contents).map(|()| StoreOutcome::Unit)
-        }
+        StoreOp::Write { path, contents } => view
+            .write(&path, contents.as_bytes())
+            .map(|()| StoreOutcome::Unit),
+        StoreOp::Append { path, contents } => view
+            .append(&path, contents.as_bytes())
+            .map(|()| StoreOutcome::Unit),
         StoreOp::Read { path, start, end } => {
-            read_store(store, &path, start, end).map(StoreOutcome::Text)
+            read_store(view, &path, start, end).map(StoreOutcome::Text)
         }
         StoreOp::ReadNumbered { path, start, end } => {
-            read_store_numbered(store, &path, start, end).map(StoreOutcome::Text)
+            read_store_numbered(view, &path, start, end).map(StoreOutcome::Text)
         }
-        StoreOp::StrReplace { path, old, new } => store
+        StoreOp::StrReplace { path, old, new } => view
             .str_replace(&path, &old, &new)
             .map(|()| StoreOutcome::Unit),
-        StoreOp::Delete { path } => store.delete(&path).map(|()| StoreOutcome::Unit),
-        StoreOp::Glob { pattern } => store.glob(&pattern).map(StoreOutcome::Paths),
-        StoreOp::Exists { path } => store.exists(&path).map(StoreOutcome::Bool),
+        StoreOp::Delete { path } => view.remove(&path, false).map(|_| StoreOutcome::Unit),
+        StoreOp::Glob { pattern } => view.glob(&pattern).map(StoreOutcome::Paths),
+        StoreOp::Exists { path } => view.exists(&path).map(StoreOutcome::Bool),
     }
 }

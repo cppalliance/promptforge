@@ -13,8 +13,8 @@ pub use limits::RunLimits;
 
 use crate::cancel::CancelHandle;
 use crate::model::ModelDescriptor;
-use crate::store::VfsRef;
 use crate::tools::ToolCatalog;
+use promptforge_vfs::VfsRef;
 
 use super::bindings::{ModelBindings, ToolBindings};
 
@@ -87,10 +87,11 @@ pub struct RunContext {
     /// at run start; its presence also turns on the raw-model-id
     /// `models.get` fallback.
     pub(crate) ui: Option<serde_json::Value>,
+    /// The run's whole filesystem: host roots and the declared store. The
+    /// default is a fresh memory store at `/`; a host that mounts its own
+    /// roots and declares its own store sets the handle with
+    /// [`vfs`](RunContext::vfs).
     pub(crate) vfs: VfsRef,
-    /// Whether the host set `vfs` itself ([`vfs`](RunContext::vfs)), in
-    /// which case prepare keeps it rather than building the per-run router.
-    pub(crate) vfs_explicit: bool,
     /// The run's current model: the host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
     /// which binds every declared role to it. Grows into a catalog or
@@ -120,8 +121,8 @@ pub struct RunContext {
 impl RunContext {
     /// Builds a context for the run `name` under the host's `seed` and
     /// `started_at`, with a fresh cancel flag, no `ui` snapshot, no debug
-    /// reporting, default [`RunLimits`], empty [`Flags`], and the stock
-    /// store handle, a fresh memory backend at the store mount.
+    /// reporting, default [`RunLimits`], empty [`Flags`], and the default
+    /// filesystem, a fresh memory store at `/`.
     ///
     /// `seed` is the source of the untrusted-envelope nonce, so a live host
     /// draws it from a CSPRNG (a predictable seed is a guessable nonce);
@@ -141,8 +142,7 @@ impl RunContext {
             cancel: CancelHandle::new(),
             limits: RunLimits::new(),
             ui: None,
-            vfs: promptforge_vfs::empty(),
-            vfs_explicit: false,
+            vfs: VfsRef::default(),
             model: None,
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
@@ -225,34 +225,27 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's VFS handle, which holds the store mount every
-    /// section's `store` table operates on. The default is the stock
-    /// handle, a fresh memory backend at the store mount.
+    /// Sets the run's VFS handle, the run's whole filesystem: the host
+    /// roots and the declared store every section's `store` table
+    /// operates on. The default is a fresh memory store at `/`.
     ///
-    /// A handle set here is the host's: [`Environment::prepare`]
-    /// keeps it rather than building the per-run router, so a host that
-    /// activates capabilities before prepare builds the run's router
-    /// first ([`Environment::run_vfs`]), hands it to
+    /// A handle set here is the host's, used as given by
+    /// [`Environment::prepare`](super::Environment::prepare) - the
+    /// environment never replaces it - so a host that activates
+    /// capabilities builds the run's handle first, hands it to
     /// activation's services and to this builder, and the capabilities
-    /// and the run share one store. Without it, prepare builds the router
-    /// (the shared base mounted at `/` plus the run's fresh store) and
-    /// hosts that seed before the run or extract after it go through the
-    /// prepared handle ([`vfs_handle`](RunContext::vfs_handle)).
-    ///
-    /// [`Environment::prepare`]: super::Environment::prepare
-    /// [`Environment::run_vfs`]: super::Environment::run_vfs
+    /// and the run share one filesystem. Hosts that seed before the run
+    /// or extract after it go through the prepared handle
+    /// ([`vfs_handle`](RunContext::vfs_handle)).
     #[must_use]
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
         self.vfs = vfs;
-        self.vfs_explicit = true;
         self
     }
 
-    /// Returns the run's VFS handle. After
-    /// [`Environment::prepare`](super::Environment::prepare) this is the
-    /// per-run router - the shared base mounted at `/` plus the run's
-    /// fresh store, or the handle the host set - and hosts extract run
-    /// output through it.
+    /// Returns the run's VFS handle: the run's whole filesystem, host
+    /// roots and declared store included, through which hosts seed files
+    /// before the run and extract output after it.
     ///
     /// Named `vfs_handle` because the builder half already owns
     /// [`vfs`](RunContext::vfs).
@@ -354,7 +347,6 @@ impl fmt::Debug for RunContext {
             .field("limits", &self.limits)
             .field("ui", &self.ui)
             .field("vfs", &self.vfs)
-            .field("vfs_explicit", &self.vfs_explicit)
             .field("model", &self.model)
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)

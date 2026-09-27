@@ -60,6 +60,9 @@ pub enum ErrorKind {
     TasksLive,
     /// The host cancelled the run.
     Cancelled,
+    /// A store operation's own failure; includes `reason` and the
+    /// [`VfsError`](promptforge_vfs::VfsError) variant's fields.
+    Store,
     /// A Lua authoring or runtime failure: a compile error, a runtime error
     /// in author code, a shim's argument error, or an exhausted host quota.
     Lua,
@@ -83,6 +86,7 @@ impl ErrorKind {
             ErrorKind::TaskConsumed => "task_consumed",
             ErrorKind::TasksLive => "tasks_live",
             ErrorKind::Cancelled => "cancelled",
+            ErrorKind::Store => "store",
             ErrorKind::Lua => "lua",
             ErrorKind::Internal => "internal",
         }
@@ -102,6 +106,7 @@ impl ErrorKind {
             "task_consumed" => Some(ErrorKind::TaskConsumed),
             "tasks_live" => Some(ErrorKind::TasksLive),
             "cancelled" => Some(ErrorKind::Cancelled),
+            "store" => Some(ErrorKind::Store),
             "lua" => Some(ErrorKind::Lua),
             "internal" => Some(ErrorKind::Internal),
             _ => None,
@@ -115,8 +120,39 @@ impl std::fmt::Display for ErrorKind {
     }
 }
 
+/// One field of an error table: a string or an integer, so a field like
+/// a store anchor's `count` stays numeric in Lua instead of being
+/// stringified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorField {
+    /// A string-valued field.
+    String(String),
+    /// An integer-valued field (a store anchor's `count`).
+    Integer(i64),
+}
+
+impl ErrorField {
+    /// The field's string value, when it is one.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            ErrorField::String(value) => Some(value),
+            ErrorField::Integer(_) => None,
+        }
+    }
+
+    /// The field's integer value, when it is one.
+    #[must_use]
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            ErrorField::String(_) => None,
+            ErrorField::Integer(value) => Some(*value),
+        }
+    }
+}
+
 /// A Rust error's rendering into the Lua error table: its kind and the
-/// kind's own string fields. `Display` supplies `message`.
+/// kind's own fields. `Display` supplies `message`.
 ///
 /// The envelope renderer requires this of the driver's error type, so a
 /// failure answered to Lua always has a kind; an internal type that gains a
@@ -125,9 +161,9 @@ pub trait ErrorValue: std::fmt::Display {
     /// The kind the table's `kind` field names.
     fn kind(&self) -> ErrorKind;
 
-    /// The kind's own fields, as `(name, value)` string pairs set beside
+    /// The kind's own fields, as `(name, value)` pairs set beside
     /// `kind` and `message`. Empty for kinds without fields.
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, ErrorField)> {
         Vec::new()
     }
 }
@@ -142,16 +178,21 @@ impl ErrorValue for Error {
             Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
             Error::Interrupted => ErrorKind::Cancelled,
             Error::Tool { .. } => ErrorKind::Tool,
+            Error::Store { .. } => ErrorKind::Store,
             Error::Internal(_) => ErrorKind::Internal,
             Error::Raised(raised) => raised.kind,
         }
     }
 
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, ErrorField)> {
         match self {
             Error::ContextExhausted { reason } => {
-                vec![("reason".to_owned(), reason.tag().to_owned())]
+                vec![(
+                    "reason".to_owned(),
+                    ErrorField::String(reason.tag().to_owned()),
+                )]
             }
+            Error::Store { source, .. } => store_error_value_fields(source),
             Error::Raised(raised) => raised
                 .fields
                 .iter()
@@ -160,6 +201,92 @@ impl ErrorValue for Error {
             _ => Vec::new(),
         }
     }
+}
+
+/// The `reason` tag a store error value carries for `error`: the tag
+/// author code branches on to tell the failure modes apart.
+#[must_use]
+pub fn store_error_reason(error: &promptforge_vfs::VfsError) -> &'static str {
+    match error {
+        promptforge_vfs::VfsError::NotFound { .. } => "not_found",
+        promptforge_vfs::VfsError::AlreadyExists { .. } => "already_exists",
+        promptforge_vfs::VfsError::NotADirectory { .. } => "not_a_directory",
+        promptforge_vfs::VfsError::IsADirectory { .. } => "is_a_directory",
+        promptforge_vfs::VfsError::DirectoryNotEmpty { .. } => "directory_not_empty",
+        promptforge_vfs::VfsError::NotUtf8 { .. } => "not_utf8",
+        promptforge_vfs::VfsError::InvalidPath { .. } => "invalid_path",
+        promptforge_vfs::VfsError::InvalidRange { .. } => "invalid_range",
+        promptforge_vfs::VfsError::Anchor { .. } => "anchor",
+        promptforge_vfs::VfsError::PermissionDenied { .. } => "permission_denied",
+        promptforge_vfs::VfsError::Unsupported { .. } => "unsupported",
+        promptforge_vfs::VfsError::Conflict { .. } => "conflict",
+        // `VfsError` is `#[non_exhaustive]`: every failure without its
+        // own reason, the backend's and any future variant's, is the
+        // backend bucket.
+        _ => "backend",
+    }
+}
+
+/// The variant's own fields a store error value carries beside `kind`,
+/// `message`, and `reason`: the paths the failure names, plus `anchor`
+/// and its integer `count` for an anchor error, or `rule` for an invalid
+/// path. The rule is the [`PathReason`](promptforge_vfs::PathReason) tag,
+/// which `PathReason::from_tag` parses back.
+#[must_use]
+pub fn store_error_fields(error: &promptforge_vfs::VfsError) -> Vec<(String, ErrorField)> {
+    use promptforge_vfs::VfsError;
+    match error {
+        VfsError::NotFound { path }
+        | VfsError::AlreadyExists { path }
+        | VfsError::NotADirectory { path }
+        | VfsError::IsADirectory { path }
+        | VfsError::DirectoryNotEmpty { path }
+        | VfsError::NotUtf8 { path }
+        | VfsError::InvalidRange { path, .. }
+        | VfsError::PermissionDenied { path, .. }
+        | VfsError::Unsupported { path, .. }
+        | VfsError::Conflict { path, .. } => {
+            vec![("path".to_owned(), ErrorField::String(path.clone()))]
+        }
+        VfsError::InvalidPath { path, reason } => vec![
+            ("path".to_owned(), ErrorField::String(path.clone())),
+            (
+                "rule".to_owned(),
+                ErrorField::String(reason.tag().to_owned()),
+            ),
+        ],
+        VfsError::Anchor {
+            path,
+            anchor,
+            count,
+        } => vec![
+            ("path".to_owned(), ErrorField::String(path.clone())),
+            ("anchor".to_owned(), ErrorField::String(anchor.clone())),
+            (
+                "count".to_owned(),
+                ErrorField::Integer(i64::try_from(*count).unwrap_or(i64::MAX)),
+            ),
+        ],
+        // `VfsError` is `#[non_exhaustive]`: a variant without named
+        // fields - the backend's and any future variant's - reports none.
+        _ => Vec::new(),
+    }
+}
+
+/// The full field set a store error value carries: the `reason` tag plus
+/// the variant's own fields from [`store_error_fields`].
+///
+/// One source for the shape, so a failure the direct closures raise
+/// during a shared library load and one answered through the executor's
+/// effect path are indistinguishable to author code.
+#[must_use]
+pub fn store_error_value_fields(error: &promptforge_vfs::VfsError) -> Vec<(String, ErrorField)> {
+    let mut fields = vec![(
+        "reason".to_owned(),
+        ErrorField::String(store_error_reason(error).to_owned()),
+    )];
+    fields.extend(store_error_fields(error));
+    fields
 }
 
 /// A structured error table read back into Rust: the kind, the message
@@ -176,8 +303,9 @@ pub struct Raised {
     pub kind: ErrorKind,
     /// The message `tostring` renders.
     pub message: String,
-    /// The kind's own fields (`reason`, `finish_reason`, ...), string-valued.
-    pub fields: BTreeMap<String, String>,
+    /// The kind's own fields (`reason`, `finish_reason`, ...), string- or
+    /// integer-valued (a store anchor's `count`).
+    pub fields: BTreeMap<String, ErrorField>,
 }
 
 impl Raised {
@@ -187,7 +315,8 @@ impl Raised {
     pub fn overflow_reason(&self) -> Option<OverflowReason> {
         self.fields
             .get("reason")
-            .and_then(|tag| OverflowReason::from_tag(tag))
+            .and_then(ErrorField::as_str)
+            .and_then(OverflowReason::from_tag)
     }
 }
 
@@ -240,6 +369,10 @@ pub fn error_table(lua: &Lua, error: &impl ErrorValue) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     table.raw_set("message", error.to_string())?;
     for (name, value) in error.fields() {
+        let value = match value {
+            ErrorField::String(value) => Value::String(lua.create_string(value)?),
+            ErrorField::Integer(value) => Value::Integer(value),
+        };
         table.raw_set(name, value)?;
     }
     finish_table(lua, error.kind(), table)
@@ -283,7 +416,7 @@ pub(crate) fn install_error_value(lua: &Lua) -> mlua::Result<Function> {
 struct Classified {
     kind: ErrorKind,
     message: String,
-    fields: Vec<(String, String)>,
+    fields: Vec<(String, ErrorField)>,
 }
 
 impl Classified {
@@ -337,7 +470,7 @@ impl ErrorValue for Classified {
         self.kind
     }
 
-    fn fields(&self) -> Vec<(String, String)> {
+    fn fields(&self) -> Vec<(String, ErrorField)> {
         self.fields.clone()
     }
 }
@@ -395,9 +528,12 @@ pub(crate) fn raised_from(lua: &Lua, value: &Value) -> mlua::Result<Option<Raise
         if name == "kind" || name == "message" {
             continue;
         }
-        if let Value::String(value) = value {
-            fields.insert(name, value.to_str()?.to_owned());
-        }
+        let field = match value {
+            Value::String(value) => ErrorField::String(value.to_str()?.to_owned()),
+            Value::Integer(value) => ErrorField::Integer(value),
+            _ => continue,
+        };
+        fields.insert(name, field);
     }
     Ok(Some(Raised {
         kind,

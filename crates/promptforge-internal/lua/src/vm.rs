@@ -96,6 +96,11 @@ pub struct SectionVm {
     /// share it, so every store op is attributed to the identity the
     /// executor installed for this chain step.
     access: Option<Arc<Access>>,
+    /// The slot the direct store closures record a claims-model conflict
+    /// into during the shared replay, for the executor to read when the
+    /// load returns via
+    /// [`take_store_conflict`](Self::take_store_conflict).
+    store_conflicts: Arc<Mutex<Option<String>>>,
     host_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
@@ -305,6 +310,7 @@ impl SectionVm {
             local_handler_depth: Arc::new(AtomicU32::new(0)),
             sys_live: Arc::new(Mutex::new(None)),
             access: None,
+            store_conflicts: Arc::new(Mutex::new(None)),
             host_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
@@ -484,7 +490,7 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vfs = promptforge_vfs::empty();
+    /// let vfs = promptforge_vfs::VfsRef::default();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );
@@ -576,12 +582,16 @@ impl SectionVm {
     ///
     /// Called once after [`inject_host_with_var`](Self::inject_host_with_var).
     /// The closures capture owned strings, a clone of the emitter, and Arc
-    /// clones of the log budget counters and the store handle, so they stay valid across
-    /// every chunk this VM runs without a live [`mlua::Scope`].
+    /// clones of the log budget counters and the store view, so they stay
+    /// valid across every chunk this VM runs without a live [`mlua::Scope`].
+    /// The direct store closures record a claims-model conflict into the
+    /// VM's slot for the executor to read with
+    /// [`take_store_conflict`](Self::take_store_conflict).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or the
-    /// globals cannot be installed.
+    /// globals cannot be installed, or [`Error::Store`] if the handle
+    /// declares no store.
     pub fn install_host_apis(&self, emitter: &Emitter, section: &str) -> Result<()> {
         let access = self.access.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
@@ -593,7 +603,27 @@ impl SectionVm {
             &self.log_budget,
             &self.log_byte_budget,
         )?;
-        install_store_table(&self.lua, &self.lua.globals(), access, emitter, section)
+        install_store_table(
+            &self.lua,
+            &self.lua.globals(),
+            access,
+            emitter,
+            section,
+            &self.store_conflicts,
+        )
+    }
+
+    /// Takes the claims-model conflict the direct store closures recorded
+    /// during the shared replay, clearing the slot. The executor reads it
+    /// when [`replay_shared`](Self::replay_shared) returns, so a conflict
+    /// author code caught with `pcall` still ends the run with a
+    /// determinism violation.
+    #[must_use]
+    pub fn take_store_conflict(&self) -> Option<String> {
+        self.store_conflicts
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 
     /// Installs `call`, `jump`, and `list_from_section` as persistent
@@ -834,7 +864,7 @@ impl SectionVm {
     ///
     /// let nonce = GuardNonce::from_seed(1);
     /// let emitter = Emitter::root(EventSink::default(), "example-run", DebugMode::Off);
-    /// let vfs = promptforge_vfs::empty();
+    /// let vfs = promptforge_vfs::VfsRef::default();
     /// let access = std::sync::Arc::new(
     ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );

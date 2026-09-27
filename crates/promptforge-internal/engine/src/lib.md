@@ -26,4 +26,4 @@ assert_eq!(prompt.frontmatter().name(), "greeter");
 # Ok::<(), promptforge_engine::ParseError>(())
 ```
 
-Executing a parsed prompt builds a [`Run`] over a [`RunContext`] prepared by an [`Environment`] (which holds the host roots and the catalog of tools the host activated); the store handle sits on the context, defaulting to the stock in-memory mount. The host then loops: [`Run::step`] returns the effects to perform and the events to log, and [`Run::resume`] hands each effect's answer back.
+Executing a parsed prompt builds a [`Run`] over a [`RunContext`] prepared by an [`Environment`] (which holds the catalog of tools the host activated); the filesystem handle - host roots and the declared store - sits on the context, defaulting to a fresh in-memory store at `/`. The host then loops: [`Run::step`] returns the effects to perform and the events to log, and [`Run::resume`] hands each effect's answer back.

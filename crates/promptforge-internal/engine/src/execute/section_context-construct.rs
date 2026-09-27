@@ -17,8 +17,8 @@ use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
 use crate::lua::SectionVm;
 use crate::parser::Section;
-use crate::store::Access;
 use promptforge_types::event::lifecycle;
+use promptforge_vfs::Access;
 
 use super::{SectionContext, TaskSeed};
 

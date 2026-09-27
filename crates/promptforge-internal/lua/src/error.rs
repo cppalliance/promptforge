@@ -131,6 +131,20 @@ pub enum Error {
         source: BoxedSource,
     },
 
+    /// A store operation's own failure: the model-facing message rendered
+    /// for the operation, beside the structured
+    /// [`VfsError`](promptforge_vfs::VfsError) it renders. The direct store
+    /// closures raise this, so a failure caught by `pcall` classifies as
+    /// kind `store` with the `reason` tag and the variant's fields.
+    #[error("{message}")]
+    Store {
+        /// The model-facing message, from `store_error_message`.
+        message: String,
+        /// The structured failure the message renders.
+        #[source]
+        source: promptforge_vfs::VfsError,
+    },
+
     /// An internal runtime invariant was violated (a state the surrounding code
     /// has already guaranteed cannot occur). Surfaced as a concrete error rather
     /// than silently skipping work, so an impossible state cannot masquerade as a
@@ -188,6 +202,15 @@ impl Error {
         Error::Tool {
             message: source.to_string(),
             source: Box::new(source),
+        }
+    }
+
+    /// Wraps a store operation's failure as [`Error::Store`], rendering
+    /// the model-facing message with the operation for its wording.
+    pub(crate) fn store(op: &crate::protocol::StoreOp, source: promptforge_vfs::VfsError) -> Error {
+        Error::Store {
+            message: crate::host::store_error_message(op, &source),
+            source,
         }
     }
 }

@@ -20,12 +20,12 @@ use crate::execute::support::MAX_CALL_DEPTH;
 use crate::lua::{ToolSet, resolve_model_binding};
 use crate::model::Message;
 use crate::model::ModelBinding;
-use crate::store::StoreError;
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::event::lifecycle::Lifecycle;
+use promptforge_vfs::VfsError;
 
-use super::{ChainIndex, Continuation, Counters, Scheduler};
+use super::{ChainIndex, Continuation, Counters, Scheduler, StoreContinuation};
 
 /// The error for an alias that names no binding in the run's tool catalog:
 /// the name and every bound alias, so the message reads required versus
@@ -111,13 +111,15 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
 /// claims-model conflict becomes the fatal determinism violation: the
 /// driver intercepts it at the answer boundary and ends the run on the
 /// spot rather than resuming it into Lua, so no author `pcall` can catch
-/// it. Every other failure returns as the call's answer with the store's
-/// own message, classified `Lua` if it aborts the chunk uncaught.
-pub(super) fn classify_store_failure(error: &StoreError) -> Error {
-    if let Some(detail) = error.conflict_detail() {
-        return Error::Determinism(detail.to_owned());
+/// it. Every other failure returns as the call's answer as an
+/// [`Error::Store`] holding the model-facing message rendered for the
+/// operation and the structured cause, classified `Store` if it aborts
+/// the chunk uncaught.
+pub(super) fn classify_store_failure(op: &StoreOp, error: &VfsError) -> Error {
+    if let VfsError::Conflict { detail, .. } = error {
+        return Error::Determinism(detail.clone());
     }
-    Error::Lua(error.to_string())
+    Error::store_op(op, error.clone())
 }
 
 impl Scheduler {
@@ -291,23 +293,30 @@ impl Scheduler {
         self.issue(id, effect, Continuation::UserInput);
     }
 
-    /// Dispatches a `store` request: issues the operation under the
-    /// chain's access capability as a `Store` effect for the host to
-    /// perform, parking the chain in the pending table exactly as a leaf
-    /// I/O round does. Every store operation takes this yield path
-    /// uniformly (memory- and host-backed alike, with no inline fast path)
-    /// so interleaving behavior never depends on which backend serves
-    /// the mount. The operation's event is pushed when the answer is
-    /// applied, before the chain resumes.
+    /// Dispatches a `store` request: derives the store view from the
+    /// chain's access capability and issues the operation through it as a
+    /// `Store` effect for the host to perform, parking the chain in the
+    /// pending table exactly as a leaf I/O round does. Every store
+    /// operation takes this yield path uniformly (memory- and host-backed
+    /// alike, with no inline fast path) so interleaving behavior never
+    /// depends on which backend serves the mount. The operation's event is
+    /// pushed when the answer is applied, before the chain resumes.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the live chain's access capability
-    /// is gone, which only the chain-end paths take.
+    /// is gone, which only the chain-end paths take, or [`Error::Store`]
+    /// when the handle the chain's access came from declares no store,
+    /// which the run's start probe already ruled out.
     fn dispatch_store(&mut self, id: ChainIndex, op: StoreOp) -> Result<()> {
         let access = Arc::clone(self.chains[id.index()].access()?);
+        let view = Arc::new(promptforge_vfs::detail::store_view(&access).map_err(Error::store)?);
         let observations = store_observations(&op);
-        let effect = Effect::Store { access, op };
-        self.issue(id, effect, Continuation::Store(observations));
+        let continuation = StoreContinuation {
+            op: op.clone(),
+            observations,
+        };
+        let effect = Effect::Store { access: view, op };
+        self.issue(id, effect, Continuation::Store(continuation));
         Ok(())
     }
 

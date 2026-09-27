@@ -148,13 +148,13 @@ impl StoreError {
     /// ```
     /// use promptforge::RunContext;
     /// use promptforge::timestamp::Timestamp;
-    /// use promptforge::vfs::{Origin, StoreErrorKind, StoreOp, perform_store_op};
+    /// use promptforge::vfs::{Origin, StoreOp, VfsError, perform_store_op};
     ///
     /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
     /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
     /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
     /// let err = perform_store_op(&access, read).unwrap_err();
-    /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
+    /// assert!(matches!(err, VfsError::NotFound { .. }));
     /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
@@ -179,13 +179,13 @@ impl StoreError {
     /// ```
     /// use promptforge::RunContext;
     /// use promptforge::timestamp::Timestamp;
-    /// use promptforge::vfs::{Origin, StoreOp, perform_store_op};
+    /// use promptforge::vfs::{Origin, StoreOp, VfsError, perform_store_op};
     ///
     /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
     /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
     /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
     /// let err = perform_store_op(&access, read).unwrap_err();
-    /// assert!(err.is_not_found());
+    /// assert!(matches!(err, VfsError::NotFound { .. }));
     /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
@@ -199,13 +199,13 @@ impl StoreError {
     /// ```
     /// use promptforge::RunContext;
     /// use promptforge::timestamp::Timestamp;
-    /// use promptforge::vfs::{Origin, StoreOp, perform_store_op};
+    /// use promptforge::vfs::{Origin, StoreOp, VfsError, perform_store_op};
     ///
     /// let ctx = RunContext::new("store error example", 1, Timestamp::UNIX_EPOCH);
     /// let access = ctx.vfs_handle().acquire(Origin::new("store error example"))?;
     /// let read = StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None };
     /// let err = perform_store_op(&access, read).unwrap_err();
-    /// assert_eq!(err.path(), Some("missing.txt"));
+    /// assert!(matches!(err, VfsError::NotFound { .. }));
     /// # Ok::<(), promptforge::vfs::VfsError>(())
     /// ```
     #[must_use]
@@ -242,7 +242,7 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge::vfs::{StoreError, StoreErrorKind};
+    /// use promptforge_store::{StoreError, StoreErrorKind};
     ///
     /// let io = std::io::Error::other("disk gone");
     /// let err = StoreError::backend(io);

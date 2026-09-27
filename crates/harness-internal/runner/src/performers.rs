@@ -34,7 +34,7 @@ use promptforge::model::{
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
+use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
 use serde_json::Value;
 
 #[path = "performers-host.rs"]
@@ -90,21 +90,22 @@ pub trait InputPerformer: Send + Sync {
     ) -> BoxFuture<Result<InputOutcome, InputError>>;
 }
 
-/// Performs a `Store` effect: one store operation under the chain's
-/// access capability.
+/// Performs a `Store` effect: one store operation through the store
+/// view the effect carries.
 ///
 /// Synchronous: the loop runs it on the blocking pool. Dropping the
 /// access when the operation completes is good hygiene, but it never
 /// affects correctness: claims follow happens-before within the run's
 /// scope.
 pub trait StorePerformer: Send + Sync {
-    /// Performs `op` through `access`. The performer uses the capability
-    /// as given and never derives, widens, or retains store scope from it.
+    /// Performs `op` through `access`, the store view the effect
+    /// carries. The performer uses the capability as given and never
+    /// derives, widens, or retains store scope from it.
     ///
     /// # Errors
-    /// Returns the store's own failure, which the engine raises at the
-    /// author's call site as a store error.
-    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, StoreError>;
+    /// Returns the store's own structured failure, which the engine
+    /// raises at the author's call site as a store error.
+    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, VfsError>;
 }
 
 /// Performs a `Timer` effect: one sleep.

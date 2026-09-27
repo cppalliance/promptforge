@@ -184,6 +184,15 @@ impl Scheduler {
         // its end, before its owner is woken: the owner's re-acquire and
         // any queued sibling need the freed capacity.
         self.release_chain_slots(id);
+        // A determinism violation is fatal to the run on the spot and
+        // never resumes into Lua as a catchable member failure: a shim
+        // that re-raises it after its own cleanup yields would flatten
+        // the typed error, so the outcome ends the run here, exactly as
+        // the answer boundary does.
+        if let Err(Error::Determinism(detail)) = &outcome {
+            *root_result = Some(Err(Error::Determinism(detail.clone())));
+            return;
+        }
         if is_task {
             // A missing slot is a scheduler bug: fail the run loudly rather
             // than lose the task's outcome.

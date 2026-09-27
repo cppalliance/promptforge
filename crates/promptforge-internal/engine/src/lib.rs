@@ -8,7 +8,6 @@ pub mod input;
 pub(crate) mod lua;
 pub mod model;
 pub mod parser;
-pub(crate) mod store;
 pub(crate) mod subst;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -25,8 +24,8 @@ pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
     EffectRecord, Environment, InputAnswerRecord, ModelBindings, RequirementCheck, Requirements,
     Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
-    StoreAnswerRecord, StoreError, StoreOp, StoreOutcome, ToolAnswerRecord, ToolBindings,
-    UnmetRequirement, perform_store_op,
+    StoreAnswerRecord, StoreOp, StoreOutcome, ToolAnswerRecord, ToolBindings, UnmetRequirement,
+    perform_store_op,
 };
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

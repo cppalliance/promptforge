@@ -251,7 +251,10 @@ fn a_structured_raise_surfacing_as_the_coroutine_failure_keeps_its_table() {
                 raised.message
             );
             assert_eq!(
-                raised.fields.get("reason").map(String::as_str),
+                raised
+                    .fields
+                    .get("reason")
+                    .and_then(promptforge_lua::ErrorField::as_str),
                 Some("precheck")
             );
         }
@@ -267,9 +270,12 @@ fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
     let exhausted = promptforge_lua::Raised {
         kind: ErrorKind::ContextExhausted,
         message: "context exhausted: provider".to_owned(),
-        fields: [("reason".to_owned(), "provider".to_owned())]
-            .into_iter()
-            .collect(),
+        fields: [(
+            "reason".to_owned(),
+            promptforge_lua::ErrorField::String("provider".to_owned()),
+        )]
+        .into_iter()
+        .collect(),
     };
     assert!(matches!(
         crate::Error::from(Error::Raised(exhausted)),
@@ -300,9 +306,12 @@ fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
     let empty = promptforge_lua::Raised {
         kind: ErrorKind::EmptyModelReply,
         message: "the model returned an empty turn".to_owned(),
-        fields: [("finish_reason".to_owned(), "length".to_owned())]
-            .into_iter()
-            .collect(),
+        fields: [(
+            "finish_reason".to_owned(),
+            promptforge_lua::ErrorField::String("length".to_owned()),
+        )]
+        .into_iter()
+        .collect(),
     };
     match crate::Error::from(Error::Raised(empty)) {
         crate::Error::EmptyModelReply {

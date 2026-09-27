@@ -32,7 +32,7 @@ use serde_json::Value;
 use crate::input::{InputError, InputOutcome};
 use crate::model::{Completion, CompletionError, CompletionResult, Message, ToolSchema};
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
-use crate::store::{Access, StoreError};
+use promptforge_vfs::{Access, VfsError};
 
 use crate::execute::protocol::{StoreOp, StoreOutcome};
 
@@ -101,13 +101,15 @@ pub enum Effect {
         /// The section asking.
         section: String,
     },
-    /// One store operation under the chain's access capability. The
-    /// handle is minted by the engine under the chain's identity; a host
-    /// performing the effect uses it as given and never derives, widens,
-    /// or retains store scope from it. Dropping it no longer affects
-    /// correctness: claims follow happens-before within the run's scope.
+    /// One store operation under the chain's store view: an ordinary
+    /// access the engine derived from the chain's capability at dispatch,
+    /// rooted at the handle's declared store. A host performing the
+    /// effect uses it as given and never derives, widens, or retains
+    /// store scope from it. Dropping it no longer affects correctness:
+    /// claims follow happens-before within the run's scope.
     Store {
-        /// The chain's access capability.
+        /// The chain's store view: the chain's identity over the store
+        /// root alone.
         access: Arc<Access>,
         /// The validated operation.
         op: StoreOp,
@@ -260,8 +262,9 @@ pub enum EffectAnswer {
     ToolCall(std::result::Result<ToolOutput, ToolError>),
     /// The broker's outcome or its failure.
     UserInput(std::result::Result<InputOutcome, InputError>),
-    /// The store operation's outcome or the store's own failure.
-    Store(std::result::Result<StoreOutcome, StoreError>),
+    /// The store operation's outcome or the store's own structured
+    /// failure.
+    Store(std::result::Result<StoreOutcome, VfsError>),
     /// The timer fired.
     Timer,
     /// The task's events after the read's `last`, in sequence order, as

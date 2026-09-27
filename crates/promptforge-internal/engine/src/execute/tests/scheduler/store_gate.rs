@@ -108,12 +108,12 @@ struct GatedStore {
     gate: Arc<StoreGate>,
 }
 
-/// A test store mounting a [`GatedStore`] on `gate`.
+/// A test store declaring a [`GatedStore`] on `gate` as its store at `/`.
 pub(in super::super) fn gated_store(gate: &Arc<StoreGate>) -> TestStore {
     TestStore::from_vfs(
         VfsRef::builder()
-            .mount(
-                promptforge_vfs::STORE_MOUNT,
+            .store(
+                "/",
                 GatedStore {
                     inner: MemoryBackend::new(),
                     gate: Arc::clone(gate),

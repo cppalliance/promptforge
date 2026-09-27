@@ -6,13 +6,14 @@
 //! CSPRNG and its `started_at` from the wall clock, both written to the
 //! run's row in the log before anything else, so the record can hand them
 //! back verbatim to a future replay. Then the ceremony the engine's
-//! `Environment` expects of a host: parse; build the run's VFS so the
-//! capabilities' services and the run share one store; activate the
-//! prompt's declared capabilities against the caller's registry, which
-//! assembles the catalog and the implementation table; install the catalog
-//! and prepare the context; merge activation's report into prepare's and
-//! refuse an unsatisfiable prompt with the engine's model-readable notice;
-//! and build the `Run` beside its performers.
+//! `Environment` expects of a host: parse; hand the run's whole
+//! filesystem, host roots and the declared store, to the capabilities'
+//! services and to the context as given; activate the prompt's declared
+//! capabilities against the caller's registry, which assembles the
+//! catalog and the implementation table; install the catalog and prepare
+//! the context; merge activation's report into prepare's and refuse an
+//! unsatisfiable prompt with the engine's model-readable notice; and
+//! build the `Run` beside its performers.
 //!
 //! A refusal (or a prompt that fails to parse) is a run that ended before
 //! it began: its row is closed as failed with the refusal as the message,
@@ -51,8 +52,9 @@ pub struct Services {
     /// against; `None` is a host with no capabilities, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<CapabilityRegistry>>,
-    /// The host roots the run's VFS mounts at `/`; never the store mount,
-    /// which preparation adds fresh per run.
+    /// The run's whole filesystem: the host roots and the declared store,
+    /// passed straight to the context's VFS and handed to the capabilities
+    /// as the run's services.
     pub vfs: VfsRef,
     /// The run's cancel flag: handed to the context, to every capability
     /// activated for the run, and polled by the engine.
@@ -264,12 +266,14 @@ pub async fn prepare_source(
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    // The activate-prepare-refuse ceremony: the run's VFS is built first so
-    // the capabilities' services and the run share one store; the
-    // activated catalog is what prepare fills slots against, and the
+    // The activate-prepare-refuse ceremony: the run's filesystem is the
+    // host's whole - host roots and the declared store - handed to the
+    // capabilities' services and to the context as given, so the
+    // capabilities and the run share one filesystem; the activated
+    // catalog is what prepare fills slots against, and the
     // implementations stay here for the tool performer.
-    let env = Environment::new().base_vfs(vfs);
-    let ctx = ctx.vfs(env.run_vfs());
+    let env = Environment::new();
+    let ctx = ctx.vfs(vfs);
     let run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
     let activation = activate(registry.as_deref(), &prompt, &run_services);
     let env = env.tools(activation.catalog);

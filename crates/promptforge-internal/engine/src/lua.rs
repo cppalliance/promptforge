@@ -12,8 +12,8 @@
 //! the crate-internal import surface for it.
 
 // The store operation behind `execute::perform_store_op`, the entry point
-// a host's store performer answers a `Store` effect through.
-pub(crate) use promptforge_lua::run_store_op;
+// a host's store performer answers a `Store` effect through, and the
+// model-facing message renderer a store failure carries.
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaProgram, MessageRecord, ModelReport, OverflowReason,
     ProseState, ScriptReport, SectionVm, TaskAllowlist, ToolBinding, ToolCallCounts, ToolSet,
@@ -22,6 +22,7 @@ pub(crate) use promptforge_lua::{
     precheck, prepare_dispatch, prepare_model_dispatch, project_messages, render_item,
     resolve_model_binding,
 };
+pub(crate) use promptforge_lua::{run_store_op, store_error_message};
 
 #[cfg(test)]
 mod tests;

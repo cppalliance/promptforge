@@ -47,7 +47,6 @@ use tokio::task::JoinHandle;
 
 use crate::cancel::CancelHandle;
 use crate::lua::run_store_op;
-use crate::store::Store;
 #[cfg(test)]
 use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::{Error, Result};
@@ -411,7 +410,7 @@ impl<'a> TokioDriver<'a> {
                 // rather than interrupts, so a dropped op completes before
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
-                    let result = run_store_op(&Store::new(&access), op);
+                    let result = run_store_op(&access, op);
                     post(&tx, id, EffectAnswer::Store(result));
                 })
             }

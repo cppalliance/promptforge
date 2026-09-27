@@ -22,7 +22,6 @@ use crate::execute::task_history;
 use crate::input::InputOutcome;
 use crate::lua::run_store_op;
 use crate::model::{Completion, CompletionResult, ToolCall};
-use crate::store::Store;
 use crate::test_support::drive;
 
 /// A canned text reply from the test model.
@@ -69,9 +68,7 @@ pub(super) fn perform_locally(
             "no tool is bound as {alias} in this test"
         )))),
         Effect::UserInput { .. } => EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)),
-        Effect::Store { access, op } => {
-            EffectAnswer::Store(run_store_op(&Store::new(access), op.clone()))
-        }
+        Effect::Store { access, op } => EffectAnswer::Store(run_store_op(access, op.clone())),
         Effect::Timer { .. } => EffectAnswer::Timer,
         Effect::TaskEvents { .. } => panic!("the driver answers a history read itself"),
     }

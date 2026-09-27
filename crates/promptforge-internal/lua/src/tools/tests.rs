@@ -13,10 +13,10 @@ use crate::{SectionVm, ToolBinding};
 use promptforge_types::tools::ToolId;
 use std::sync::{Arc, Mutex};
 
-/// A fresh stock handle's access capability for a test VM.
-fn fresh_access() -> Arc<promptforge_store::Access> {
+/// A fresh default handle's access capability for a test VM.
+fn fresh_access() -> Arc<crate::Access> {
     Arc::new(
-        promptforge_vfs::empty()
+        promptforge_vfs::VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("tool test fixture"))
             .expect("the stock backend acquires"),
     )

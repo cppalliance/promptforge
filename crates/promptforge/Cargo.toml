@@ -16,7 +16,6 @@ promptforge-engine.workspace = true
 promptforge-lua.workspace = true
 promptforge-model-client.workspace = true
 promptforge-parser.workspace = true
-promptforge-store.workspace = true
 promptforge-types.workspace = true
 promptforge-vfs.workspace = true
 workspace-hack.workspace = true

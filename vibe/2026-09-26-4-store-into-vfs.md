@@ -860,7 +860,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-8>
 
-### Step 8: Perform every store operation through the store view
+### Step 8: Perform every store operation through the store view [completed]
 
 - Component: Declared store
 - Piece: store switch. The engine, Lua, facade and harness changes are built jointly, in one commit: the error type in `EffectAnswer::Store`, the Lua `store` error kind and the removal of the engine's store location cross all four, so no subset compiles or passes alone. Containment never lapses, because the Store facade's path validation stays in use until this commit moves every store call onto the store view.

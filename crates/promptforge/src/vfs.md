@@ -4,13 +4,13 @@ Every file a prompt reads or writes through its `store` table lives in one virtu
 
 # Where this fits
 
-Before a run, the host decides what the run's filesystem holds. [`Environment::base_vfs`](crate::Environment::base_vfs) mounts host directories under `/` for every run. [`Environment::prepare`](crate::Environment::prepare) then gives the [`RunContext`](crate::RunContext) a per-run handle that adds a fresh store at `/_promptforge/store`. A host that activates capabilities builds that per-run handle first with [`Environment::run_vfs`](crate::Environment::run_vfs), hands it to the capabilities, and sets it with [`RunContext::vfs`](crate::RunContext::vfs). [`Environment::prepare`](crate::Environment::prepare) keeps a handle set this way, so the capabilities and the run share one store. Either way, the host seeds files through [`RunContext::vfs_handle`](crate::RunContext::vfs_handle) before [`Run::new`](crate::Run::new), and reads output through it after the run.
+Before a run, the host decides what the run's filesystem holds, by building one [`VfsRef`](crate::vfs::VfsRef) that mounts the host's directories and declares the store. [`RunContext::new`](crate::RunContext::new) starts with a fresh memory store at `/`, and a host that wants host roots or its own store builds the handle itself and hands it to [`RunContext::vfs`](crate::RunContext::vfs). [`Environment::prepare`](crate::Environment::prepare) keeps the context's handle as given, so the capabilities and the run share one filesystem. The host seeds files through [`RunContext::vfs_handle`](crate::RunContext::vfs_handle) before [`Run::new`](crate::Run::new), and reads output through it after the run.
 
-During the run, every `store.*` call in a prompt reaches the host from [`Run::step`](crate::Run::step) inside [`Step::Pending`](crate::Step::Pending) as an [`Effect::Store`](crate::effect::Effect::Store). Its [`access`](crate::effect::Effect#variant.Store.field.access) field is an [`Arc`](std::sync::Arc) of an [`Access`] already scoped to the run's store, and its [`op`](crate::effect::Effect#variant.Store.field.op) field is a [`StoreOp`]. The host performs the operation with [`perform_store_op`] and hands the whole [`Result`] back through [`Run::resume`](crate::Run::resume) as an [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store). The crate page's host loop does exactly this.
+During the run, every `store.*` call in a prompt reaches the host from [`Run::step`](crate::Run::step) inside [`Step::Pending`](crate::Step::Pending) as an [`Effect::Store`](crate::effect::Effect::Store). Its [`access`](crate::effect::Effect#variant.Store.field.access) field is an [`Arc`](std::sync::Arc) of an [`Access`] that is the store view - rooted at the handle's declared store, confined to its mount, under the chain's own identity - and its [`op`](crate::effect::Effect#variant.Store.field.op) field is a [`StoreOp`]. The host performs the operation with [`perform_store_op`] and hands the whole [`Result`] back through [`Run::resume`](crate::Run::resume) as an [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store). The crate page's host loop does exactly this.
 
 Three rules apply to the [`Access`] in a store effect. The host uses it as given and never derives or widens store scope from it. Dropping the access when the operation completes is good hygiene, but it never affects correctness: claims follow happens-before within the run's scope and are ignored once the scope ends. And because [`perform_store_op`] is synchronous, an async host runs it off its executor, for example on a blocking pool.
 
-A [`StoreError`] in the answer is raised in the prompt at the `store.*` call when the answer is resumed, so the prompt author can handle it. The exception is [`StoreError::WriteRace`], which ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism). For a log, [`Effect::record`](crate::effect::Effect::record) keeps the [`StoreOp`] as [`EffectRecord::Store`](crate::effect::EffectRecord::Store) and drops the access, and [`EffectAnswer::record`](crate::effect::EffectAnswer::record) keeps the outcome as [`AnswerRecord::Store`](crate::effect::AnswerRecord::Store). The run also reports each store outcome on its [`Event`](crate::event::Event) stream, which the [`event`](crate::event) page lists.
+A [`VfsError`] in the answer is raised in the prompt at the `store.*` call when the answer is resumed, as an error value of kind `store` carrying the failure's `reason` and fields, so the prompt author can handle it. The exception is [`VfsError::Conflict`], which ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism) and cannot be caught. For a log, [`Effect::record`](crate::effect::Effect::record) keeps the [`StoreOp`] as [`EffectRecord::Store`](crate::effect::EffectRecord::Store) and drops the access, and [`EffectAnswer::record`](crate::effect::EffectAnswer::record) keeps the outcome as [`AnswerRecord::Store`](crate::effect::AnswerRecord::Store), a failure recorded as the [`VfsError`]'s [`Display`](std::fmt::Display) text. The run also reports each store outcome on its [`Event`](crate::event::Event) stream, which the [`event`](crate::event) page lists.
 
 # A first filesystem
 
@@ -326,9 +326,9 @@ assert_eq!(log[0].2, "observer example");
 
 # The run's store
 
-A run's store is a mount at `/_promptforge/store` inside the run's handle, and the prompt's `store` table is scoped to it. One handle serves every section of a run, so store files persist from section to section even though each section's Lua state does not. [`RunContext::new`](crate::RunContext::new) starts with a fresh memory backend at the store mount. [`Environment::run_vfs`](crate::Environment::run_vfs) builds a router with the environment's base mounted at `/` plus a fresh memory backend at the store mount, so every run shares the base and gets its own store. Several concurrent runs can share one host-backed base this way. Each run is its own scope, and two live scopes never order each other, so when a second run writes a path such as `/shared.txt` while the first run's claim on it is live, the write fails with [`VfsError::Conflict`], and the file keeps the first run's contents.
+A run's store is the mount its handle declares, and the prompt's `store` table is scoped to it through a *store view*: an [`Access`] rooted at the declared store root, confined to the store's own mount, under the chain's identity. The engine derives one from the chain's capability for every store call, so a [`StoreOp`] can reach only files inside the store, and one chain never conflicts with itself through its view. One handle serves every section of a run, so store files persist from section to section even though each section's Lua state does not. [`RunContext::new`](crate::RunContext::new) starts with the default handle, a fresh memory store at `/`. A host with host roots builds the run's handle itself with [`VfsRef::builder`](crate::vfs::VfsRef::builder), mounting its base at `/` and declaring the store, and hands it to [`RunContext::vfs`](crate::RunContext::vfs). Several concurrent runs can share one host-backed base this way. Each run is its own scope, and two live scopes never order each other, so when a second run writes a path such as `/shared.txt` while the first run's claim on it is live, the write fails with [`VfsError::Conflict`], and the file keeps the first run's contents. A run whose handle declares no store fails with [`RunErrorKind::Store`](crate::RunErrorKind::Store).
 
-A [`StoreOp`] names its paths logically, relative to the store mount. So `notes.md` means `/_promptforge/store/notes.md`, and a [`StoreOp`] can reach only files inside the run's store. The host seeds and extracts through the full virtual path. [`perform_store_op`] validates each logical path before any backend sees it, and reports a broken rule as [`StoreError::InvalidPath`] with a [`PathReason`]. The checks run in this order, and the first rule broken is reported:
+A [`StoreOp`] names its paths logically, relative to the store root. So `notes.md` means `/notes.md` when the store is at `/`, and a [`StoreOp`] can reach only files inside the run's store. The host seeds and extracts through the store view's logical paths, as the example below does. The store view validates each logical path before any backend sees it, and reports a broken rule as [`VfsError::InvalidPath`] with a [`PathReason`]. The checks run in this order, and the first rule broken is reported:
 
 1. The path is empty: [`PathReason::Empty`].
 2. The path is over 1024 bytes: [`PathReason::TooLong`].
@@ -337,20 +337,18 @@ A [`StoreOp`] names its paths logically, relative to the store mount. So `notes.
 5. The path contains a backslash: [`PathReason::Backslash`].
 6. Then, for each segment between slashes: an empty segment gives [`PathReason::EmptySegment`], a `.` or `..` segment gives [`PathReason::Traversal`], a trailing `.` or space gives [`PathReason::UnsafeSuffix`], and a reserved device name gives [`PathReason::ReservedName`]. The reserved names are `CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, and `LPT1` to `LPT9`.
 
-[`StoreError::kind`] classifies a failure with a stable [`StoreErrorKind`]. Match on the kind rather than on the error's variants, as the error's own documentation directs. [`StoreError::is_not_found`] tells whether the file was absent, and [`StoreError::path`] recovers the logical path. A host store performer that fails for its own reasons wraps its error with [`StoreError::backend`].
+A store failure reaches the author as an error value of kind `store`, carrying `reason`, the variant's fields (`path`, plus `anchor` and the integer `count` for an anchor error, or `rule` for an invalid path), and a model-facing `message` that says what failed and how to fix it. A missing file reads "file not found in store: notes.md". Rust code matches the [`VfsError`] variant directly and reads its fields; a host store performer that fails for its own reasons returns [`VfsError::Backend`].
 
-This example seeds a file through the context's handle, then calls [`perform_store_op`] against it, as a host loop does for each store effect:
+This example seeds a file through the context's handle, then calls [`perform_store_op`] against the store view, as a host loop does for each store effect:
 
 ````
 use promptforge::RunContext;
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::{
-    perform_store_op, Origin, PathReason, StoreError, StoreErrorKind, StoreOp, StoreOutcome,
-};
+use promptforge::vfs::{perform_store_op, Origin, StoreOp, StoreOutcome, VfsError};
 
 let ctx = RunContext::new("store example", 7, Timestamp::UNIX_EPOCH);
 let seed = ctx.vfs_handle().acquire(Origin::new("seed"))?;
-seed.write("/_promptforge/store/brief.md", b"one\ntwo\n")?;
+seed.write("/brief.md", b"one\ntwo\n")?;
 drop(seed);
 
 let access = ctx.vfs_handle().acquire(Origin::new("store example"))?;
@@ -364,18 +362,8 @@ let missing = StoreOp::Read { path: "missing.md".to_owned(), start: None, end: N
 let Err(error) = perform_store_op(&access, missing) else {
     panic!("the file is absent");
 };
-assert!(error.kind() == StoreErrorKind::NotFound);
-assert!(error.is_not_found());
-assert_eq!(error.path(), Some("missing.md"));
+assert!(matches!(error, VfsError::NotFound { .. }));
 
-let absolute = StoreOp::Write { path: "/brief.md".to_owned(), contents: "x".to_owned() };
-let Err(error) = perform_store_op(&access, absolute) else {
-    panic!("store paths are relative");
-};
-assert!(matches!(error, StoreError::InvalidPath { reason: PathReason::Absolute, .. }));
-
-let own = StoreError::backend(std::io::Error::other("disk gone"));
-assert!(own.kind() == StoreErrorKind::Backend);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
@@ -507,7 +495,7 @@ This part covers every item in the module, grouped by task: handles and access f
 - [`VfsRef::with_policy`] takes `backend`, as for [`VfsRef::new`], and `policy`, any [`Policy`] that is also [`Sync`] and `'static`. It returns a handle with that policy, no op sink, and a fresh claims table.
 - [`VfsRef::builder`] returns an empty [`VfsRefBuilder`], with no mounts, no policy, no sink, and no store.
 - `VfsRef` implements [`Default`](std::default::Default): [`Default::default`](std::default::Default::default) returns a fresh handle with one mount, a memory backend at `/`, declared as the store, and nothing else.
-- [`VfsRef::overlay`] takes `&self`, a `prefix` of type [`&str`](str), and a `backend` that is any `'static` [`Vfs`]. The prefix is the absolute virtual path to mount the backend at. It returns a new handle whose namespace is this handle's namespace with the backend mounted at the prefix, sharing this handle's claims table, policy, and op sink. Operations outside the prefix route through this handle. It panics with "invalid overlay prefix {prefix:?}: {err}" when the prefix does not canonicalize, and with "an overlay at / would replace the base entirely; use VfsRef::new instead" for `/`. [`Environment::prepare`](crate::Environment::prepare) builds per-run stores with a fresh router instead of an overlay, because concurrent runs' stores are different storage.
+- [`VfsRef::overlay`] takes `&self`, a `prefix` of type [`&str`](str), and a `backend` that is any `'static` [`Vfs`]. The prefix is the absolute virtual path to mount the backend at. It returns a new handle whose namespace is this handle's namespace with the backend mounted at the prefix, sharing this handle's claims table, policy, op sink, and store declaration. Operations outside the prefix route through this handle. It panics with "invalid overlay prefix {prefix:?}: {err}" when the prefix does not canonicalize, and with "an overlay at / would replace the base entirely; use VfsRef::new instead" for `/`.
 - [`VfsRef::acquire`] takes `&self` and an [`Origin`], and returns a new [`Access`] bound to a fresh [`ExecId`]. It starts a *scope*: the acquired identity is the scope's root, and every identity forked from it joins the scope. Nothing orders two scopes, so two live scopes' claims always conflict. The origin labels every operation the access performs. It fails with the backend's own error when a directly wrapped backend's [`Vfs::acquire`] refuses the identity. A router acquires each mount lazily, so a mount's refusal surfaces from the first operation on that mount.
 
 [`VfsRef`] implements [`Vfs`], and its [`Vfs::read_only`] reports the wrapped backend's flag.
@@ -539,7 +527,7 @@ Neither constructor can fail. [Identities and claims](#identities-and-claims) sa
 
 [`Access`] is the capability that every filesystem operation goes through. It is bound to one [`ExecId`] and one [`Origin`]. The host receives one from [`VfsRef::acquire`], or inside an [`Effect::Store`](crate::effect::Effect::Store), and never builds one. It is [`Send`] and [`Sync`]. It is `#[must_use]`, because an access dropped at once releases its identity before any work is done.
 
-Each method canonicalizes its path arguments, consults the policy, registers a claim, fires the op sink, and then calls the backend, in that order. So every method can fail with [`VfsError::InvalidPath`] for a malformed path, [`VfsError::PermissionDenied`] when the policy refuses, [`VfsError::Conflict`] when a claim conflicts, and [`VfsError::NotFound`] when no mount serves the path. A mutation also fails with [`VfsError::PermissionDenied`] on a read-only mount. Any other backend error passes through. The entries below give each method's arguments, its return value, the [`Op`] it reports, and its other failures. Every path argument is a [`&str`](str). A path without a leading `/` joins onto the access's root, which is `/` for every [`Access`] a host receives, so `"notes.md"` means `"/notes.md"`.
+Each method canonicalizes its path arguments, consults the policy, registers a claim, fires the op sink, and then calls the backend, in that order. So every method can fail with [`VfsError::InvalidPath`] for a malformed path, [`VfsError::PermissionDenied`] when the policy refuses, [`VfsError::Conflict`] when a claim conflicts, and [`VfsError::NotFound`] when no mount serves the path. A mutation also fails with [`VfsError::PermissionDenied`] on a read-only mount. Any other backend error passes through. The entries below give each method's arguments, its return value, the [`Op`] it reports, and its other failures. Every path argument is a [`&str`](str). A path without a leading `/` joins onto the access's root, which is `/` for every [`Access`] a host receives outside a store effect, so `"notes.md"` means `"/notes.md"`. The [`Access`] inside an [`Effect::Store`](crate::effect::Effect::Store) is the store view, rooted at the handle's declared store, where the same `"notes.md"` means the store's `/notes.md` and every error path reads back in that logical form.
 
 **Reading.**
 
@@ -576,7 +564,7 @@ Dropping an [`Access`] drops one reference to its identity and releases its back
 
 [`VfsError`] is the one error type every filesystem operation returns. The host receives it from [`Access`], [`VfsRef::acquire`], and [`HostBackend::rooted`]. Every variant is a plain struct with public fields: the variant is the kind, so a host matches on it and reads the fields directly. There are no helper methods. A custom backend builds variants directly, as literals, for example `VfsError::NotFound { path: path.to_string() }`. The enum is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
 
-- [`VfsError::NotFound`]: the path does not exist in the serving backend. A router also returns it when no mount serves the path, [`HostBackend::rooted`] returns it for an absent directory, and the memory backend returns it for a non-recursive [`Access::mkdir`] with a missing parent. Through the store it becomes [`StoreError::NotFound`], or success for [`StoreOp::Delete`].
+- [`VfsError::NotFound`]: the path does not exist in the serving backend. A router also returns it when no mount serves the path, [`HostBackend::rooted`] returns it for an absent directory, and the memory backend returns it for a non-recursive [`Access::mkdir`] with a missing parent. Through a store view it keeps its name, and [`StoreOp::Delete`] turns it into success.
   - [`VfsError::NotFound::path`](VfsError#variant.NotFound.field.path), a [`String`], is the path that did not resolve.
 - [`VfsError::AlreadyExists`]: the path already exists where creation required absence, for example [`Access::mkdir`] on an existing path.
   - [`VfsError::AlreadyExists::path`](VfsError#variant.AlreadyExists.field.path), a [`String`], is the path that was already present.
@@ -604,7 +592,7 @@ Dropping an [`Access`] drops one reference to its identity and releases its back
 - [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose detail is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", a regex grep against the default body, and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
   - [`VfsError::Unsupported::path`](VfsError#variant.Unsupported.field.path), a [`String`], is the path the operation targeted.
   - [`VfsError::Unsupported::detail`](VfsError#variant.Unsupported.field.detail), a [`String`], names what is unsupported and why.
-- [`VfsError::Conflict`]: the operation conflicts with a claim unordered with its own - a claim by an identity in another live scope, or one in the same scope whose epoch the access's clock has not seen - and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path becomes [`StoreError::WriteRace`] and ends the run.
+- [`VfsError::Conflict`]: the operation conflicts with a claim unordered with its own - a claim by an identity in another live scope, or one in the same scope whose epoch the access's clock has not seen - and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism), which Lua cannot catch.
   - [`VfsError::Conflict::path`](VfsError#variant.Conflict.field.path), a [`String`], is the canonical path or pattern both accesses claimed.
   - [`VfsError::Conflict::detail`](VfsError#variant.Conflict.field.detail), a [`String`], is the happens-before diagnosis, naming both identities and both claim kinds.
 - [`VfsError::Backend`]: the serving backend failed for any other reason. That covers a backend refusing an identity, an unmapped host I/O error, and a byte-range read whose bounds exceed the addressable size.
@@ -643,7 +631,7 @@ The backend overrides [`VfsAccess::read_range`] with a seek. [`Access::list`] so
 
 - [`Entry::name`], a [`String`], is the entry's name within its directory. It is a single segment, not a full path.
 - [`Entry::stat`], a [`Stat`], is the entry's metadata. The host backend's listing does not follow symlinks.
-- [`Entry::description`], an [`Option`] of [`String`], is an optional annotation shown beside the entry. Its documentation says it is [`None`] outside `/_promptforge`. The built-in backends always set it to [`None`].
+- [`Entry::description`], an [`Option`] of [`String`], is an optional annotation shown beside the entry. The built-in backends always set it to [`None`].
 
 ## Stat
 
@@ -785,18 +773,18 @@ For a mutation, [`Mode::Agent`] returns [`Verdict::Allow`]. [`Mode::Ask`] return
 
 [`perform_store_op`] performs one store operation through an [`Access`], which is the work behind an [`Effect::Store`](crate::effect::Effect::Store). A host that calls it answers a store effect exactly as the engine's own drivers do. It takes two arguments, both from the same effect.
 
-- `access`, a reference to an [`Access`], is the capability from the effect's [`access`](crate::effect::Effect#variant.Store.field.access) field. Pass it as received.
+- `access`, a reference to an [`Access`], is the store view from the effect's [`access`](crate::effect::Effect#variant.Store.field.access) field. Pass it as received.
 - `op`, a [`StoreOp`], is the validated operation from the effect's [`op`](crate::effect::Effect#variant.Store.field.op) field.
 
-It returns a [`Result`] of a [`StoreOutcome`] or a [`StoreError`]. The outcome is [`StoreOutcome::Unit`] for [`StoreOp::Write`], [`StoreOp::Append`], [`StoreOp::StrReplace`], and [`StoreOp::Delete`], [`StoreOutcome::Text`] for [`StoreOp::Read`] and [`StoreOp::ReadNumbered`], [`StoreOutcome::Paths`] for [`StoreOp::Glob`], and [`StoreOutcome::Bool`] for [`StoreOp::Exists`]. Wrap the whole [`Result`] in [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store) and pass it to [`Run::resume`](crate::Run::resume).
+It returns a [`Result`] of a [`StoreOutcome`] or a [`VfsError`]. The outcome is [`StoreOutcome::Unit`] for [`StoreOp::Write`], [`StoreOp::Append`], [`StoreOp::StrReplace`], and [`StoreOp::Delete`], [`StoreOutcome::Text`] for [`StoreOp::Read`] and [`StoreOp::ReadNumbered`], [`StoreOutcome::Paths`] for [`StoreOp::Glob`], and [`StoreOutcome::Bool`] for [`StoreOp::Exists`]. Wrap the whole [`Result`] in [`EffectAnswer::Store`](crate::effect::EffectAnswer::Store) and pass it to [`Run::resume`](crate::Run::resume).
 
-It is synchronous, so an async host runs it off its executor. Logical paths are joined onto the store mount `/_promptforge/store`. [`StoreOp::Delete`] of a missing file succeeds. [`StoreOp::Glob`] lists only files, as logical paths, and its read claim is the pattern itself.
+It is synchronous, so an async host runs it off its executor. The `i64` line bounds convert to `usize` here, and an `end` without a `start` is refused as an invalid range. [`StoreOp::Delete`] of a missing file succeeds. [`StoreOp::Glob`] lists only files, as logical paths, and its read claim is the pattern itself.
 
 ## StoreOp
 
 [`StoreOp`] is one validated store operation: the name of a prompt's `store.*` call plus the author's arguments. The host receives it inside an [`Effect::Store`](crate::effect::Effect::Store) and runs it with [`perform_store_op`]. A host can also build a variant directly, such as `StoreOp::Read { path: "missing.txt".to_owned(), start: None, end: None }`, or deserialize one. The enum is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
 
-Every path field is a logical path relative to the run's store mount, validated against the [`PathReason`] rules before dispatch.
+Every path field is a logical path relative to the run's store root, validated against the [`PathReason`] rules before dispatch.
 
 - [`StoreOp::Write`] is `store.write(path, contents)`. It creates or overwrites the file.
   - [`StoreOp::Write::path`](StoreOp#variant.Write.field.path), a [`String`], is the logical path.
@@ -806,7 +794,7 @@ Every path field is a logical path relative to the run's store mount, validated 
   - [`StoreOp::Append::contents`](StoreOp#variant.Append.field.contents), a [`String`], is the text to append.
 - [`StoreOp::Read`] is `store.read(path, start?, end?)`. With no `start` and no `end` it reads the whole file verbatim. With a `start` it returns a 1-based, inclusive line range joined by `"\n"` with no trailing newline.
   - [`StoreOp::Read::path`](StoreOp#variant.Read.field.path), a [`String`], is the logical path of a UTF-8 file.
-  - [`StoreOp::Read::start`](StoreOp#variant.Read.field.start), an [`Option`] of [`i64`], is the first line. A value below 1 fails with [`StoreError::InvalidRange`] and "start must be at least 1", and a negative value counts as 0. A `start` past the last line gives `""`.
+  - [`StoreOp::Read::start`](StoreOp#variant.Read.field.start), an [`Option`] of [`i64`], is the first line. A value below 1 fails with [`VfsError::InvalidRange`] and "start must be at least 1", and a negative value counts as 0. A `start` past the last line gives `""`.
   - [`StoreOp::Read::end`](StoreOp#variant.Read.field.end), an [`Option`] of [`i64`], is the last line, inclusive. [`None`] means the last line, and a value past the last line clamps to it. An `end` without a `start` fails with "start is required when end is given", and an `end` before `start` fails with "end must not be before start".
 - [`StoreOp::ReadNumbered`] is `store.read_numbered(path, start?, end?)`: the same read with absolute line numbers, right-aligned and followed by `"| "`. With no bounds it numbers the whole file from 1.
   - [`StoreOp::ReadNumbered::path`](StoreOp#variant.ReadNumbered.field.path), a [`String`], is the logical path.
@@ -814,12 +802,12 @@ Every path field is a logical path relative to the run's store mount, validated 
   - [`StoreOp::ReadNumbered::end`](StoreOp#variant.ReadNumbered.field.end), an [`Option`] of [`i64`], follows the rules of [`StoreOp::Read::end`](StoreOp#variant.Read.field.end).
 - [`StoreOp::StrReplace`] is `store.str_replace(path, old, new)`. It replaces the one occurrence of the anchor.
   - [`StoreOp::StrReplace::path`](StoreOp#variant.StrReplace.field.path), a [`String`], is the logical path.
-  - [`StoreOp::StrReplace::old`](StoreOp#variant.StrReplace.field.old), a [`String`], is the anchor text, which must occur exactly once. An empty anchor fails with [`StoreError::InvalidAnchor`], no match with [`StoreError::AnchorNotFound`], and more than one match with [`StoreError::AnchorAmbiguous`].
+  - [`StoreOp::StrReplace::old`](StoreOp#variant.StrReplace.field.old), a [`String`], is the anchor text, which must occur exactly once. An empty anchor, no match, or more than one match fails with [`VfsError::Anchor`], whose fields name the path, the anchor, and the count.
   - [`StoreOp::StrReplace::new`](StoreOp#variant.StrReplace.field.new), a [`String`], is the replacement text, and may be empty.
 - [`StoreOp::Delete`] is `store.delete(path)`. It removes the file, and a missing file succeeds.
   - [`StoreOp::Delete::path`](StoreOp#variant.Delete.field.path), a [`String`], is the logical path. The removal is not recursive, so a path that is a directory with children fails as a backend error.
 - [`StoreOp::Glob`] is `store.glob(pattern)`. It lists the stored files that match.
-  - [`StoreOp::Glob::pattern`](StoreOp#variant.Glob.field.pattern), a [`String`], is a glob relative to the store mount, with `*` within one segment and `**` across segments as a whole segment. It must be non-empty, at most 1024 bytes, and free of control characters and backslashes. Only files are listed, as logical paths.
+  - [`StoreOp::Glob::pattern`](StoreOp#variant.Glob.field.pattern), a [`String`], is a glob relative to the store root, with `*` within one segment and `**` across segments as a whole segment. It must be non-empty, at most 1024 bytes, and free of control characters and backslashes. Only files are listed, as logical paths, and a pattern ending in `/` lists directories only.
 - [`StoreOp::Exists`] is `store.exists(path)`. It tests whether the path exists.
   - [`StoreOp::Exists::path`](StoreOp#variant.Exists.field.path), a [`String`], is the logical path.
 
@@ -834,76 +822,12 @@ The read bounds are [`i64`] for compatibility with the prompt-facing call. [`Sto
 - [`StoreOutcome::Paths`] holds a [`Vec`] of [`String`]: the matching logical file paths, sorted. It answers [`StoreOp::Glob`].
 - [`StoreOutcome::Bool`] holds a [`bool`]: whether the path exists. It answers [`StoreOp::Exists`].
 
-## StoreError
-
-[`StoreError`] is the failure of one store operation. [`perform_store_op`] returns it, and the answer carries it back to the run, which raises it at the prompt's call site. [`StoreError::backend`] is the only public constructor. The enum and every variant with fields are `#[non_exhaustive]`, so a pattern on a variant needs `..`. Its documentation directs hosts to match on [`StoreError::kind`] rather than on variants. Every `path` field below is the logical path exactly as the caller supplied it, relative to the store mount.
-
-- [`StoreError::NotFound`]: no file exists at the path. [`StoreOp::Read`], [`StoreOp::ReadNumbered`], and [`StoreOp::StrReplace`] return it for a missing file. Pass it back as the answer, and the author sees it at the call site.
-  - [`StoreError::NotFound::path`](StoreError#variant.NotFound.field.path), a [`String`], is the path that did not resolve.
-- [`StoreError::InvalidAnchor`]: a [`StoreOp::StrReplace`] anchor was refused before any search. The only cause is an empty anchor.
-  - [`StoreError::InvalidAnchor::path`](StoreError#variant.InvalidAnchor.field.path), a [`String`], is the path the edit targeted.
-  - [`StoreError::InvalidAnchor::reason`](StoreError#variant.InvalidAnchor.field.reason), a [`&'static str`](str), is the reason, currently always "anchor must not be empty".
-- [`StoreError::AnchorNotFound`]: the anchor did not occur in the file, and nothing was written.
-  - [`StoreError::AnchorNotFound::path`](StoreError#variant.AnchorNotFound.field.path), a [`String`], is the path that was searched.
-  - [`StoreError::AnchorNotFound::anchor`](StoreError#variant.AnchorNotFound.field.anchor), a [`String`], is the anchor text.
-- [`StoreError::AnchorAmbiguous`]: the anchor occurred more than once, so the edit was refused rather than applied to an arbitrary match.
-  - [`StoreError::AnchorAmbiguous::path`](StoreError#variant.AnchorAmbiguous.field.path), a [`String`], is the path that was searched.
-  - [`StoreError::AnchorAmbiguous::anchor`](StoreError#variant.AnchorAmbiguous.field.anchor), a [`String`], is the anchor text.
-  - [`StoreError::AnchorAmbiguous::count`](StoreError#variant.AnchorAmbiguous.field.count), a [`usize`], is the number of non-overlapping matches, always 2 or more.
-- [`StoreError::InvalidPath`]: a path failed validation before any backend saw it.
-  - [`StoreError::InvalidPath::path`](StoreError#variant.InvalidPath.field.path), a [`String`], is the rejected path.
-  - [`StoreError::InvalidPath::reason`](StoreError#variant.InvalidPath.field.reason), a [`PathReason`], is the rule it broke.
-- [`StoreError::InvalidPattern`]: a [`StoreOp::Glob`] pattern was rejected before matching.
-  - [`StoreError::InvalidPattern::pattern`](StoreError#variant.InvalidPattern.field.pattern), a [`String`], is the rejected pattern as supplied, without the store mount prefix.
-  - [`StoreError::InvalidPattern::reason`](StoreError#variant.InvalidPattern.field.reason), a [`String`], is "pattern is empty", "pattern exceeds 1024 bytes", "pattern contains a control character", "pattern does not support backslash escapes", or the [`VfsError::InvalidPath`] reason text for a grammar or canonicalization failure.
-- [`StoreError::InvalidRange`]: a [`StoreOp::Read`] or [`StoreOp::ReadNumbered`] line range was rejected.
-  - [`StoreError::InvalidRange::path`](StoreError#variant.InvalidRange.field.path), a [`String`], is the path the read targeted.
-  - [`StoreError::InvalidRange::reason`](StoreError#variant.InvalidRange.field.reason), a [`&'static str`](str), is "start must be at least 1", "end must not be before start", or "start is required when end is given".
-- [`StoreError::WriteRace`]: two unordered accesses touched the same path, and the losing operation never reached the backend. It ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism), which Lua cannot catch.
-  - [`StoreError::WriteRace::path`](StoreError#variant.WriteRace.field.path), a [`String`], is the path the conflicting operation targeted.
-  - [`StoreError::WriteRace::detail`](StoreError#variant.WriteRace.field.detail), a [`String`], is the [`VfsError::Conflict`] message, naming the canonical virtual path, both identities, and both claim kinds.
-- [`StoreError::Backend`]: the backend failed for a reason of its own. Every filesystem error other than not-found and conflict lands here, including a policy denial, a read-only mount, and text that is not UTF-8.
-  - [`StoreError::Backend::source`](StoreError#variant.Backend.field.source), a [`Box`] of a [`std::error::Error`] that is [`Send`] and [`Sync`], is the backend's own error. For a filesystem failure it is the [`VfsError`], so a host can downcast it to inspect it.
-
-The methods classify and inspect an error. None of them can fail.
-
-- [`StoreError::kind`] returns the stable [`StoreErrorKind`]. [`StoreError::AnchorNotFound`] and [`StoreError::AnchorAmbiguous`] both map to [`StoreErrorKind::Anchor`], and every other variant maps to the kind of the same name.
-- [`StoreError::is_not_found`] returns `true` only for [`StoreError::NotFound`].
-- [`StoreError::path`] returns the logical path as an [`Option`] of [`&str`](str), for example `Some("missing.txt")`. It is [`None`] for [`StoreError::InvalidPattern`] and [`StoreError::Backend`].
-- [`StoreError::conflict_detail`] returns the full conflict diagnosis from a [`StoreError::WriteRace`] as an [`Option`] of [`&str`](str), and [`None`] for every other variant. The engine passes it verbatim into the run's determinism failure.
-- [`StoreError::backend`] takes `source`, any [`std::error::Error`] that is [`Send`], [`Sync`], and `'static`, and returns a [`StoreError::Backend`] holding it boxed. Use it when a host store performer fails for its own reasons, or to convert a [`VfsError`] into a [`StoreError`].
-
-[`StoreError`] implements [`std::error::Error`], and [`StoreError::Backend`] reports its source through [`source`](std::error::Error::source). It is not [`Clone`]. Its [`Display`](std::fmt::Display) texts are lowercase with no trailing period:
-
-- [`StoreError::NotFound`]: "file not found: {path}"
-- [`StoreError::InvalidAnchor`]: "invalid anchor for {path}: {reason}"
-- [`StoreError::AnchorNotFound`]: "anchor not found in {path}"
-- [`StoreError::AnchorAmbiguous`]: "anchor occurs {count} times in {path}, expected exactly one"
-- [`StoreError::InvalidPath`]: "invalid path {path:?}: {reason}"
-- [`StoreError::InvalidPattern`]: "invalid glob pattern {pattern:?}: {reason}"
-- [`StoreError::InvalidRange`]: "invalid line range for {path}: {reason}"
-- [`StoreError::WriteRace`]: "write-write race on {path}: another unordered access holds a claim on it"
-- [`StoreError::Backend`]: "store backend failure"
-
-## StoreErrorKind
-
-[`StoreErrorKind`] is the stable, matchable classification of a [`StoreError`], returned by [`StoreError::kind`]. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm, and new causes can be added without breaking it. It has no [`Display`](std::fmt::Display).
-
-- [`StoreErrorKind::NotFound`]: no file exists at the path.
-- [`StoreErrorKind::Anchor`]: a `store.str_replace` anchor did not occur, or occurred more than once.
-- [`StoreErrorKind::InvalidAnchor`]: a `store.str_replace` anchor was empty and refused before any search.
-- [`StoreErrorKind::InvalidPath`]: a path failed validation.
-- [`StoreErrorKind::InvalidPattern`]: a glob pattern failed validation.
-- [`StoreErrorKind::InvalidRange`]: a line range failed validation.
-- [`StoreErrorKind::WriteRace`]: two unordered accesses touched the same path.
-- [`StoreErrorKind::Backend`]: the backend itself failed, including policy denials and read-only mounts surfaced through the store.
-
 ## PathReason
 
-[`PathReason`] says why a path or glob pattern was rejected before any backend saw it. The VFS owns it: every [`VfsError::InvalidPath`] carries one, and the store re-exports it and reuses the first nine reasons for its own path validation, where it arrives in [`StoreError::InvalidPath::reason`](StoreError#variant.InvalidPath.field.reason). Hosts never build one, though they can name variants to compare. It is `#[non_exhaustive]`. [The run's store](#the-runs-store) gives the order the store's rules are checked in. The fix in every case is to supply a path that follows the rule.
+[`PathReason`] says why a path or glob pattern was rejected before any backend saw it. The VFS owns it: every [`VfsError::InvalidPath`] carries one, and the store view reuses the first nine reasons for its own path validation. Hosts never build one, though they can name variants to compare and read the tag with [`PathReason::tag`](PathReason::tag). It is `#[non_exhaustive]`. [The run's store](#the-runs-store) gives the order the store's rules are checked in. The fix in every case is to supply a path that follows the rule.
 
 - [`PathReason::Empty`]: the path was the empty string. Its documentation also claims a path made only of separators, but the leading `/` check runs first, so such a path reports [`PathReason::Absolute`].
-- [`PathReason::Absolute`]: the path began with `/`. Store paths are relative to the store mount, so drop the leading slash.
+- [`PathReason::Absolute`]: the path began with `/`. Store paths are relative to the store root, so drop the leading slash.
 - [`PathReason::Traversal`]: a segment was `.` or `..`.
 - [`PathReason::Control`]: the path contained a byte below `0x20` or equal to `0x7f`.
 - [`PathReason::EmptySegment`]: the path contained an empty segment, from a `//` run or a trailing `/`.

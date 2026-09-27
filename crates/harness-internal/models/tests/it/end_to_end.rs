@@ -336,7 +336,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
     let services = Services {
         registry: None,
-        vfs: promptforge::vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::default(),
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(GatewayChatPerformer::new(client, deltas)),

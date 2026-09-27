@@ -22,8 +22,8 @@ use crate::cancel::CancelHandle;
 use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
-use crate::store::{Access, VfsRef};
 use crate::untrusted::GuardNonce;
+use promptforge_vfs::{Access, VfsRef};
 
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
@@ -46,9 +46,9 @@ pub(crate) struct RunState {
     /// The untrusted-envelope nonce, derived once here from the run's seed
     /// so every wrap in the run shares it.
     nonce: GuardNonce,
-    /// The run's VFS handle: holds the store mount backing every
-    /// section's Lua `store` table. Chain steps acquire or spawn their
-    /// access capabilities from it.
+    /// The run's VFS handle: the run's whole filesystem, the declared
+    /// store backing every section's Lua `store` table included. Chain
+    /// steps acquire or spawn their access capabilities from it.
     vfs: VfsRef,
     /// The execution identifier stamped on every observation.
     execution: Arc<str>,

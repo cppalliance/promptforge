@@ -3,11 +3,11 @@
 
 use super::*;
 
-/// A fresh stock handle's access capability, for tests that inject host
+/// A fresh default handle's access capability, for tests that inject host
 /// values into a standalone VM.
 pub(super) fn fresh_access() -> Arc<Access> {
     Arc::new(
-        promptforge_vfs::empty()
+        VfsRef::default()
             .acquire(promptforge_vfs::Origin::new("execute test fixture"))
             .expect("the stock backend acquires"),
     )
@@ -186,22 +186,18 @@ pub(super) struct RunOptions {
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
 }
 
-/// The test stand-in for the old `StoreRef::memory()`: a stock VFS handle
-/// (the store mount preinstalled) whose `read`/`write` helpers each go
-/// through a fresh, immediately dropped access. A short-lived access per
-/// call is what keeps seeding and post-run assertions conflict-free: each
-/// access is its own scope, and its claims die with it, so a held seeder
-/// access would meet the run's own scope as a false race.
-///
-/// The handle is reconnectable: [`run`]'s prepare pass builds the run's
-/// own router (a fresh store backend per run), so the wrapper points the
-/// store at the prepared handle before driving, and post-run assertions
-/// read what the run actually wrote.
+/// The test stand-in for the old `StoreRef::memory()`: a fresh default
+/// VFS handle (a memory store at `/`) whose `read`/`glob` helpers each go
+/// through a fresh, immediately dropped access and its store view. A
+/// short-lived access per call is what keeps seeding and post-run
+/// assertions conflict-free: each access is its own scope, and its claims
+/// die with it, so a held seeder access would meet the run's own scope as
+/// a false race.
 pub(super) struct TestStore(Mutex<VfsRef>);
 
 impl TestStore {
     pub(super) fn new() -> TestStore {
-        TestStore(Mutex::new(promptforge_vfs::empty()))
+        TestStore(Mutex::new(VfsRef::default()))
     }
 
     /// Wraps a caller-built handle - a gated backend, say - in the test
@@ -210,7 +206,8 @@ impl TestStore {
         TestStore(Mutex::new(vfs))
     }
 
-    /// The handle the run and the context builders take.
+    /// The handle the run and the context builders take: the run's whole
+    /// filesystem, store included.
     pub(super) fn vfs(&self) -> VfsRef {
         self.0
             .lock()
@@ -218,26 +215,18 @@ impl TestStore {
             .clone()
     }
 
-    /// Points the store at the run's prepared handle, so post-run
-    /// assertions read the store the run actually used.
-    pub(super) fn reconnect(&self, vfs: VfsRef) {
-        *self.0.lock().expect("the store lock is not poisoned") = vfs;
+    pub(super) fn read(&self, path: &str) -> std::result::Result<String, VfsError> {
+        let access = self
+            .vfs()
+            .acquire(promptforge_vfs::Origin::new("TestStore::read"))?;
+        promptforge_vfs::detail::store_view(&access)?.read_string(path)
     }
 
-    pub(super) fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
-        let vfs = self.vfs();
-        let access = vfs
-            .acquire(promptforge_vfs::Origin::new("TestStore::read"))
-            .map_err(StoreError::backend)?;
-        Store::new(&access).read(path)
-    }
-
-    pub(super) fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
-        let vfs = self.vfs();
-        let access = vfs
-            .acquire(promptforge_vfs::Origin::new("TestStore::glob"))
-            .map_err(StoreError::backend)?;
-        Store::new(&access).glob(pattern)
+    pub(super) fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, VfsError> {
+        let access = self
+            .vfs()
+            .acquire(promptforge_vfs::Origin::new("TestStore::glob"))?;
+        promptforge_vfs::detail::store_view(&access)?.glob(pattern)
     }
 }
 
@@ -310,12 +299,10 @@ pub(super) async fn run(
 ) -> Result<String> {
     let mut env = Environment::new();
     let mut host = RunHost::new().observer(opts.observer);
-    // The run's own router (a fresh store backend per run) is built here
-    // and set on the context, so the test store can reconnect to the
-    // handle the run will use and read back what the run actually wrote.
-    let vfs = env.run_vfs();
-    store.reconnect(vfs.clone());
-    let mut ctx = test_context(opts.execution).vfs(vfs);
+    // The test store's handle is the run's whole filesystem: the context
+    // takes it as given, so post-run assertions read what the run
+    // actually wrote.
+    let mut ctx = test_context(opts.execution).vfs(store.vfs());
     if !tools.is_empty() {
         // The host pattern with tools: the fixtures' descriptors form the
         // catalog the run binds its frontmatter slots against, and the

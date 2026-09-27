@@ -57,7 +57,7 @@ async fn log() -> SharedLog {
 fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Services {
     Services {
         registry,
-        vfs: promptforge::vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::default(),
         cancel: CancelHandle::new(),
         log: Arc::clone(log),
         chat: Arc::new(Unused),

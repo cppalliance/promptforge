@@ -4,7 +4,7 @@
 
 ## promptforge-engine
 
-The PromptForge engine: the sans-IO `Run` state machine that executes a parsed prompt's sections as effects a host performs and answers. The facade re-exports its run, effect, context, and error types. Depends on promptforge-types, promptforge-lua, promptforge-parser, promptforge-store, promptforge-vfs, and promptforge-model-client.
+The PromptForge engine: the sans-IO `Run` state machine that executes a parsed prompt's sections as effects a host performs and answers. The facade re-exports its run, effect, context, and error types. Depends on promptforge-types, promptforge-lua, promptforge-parser, promptforge-vfs, and promptforge-model-client.
 
 ## promptforge-types
 
@@ -12,7 +12,7 @@ The shared vocabulary most of the facade is built on: the tool, capability, and 
 
 ## promptforge-lua
 
-The sandboxed Lua runtime: the section VM, the coroutine protocol, and the host surface over a restricted mlua VM. The engine executes every section's Lua block through it, and the parser splits fences for it. Depends on promptforge-types, promptforge-model-client, and promptforge-store.
+The sandboxed Lua runtime: the section VM, the coroutine protocol, and the host surface over a restricted mlua VM. The engine executes every section's Lua block through it, and the parser splits fences for it. Depends on promptforge-types, promptforge-model-client, and promptforge-vfs.
 
 ## promptforge-parser
 

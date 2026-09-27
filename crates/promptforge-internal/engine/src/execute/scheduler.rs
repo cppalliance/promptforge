@@ -84,10 +84,9 @@ use std::sync::Arc;
 
 use mlua::Thread;
 use promptforge_types::ids::{ChainId, Provenance, TaskId};
-use promptforge_vfs::Origin;
+use promptforge_vfs::{Access, Origin};
 
 use crate::parser::{Block, Prompt, Section};
-use crate::store::Access;
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 
@@ -97,7 +96,7 @@ use super::run::{Effect, EffectAnswer, EffectId};
 use super::scope::DispatchTarget;
 use super::section_context::{SectionContext, TaskSeed};
 use await_tasks::AwaitTasks;
-use pending::{Continuation, Pending, ToolCallContinuation};
+use pending::{Continuation, Pending, StoreContinuation, ToolCallContinuation};
 use tasks::TaskSlot;
 
 /// Where a sibling slice sits in the prompt tree: the index of each

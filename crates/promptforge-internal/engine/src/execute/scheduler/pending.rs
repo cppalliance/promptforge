@@ -7,6 +7,7 @@
 //! [`EffectAnswer`]: super::EffectAnswer
 //! [`Answer`]: super::Answer
 
+use crate::execute::protocol::StoreOp;
 use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
 
@@ -29,9 +30,11 @@ pub(super) enum Continuation {
     /// A `user_input` wait: the broker's text is reported and resumes with
     /// its availability flag.
     UserInput,
-    /// A store operation: the succeeded/failed observation pair its
-    /// outcome reports, `None` for `exists`, which reports nothing.
-    Store(Option<(Lifecycle, Lifecycle)>),
+    /// A store operation: the operation itself (for the answer's rendered
+    /// message and conflict classification) and the succeeded/failed
+    /// observation pair its outcome reports, `None` for `exists`, which
+    /// reports nothing.
+    Store(StoreContinuation),
     /// The internal timer behind a timed wait: the firing completes the
     /// slot backed by the effect and wakes its waiting owner; no chain
     /// resumes.
@@ -39,6 +42,17 @@ pub(super) enum Continuation {
     /// A task history read: the shim's event sequence, or the model's
     /// untrusted text.
     TaskEvents(TaskEventsReader),
+}
+
+/// What a store answer is applied with: the operation the chain yielded,
+/// so its failure's model-facing message and determinism classification
+/// render from the call surface the author used.
+pub(super) struct StoreContinuation {
+    /// The operation the effect performs.
+    pub(super) op: StoreOp,
+    /// The succeeded/failed observation pair the outcome reports; `None`
+    /// for `exists`.
+    pub(super) observations: Option<(Lifecycle, Lifecycle)>,
 }
 
 /// What a bound `tool_call`'s answer is applied with: the binding the call

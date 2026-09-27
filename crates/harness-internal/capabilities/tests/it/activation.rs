@@ -7,9 +7,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::vfs::Origin;
 use promptforge::{Environment, RunErrorKind, RunResult};
 
-use super::support::{
-    Fixture, STORE_MOUNT, captured_logs, context, parse, prepare_activated, run_activated,
-};
+use super::support::{Fixture, captured_logs, context, parse, prepare_activated, run_activated};
 
 /// A prompt declaring `promptforge/web` as a required capability.
 pub(super) const DECLARES_REQUIRED: &str = concat!(
@@ -120,16 +118,16 @@ fn activation_receives_the_runs_own_services() {
         "the activated handle is the run's own"
     );
     drop(activations);
-    // The services VFS is the run's own handle: the host built the run's
-    // router, handed it to activation, and set it on the context, so the
-    // activation's marker is readable through the context's store mount.
+    // The services VFS is the run's own handle: the host handed it to
+    // activation and to the context, so the activation's marker - written
+    // into the declared store at `/` - is readable through the context's
+    // handle after prepare.
     let access = ctx
         .vfs_handle()
         .acquire(Origin::new("post-prepare read"))
         .expect("the prepared handle acquires");
-    let marker = format!("{STORE_MOUNT}/activated.txt");
     assert_eq!(
-        access.read(&marker).expect("the marker persists"),
+        access.read("activated.txt").expect("the marker persists"),
         b"active"
     );
 }

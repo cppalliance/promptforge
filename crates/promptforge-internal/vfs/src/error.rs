@@ -43,6 +43,47 @@ pub enum PathReason {
     IntoDescendant,
 }
 
+impl PathReason {
+    /// The short tag a store error value's `rule` field holds: the same
+    /// word [`PathReason::from_tag`] parses back, so the two round-trip.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            PathReason::Empty => "empty",
+            PathReason::Absolute => "absolute",
+            PathReason::Traversal => "traversal",
+            PathReason::Control => "control",
+            PathReason::EmptySegment => "empty_segment",
+            PathReason::Backslash => "backslash",
+            PathReason::ReservedName => "reserved_name",
+            PathReason::UnsafeSuffix => "unsafe_suffix",
+            PathReason::TooLong => "too_long",
+            PathReason::Wildcard => "wildcard",
+            PathReason::IntoDescendant => "into_descendant",
+        }
+    }
+
+    /// Parses a [`PathReason::tag`]; `None` for a tag outside the
+    /// vocabulary.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<PathReason> {
+        match tag {
+            "empty" => Some(PathReason::Empty),
+            "absolute" => Some(PathReason::Absolute),
+            "traversal" => Some(PathReason::Traversal),
+            "control" => Some(PathReason::Control),
+            "empty_segment" => Some(PathReason::EmptySegment),
+            "backslash" => Some(PathReason::Backslash),
+            "reserved_name" => Some(PathReason::ReservedName),
+            "unsafe_suffix" => Some(PathReason::UnsafeSuffix),
+            "too_long" => Some(PathReason::TooLong),
+            "wildcard" => Some(PathReason::Wildcard),
+            "into_descendant" => Some(PathReason::IntoDescendant),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for PathReason {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {

@@ -13,7 +13,7 @@ use harness_log::RunId;
 use promptforge::event::Event;
 use promptforge::ids::TaskId;
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreError, StoreOp, StoreOutcome, perform_store_op};
+use promptforge::vfs::{StoreOp, StoreOutcome, VfsError, perform_store_op};
 
 use super::{BoxFuture, StorePerformer, TaskEventsPerformer, TimerPerformer};
 use crate::effect_loop::SharedLog;
@@ -38,7 +38,7 @@ impl TimerPerformer for TokioTimer {
 }
 
 /// Performs a store operation through the engine's store facade over the
-/// effect's own access capability.
+/// store view the effect carries.
 ///
 /// Synchronous: the loop runs it on the blocking pool. Dropping the
 /// access when the operation completes never affects correctness: claims
@@ -47,7 +47,7 @@ impl TimerPerformer for TokioTimer {
 pub struct VfsStore;
 
 impl StorePerformer for VfsStore {
-    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, StoreError> {
+    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, VfsError> {
         perform_store_op(access, op)
     }
 }

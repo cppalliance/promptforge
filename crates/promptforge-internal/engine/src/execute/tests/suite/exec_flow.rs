@@ -10,9 +10,8 @@ use crate::RunErrorKind;
 use crate::test_support::recording::Observer;
 use crate::test_support::{RunHost, TestTool, TestToolTable, run_with_host};
 use crate::{Environment, RunError, RunResult};
-use promptforge_store::StoreError;
 use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
-use promptforge_vfs::VfsRef;
+use promptforge_vfs::{VfsError, VfsRef};
 use serde_json::{Value, json};
 
 use super::support::{
@@ -51,7 +50,7 @@ impl TestStore {
         TestStore(Mutex::new(None))
     }
 
-    fn read(&self, path: &str) -> Result<String, StoreError> {
+    fn read(&self, path: &str) -> Result<String, VfsError> {
         self.0
             .lock()
             .expect("the store lock is not poisoned")
@@ -2112,40 +2111,26 @@ return 'done'\n\
     assert_eq!(out, "done");
 }
 
-/// The defensive fallback in the free `run`: a hand-built `VfsRef` lacking
-/// the store mount gets a fresh memory store overlaid for the run, so the
-/// run's store writes land on the overlay (readable across sections) instead
-/// of failing for want of the mount, and the caller's backend stays untouched.
-/// (`Environment::run` never needs the fallback: its prepare pass builds a
-/// router that always includes the store mount.)
+/// A hand-built `VfsRef` that declares no store fails the run up front
+/// with [`RunErrorKind::Store`]: every run needs a declared store, and
+/// the defensive fallback overlay is gone. (`Environment::prepare` never
+/// replaces the handle, so the raw handle's declaration is what the run
+/// sees.)
 #[tokio::test]
-async fn a_mount_less_handle_runs_on_the_defensive_store_overlay() {
+async fn a_handle_without_a_declared_store_fails_the_run() {
     let md = flow_prompt!(
         "# Test prompt\n\n\
-        ## First\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n\n\
-        ## Second\n\n```lua\nreturn store.read('overlay.txt')\n```\n"
+        ## Only\n\n```lua\nstore.write('overlay.txt', 'overlaid')\n```\n"
     );
     let vfs = VfsRef::new(promptforge_vfs::MemoryBackend::new());
-    let probe = vfs.clone();
-    let out = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
+    let result = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
         .await
         .result
-        .expect("a mount-less handle gets the defensive memory-store overlay");
+        .expect_err("a run whose handle declares no store must be refused");
     assert_eq!(
-        out, "overlaid",
-        "the first section's write must be readable from the overlaid store"
-    );
-    // The overlay is throwaway: the caller's backend never gains the mount
-    // or the run's writes.
-    assert!(
-        matches!(
-            probe
-                .acquire(promptforge_vfs::Origin::new("overlay absence probe"))
-                .expect("the stock backend acquires")
-                .stat(promptforge_vfs::STORE_MOUNT),
-            Err(promptforge_vfs::VfsError::NotFound { .. })
-        ),
-        "the run's writes must land on the overlay, not the caller's backend"
+        result.kind(),
+        crate::RunErrorKind::Store,
+        "the run fails as a store error: {result}"
     );
 }
 
@@ -2165,9 +2150,10 @@ async fn default_environment_runs_a_capability_free_prompt() {
 }
 
 #[tokio::test]
-async fn default_run_context_store_handle_has_the_stock_mount() {
-    // `RunContext` absorbs the store handle with a `promptforge_vfs::empty()`
-    // default: a store-using run needs no host-supplied handle.
+async fn default_run_context_store_handle_declares_a_fresh_store() {
+    // `RunContext` absorbs the filesystem handle with a `VfsRef::default()`
+    // (a fresh memory store at `/`) default: a store-using run needs no
+    // host-supplied handle.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## First\n\n```lua\nstore.write('default.txt', 'stock')\n```\n\n\
@@ -2176,7 +2162,7 @@ async fn default_run_context_store_handle_has_the_stock_mount() {
     let out = run_fixture(md, "exec-flow", EXECUTION, "", None)
         .await
         .result
-        .expect("the default store handle has the stock mount");
+        .expect("the default store handle declares a fresh store");
     assert_eq!(out, "stock");
 }
 
@@ -2285,4 +2271,237 @@ impl TestTool for EchoTool {
             .expect("the fixture tool requires a string value");
         Ok(ToolOutput::trusted(format!("echoed: {value}")))
     }
+}
+
+/// A store failure the author caught with `pcall` is an error table of
+/// kind `store`: its `reason`, `path`, and `anchor` fields and its
+/// integer `count` read from Lua, and `tostring` returns the
+/// model-facing message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_caught_store_error_is_a_store_table_with_reason_fields_and_message() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+local ok, err = pcall(function() return store.read('missing.txt') end)\n\
+assert(ok == false, 'the missing read fails')\n\
+assert(err.kind == 'store', 'kind is store, got ' .. tostring(err.kind))\n\
+assert(err.reason == 'not_found', 'reason is not_found, got ' .. tostring(err.reason))\n\
+assert(err.path == 'missing.txt', 'the path field names the file')\n\
+assert(tostring(err) == 'file not found in store: missing.txt', 'tostring is the message')\n\
+store.write('a.txt', 'na na na')\n\
+local ok2, err2 = pcall(function() store.str_replace('a.txt', 'na', 'la') end)\n\
+assert(ok2 == false, 'the ambiguous anchor fails')\n\
+assert(err2.reason == 'anchor', 'reason is anchor, got ' .. tostring(err2.reason))\n\
+assert(err2.anchor == 'na', 'the anchor field names the anchor')\n\
+assert(type(err2.count) == 'number' and err2.count % 1 == 0, 'count is an integer')\n\
+assert(err2.count == 3, 'count is the match count')\n\
+assert(tostring(err2):find('include more surrounding text', 1, true) ~= nil, 'the message carries the hint')\n\
+return 'ok'\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("the caught store errors carry the documented shape");
+    assert_eq!(out, "ok");
+}
+
+/// A store argument type error stays kind `lua`, like every other host
+/// function's argument errors: only what the VFS reports is kind `store`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_store_argument_type_error_is_kind_lua() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+local ok, err = pcall(function() store.write(123, 'x') end)\n\
+assert(ok == false, 'the non-string path fails')\n\
+assert(err.kind == 'lua', 'an argument error is kind lua, got ' .. tostring(err.kind))\n\
+local ok2, err2 = pcall(function() store.glob('a') end)\n\
+return 'ok'\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("the argument type error surfaces as a lua error");
+    assert_eq!(out, "ok");
+}
+
+/// An uncaught store failure ends the run as a `Store` run error whose
+/// message is the model-facing rendering.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_uncaught_store_failure_ends_the_run_as_a_store_error() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+return store.read('missing.txt')\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("an uncaught store failure must fail the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Store,
+        "the run fails as a store error: {error:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("file not found in store: missing.txt"),
+        "the message is the store's rendering: {error}"
+    );
+}
+
+/// An uncaught store failure in the H1 pass ends the run as a `Store`
+/// run error: the H1 blocks run through the same coroutine machinery as
+/// any section.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_uncaught_store_failure_in_h1_ends_the_run_as_a_store_error() {
+    let md = flow_prompt!(
+        "\
+```lua\n\
+return store.read('missing.txt')\n\
+```\n\n\
+## Only\n\n\
+Done.\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("an uncaught store failure in H1 must fail the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Store,
+        "the H1 failure is a store error: {error:?}"
+    );
+}
+
+/// A caught store error raised again, after another suspending call,
+/// keeps its classification: the run ends as a `Store` run error whose
+/// message is the original rendering.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_caught_store_error_raised_again_after_a_suspending_call_keeps_store() {
+    let md = flow_prompt!(
+        "\
+## First\n\n\
+```lua\n\
+local ok, err = pcall(function() return store.read('missing.txt') end)\n\
+assert(ok == false, 'the missing read fails')\n\
+call('### Sibling', '')\n\
+error(err)\n\
+```\n\n\
+### Sibling\n\n\
+```lua\n\
+return 'sibling'\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("the re-raised store error must fail the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Store,
+        "the re-raised error keeps its store classification: {error:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("file not found in store: missing.txt"),
+        "the message is the original rendering: {error}"
+    );
+}
+
+/// A store declared at `/` cannot reach a host directory mounted beneath
+/// it: the store view is confined to its own mount, so a file the host
+/// directory holds reads as absent from the store.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_store_at_the_root_cannot_reach_a_host_mount_beneath_it() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+local ok, err = pcall(function() return store.read('host/secret.txt') end)\n\
+assert(ok == false, 'the host path is not in the store')\n\
+assert(err.reason == 'not_found', 'the host file is simply absent: ' .. tostring(err))\n\
+return 'ok'\n\
+```\n"
+    );
+    let vfs = promptforge_vfs::VfsRef::builder()
+        .store("/", promptforge_vfs::MemoryBackend::new())
+        .mount("/host", promptforge_vfs::MemoryBackend::new())
+        .build();
+    // The host mount really holds the file: only the store view cannot
+    // reach it.
+    vfs.acquire(promptforge_vfs::Origin::new("host seeding"))
+        .expect("the handle acquires")
+        .write("/host/secret.txt", b"secret")
+        .expect("the host mount seeds");
+    let out = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
+        .await
+        .result
+        .expect("the store view is confined to its own mount");
+    assert_eq!(out, "ok");
+}
+
+/// The shared library replays in every section VM through the direct
+/// store closures, so its top-level write runs under each arm's own
+/// identity: the second arm's load meets the first's standing write
+/// claim and the run ends with a determinism violation, even though the
+/// write never yields through the scheduler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shared_library_write_across_two_arms_ends_the_run_with_determinism() {
+    let md = flow_prompt!(
+        "\
+```lua shared\n\
+store.write('shared.txt', 'seed')\n\
+```\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha', 'beta'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return item\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("the shared library's cross-arm write must end the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Determinism,
+        "the load-time conflict is a determinism violation: {error:?}"
+    );
+}
+
+/// A conflict the shared library caught with its own `pcall` still ends
+/// the run with a determinism violation: the direct closures record the
+/// conflict, and the load's setup reads it when the load returns.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shared_library_conflict_caught_with_pcall_still_ends_the_run_with_determinism() {
+    let md = flow_prompt!(
+        "\
+```lua shared\n\
+local ok = pcall(function() store.write('shared.txt', 'seed') end)\n\
+```\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha', 'beta'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return item\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("the pcall-caught load conflict must still end the run");
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Determinism,
+        "a caught load-time conflict is still fatal: {error:?}"
+    );
 }

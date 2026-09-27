@@ -21,7 +21,7 @@ use promptforge::model::{
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
+use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
 use promptforge::{Prompt, Run, RunContext};
 use serde_json::Value;
 
@@ -102,7 +102,7 @@ impl InputPerformer for Unused {
 }
 
 impl StorePerformer for Unused {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, StoreError> {
+    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
         unreachable!("this test issues no Store effect")
     }
 }
@@ -233,7 +233,7 @@ impl TimerPerformer for PendingTimer {
 pub(crate) struct UnitStore;
 
 impl StorePerformer for UnitStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, StoreError> {
+    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
         Ok(StoreOutcome::Unit)
     }
 }
@@ -245,7 +245,7 @@ pub(crate) struct SlowStore {
 }
 
 impl StorePerformer for SlowStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, StoreError> {
+    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
         std::thread::sleep(self.delay);
         self.finished.store(true, Ordering::SeqCst);
         Ok(StoreOutcome::Unit)

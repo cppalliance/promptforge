@@ -87,7 +87,7 @@ pub(crate) async fn run_once(
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
     let services = Services {
         registry,
-        vfs: promptforge::vfs::VfsRef::builder().build(),
+        vfs: promptforge::vfs::VfsRef::default(),
         cancel: cancel.clone(),
         log: Arc::clone(&core.log),
         chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),

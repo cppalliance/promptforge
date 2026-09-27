@@ -21,7 +21,6 @@ use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::store::{Access, StoreError, VfsRef};
 use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
@@ -33,7 +32,7 @@ use crate::{Error, Result};
 use promptforge_lua::ToolOutputKind;
 use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
 use promptforge_model_client::model::ModelCatalog;
-use promptforge_store::Store;
+use promptforge_vfs::{Access, VfsError, VfsRef};
 
 mod context;
 mod fixtures;

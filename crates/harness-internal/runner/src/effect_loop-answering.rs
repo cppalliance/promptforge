@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use promptforge::effect::{EffectAnswer, EffectId};
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreError, StoreOp, StoreOutcome};
+use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
 use tokio::sync::mpsc;
 
 use crate::performers::StorePerformer;
@@ -68,7 +68,7 @@ pub(super) fn perform_store(
     store: &dyn StorePerformer,
     access: Arc<Access>,
     op: StoreOp,
-) -> Result<StoreOutcome, StoreError> {
+) -> Result<StoreOutcome, VfsError> {
     let result = store.perform(&access, op);
     drop(access);
     result

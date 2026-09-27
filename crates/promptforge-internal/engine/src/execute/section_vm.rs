@@ -26,8 +26,8 @@ use std::sync::Arc;
 use promptforge_types::emitter::Emitter;
 
 use crate::lua::{LuaProgram, SectionVm};
-use crate::store::Access;
 use crate::{Error, Result};
+use promptforge_vfs::Access;
 
 /// What a section VM is seeded with beyond the shared host contract.
 ///
@@ -142,7 +142,15 @@ where
     if setup.raw_shims {
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;
     }
-    vm.replay_shared(setup.shared, setup.emitter, setup.section_name)?;
+    let replay = vm.replay_shared(setup.shared, setup.emitter, setup.section_name);
+    // A store conflict the direct closures recorded during the load ends
+    // the run with a determinism violation when the load returns - caught
+    // by `pcall` or not - so the conflict wins over the load's own
+    // outcome.
+    if let Some(detail) = vm.take_store_conflict() {
+        return Err(Error::Determinism(detail));
+    }
+    replay?;
     // The store yield shims install after the shared replay: the shared
     // chunk runs as a main chunk, not a coroutine, so load-time store
     // calls must hit the direct closures (which capture the same

@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::program::map_chunk_line_to_absolute;
 use crate::vm::{LocalTools, LuaOutcome, run_chunk};
-use promptforge_store::Store;
 use promptforge_types::tools::ToolDescriptor;
 use promptforge_vfs::{ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 use serde_json::json;
@@ -17,15 +16,22 @@ use recording::{Observation, Recorder, detail, null_emitter};
 
 const EXECUTION: &str = "lua-test";
 
-/// A fresh stock handle's access capability for a test VM: the store mount
-/// exists and the vended identity is the test's own, so seeding through the
-/// facade and the VM's store ops never meet a second live identity.
+/// A fresh default handle's access capability for a test VM: the store is
+/// declared at the root and the vended identity is the test's own, so
+/// seeding through the store view and the VM's store ops never meet a
+/// second live identity.
 fn fresh_access() -> Arc<Access> {
     Arc::new(
-        promptforge_vfs::empty()
+        VfsRef::default()
             .acquire(Origin::new("lua test fixture"))
             .expect("the stock backend acquires"),
     )
+}
+
+/// The store view derived from a test's access: the same view the `store`
+/// table's closures operate through, for seeding and extraction.
+fn store_view(access: &Access) -> Access {
+    promptforge_vfs::detail::store_view(access).expect("the handle declares a store")
 }
 
 /// Returns the message held by either Lua-category error representation.
@@ -112,10 +118,14 @@ impl VfsAccess for FailingAccess {
     }
 }
 
-/// The access a failing backend vends, for tests driving the error path.
+/// The access a failing backend vends, for tests driving the error path:
+/// the failing backend declared as the store, so the store view derives
+/// and every operation reaches the backend's refusal.
 fn failing_access() -> Arc<Access> {
     Arc::new(
-        VfsRef::new(FailingBackend)
+        VfsRef::builder()
+            .store("/", FailingBackend)
+            .build()
             .acquire(Origin::new("failing backend test"))
             .expect("the failing backend still acquires"),
     )
@@ -546,7 +556,7 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
                       store.write('answer.txt', args)\n\
                       return var.answer";
     let recorded_access = fresh_access();
-    let recorded_store = Store::new(&recorded_access);
+    let recorded_store = store_view(&recorded_access);
     let recorder = Arc::new(Recorder::default());
     let observer = recorder.emitter().clone();
     let observed_outcome = run_chunk(
@@ -559,7 +569,7 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
     )
     .expect("recorded execution must succeed");
     let null_access = fresh_access();
-    let null_store = Store::new(&null_access);
+    let null_store = store_view(&null_access);
     let silent = run_chunk(
         source,
         "same",
@@ -574,10 +584,10 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
     assert_eq!(observed_outcome.var, silent.var);
     assert_eq!(
         recorded_store
-            .read("answer.txt")
+            .read_string("answer.txt")
             .expect("recorded write must persist"),
         null_store
-            .read("answer.txt")
+            .read_string("answer.txt")
             .expect("silent write must persist")
     );
 }
@@ -1103,9 +1113,9 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         "return decorate(phase_marker) .. ':' .. shared_saw_args .. ':' .. shared_saw_store",
     );
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     store
-        .write("seed.txt", "seeded")
+        .write("seed.txt", b"seeded")
         .expect("the memory store can seed a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_host("input", &json!({ "id": 7 }), &access)
@@ -1127,7 +1137,9 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         Some("<input>")
     );
     assert_eq!(
-        store.read("phase.txt").expect("shared store must read"),
+        store
+            .read_string("phase.txt")
+            .expect("shared store must read"),
         "<input>"
     );
 
@@ -2301,7 +2313,7 @@ fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
 #[test]
 fn store_exists_returns_boolean() {
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     assert_eq!(
         run_with("return tostring(store.exists('missing.txt'))", &access)
             .unwrap()
@@ -2309,7 +2321,7 @@ fn store_exists_returns_boolean() {
             .as_deref(),
         Some("false")
     );
-    store.write("a.txt", "hi").expect("write");
+    store.write("a.txt", b"hi").expect("write");
     assert_eq!(
         run_with("return tostring(store.exists('a.txt'))", &access)
             .unwrap()
@@ -2498,13 +2510,13 @@ fn store_read_numbered_without_bounds_numbers_from_one() {
 #[test]
 fn store_read_numbered_numbers_a_slice_absolutely() {
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     let mut body = String::new();
     for n in 1..=85 {
         use std::fmt::Write as _;
         let _ = writeln!(body, "line{n}");
     }
-    store.write("a.txt", &body).expect("write");
+    store.write("a.txt", body.as_bytes()).expect("write");
     let out = run_with("return store.read_numbered('a.txt', 84, 85)", &access).unwrap();
     assert_eq!(out.returned.as_deref(), Some("84| line84\n85| line85"));
 }
@@ -2512,13 +2524,13 @@ fn store_read_numbered_numbers_a_slice_absolutely() {
 #[test]
 fn store_read_numbered_pads_across_the_hundred_boundary() {
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     let mut body = String::new();
     for n in 1..=100 {
         use std::fmt::Write as _;
         let _ = writeln!(body, "line{n}");
     }
-    store.write("a.txt", &body).expect("write");
+    store.write("a.txt", body.as_bytes()).expect("write");
     let out = run_with("return store.read_numbered('a.txt', 99, 100)", &access).unwrap();
     assert_eq!(out.returned.as_deref(), Some(" 99| line99\n100| line100"));
 }
@@ -2589,9 +2601,9 @@ fn store_read_numbered_end_without_start_raises() {
 #[test]
 fn installed_store_read_honors_line_bounds() {
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     store
-        .write("a.txt", "one\ntwo\nthree\n")
+        .write("a.txt", b"one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &access)
@@ -2625,9 +2637,9 @@ fn installed_store_read_honors_line_bounds() {
 #[test]
 fn installed_store_read_numbered_honors_line_bounds() {
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     store
-        .write("a.txt", "one\ntwo\nthree\n")
+        .write("a.txt", b"one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &access)
@@ -2694,6 +2706,42 @@ fn store_error_surfaces_as_lua_error() {
 }
 
 #[test]
+fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
+    // The shared library loads through the direct store closures, before
+    // the yield shims install. A non-conflict failure caught by the shim's
+    // `pcall` must render the same shape the effect path renders: kind
+    // `store`, the `reason` tag, and the variant's fields.
+    let shared = program(
+        "local ok, err = pcall(function() return store.read('missing.txt') end)\n\
+             shared_store_error = err",
+    );
+    let access = fresh_access();
+    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &access)
+        .expect("host values must inject");
+    vm.install_host_apis(&null_emitter(), "Test")
+        .expect("host APIs must install");
+    vm.install_coro_shims(1).expect("coro shims must install");
+    vm.replay_shared(&shared, &null_emitter(), "Test")
+        .expect("the shared library must load");
+    let out = run_scalar(
+        &vm,
+        &program(
+            "return shared_store_error.kind .. '|' .. shared_store_error.reason .. '|' \
+                 .. shared_store_error.path .. '|' .. tostring(shared_store_error)",
+        ),
+        &null_emitter(),
+        "Test",
+    )
+    .expect("the section chunk must run");
+    assert_eq!(
+        out.as_deref(),
+        Some("store|not_found|missing.txt|file not found in store: missing.txt"),
+        "the shared-load store failure must carry the documented shape"
+    );
+}
+
+#[test]
 fn lua_runtime_error_preserves_its_mlua_source() {
     // F4: a Lua runtime failure is the source-bearing `LuaRuntime` variant and
     // retains the originating `mlua` error as a private `source()` instead of
@@ -2714,10 +2762,10 @@ fn store_writes_are_visible_on_the_shared_handle() {
     // The table is backed by the caller's handle, so a write from Lua is
     // observable through a clone of that same handle after the chunk ends.
     let access = fresh_access();
-    let store = Store::new(&access);
+    let store = store_view(&access);
     run_with("store.write('shared.txt', 'from lua')", &access).unwrap();
     assert_eq!(
-        store.read("shared.txt").expect("read"),
+        store.read_string("shared.txt").expect("read"),
         "from lua",
         "a Lua write must land in the shared store"
     );
@@ -2778,8 +2826,8 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
     fn empty(_access: &Arc<Access>) {}
 
     fn existing(access: &Arc<Access>) {
-        Store::new(access)
-            .write("a.txt", "old")
+        store_view(access)
+            .write("a.txt", b"old")
             .expect("the memory store can prepare a file");
     }
 
@@ -2859,7 +2907,10 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
         let observer = recorder.emitter().clone();
         let error = run_chunk(case.source, "", &json!({}), &access, &observer, "Store")
             .expect_err("the failing backend rejects every operation");
-        assert!(matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }));
+        assert!(
+            matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }),
+            "a store failure surfaces through the Lua boundary, got {error:?}"
+        );
         assert_eq!(
             recorder.observations(),
             vec![("Store".to_owned(), case.failure.clone())],
@@ -2899,7 +2950,7 @@ fn store_observations_happen_before_later_lua_side_effects() {
         "each write's report lands before the next Lua statement runs"
     );
     assert_eq!(
-        Store::new(&access)
+        store_view(&access)
             .glob("**")
             .expect("the memory store can glob"),
         vec!["first.txt".to_owned(), "second.txt".to_owned()],
@@ -2963,6 +3014,237 @@ fn untrusted_global_rejects_a_non_string_argument() {
     assert!(
         matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }),
         "a non-string argument must surface as a Lua error, got {error:?}"
+    );
+}
+
+// --- The store error value shape ------------------------------------------
+
+/// One store failure's rendering: the reason tag, the fields (with the
+/// anchor's `count` checked as an integer), and the model-facing message.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table holds every reason's rendering beside its fields and message"
+)]
+#[test]
+fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
+    use promptforge_vfs::{PathReason, VfsError};
+
+    struct Case {
+        error: VfsError,
+        reason: &'static str,
+        fields: Vec<(String, crate::ErrorField)>,
+        message: &'static str,
+    }
+
+    fn path_field(path: &str) -> Vec<(String, crate::ErrorField)> {
+        vec![(
+            "path".to_owned(),
+            crate::ErrorField::String(path.to_owned()),
+        )]
+    }
+
+    let cases = [
+        Case {
+            error: VfsError::NotFound {
+                path: "notes.md".to_owned(),
+            },
+            reason: "not_found",
+            fields: path_field("notes.md"),
+            message: "file not found in store: notes.md",
+        },
+        Case {
+            error: VfsError::Anchor {
+                path: "notes.md".to_owned(),
+                anchor: "TODO".to_owned(),
+                count: 3,
+            },
+            reason: "anchor",
+            fields: vec![
+                (
+                    "path".to_owned(),
+                    crate::ErrorField::String("notes.md".to_owned()),
+                ),
+                (
+                    "anchor".to_owned(),
+                    crate::ErrorField::String("TODO".to_owned()),
+                ),
+                ("count".to_owned(), crate::ErrorField::Integer(3)),
+            ],
+            message: "anchor \"TODO\" occurs 3 times in notes.md, expected exactly one; \
+                      include more surrounding text so it matches once",
+        },
+        Case {
+            error: VfsError::InvalidPath {
+                path: "../x".to_owned(),
+                reason: PathReason::Traversal,
+            },
+            reason: "invalid_path",
+            fields: vec![
+                (
+                    "path".to_owned(),
+                    crate::ErrorField::String("../x".to_owned()),
+                ),
+                (
+                    "rule".to_owned(),
+                    crate::ErrorField::String("traversal".to_owned()),
+                ),
+            ],
+            message: "invalid path \"../x\": path contains a traversal segment",
+        },
+        Case {
+            error: VfsError::InvalidRange {
+                path: "notes.md".to_owned(),
+                reason: "start must be at least 1",
+            },
+            reason: "invalid_range",
+            fields: path_field("notes.md"),
+            message: "invalid line range for notes.md: start must be at least 1",
+        },
+        Case {
+            error: VfsError::NotUtf8 {
+                path: "a.bin".to_owned(),
+            },
+            reason: "not_utf8",
+            fields: path_field("a.bin"),
+            message: "file in store is not UTF-8: a.bin",
+        },
+        Case {
+            error: VfsError::IsADirectory {
+                path: "d".to_owned(),
+            },
+            reason: "is_a_directory",
+            fields: path_field("d"),
+            message: "is a directory in store: d",
+        },
+        Case {
+            error: VfsError::NotADirectory {
+                path: "d".to_owned(),
+            },
+            reason: "not_a_directory",
+            fields: path_field("d"),
+            message: "not a directory in store: d",
+        },
+        Case {
+            error: VfsError::DirectoryNotEmpty {
+                path: "d".to_owned(),
+            },
+            reason: "directory_not_empty",
+            fields: path_field("d"),
+            message: "directory not empty in store: d",
+        },
+        Case {
+            error: VfsError::AlreadyExists {
+                path: "d".to_owned(),
+            },
+            reason: "already_exists",
+            fields: path_field("d"),
+            message: "file already exists in store: d",
+        },
+        Case {
+            error: VfsError::PermissionDenied {
+                path: "d".to_owned(),
+                reason: "read-only mount".to_owned(),
+            },
+            reason: "permission_denied",
+            fields: path_field("d"),
+            message: "permission denied for store path d: read-only mount",
+        },
+        Case {
+            error: VfsError::Unsupported {
+                path: "d".to_owned(),
+                detail: "no rename".to_owned(),
+            },
+            reason: "unsupported",
+            fields: path_field("d"),
+            message: "unsupported store operation on d: no rename",
+        },
+        Case {
+            error: VfsError::Backend {
+                message: "disk gone".to_owned(),
+            },
+            reason: "backend",
+            fields: Vec::new(),
+            message: "store backend failure: disk gone",
+        },
+    ];
+
+    for case in cases {
+        let reason = crate::store_error_reason(&case.error);
+        let fields = crate::store_error_fields(&case.error);
+        let op = crate::StoreOp::Read {
+            path: "x".to_owned(),
+            start: None,
+            end: None,
+        };
+        let message = crate::store_error_message(&op, &case.error);
+        assert_eq!(reason, case.reason, "wrong reason for {:?}", case.error);
+        assert_eq!(fields, case.fields, "wrong fields for {:?}", case.error);
+        assert_eq!(message, case.message, "wrong message for {:?}", case.error);
+    }
+}
+
+/// A glob failure renders as an invalid glob pattern - the call surface's
+/// promised wording - while a path failure renders as an invalid path.
+#[test]
+fn store_error_messages_use_the_operations_wording() {
+    use promptforge_vfs::{PathReason, VfsError};
+    let error = VfsError::InvalidPath {
+        path: "a**b".to_owned(),
+        reason: PathReason::Wildcard,
+    };
+    let glob = crate::StoreOp::Glob {
+        pattern: "a**b".to_owned(),
+    };
+    let read = crate::StoreOp::Read {
+        path: "a**b".to_owned(),
+        start: None,
+        end: None,
+    };
+    assert_eq!(
+        crate::store_error_message(&glob, &error),
+        "invalid glob pattern \"a**b\": pattern contains invalid wildcard grammar"
+    );
+    assert_eq!(
+        crate::store_error_message(&read, &error),
+        "invalid path \"a**b\": pattern contains invalid wildcard grammar"
+    );
+}
+
+/// A store failure raised through the Lua boundary renders as an error
+/// table of kind `store` whose `count` field is a Lua integer, and
+/// `tostring` returns the model-facing message.
+#[test]
+fn a_raised_store_error_renders_an_integer_count_and_the_message() {
+    let anchor = promptforge_vfs::VfsError::Anchor {
+        path: "notes.md".to_owned(),
+        anchor: "TODO".to_owned(),
+        count: 3,
+    };
+    let error = Error::store(
+        &crate::StoreOp::StrReplace {
+            path: "notes.md".to_owned(),
+            old: "TODO".to_owned(),
+            new: "DONE".to_owned(),
+        },
+        anchor,
+    );
+    assert_eq!(error.kind(), crate::ErrorKind::Store);
+    let fields = error.fields();
+    assert!(fields.contains(&("count".to_owned(), crate::ErrorField::Integer(3),)));
+    let lua = mlua::Lua::new();
+    let table = crate::error_table(&lua, &error).expect("the table builds");
+    let raised = crate::error_value::raised_from(&lua, &Value::Table(table))
+        .expect("the table reads back")
+        .expect("the table is a structured error table");
+    assert_eq!(raised.kind, crate::ErrorKind::Store);
+    assert_eq!(
+        raised.fields.get("count"),
+        Some(&crate::ErrorField::Integer(3)),
+        "the count field stays an integer through the boundary"
+    );
+    assert!(
+        error.to_string().contains("include more surrounding text"),
+        "the message carries the recovery hint: {error}"
     );
 }
 
