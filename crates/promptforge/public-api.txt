@@ -667,7 +667,7 @@ pub fn promptforge::vfs::Access::read(&self, path: &str) -> core::result::Result
 pub fn promptforge::vfs::Access::read_range(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read_range_numbered(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read_string(&self, path: &str) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
-pub fn promptforge::vfs::Access::remove(&self, path: &str, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::remove(&self, path: &str, recursive: bool) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::rename(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::stat(&self, path: &str) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::str_replace(&self, path: &str, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
@@ -699,6 +699,7 @@ pub fn promptforge::vfs::VfsAccess::chmod(&mut self, path: &promptforge::vfs::Vf
 pub fn promptforge::vfs::VfsAccess::copy(&mut self, from: &promptforge::vfs::VfsPath, to: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::exists(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::glob_kind(&self, pattern: &str, dirs_only: bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::grep(&self, query: &promptforge::vfs::GrepQuery) -> core::result::Result<promptforge::vfs::GrepResults, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::list(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::mkdir(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>

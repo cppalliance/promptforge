@@ -710,7 +710,7 @@ Each of the 12 traces below becomes a test, and "always" means the result is the
 
 <step-2>
 
-### Step 2: Root every Access, make remove idempotent, and split glob results
+### Step 2: Root every Access, make remove idempotent, and split glob results [completed]
 
 - Component: VFS core API
 - Piece: path semantics, sequential before the error model (Step 3). Landing roots first means no step has to give a relative path a `PathReason`, and Step 3 then migrates every error site once, including the raw-pattern checks added here. Nothing in this step needs the structured errors.

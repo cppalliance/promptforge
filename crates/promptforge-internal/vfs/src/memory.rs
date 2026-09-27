@@ -424,12 +424,12 @@ impl VfsAccess for MemoryAccess {
 mod tests {
     use super::MemoryBackend;
     use crate::error::VfsError;
-    use crate::path::{VfsPath, canonicalize};
+    use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
-        canonicalize(s)
+        canonicalize_absolute(s)
     }
 
     /// Returns a session on a backend pre-populated through the write

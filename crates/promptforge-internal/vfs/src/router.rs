@@ -17,7 +17,7 @@ use crate::error::VfsError;
 use crate::grep::{GrepQuery, GrepResults};
 use crate::handle::VfsRef;
 use crate::observe::{OpEvent, OpSink};
-use crate::path::{VfsPath, VfsPathBuf, canonicalize};
+use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
 use crate::stat::{Entry, Stat};
 use crate::traits::{AllowAll, ExecId, Policy, Vfs, VfsAccess};
 
@@ -153,7 +153,7 @@ impl RoutingAccess {
     fn strip(&self, path: &VfsPath) -> Result<VfsPath, VfsError> {
         let (prefix, _) = resolve(&self.mounts, path.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {path}")))?;
-        canonicalize(strip_mount(prefix.as_str(), path.as_str()))
+        canonicalize_absolute(strip_mount(prefix.as_str(), path.as_str()))
     }
 
     /// Rejects mutations on read-only mounts before anything is
@@ -227,11 +227,28 @@ impl VfsAccess for RoutingAccess {
         // Patterns are not paths, but they route like one:
         // canonicalizing resolves dot segments and rejects escapes past
         // the namespace root; wildcards are ordinary segments.
-        let canonical = canonicalize(pattern)?;
+        let canonical = canonicalize_absolute(pattern)?;
         let (prefix, _) = resolve(&self.mounts, canonical.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {canonical}")))?;
         let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
         let mut matches = self.with_mount(&canonical, |session| session.glob(&scoped))?;
+        for path in &mut matches {
+            *path = rejoin(prefix.as_str(), path);
+        }
+        Ok(matches)
+    }
+
+    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        // Mirrors `glob`: the dirs-only flag must survive the mount
+        // boundary. The trait default re-splits inside the serving
+        // session with the already-stripped pattern, which loses the
+        // flag and filters the files-only result down to nothing.
+        let canonical = canonicalize_absolute(pattern)?;
+        let (prefix, _) = resolve(&self.mounts, canonical.as_str())
+            .ok_or_else(|| VfsError::NotFound(format!("no mount serves {canonical}")))?;
+        let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
+        let mut matches =
+            self.with_mount(&canonical, |session| session.glob_kind(&scoped, dirs_only))?;
         for path in &mut matches {
             *path = rejoin(prefix.as_str(), path);
         }
@@ -280,11 +297,11 @@ impl VfsAccess for RoutingAccess {
     }
 
     fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        let root = canonicalize(query.root.as_str())?;
+        let root = canonicalize_absolute(query.root.as_str())?;
         let (prefix, _) = resolve(&self.mounts, root.as_str())
             .ok_or_else(|| VfsError::NotFound(format!("no mount serves {root}")))?;
         let mut scoped = query.clone();
-        scoped.root = canonicalize(strip_mount(prefix.as_str(), root.as_str()))?.to_buf();
+        scoped.root = canonicalize_absolute(strip_mount(prefix.as_str(), root.as_str()))?.to_buf();
         let mut results = self.with_mount(&root, |session| session.grep(&scoped))?;
         for hit in &mut results.matches {
             hit.path = rejoin(prefix.as_str(), &hit.path);
@@ -358,7 +375,7 @@ impl VfsRefBuilder {
     /// already sits at `prefix`: both are construction-time bugs.
     #[must_use]
     pub fn mount(mut self, prefix: &str, backend: impl Vfs + 'static) -> VfsRefBuilder {
-        let canonical = canonicalize(prefix)
+        let canonical = canonicalize_absolute(prefix)
             .unwrap_or_else(|err| panic!("invalid mount prefix {prefix:?}: {err}"));
         let key = canonical.to_buf();
         assert!(
@@ -409,11 +426,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+    use super::{Mounts, Router};
     use crate::error::VfsError;
     use crate::handle::VfsRef;
+    use crate::memory::MemoryBackend;
     use crate::observe::Origin;
-    use crate::path::VfsPath;
-    use crate::stat::{Entry, Stat};
+    use crate::path::{VfsPath, canonicalize_absolute};
+    use crate::stat::{Entry, FileType, Stat};
     use crate::traits::{ExecId, Vfs, VfsAccess};
 
     /// A recording in-memory stub. Files are keyed by the exact paths
@@ -553,8 +572,19 @@ mod tests {
         }
 
         fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not stat".into()))
+            // Every stored key is a file; the stub holds no directories.
+            let bytes = self
+                .files()
+                .get(path.as_str())
+                .cloned()
+                .ok_or_else(|| VfsError::NotFound(path.to_string()))?;
+            Ok(Stat {
+                file_type: FileType::File,
+                size: bytes.len() as u64,
+                mode: None,
+                modified: None,
+                created: None,
+            })
         }
 
         fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
@@ -757,6 +787,44 @@ mod tests {
         let access = vfs.acquire(test_origin())?;
         let matches = access.glob("/a/b/*.txt")?;
         assert_eq!(matches, vec!["/a/b/x.txt".to_owned()]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_only_glob_keeps_its_flag_across_a_mounted_handle() -> Result<(), VfsError> {
+        // The overlay's base is a mounted handle: the dirs-only flag must
+        // survive the mount forward, or the base's capability re-splits
+        // the already-stripped pattern as files-only and the directories
+        // vanish from the result.
+        let base = VfsRef::builder().mount("/x", MemoryBackend::new()).build();
+        let overlay = base.overlay("/overlay", StubFs::default());
+        let access = overlay.acquire(test_origin())?;
+        access.write("/x/d/a.txt", b"x")?;
+        access.write("/x/d/sub/b.txt", b"x")?;
+        assert_eq!(access.glob("x/d/*/")?, vec!["x/d/sub".to_owned()]);
+        assert_eq!(access.glob("x/d/*")?, vec!["x/d/a.txt".to_owned()]);
+        Ok(())
+    }
+
+    #[test]
+    fn removing_an_absent_path_through_a_mounted_handle_reports_not_found() -> Result<(), VfsError>
+    {
+        // The mount-forward chain at the backend level: the router's
+        // session resolves the mount, and the mounted handle's forward
+        // maps the capability's Ok(false) back onto the backend trait's
+        // NotFound spelling.
+        let base = VfsRef::new(StubFs::default());
+        let mut mounts = Mounts::new();
+        mounts.insert(
+            canonicalize_absolute("/base")?.to_buf(),
+            Arc::new(Mutex::new(Box::new(base.clone()))),
+        );
+        let mut router = Router::new(mounts);
+        let mut session = router.acquire(ExecId::vend())?;
+        assert!(matches!(
+            session.remove(&canonicalize_absolute("/base/missing.txt")?, false),
+            Err(VfsError::NotFound(_))
+        ));
         Ok(())
     }
 

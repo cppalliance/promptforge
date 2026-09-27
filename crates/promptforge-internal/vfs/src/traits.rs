@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::VfsError;
 use crate::grep::{GrepMatch, GrepQuery, GrepResults};
-use crate::path::{VfsPath, VfsPathBuf, canonicalize};
-use crate::stat::{Entry, Stat};
+use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
+use crate::stat::{Entry, FileType, Stat};
 
 /// Identity of one serial thread of execution. Process-unique, vended
 /// from a process-global monotonic counter. Opaque: no public constructor -
@@ -142,6 +142,33 @@ pub trait VfsAccess: Send {
     /// Returns an error when the pattern is invalid or the backend fails.
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError>;
 
+    /// Returns stored paths matching `pattern` that are files, or only
+    /// directories when `dirs_only` is set, sorted.
+    ///
+    /// Default: [`VfsAccess::glob`], then filter each match through
+    /// [`VfsAccess::stat`]. Backends that index their own trees override
+    /// to filter without a stat per match.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the pattern is invalid, when a matched path
+    /// fails to canonicalize or stat, or when the backend fails.
+    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        let mut kept = Vec::new();
+        for matched in self.glob(pattern)? {
+            let stat = self.stat(&canonicalize_absolute(&matched)?)?;
+            let keep = if dirs_only {
+                stat.file_type == FileType::Directory
+            } else {
+                stat.file_type == FileType::File
+            };
+            if keep {
+                kept.push(matched);
+            }
+        }
+        Ok(kept)
+    }
+
     /// Lists the directory at `path`.
     ///
     /// # Errors
@@ -245,7 +272,7 @@ pub trait VfsAccess: Send {
         let mut matches = Vec::new();
         let mut truncated = false;
         'files: for path in self.glob(&pattern)? {
-            let vfs_path = canonicalize(&path)?;
+            let vfs_path = canonicalize_absolute(&path)?;
             let bytes = match self.read(&vfs_path) {
                 Ok(bytes) => bytes,
                 Err(VfsError::IsADirectory(_)) => continue,
@@ -396,7 +423,7 @@ mod tests {
     use super::{AllowAll, Op, Policy, Verdict, VfsAccess};
     use crate::error::VfsError;
     use crate::grep::{GrepQuery, GrepResults};
-    use crate::path::{VfsPath, canonicalize};
+    use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::{Entry, Stat};
 
     /// Minimal in-memory backend exercising the trait defaults: the
@@ -416,13 +443,13 @@ mod tests {
     }
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
-        canonicalize(s)
+        canonicalize_absolute(s)
     }
 
     fn query(root: &str, pattern: &str) -> Result<GrepQuery, VfsError> {
         Ok(GrepQuery {
             pattern: pattern.to_owned(),
-            root: canonicalize(root)?.to_buf(),
+            root: canonicalize_absolute(root)?.to_buf(),
             is_regex: false,
             case_insensitive: false,
             glob_filter: None,

@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::VfsError;
 use crate::glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
-use crate::path::{VfsPath, canonicalize};
+use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
 use crate::traits::{ExecId, Vfs, VfsAccess};
 
@@ -503,7 +503,7 @@ impl VfsAccess for HostAccess {
             )));
         }
         let tokens = compile_glob(pattern.as_bytes());
-        let root = self.resolve(&canonicalize(walk_root(pattern))?)?;
+        let root = self.resolve(&canonicalize_absolute(walk_root(pattern))?)?;
         if !root.is_dir() {
             return Ok(Vec::new());
         }
@@ -608,12 +608,12 @@ mod tests {
 
     use super::{HostBackend, identity_to_virtual, map_io};
     use crate::error::VfsError;
-    use crate::path::{VfsPath, canonicalize};
+    use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::FileType;
     use crate::traits::{ExecId, Vfs, VfsAccess};
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
-        canonicalize(s)
+        canonicalize_absolute(s)
     }
 
     /// A unique temporary directory that removes itself on drop.
@@ -912,5 +912,81 @@ mod tests {
             Err(VfsError::NotFound(_))
         ));
         Ok(())
+    }
+
+    /// The rooted-path, idempotent-remove, and split-glob semantics of
+    /// the public capability, exercised over the host backend.
+    mod semantics {
+        use super::{HostBackend, TempDir, VfsError};
+        use crate::{Origin, VfsRef};
+
+        fn rooted(temp: &TempDir) -> Result<VfsRef, VfsError> {
+            Ok(VfsRef::new(HostBackend::rooted(temp.path())?))
+        }
+
+        #[test]
+        fn a_relative_path_joins_onto_the_access_root() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            access.write("a/b.txt", b"hi")?;
+            assert_eq!(access.read("a/b.txt")?, b"hi");
+            assert_eq!(access.read("/a/b.txt")?, b"hi");
+            Ok(())
+        }
+
+        #[test]
+        fn dotdot_stops_at_the_access_root() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            access.write("/drafts/f.txt", b"x")?;
+            assert_eq!(access.read("drafts/../drafts/f.txt")?, b"x");
+            assert!(matches!(
+                access.read("../f.txt"),
+                Err(VfsError::InvalidPath(_))
+            ));
+            Ok(())
+        }
+
+        #[test]
+        fn removing_a_missing_path_is_ok_false() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            assert!(!access.remove("missing.txt", false)?);
+            access.write("f.txt", b"x")?;
+            assert!(access.remove("f.txt", false)?);
+            assert!(!access.remove("f.txt", false)?);
+            Ok(())
+        }
+
+        #[test]
+        fn glob_returns_files_and_a_trailing_slash_selects_directories() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            access.write("/d/a.txt", b"")?;
+            access.write("/d/sub/c.txt", b"")?;
+            assert_eq!(access.glob("/d/*")?, vec!["/d/a.txt".to_owned()]);
+            assert_eq!(access.glob("/d/*/")?, vec!["/d/sub".to_owned()]);
+            Ok(())
+        }
+
+        #[test]
+        fn a_relative_pattern_yields_relative_results() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            access.write("/d/a.txt", b"")?;
+            assert_eq!(access.glob("d/*.txt")?, vec!["d/a.txt".to_owned()]);
+            Ok(())
+        }
+
+        #[test]
+        fn glob_refuses_a_backslash_in_the_raw_pattern() -> Result<(), VfsError> {
+            let temp = TempDir::new()?;
+            let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
+            assert!(matches!(
+                access.glob("/a\\b"),
+                Err(VfsError::InvalidPath(_))
+            ));
+            Ok(())
+        }
     }
 }

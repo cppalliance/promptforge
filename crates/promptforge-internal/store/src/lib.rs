@@ -336,8 +336,9 @@ impl Store<'_> {
     pub fn delete(&self, path: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
         match self.access.remove(&full(path.as_str()), false) {
-            // Idempotent: an absent path is already in the post-delete state.
-            Ok(()) | Err(VfsError::NotFound(_)) => Ok(()),
+            // Idempotent: a confirmed removal and a confirmed absence
+            // are both already the post-delete state.
+            Ok(_) => Ok(()),
             Err(other) => Err(map_vfs(other, path.as_str())),
         }
     }
@@ -413,8 +414,9 @@ impl Store<'_> {
         let prefix = format!("{STORE_MOUNT}/");
         let mut paths = Vec::new();
         for matched in matches {
-            // The VFS glob lists directories as well as files; the store
-            // vocabulary lists files only.
+            // The VFS glob already lists files only; the per-match stat
+            // keeps the store's read claim on each matched file, so a
+            // glob over a claimed path races like a read.
             let logical = matched.strip_prefix(&prefix).unwrap_or(&matched);
             let stat = self
                 .access

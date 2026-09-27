@@ -16,9 +16,10 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
+use crate::glob::{MAX_GLOB_PATTERN_BYTES, validate_glob_grammar};
 use crate::grep::{GrepQuery, GrepResults};
 use crate::observe::{OpEvent, OpSink, Origin};
-use crate::path::{VfsPath, canonicalize};
+use crate::path::{VfsPath, canonicalize, canonicalize_absolute};
 use crate::router::{Mounts, Router, VfsRefBuilder};
 use crate::stat::{Entry, Stat};
 use crate::traits::{AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
@@ -152,6 +153,17 @@ fn conflict(
     ))
 }
 
+/// Re-spells a namespace-absolute result relative to the access's root,
+/// or `None` when the result does not sit under it (never, for results
+/// of a pattern that joined onto the root).
+fn strip_root(root: &str, matched: &str) -> Option<String> {
+    if root == "/" {
+        return matched.strip_prefix('/').map(str::to_owned);
+    }
+    let prefix = format!("{root}/");
+    matched.strip_prefix(&prefix).map(str::to_owned)
+}
+
 /// One mounted filesystem instance: its backend and the ledger of who is
 /// touching what. The two are separately `Arc`-shareable so `overlay()`
 /// (a later step) can share the claims table while swapping the backend.
@@ -221,7 +233,7 @@ impl VfsRef {
     /// [`VfsRef::new`] instead.
     #[must_use]
     pub fn overlay(&self, prefix: &str, backend: impl Vfs + 'static) -> VfsRef {
-        let canonical = canonicalize(prefix)
+        let canonical = canonicalize_absolute(prefix)
             .unwrap_or_else(|err| panic!("invalid overlay prefix {prefix:?}: {err}"));
         assert!(
             canonical.as_str() != "/",
@@ -231,7 +243,7 @@ impl VfsRef {
         // operations outside the overlay prefix route through the base's
         // own policy and claims under the caller's identity.
         let mut mounts = Mounts::new();
-        let root = canonicalize("/")
+        let root = canonicalize_absolute("/")
             .unwrap_or_else(|err| panic!("the namespace root is always valid: {err}"))
             .to_buf();
         mounts.insert(root, Arc::new(Mutex::new(Box::new(self.clone()))));
@@ -280,6 +292,7 @@ impl VfsRef {
         Ok(Access {
             id,
             origin,
+            root: VfsPath::root(),
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             inner: Mutex::new(inner),
@@ -322,6 +335,9 @@ pub struct Access {
     /// The caller-supplied observability origin; `None` only on the
     /// crate-private mount forward, which never fires.
     origin: Option<Origin>,
+    /// The root that relative paths and patterns join onto, fixed for
+    /// the access's life. A plain acquire roots at `/`.
+    root: VfsPath,
     volume: Arc<Volume>,
     policy: Arc<dyn Policy + Sync>,
     inner: Mutex<Box<dyn VfsAccess>>,
@@ -350,6 +366,9 @@ impl Access {
         Ok(Access {
             id,
             origin: Some(origin),
+            // The child shares the parent's root: a store view's arms
+            // see the same store.
+            root: self.root.clone(),
             volume: self.volume.clone(),
             policy: self.policy.clone(),
             inner: Mutex::new(inner),
@@ -464,13 +483,22 @@ impl Access {
 
     /// Removes the file, link, or directory at `path`.
     ///
+    /// A confirmed removal is `Ok(true)`, and a missing path is
+    /// `Ok(false)`: deleting is idempotent.
+    ///
     /// # Errors
     /// Returns an error when the policy denies the delete, when another
     /// live identity holds a claim on `path`, or when the backend fails.
-    pub fn remove(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
+    pub fn remove(&self, path: &str, recursive: bool) -> Result<bool, VfsError> {
         let path = self.gate(Op::Delete, path, ClaimKind::Write)?;
         self.fire(Op::Delete, &path);
-        self.inner().remove(&path, recursive)
+        match self.inner().remove(&path, recursive) {
+            Ok(()) => Ok(true),
+            // The backend trait reports an absent path as NotFound; the
+            // public capability confirms the absence instead.
+            Err(VfsError::NotFound(_)) => Ok(false),
+            Err(err) => Err(err),
+        }
     }
 
     /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
@@ -485,17 +513,60 @@ impl Access {
         self.inner().exists(&path)
     }
 
-    /// Returns stored paths matching `pattern`, sorted.
+    /// Returns the paths matching `pattern` that are files, or only
+    /// directories when the pattern ends in `/`, sorted.
+    ///
+    /// The raw pattern is validated before canonicalization, so a
+    /// backslash is refused rather than turned into a separator. A
+    /// pattern without a leading `/` joins onto the access's root, and
+    /// its results come back relative to that root.
     ///
     /// # Errors
-    /// Returns an error when the policy denies the glob or when the
-    /// backend fails.
+    /// Returns an error when the pattern is empty, over-long, or
+    /// grammar-invalid, when the policy denies the glob, when another
+    /// live identity holds a conflicting claim, or when the backend
+    /// fails.
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        if pattern.is_empty() {
+            return Err(VfsError::InvalidPath("empty path".into()));
+        }
+        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
+            return Err(VfsError::InvalidPath(format!(
+                "glob pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"
+            )));
+        }
+        if let Err(reason) = validate_glob_grammar(pattern) {
+            return Err(VfsError::InvalidPath(format!(
+                "invalid glob pattern {pattern:?}: {reason}"
+            )));
+        }
+        // A trailing `/` asks for directories only; matching and the
+        // claim key use the pattern without it.
+        let dirs_only = pattern.ends_with('/');
+        let stripped = pattern.trim_end_matches('/');
+        let pattern = if stripped.is_empty() { "/" } else { stripped };
+        self.glob_pattern(pattern, dirs_only)
+    }
+
+    /// The canonical-pattern half of [`Access::glob`]: gates, fires, and
+    /// matches one pattern whose trailing `/` was already split off into
+    /// `dirs_only`. Crate-private so the mounted-handle forward can
+    /// preserve the flag it received.
+    fn glob_pattern(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        let relative = !pattern.starts_with('/');
         // The claim key is the canonicalized pattern; the backend
-        // receives the pattern verbatim.
+        // receives it canonical too.
         let claimed = self.gate(Op::Glob, pattern, ClaimKind::Read)?;
         self.fire(Op::Glob, &claimed);
-        self.inner().glob(pattern)
+        let mut matches = self.inner().glob_kind(claimed.as_str(), dirs_only)?;
+        if relative {
+            for matched in &mut matches {
+                if let Some(rest) = strip_root(self.root.as_str(), matched) {
+                    *matched = rest;
+                }
+            }
+        }
+        Ok(matches)
     }
 
     /// Lists the directory at `path`.
@@ -572,7 +643,7 @@ impl Access {
     /// live identity holds a write claim on the query's root, or when the
     /// backend fails.
     pub fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        let root = canonicalize(query.root.as_str())?;
+        let root = canonicalize(&self.root, query.root.as_str())?;
         self.check_policy(Op::Grep, &root)?;
         self.volume
             .claims
@@ -583,9 +654,10 @@ impl Access {
 
     /// Canonicalizes at receipt, consults the policy, then registers the
     /// claim - in that order, so a denied operation never registers a
-    /// claim and every claim key is the canonical path.
+    /// claim and every claim key is the canonical path. A path without a
+    /// leading `/` joins onto the access's root.
     fn gate(&self, op: Op, path: &str, claim: ClaimKind) -> Result<VfsPath, VfsError> {
-        let path = canonicalize(path)?;
+        let path = canonicalize(&self.root, path)?;
         self.check_policy(op, &path)?;
         // The claims table holds its own clone: the string frees when
         // the claim and every other owner drop.
@@ -722,7 +794,13 @@ impl VfsAccess for HandleAccess {
     }
 
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.0.remove(path.as_str(), recursive)
+        // The backend trait's contract reports an absent path as
+        // NotFound; the capability's Ok(false) maps back onto it.
+        if self.0.remove(path.as_str(), recursive)? {
+            Ok(())
+        } else {
+            Err(VfsError::NotFound(path.to_string()))
+        }
     }
 
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
@@ -731,6 +809,12 @@ impl VfsAccess for HandleAccess {
 
     fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
         self.0.glob(pattern)
+    }
+
+    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
+        // The forward re-enters the full public pipeline with the flag
+        // intact, so the dirs-only split survives the handle boundary.
+        self.0.glob_pattern(pattern, dirs_only)
     }
 
     fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
@@ -771,7 +855,7 @@ mod tests {
     use crate::error::VfsError;
     use crate::observe::{OpEvent, Origin};
     use crate::path::VfsPath;
-    use crate::stat::{Entry, Stat};
+    use crate::stat::{Entry, FileType, Stat};
     use crate::traits::{ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
 
     /// Minimal in-memory backend shared between the `Vfs` and the access
@@ -881,8 +965,19 @@ mod tests {
         }
 
         fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-            let _ = path;
-            Err(VfsError::Unsupported("the stub does not stat".into()))
+            // Every stored key is a file; the stub holds no directories.
+            let bytes = self
+                .files()
+                .get(path.as_str())
+                .cloned()
+                .ok_or_else(|| VfsError::NotFound(path.to_string()))?;
+            Ok(Stat {
+                file_type: FileType::File,
+                size: bytes.len() as u64,
+                mode: None,
+                modified: None,
+                created: None,
+            })
         }
 
         fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
@@ -1490,5 +1585,86 @@ mod tests {
             &[Op::Write]
         );
         Ok(())
+    }
+
+    /// The rooted-path, idempotent-remove, and split-glob semantics of
+    /// the public capability, exercised over the memory backend.
+    mod semantics {
+        use crate::memory::MemoryBackend;
+
+        use super::{VfsError, VfsRef, test_origin};
+
+        fn memory() -> VfsRef {
+            VfsRef::new(MemoryBackend::new())
+        }
+
+        #[test]
+        fn a_relative_path_joins_onto_the_access_root() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            access.write("notes/a.txt", b"hi")?;
+            assert_eq!(access.read("/notes/a.txt")?, b"hi");
+            assert_eq!(access.read("notes/a.txt")?, b"hi");
+            Ok(())
+        }
+
+        #[test]
+        fn dotdot_stops_at_the_access_root() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            access.write("/drafts/f.txt", b"x")?;
+            assert_eq!(access.read("drafts/../drafts/f.txt")?, b"x");
+            assert!(matches!(
+                access.read("../f.txt"),
+                Err(VfsError::InvalidPath(_))
+            ));
+            Ok(())
+        }
+
+        #[test]
+        fn removing_a_missing_path_is_ok_false() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            assert!(!access.remove("/gone.txt", false)?);
+            access.write("/f.txt", b"x")?;
+            assert!(access.remove("/f.txt", false)?);
+            assert!(!access.remove("/f.txt", false)?);
+            Ok(())
+        }
+
+        #[test]
+        fn glob_returns_files_and_a_trailing_slash_selects_directories() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            access.write("/d/a.txt", b"")?;
+            access.write("/d/sub/c.txt", b"")?;
+            assert_eq!(access.glob("/d/*")?, vec!["/d/a.txt".to_owned()]);
+            assert_eq!(access.glob("/d/*/")?, vec!["/d/sub".to_owned()]);
+            Ok(())
+        }
+
+        #[test]
+        fn glob_refuses_a_backslash_in_the_raw_pattern() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            access.write("/a.txt", b"")?;
+            // A backslash is refused as written, never turned into a
+            // separator by canonicalization.
+            assert!(matches!(
+                access.glob("/a\\b"),
+                Err(VfsError::InvalidPath(_))
+            ));
+            assert!(matches!(
+                access.glob("/a/***/b"),
+                Err(VfsError::InvalidPath(_))
+            ));
+            Ok(())
+        }
+
+        #[test]
+        fn a_relative_pattern_yields_relative_results() -> Result<(), VfsError> {
+            let access = memory().acquire(test_origin())?;
+            access.write("/d/a.txt", b"")?;
+            access.write("/d/b.md", b"")?;
+            access.write("/d/sub/c.txt", b"")?;
+            assert_eq!(access.glob("d/*.txt")?, vec!["d/a.txt".to_owned()]);
+            assert_eq!(access.glob("d/*/")?, vec!["d/sub".to_owned()]);
+            Ok(())
+        }
     }
 }
