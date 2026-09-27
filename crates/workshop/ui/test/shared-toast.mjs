@@ -1,4 +1,4 @@
-// Unit test for the shared toast stack (shared-ui/toast.ts), which the
+// Unit test for the shared toast stack (@workshop/look/toast.ts), which the
 // workshop's update notifications now feed: show() appends a kind-classed
 // toast to the polite live region, and the toast dismisses itself after
 // its four-second lifetime. Bundles the module with esbuild and drives it
@@ -18,7 +18,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/toast"))],
+  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/toast"))],
   bundle: true,
   write: false,
   format: "esm",

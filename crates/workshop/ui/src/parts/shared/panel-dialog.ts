@@ -1,12 +1,12 @@
 // Themed modal dialogs for the workshop panels, built on the shared
-// focus-trapped modal (shared-ui/modal): an overlay inside the panel
+// focus-trapped modal (@workshop/look/modal): an overlay inside the panel
 // element, a role="dialog" surface, an optional labeled text field, a
 // Tab focus trap, Escape dismissal, and focus return to the invoker.
 // The editor's conflict and close prompts and the workshop tree's Add
 // Folder prompt are built through this one helper so their behavior
 // never diverges.
 
-import { openModal } from "shared-ui/modal";
+import { openModal } from "@workshop/look/modal";
 
 import { toDisposable, type IDisposable } from "../../base/lifecycle";
 

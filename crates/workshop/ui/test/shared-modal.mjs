@@ -1,4 +1,4 @@
-// Unit test for the shared focus-trapped modal (shared-ui/modal.ts):
+// Unit test for the shared focus-trapped modal (@workshop/look/modal.ts):
 // the overlay and dialog structure with the prefix class contract, the
 // Tab trap cycling both directions, Escape and backdrop dismissal with
 // focus return to the invoker, the requiresValue gating with Enter
@@ -19,7 +19,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/modal"))],
+  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/modal"))],
   bundle: true,
   write: false,
   format: "esm",

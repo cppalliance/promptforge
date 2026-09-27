@@ -1,4 +1,4 @@
-// Unit test for the shared status bar view (shared-ui/status-bar.ts):
+// Unit test for the shared status bar view (@workshop/look/status-bar.ts):
 // the barberpole beside the consumer's indicators group (setBusy shows
 // and hides the barberpole, the group stays visible throughout and keeps
 // its contents, the barberpole precedes the group in DOM order), the
@@ -19,7 +19,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/status-bar"))],
+  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/status-bar"))],
   bundle: true,
   write: false,
   format: "esm",

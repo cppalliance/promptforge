@@ -1,7 +1,7 @@
 // The Run window's tab renderer: the default chip's structure (same
 // classes, so the theme styles it identically) with a close action,
 // plus the loading shimmer. While its panel is loading, the title span
-// takes shared-ui's .ws-shimmer-text; the negative animation-delay
+// takes @workshop/look's .ws-shimmer-text; the negative animation-delay
 // against the module-level epoch keeps the sweep continuous across the
 // re-renders a tab title goes through (the same trick upstream VS Code
 // uses). Tabs register themselves by panel id in the module map below
@@ -13,7 +13,7 @@ import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
 import { Disposable } from "../../base/lifecycle";
 
-/** The shimmer period, matching the 2s loop in shared-ui/shimmer.css. */
+/** The shimmer period, matching the 2s loop in @workshop/look/shimmer.css. */
 const SHIMMER_PERIOD_MS = 2000;
 // The epoch the negative animation-delay is computed against, so a
 // re-rendered title continues the sweep instead of restarting it.

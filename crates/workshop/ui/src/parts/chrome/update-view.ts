@@ -1,13 +1,13 @@
 // Update banner and installation overlay. Native I/O and state stay in the
 // service; this view only translates snapshots into DOM. Transient update
-// notifications feed the shared toast stack (shared-ui/toast); the banner
+// notifications feed the shared toast stack (@workshop/look/toast); the banner
 // keeps the actionable "available" state and the overlay the install
 // progress (the shared inline progress bar).
 
 import "./update-view.css";
 
-import { createProgressBar } from "shared-ui/progress";
-import type { ToastStack } from "shared-ui/toast";
+import { createProgressBar } from "@workshop/look/progress";
+import type { ToastStack } from "@workshop/look/toast";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { UpdateService, type UpdateSnapshot } from "../../services/update-service";

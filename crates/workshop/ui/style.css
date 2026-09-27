@@ -1,8 +1,8 @@
 /* ==========================================================================
    PromptForge workshop skin
 
-   The design tokens live in shared-ui/tokens.css - the Cursor Dark sheet
-   both PromptForge UIs share - bundled into dist/app.css from main.ts's
+   The design tokens live in @workshop/look/tokens.css - the Workshop
+   family's Cursor Dark sheet - bundled into dist/app.css from main.ts's
    import. Reskinning the UI means editing that one block (or overriding
    it from a stylesheet loaded after); no rule below hardcodes a color or
    a themed length.

@@ -1,6 +1,6 @@
-import "shared-ui/tokens.css";
-import "shared-ui/controls.css";
-import "shared-ui/shimmer.css";
+import "@workshop/look/tokens.css";
+import "@workshop/look/controls.css";
+import "@workshop/look/shimmer.css";
 import "dockview/dist/styles/dockview.css";
 
 import "./tokens/base.css";
@@ -8,7 +8,7 @@ import "./tokens/semantic.css";
 import "./tokens/component.css";
 
 import { createDockview, themeDark } from "dockview";
-import { createToastStack } from "shared-ui/toast";
+import { createToastStack } from "@workshop/look/toast";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService, MODEL_SERVICE } from "./services/model-service";
@@ -122,7 +122,7 @@ registerService(
 // updates the status bar renders as they arrive, catalog pushes, and
 // workbench snapshots. Chat goes over the agent panel's own /agents/ws
 // socket, composed inside the panel. The status bar builds its own
-// view (shared-ui) and appends it as the body's full-width footer.
+// view (@workshop/look) and appends it as the body's full-width footer.
 const statusBar = disposables.add(new StatusBar());
 const updates = disposables.add(new UpdateService());
 // The shared toast stack shows the update notifications; the workshop

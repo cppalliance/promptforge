@@ -1,7 +1,7 @@
 /* Styles for the Run window panel (run-panel.ts, run-rows.ts), which
    imports this file; esbuild bundles it into dist/app.css. Themed
-   values come from the :root tokens in shared-ui/tokens.css; the
-   controls (buttons, inputs) use the shared-ui/controls.css classes. */
+   values come from the :root tokens in @workshop/look/tokens.css; the
+   controls (buttons, inputs) use the @workshop/look/controls.css classes. */
 
 .ws-run-panel {
   position: relative;

@@ -1,6 +1,6 @@
 // The status bar renderer: consumes the observer's status frames off the
 // persistent socket and paints them into the shared status bar view
-// (shared-ui/status-bar), which owns the bar, the text region, and the
+// (@workshop/look/status-bar), which owns the bar, the text region, and the
 // busy barberpole beside the indicators. Info and error frames set the
 // text (the description shows as the tooltip) and drive the barberpole;
 // debug frames are internal instrumentation: they never touch the text
@@ -8,7 +8,7 @@
 // indicators group holds the recording and activity LEDs; the view's
 // extras region stays empty.
 
-import { createStatusBarView, type StatusBarView } from "shared-ui/status-bar";
+import { createStatusBarView, type StatusBarView } from "@workshop/look/status-bar";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
 import { CONTEXT_KEY_SERVICE, type ContextKey } from "../../services/context-key-service";

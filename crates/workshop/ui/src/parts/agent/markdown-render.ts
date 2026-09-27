@@ -42,10 +42,10 @@ import langYaml from "@shikijs/langs/yaml";
 
 const THEME_NAME = "workshop-dark";
 
-// The theme colors are the skin's --syntax-* token values (shared-ui/tokens.css).
+// The theme colors are the skin's --syntax-* token values (@workshop/look/tokens.css).
 // Shiki resolves token colors in JS at highlight time, where CSS custom
 // properties cannot reach, so the values are duplicated here as a static
-// theme; shared-ui/tokens.css stays the source of truth for what they should be.
+// theme; @workshop/look/tokens.css stays the source of truth for what they should be.
 const workshopTheme: ThemeRegistration = {
   name: THEME_NAME,
   type: "dark",

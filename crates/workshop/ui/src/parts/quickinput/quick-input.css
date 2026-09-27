@@ -1,5 +1,5 @@
 /* Styles for quick-input.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
+   into dist/app.css. Themed values come from the :root tokens in @workshop/look/tokens.css. */
 
 /* The panel floats under the title bar, horizontally centered, above
    every other surface. Its width ceiling is the command center pill's

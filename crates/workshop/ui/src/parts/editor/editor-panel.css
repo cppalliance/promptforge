@@ -1,7 +1,7 @@
 /* Styles for editor-panel.ts, which imports this file; esbuild bundles it
    into dist/app.css. Covers the editor surface and the panel's modal
    dialogs from shared/panel-dialog.ts. Themed values come from the :root
-   tokens in shared-ui/tokens.css. */
+   tokens in @workshop/look/tokens.css. */
 
 /* The editor panel: the CodeMirror surface fills the panel; the editor's
    own theme (colors, gutters, selection, search panel) is applied from JS
@@ -46,7 +46,7 @@
   background: var(--ws-overlay-scrim);
 }
 
-/* The shared modal's base skin (shared-ui/modal.css) would size these
+/* The shared modal's base skin (@workshop/look/modal.css) would size these
    dialogs to a fixed width and add a drop shadow; the panel dialogs stay
    content-sized and shadowless, as before the extraction. */
 .ws-editor-conflict,

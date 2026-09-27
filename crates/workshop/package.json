@@ -1,7 +1,8 @@
 {
   "private": true,
   "workspaces": [
-    "ui"
+    "ui",
+    "look"
   ],
   "devDependencies": {
     "esbuild": "^0.28.2",

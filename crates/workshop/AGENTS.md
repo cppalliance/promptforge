@@ -16,6 +16,7 @@ The Workshop family: the desktop app, the in-process server, the subsystems the 
 - `registry` (vocabulary): self-registration slots and the `Push` facade.
 - `support` (vocabulary): shared primitives (including the retained broadcast bus and its `recv_or_pending` helper) and test fixtures.
 - `ui` (not a Rust crate): the TypeScript SPA. The workspace tree panel lives in `parts/workspace/`, the File menu's open, save-as, and duplicate workspace commands in `parts/workspace-document/`, and the icons and panel dialog helper in `parts/shared/`.
+- `look` (not a Rust crate): `@workshop/look`, the Workshop family's fork of `crates/shared-ui` - the Cursor Dark tokens and the shared components (modal, dropdown, toast stack, status bar view, progress bar, button and input bases). The SPA consumes it through the npm workspace rooted at `crates/workshop`.
 
 ## Runtime links
 

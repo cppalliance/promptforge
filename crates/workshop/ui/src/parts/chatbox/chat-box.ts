@@ -45,7 +45,7 @@ import type {
   SerializedDraft,
 } from "./types";
 
-// The fallbacks mirror the token defaults in shared-ui/tokens.css; they
+// The fallbacks mirror the token defaults in @workshop/look/tokens.css; they
 // apply when the skin is absent (tests) or the token is deleted.
 const DEFAULT_MIN_HEIGHT_PX = 36;
 const DEFAULT_MAX_HEIGHT_PX = 200;

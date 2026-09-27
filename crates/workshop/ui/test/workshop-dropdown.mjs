@@ -1,4 +1,4 @@
-// Unit test for the shared action menu (shared-ui/dropdown.ts), the
+// Unit test for the shared action menu (@workshop/look/dropdown.ts), the
 // floating menu the workshop's mode chip and model picker open. Bundles
 // the module with esbuild and drives it against jsdom. Covers: opening
 // renders a role=menu of menuitem buttons and wires the trigger's
@@ -32,7 +32,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [fileURLToPath(import.meta.resolve("shared-ui/dropdown"))],
+  entryPoints: [fileURLToPath(import.meta.resolve("@workshop/look/dropdown"))],
   bundle: true,
   write: false,
   format: "esm",

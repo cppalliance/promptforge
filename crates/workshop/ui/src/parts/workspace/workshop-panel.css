@@ -1,6 +1,6 @@
 /* Styles for workshop-panel.ts, which imports this file; esbuild bundles
    it into dist/app.css. Covers the Workshop tree panel. Themed values
-   come from the :root tokens in shared-ui/tokens.css. */
+   come from the :root tokens in @workshop/look/tokens.css. */
 
 /* The Workshop file tree panel: one directory per level, folders before
    files, disclosure chevrons on directories. Rows are real buttons.

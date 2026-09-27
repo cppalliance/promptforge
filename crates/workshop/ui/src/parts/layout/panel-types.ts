@@ -23,7 +23,7 @@ import {
   loadPanelType,
   panelTypeEntry,
 } from "../../services/panel-registry";
-import { DropdownMenu } from "shared-ui/dropdown";
+import { DropdownMenu } from "@workshop/look/dropdown";
 import { RunTab } from "./run-tab";
 
 export {

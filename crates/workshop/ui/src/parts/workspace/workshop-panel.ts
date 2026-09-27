@@ -31,7 +31,7 @@ import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../s
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 import { addFolderToWorkspace } from "./add-folder";
 import { rootsCurrentIn } from "./workspace-drops";
-import { DropdownMenu } from "shared-ui/dropdown";
+import { DropdownMenu } from "@workshop/look/dropdown";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../shared/icons";
 import { openInZone, panelIdFor } from "../layout/zones";
 import "./workshop-panel.css";

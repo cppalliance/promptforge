@@ -39,11 +39,11 @@
     "@tiptap/pm": "^3.31.0",
     "@tiptap/starter-kit": "^3.31.0",
     "@tiptap/suggestion": "^3.31.0",
+    "@workshop/look": "*",
     "dockview": "^8.3.1",
     "dompurify": "^3.4.14",
     "lucide": "^1.37.0",
     "marked": "^18.0.11",
-    "shared-ui": "file:../../shared-ui",
     "shiki": "^4.4.3"
   },
   "devDependencies": {

@@ -323,7 +323,7 @@ Every change is behavior-neutral, so verification means the existing suites pass
 
 <step-3>
 
-### Step 3: Name the fork @workshop/look and switch the Workshop onto it
+### Step 3: Name the fork @workshop/look and switch the Workshop onto it [completed]
 
 - Component: `@workshop/look`
 - Placement: the dependency switch and the import rewrite land together, so the Workshop never builds against both packages or neither. Every later step in this component edits a package the Workshop already consumes.

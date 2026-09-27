@@ -46,4 +46,4 @@ The desktop release orchestrator: builds the gateway, stages the sidecar, builds
 
 Workspace automation: the new-crate scaffolder, the tidy checks (tier graph, lint inheritance, file ceiling), and the product-boundary matrix. `cargo test -p build-xtask` is the structural harness every change runs. No workspace dependencies.
 
-Note: `shared-ui` is not a Rust crate - it is the shared TypeScript+CSS package both esbuild-built UIs consume, so the `crates/*` member glob skips it.
+Note: `shared-ui` is not a Rust crate - it is the TypeScript+CSS package the Gateway config UI consumes (the Workshop uses its fork, `workshop/look`), so the `crates/*` member glob skips it.

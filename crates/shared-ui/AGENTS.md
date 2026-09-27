@@ -2,6 +2,8 @@
 
 Shared TypeScript and CSS primitives for the Gateway configuration UI and Workshop UI.
 
+The Workshop no longer consumes this package; it uses its fork, `@workshop/look` in `crates/workshop/look`.
+
 - `tokens.css` owns the shared design-token vocabulary consumed by both product UIs.
 - This package is a base-layer dependency and never imports from either product UI.
 - A behavioral primitive belongs here only when both product UIs consume it. Product-specific controls and integrations stay with their products.

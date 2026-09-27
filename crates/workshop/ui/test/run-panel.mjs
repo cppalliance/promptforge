@@ -567,7 +567,7 @@ check(
 // against the stylesheet itself: under prefers-reduced-motion the
 // animation, gradient, clip, and transparent fill all come off.
 const shimmerCss = await readFile(
-  path.join(uiDir, "..", "..", "..", "shared-ui", "shimmer.css"),
+  fileURLToPath(import.meta.resolve("@workshop/look/shimmer.css")),
   "utf8");
 const reducedBlock = shimmerCss.split("@media (prefers-reduced-motion: reduce)")[1] ?? "";
 check("the shimmer class is defined", shimmerCss.includes(".ws-shimmer-text"));

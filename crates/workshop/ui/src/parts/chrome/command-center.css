@@ -1,5 +1,5 @@
 /* Styles for command-center.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
+   into dist/app.css. Themed values come from the :root tokens in @workshop/look/tokens.css. */
 
 /* The no-drag marker: the center region initiates a native drag only when
    the pointer lands on the region itself (window-chrome.ts), so this class
