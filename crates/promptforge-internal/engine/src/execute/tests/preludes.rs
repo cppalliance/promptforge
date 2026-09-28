@@ -176,7 +176,7 @@ fn a_prelude_defining_ui_or_item_collides_on_a_host_that_binds_neither() {
             vec![prelude("acme/reserved", &format!("{name} = {{}}"))],
             &[
                 &format!("capability `acme/reserved`: its prelude defines the global `{name}`"),
-                "which is reserved for",
+                "which is reserved as a host global",
             ],
         );
     }

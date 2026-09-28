@@ -201,7 +201,7 @@ Each bad name produces one message, for the first check it fails. The overall se
 
 ## Tool slots and Tool objects
 
-Each `tools:` entry declares a tool slot: an alias, which follows the prompt's [name grammar for aliases](02-file-structure.md#names-for-aliases-roles-and-args), bound to one tool path. The first two segments of the path name the declared capability that supplies the tool.
+Each `tools:` entry declares a tool slot: an alias, which follows the prompt's [name grammar for aliases](02-file-structure.md#names-for-aliases-roles-and-args), bound to one tool path. The first two segments of the path name the declared capability that supplies the tool. Because each alias becomes a Lua global of its own name, an alias may not be one of the [reserved names](02-file-structure.md#reserved-names-for-aliases-and-role-labels), such as `store` or `pairs`, nor a label under `models:`.
 
 Prepare [fills each slot](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles) by exact match of its tool path against the run's tool catalog, which holds the activated capabilities' tools in declaration order. A slot whose path matches becomes a bound tool slot, and it stays bound to that same tool for the whole run. Slots are bound before any Lua runs, so Lua only chooses which bound slots the model sees, and scoping an alias that is not bound is an error.
 

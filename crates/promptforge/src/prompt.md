@@ -116,7 +116,7 @@ The [Reference](#reference) gives the exact YAML form of every key.
 
 The frontmatter parser rejects anything it does not recognize. An unknown or misspelled top-level key fails the parse, so a typo such as `desciption:` fails loudly instead of being skipped. The same rule holds inside every entry of `capabilities:`, `tools:`, `args:`, and `models:`, where misspelled sub-keys such as `optionl`, `wants`, `tipe`, and `keyword` fail too. Malformed YAML fails the parse as well. A leading UTF-8 byte order mark is dropped before parsing.
 
-Every frontmatter failure has the kind [`ParseErrorKind::Frontmatter`](crate::ParseErrorKind::Frontmatter). A bad value is reported at its exact line and column. [`ParseError::line`](crate::ParseError::line) and [`ParseError::column`](crate::ParseError::column) count from the top of the file, so the opening `---` line is line 1. [`ParseError::name`](crate::ParseError::name) returns [`None`], because a frontmatter failure happens before the prompt's name is known. Report the position to the prompt author under your own label for the source.
+Every frontmatter failure has the kind [`ParseErrorKind::Frontmatter`](crate::ParseErrorKind::Frontmatter). A bad value is reported at its exact line and column, except a name declared under both `tools:` and `models:`, which spans two keys and has neither. [`ParseError::line`](crate::ParseError::line) and [`ParseError::column`](crate::ParseError::column) count from the top of the file, so the opening `---` line is line 1. [`ParseError::name`](crate::ParseError::name) returns [`None`], because a frontmatter failure happens before the prompt's name is known. Report the position to the prompt author under your own label for the source.
 
 ````
 use promptforge::{ParseErrorKind, Prompt};
@@ -158,6 +158,35 @@ The bad id `web` sits on file line 5, and the value starts in column 5, after th
 # Prompt-local names
 
 Three kinds of name are local to a prompt: tool aliases under `tools:`, model role labels under `models:`, and arg names under `args:`. The model only ever sees these local names, never a global path. All three share one grammar, `[A-Za-z][A-Za-z0-9_-]{0,63}`, which is a letter followed by up to 63 letters, digits, underscores, or hyphens. So `1search`, `has space`, `has/slash`, and `has.dot` are rejected. A 64-character name passes, and a 65-character name fails. A name that appears twice in one map fails with "duplicate {what} `{key}`: contract map keys must be unique", where `{what}` is `tool alias`, `model role label`, or `arg name`.
+
+Tool aliases and model role labels are Lua names too. Each one becomes a global of its own name in every section of a run, so neither may take a name the section's Lua already uses: a host global such as `store`, `argv`, `tools`, or `models`, a Lua standard-library global the sandbox keeps such as `pairs` or `string`, or a Lua keyword such as `end`. The separate language guide lists every reserved name. A reserved key fails with "{what} `{key}` in `{map}` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name", where `{map}` is `tools` or `models` and `{category}` is `a host global`, `a Lua standard-library global`, or `a Lua keyword`, at the key's own line and column. Arg names are exempt, because they name fields of the parsed arguments rather than globals. A name declared under both `tools:` and `models:` fails as well, because both would install the same global; that failure names the shared name and both maps and has no line or column.
+
+````
+use promptforge::{ParseErrorKind, Prompt};
+
+let reserved = concat!(
+    "---\n",
+    "name: saver\n",
+    "description: saves a page\n",
+    "tools:\n",
+    "  store: promptforge/web/fetch\n",
+    "---\n",
+    "\n",
+    "# Saver\n",
+);
+let (failed, _parse_events) = Prompt::parse(reserved, "saver");
+let error = failed.err().ok_or("the reserved alias fails the parse")?;
+assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+assert_eq!(error.line(), Some(5));
+assert!(error
+    .to_string()
+    .contains("tool alias `store` in `tools` is reserved (a host global)"));
+
+let renamed = reserved.replace("  store:", "  saver:");
+let (parsed, _parse_events) = Prompt::parse(&renamed, "saver");
+assert!(parsed?.frontmatter().tools().get("saver").is_some());
+# Ok::<(), Box<dyn std::error::Error>>(())
+````
 
 The lookup methods [`ToolSlots::get`], [`ArgsDecl::get`], and [`ModelRoles::get`] take the name exactly as written, and the match is case-sensitive. A string outside the grammar can never be present, so looking one up returns [`None`].
 

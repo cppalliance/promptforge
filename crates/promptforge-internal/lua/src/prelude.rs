@@ -49,35 +49,17 @@ const VISIBLE_GLOBALS: [&str; 19] = [
     "untrusted",
 ];
 
-/// Globals a raw `_G` read does not find on every VM, each with what binds
-/// it: `ui` and `item` bind only on some VMs, and the `_G` metatable serves
-/// `argv` outside H1 and `prose` once a block starts, so neither is a raw
-/// global there. A prelude may define none of them on any host, so whether
-/// a prelude installs does not depend on the host or the section, and no
-/// prelude global shadows a guard.
-const RESERVED_GLOBALS: [(&str, &str); 4] = [
-    (
-        "ui",
-        "the host-state global that hosts with a snapshot bind",
-    ),
-    ("item", "the collection member global that fanout arms bind"),
-    ("argv", "the parsed args global that every section binds"),
-    (
-        "prose",
-        "the Markdown text global that each block binds when it starts",
-    ),
-];
-
 /// Installs the run's capability preludes, in order, into a section VM.
 ///
 /// Each prelude loads from source under the chunk name
 /// `@capability:<id>` in its own restricted environment (see the module
-/// docs). The globals it defines must not collide with any name bound in
-/// `_G`, with `ui`, `item`, `argv`, or `prose`, with `aliases` (the prompt's frontmatter tool
-/// and model aliases, which install as globals after the shared replay), or
-/// with an earlier prelude's globals. A table global installs as an empty
-/// proxy that reads the prelude's table and refuses writes; any other value
-/// installs as it is.
+/// docs). The globals it defines must not collide with a reserved name
+/// ([`crate::RESERVED_NAMES`]), with any other name bound in `_G`, with
+/// `aliases` (the prompt's frontmatter tool and model aliases, which
+/// install as globals after the shared replay), or with an earlier
+/// prelude's globals. A table global installs as an empty proxy that reads
+/// the prelude's table and refuses writes; any other value installs as it
+/// is.
 ///
 /// The engine's section setup calls this after the coroutine yield shims
 /// install and before the shared library replays. The chunk is not a
@@ -192,7 +174,12 @@ fn defined_globals(capability: &CapabilityId, env: &Table) -> Result<BTreeMap<St
 }
 
 /// Fails when `name` is already taken: by an earlier prelude, a
-/// frontmatter alias, a reserved global, or a name bound in `_G`.
+/// frontmatter alias, a reserved name, or a name bound in `_G`.
+///
+/// The reserved check covers the host globals that a raw `_G` read does
+/// not find on every VM (`ui` and `item` bind only on some, and the `_G`
+/// guard serves `argv` outside H1 and `prose`), so whether a prelude
+/// installs does not depend on the host or the section.
 fn check_collision(
     globals: &Table,
     capability: &CapabilityId,
@@ -204,11 +191,8 @@ fn check_collision(
         format!("which capability `{owner}`'s prelude already defines")
     } else if aliases.contains(&name) {
         "which the prompt's frontmatter binds as a tool or model alias".to_owned()
-    } else if let Some((_, holder)) = RESERVED_GLOBALS
-        .iter()
-        .find(|(reserved, _)| *reserved == name)
-    {
-        format!("which is reserved for {holder}")
+    } else if let Some(kind) = crate::reserved_name(name) {
+        format!("which is reserved as {kind}")
     } else if !matches!(
         globals.raw_get::<Value>(name).map_err(Error::lua)?,
         Value::Nil

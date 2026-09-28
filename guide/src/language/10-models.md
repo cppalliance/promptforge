@@ -99,7 +99,7 @@ models:
 
 Flow style works too, so a role fits on one line, as in `analyst: { keywords: [no-thinking, creative, chat], min_context: 32000, description: deep reasoning }`. Leave `models:` out of the frontmatter to declare no roles at all.
 
-Give every role under `models:` a distinct label, written in the [name grammar](02-file-structure.md#names-for-aliases-roles-and-args) that every prompt-local name follows: an ASCII letter followed by up to 63 ASCII letters, digits, `_`, or `-`.
+Give every role under `models:` a distinct label, written in the [name grammar](02-file-structure.md#names-for-aliases-roles-and-args) that every prompt-local name follows: an ASCII letter followed by up to 63 ASCII letters, digits, `_`, or `-`. Because each label becomes a Lua global of its own name, a label may not be one of the [reserved names](02-file-structure.md#reserved-names-for-aliases-and-role-labels), such as `models`, `tools`, or `string`, nor an alias under `tools:`.
 
 ### Declaration errors
 
@@ -107,7 +107,10 @@ A mistake inside `models:` fails the parse with a [`Frontmatter`](17-limits-and-
 
 - A label used twice fails with ``duplicate model role label `{key}`: contract map keys must be unique``, which names the label.
 - A label outside the name grammar fails with ``invalid model role label `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}``, which names the label and the grammar.
+- A reserved label fails with ``model role label `{key}` in `models` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name``, which names the label and whether it is a host global, a Lua standard-library global, or a Lua keyword.
 - Any other key inside a role, a keyword outside the seven, or a `min_context` of zero also fails the parse, with a message from the YAML reader.
+
+A label that is also a key under `tools:` fails the parse with a `Frontmatter` error too, one that names the label and both maps but reports no line or column, as [Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels) shows.
 
 ## Keywords and the thinking switch
 
@@ -243,7 +246,7 @@ Each bound role is also a role global: a bare Lua global named after the role's 
 return models.infer(analyst, prose)
 ````
 
-Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. When a role label is also a key under `tools:`, the bare global with that name holds the model handle.
+Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. No role global ever replaces a host global, a sandbox library global, or a tool alias's global, because the parse refuses a label that would.
 
 ### Keeping the default's handle
 

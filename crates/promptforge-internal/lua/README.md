@@ -9,4 +9,7 @@ yield/resume protocol that lets suspending host calls (`models.infer`,
 blocking a worker thread. One guard metatable on `_G` serves the frozen
 `argv` and the lazy, read-only `prose`; an author's own `_G` metatable
 composes behind it through the sandbox's `setmetatable` and
-`getmetatable`, which can neither reveal nor replace the guard.
+`getmetatable`, which can neither reveal nor replace the guard. Every
+name `_G` holds after section setup, plus the Lua keywords, is on one
+reserved-name list: no frontmatter tool alias, model role label, or
+capability prelude global may take one.

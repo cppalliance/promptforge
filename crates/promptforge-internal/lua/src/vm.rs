@@ -427,7 +427,10 @@ impl SectionVm {
     /// Each bound slot becomes a bare global holding its handle userdata.
     /// The engine calls this after [`replay_shared`](Self::replay_shared), so
     /// a declared alias wins over a same-named shared global; the raw install
-    /// also bypasses any metatable the shared library set on `_G`.
+    /// also bypasses any metatable the shared library set on `_G`. The raw
+    /// install never replaces a host global only because the parser refuses
+    /// an alias on [`RESERVED_NAMES`](crate::RESERVED_NAMES) and one name
+    /// under both `tools` and `models`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if a handle cannot be created or installed, or

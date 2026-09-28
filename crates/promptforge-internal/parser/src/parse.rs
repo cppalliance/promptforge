@@ -41,7 +41,8 @@ impl Prompt {
     ///
     /// # Errors
     /// The first half of the pair is a [`ParseError`] classified `Frontmatter` when the frontmatter
-    /// delimiters are missing or the frontmatter is invalid; `Structure` when
+    /// delimiters are missing or the frontmatter is invalid, a tool alias or
+    /// model role label is a reserved name, or one name is both; `Structure` when
     /// the required H1 is missing or the body has no `##` sections; `Fence` when
     /// the H1 opens with the removed `lua prompt` fence form, an exact fence
     /// is not closed, more than one `lua shared` fence exists, or a
@@ -89,6 +90,8 @@ impl Prompt {
                 column,
             }
         })?;
+        crate::contract::check_distinct_aliases(frontmatter.tools(), frontmatter.models())
+            .map_err(|message| Error::parse(ParseErrorKind::Frontmatter, message))?;
         // Everything past the frontmatter postdates the prompt's name, so a
         // failure from here on is stamped with it (and its span's position).
         let name = frontmatter.name().to_owned();

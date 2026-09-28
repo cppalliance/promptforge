@@ -229,7 +229,7 @@ Common mistakes land in predictable kinds: malformed YAML and an out-of-range `m
 invalid frontmatter: {message}
 ````
 
-A value the contract rejects, such as a malformed capability id or an out-of-range `max_tool_iterations`, gives that key's own message.
+A value the contract rejects, such as a malformed capability id, an out-of-range `max_tool_iterations`, or a tool alias that is a [reserved name](02-file-structure.md#reserved-names-for-aliases-and-role-labels), gives that key's own message.
 
 ### Structure
 
@@ -285,7 +285,7 @@ A parse failure comes with a location when the parser can point at the problem. 
 
 ### Frontmatter failures
 
-A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker.
+A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker. The one exception is a name declared both under `tools:` and under `models:`, which spans two keys and gives neither a line nor a column.
 
 A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the host may label the failure with its own name for the file instead.
 

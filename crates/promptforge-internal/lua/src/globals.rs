@@ -25,7 +25,15 @@
 //!
 //! The Lua side lives in `__impl_globals.lua`; the host's side is the slot
 //! table the chunk reads, held in the registry.
+//!
+//! [`RESERVED_NAMES`] is the other half of `_G`'s contract: every name the
+//! globals table holds once section setup ends, before any capability
+//! prelude installs, plus the Lua keywords. A frontmatter tool alias or
+//! model role label installs as a global of its own name, so the parser
+//! refuses one that is reserved, and a prelude global may not take one
+//! either.
 
+use std::fmt;
 use std::sync::LazyLock;
 
 use mlua::{Function, Table};
@@ -114,6 +122,112 @@ fn state(lua: &Lua) -> Result<Table> {
 fn refusal(lua: &Lua, message: &'static str) -> Result<Function> {
     lua.create_function(move |_, ()| -> mlua::Result<()> { Err(mlua::Error::runtime(message)) })
         .map_err(Error::lua)
+}
+
+/// Why a name is reserved in a section VM's global namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reserved {
+    /// A global the host installs: on every section VM, or only on some
+    /// (`ui` with a host-state snapshot, `item` in a spawned chain).
+    HostGlobal,
+    /// A Lua standard-library global the sandbox keeps.
+    LuaGlobal,
+    /// A Lua 5.5 keyword.
+    LuaKeyword,
+}
+
+impl fmt::Display for Reserved {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Reserved::HostGlobal => "a host global",
+            Reserved::LuaGlobal => "a Lua standard-library global",
+            Reserved::LuaKeyword => "a Lua keyword",
+        })
+    }
+}
+
+/// Every name reserved in a section VM's global namespace, sorted within
+/// each kind: the globals a section or H1 VM holds once section setup
+/// ends, before any capability prelude installs, and the Lua 5.5 keywords.
+///
+/// A global section setup installs must be listed here: the engine's
+/// section setup tests compare this list against a set-up VM's globals in
+/// both directions.
+pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
+    ("args", Reserved::HostGlobal),
+    ("argv", Reserved::HostGlobal),
+    ("call", Reserved::HostGlobal),
+    ("compactors", Reserved::HostGlobal),
+    ("fanout", Reserved::HostGlobal),
+    ("item", Reserved::HostGlobal),
+    ("jump", Reserved::HostGlobal),
+    ("list_from_section", Reserved::HostGlobal),
+    ("log", Reserved::HostGlobal),
+    ("messages", Reserved::HostGlobal),
+    ("models", Reserved::HostGlobal),
+    ("prose", Reserved::HostGlobal),
+    ("store", Reserved::HostGlobal),
+    ("sys", Reserved::HostGlobal),
+    ("tasks", Reserved::HostGlobal),
+    ("tools", Reserved::HostGlobal),
+    ("ui", Reserved::HostGlobal),
+    ("untrusted", Reserved::HostGlobal),
+    ("var", Reserved::HostGlobal),
+    ("_G", Reserved::LuaGlobal),
+    ("_VERSION", Reserved::LuaGlobal),
+    ("assert", Reserved::LuaGlobal),
+    ("error", Reserved::LuaGlobal),
+    ("getmetatable", Reserved::LuaGlobal),
+    ("ipairs", Reserved::LuaGlobal),
+    ("math", Reserved::LuaGlobal),
+    ("next", Reserved::LuaGlobal),
+    ("pairs", Reserved::LuaGlobal),
+    ("pcall", Reserved::LuaGlobal),
+    ("select", Reserved::LuaGlobal),
+    ("setmetatable", Reserved::LuaGlobal),
+    ("string", Reserved::LuaGlobal),
+    ("table", Reserved::LuaGlobal),
+    ("tonumber", Reserved::LuaGlobal),
+    ("tostring", Reserved::LuaGlobal),
+    ("type", Reserved::LuaGlobal),
+    ("xpcall", Reserved::LuaGlobal),
+    ("and", Reserved::LuaKeyword),
+    ("break", Reserved::LuaKeyword),
+    ("do", Reserved::LuaKeyword),
+    ("else", Reserved::LuaKeyword),
+    ("elseif", Reserved::LuaKeyword),
+    ("end", Reserved::LuaKeyword),
+    ("false", Reserved::LuaKeyword),
+    ("for", Reserved::LuaKeyword),
+    ("function", Reserved::LuaKeyword),
+    // The vendored Lua 5.5 builds with `LUA_COMPAT_GLOBAL`, so its lexer
+    // reads `global` as a contextual keyword rather than a reserved word;
+    // the language reserves it all the same.
+    ("global", Reserved::LuaKeyword),
+    ("goto", Reserved::LuaKeyword),
+    ("if", Reserved::LuaKeyword),
+    ("in", Reserved::LuaKeyword),
+    ("local", Reserved::LuaKeyword),
+    ("nil", Reserved::LuaKeyword),
+    ("not", Reserved::LuaKeyword),
+    ("or", Reserved::LuaKeyword),
+    ("repeat", Reserved::LuaKeyword),
+    ("return", Reserved::LuaKeyword),
+    ("then", Reserved::LuaKeyword),
+    ("true", Reserved::LuaKeyword),
+    ("until", Reserved::LuaKeyword),
+    ("while", Reserved::LuaKeyword),
+];
+
+/// Returns why `name` is reserved in a section VM's global namespace, or
+/// `None` when a frontmatter alias or a capability prelude global may take
+/// it. The match is case-sensitive, as Lua names are.
+#[must_use]
+pub fn reserved_name(name: &str) -> Option<Reserved> {
+    RESERVED_NAMES
+        .iter()
+        .find(|(reserved, _)| *reserved == name)
+        .map(|(_, kind)| *kind)
 }
 
 #[cfg(test)]

@@ -287,7 +287,7 @@ The names here are `search` and `fetch`, `writer` and `analyst`, and `use_mcp`. 
 
 The name grammar is `[A-Za-z][A-Za-z0-9_-]{0,63}`: 1 to 64 ASCII characters, a letter first, then letters, digits, `_`, or `-`. Letters are ASCII only. A 64-character name parses. Names such as `search`, `fetch`, `writer`, `analyst`, `use_mcp`, `limit`, and `query` all fit. An alias is the only name a model ever sees for a tool slot or a model role.
 
-Each of `tools:`, `models:`, and `args:` is a YAML map keyed by alias, role label, or arg name, and each key appears once within its map. Every name is checked when the prompt loads, the grammar first and uniqueness second. All of these failures have parse error kind `Frontmatter`, and each message is the detail inside `invalid frontmatter: {detail}`:
+Each of `tools:`, `models:`, and `args:` is a YAML map keyed by alias, role label, or arg name, and each key appears once within its map. Every name is checked when the prompt loads: the grammar first, then, for tool aliases and role labels only, the [reserved names](#reserved-names-for-aliases-and-role-labels), and uniqueness last. All of these failures have parse error kind `Frontmatter`, and each message is the detail inside `invalid frontmatter: {detail}`:
 
 ````text
 invalid tool alias `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}
@@ -313,6 +313,30 @@ invalid alias "{alias}": expected [A-Za-z][A-Za-z0-9_-]{0,63}
 ````
 
 Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+
+### Reserved names for aliases and role labels
+
+Every tool alias and every model role label becomes a bare Lua global of the same name in every section VM, as [Alias globals](12-tools.md#alias-globals) and [Role globals](10-models.md#role-globals) show. So neither may take a name the section VM already uses for something else. These names are reserved:
+
+- The host globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
+- The Lua standard-library globals the sandbox keeps: `assert`, `error`, `getmetatable`, `ipairs`, `math`, `next`, `pairs`, `pcall`, `select`, `setmetatable`, `string`, `table`, `tonumber`, `tostring`, `type`, and `xpcall`, plus `_G` and `_VERSION`, which the name grammar already rules out.
+- The Lua 5.5 keywords: `and`, `break`, `do`, `else`, `elseif`, `end`, `false`, `for`, `function`, `global`, `goto`, `if`, `in`, `local`, `nil`, `not`, `or`, `repeat`, `return`, `then`, `true`, `until`, and `while`.
+
+These are exactly the globals of a section VM before any capability adds its own, together with the keywords. The match is exact and case-sensitive, so `Store`, `stores`, and `my_argv` are ordinary names. A reserved key fails the parse with parse error kind `Frontmatter`, reporting its line and column, and this detail:
+
+````text
+{kind} `{key}` in `{map}` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name
+````
+
+Here `{kind}` is `tool alias` or `model role label`, `{map}` is `tools` or `models`, and `{category}` is `a host global`, `a Lua standard-library global`, or `a Lua keyword`. So `store: promptforge/web/fetch` under `tools:` fails with ``tool alias `store` in `tools` is reserved (a host global): ...``. Arg names are not checked against this list, because they name fields of `argv` rather than globals: `args:` may declare `prose` or `store`.
+
+One name also cannot be both a tool alias and a model role label, because both would install the same global. Such a pair fails the parse with parse error kind `Frontmatter` and this message, which names the first shared name in sorted order. Unlike the errors above, it reports no line or column:
+
+````text
+invalid frontmatter: `{name}` is both a tool alias in `tools` and a model role label in `models`; each installs as a section VM global of its own name, so the two must differ
+````
+
+A declared capability can define globals of its own, such as the `input` table of `promptforge/user-input`. Those globals are known only once the capability's code runs, so an alias or label with the same name fails the run when its first section VM is set up, before the run does anything, as [Letting the model ask](05-lua-environment.md#letting-the-model-ask) shows.
 
 ## The H1 title and its content
 

@@ -2,13 +2,16 @@
 //! to every declared capability, or hands none when the host has nobody
 //! to ask; and the `promptforge/user-input` capability's `input.ask()`
 //! reaches it, is refused when required on a host without one, and
-//! degrades when optional.
+//! degrades when optional. A frontmatter alias named `input` collides
+//! with the capability's prelude global and fails the run before any
+//! effect, while an alias of another name runs beside it.
 
 use super::*;
 
 use std::sync::Mutex;
 
 use harness_capabilities::{InputBroker, InputError, Service, UserInput, activate};
+use harness_log::{RecordFilter, RecordKind};
 use promptforge::Prompt;
 
 /// A prompt declaring the probe capability, with nothing to run.
@@ -332,6 +335,74 @@ async fn input_ask_with_an_argument_raises() {
     assert!(
         text.contains("input.ask takes no arguments"),
         "the error says why: {text}"
+    );
+}
+
+#[tokio::test]
+async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_any_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = log().await;
+    let declaration = format!("{REQUIRED}tools:\n  input: promptforge/user-input/ask\n");
+    let prepared = prepare_run(
+        &prompt_file(dir.path(), &user_input_prompt(&declaration, ASKS_ONCE)),
+        "",
+        user_input_services(&log, Some(Arc::new(Scripted("unused")))),
+    )
+    .await
+    .expect("the prompt parses and its requirements are met");
+    let run_id = prepared.run_id;
+    let outcome = drive_run(
+        prepared.run,
+        prepared.performers,
+        Arc::clone(&log),
+        run_id,
+        CancelHandle::new(),
+        |_event| {},
+    )
+    .await
+    .expect("the loop reaches an outcome");
+    let RunOutcome::Failed { kind, message } = outcome else {
+        panic!("the collision fails the run: {outcome:?}");
+    };
+    assert_eq!(kind, "Lua");
+    assert!(
+        message.contains(
+            "capability `promptforge/user-input`: its prelude defines the global `input`, \
+             which the prompt's frontmatter binds as a tool or model alias"
+        ),
+        "the failure names the capability, the global, and the alias: {message}"
+    );
+    let effects = log
+        .lock()
+        .await
+        .records(run_id, RecordFilter::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|stored| stored.record.kind == RecordKind::Effect)
+        .count();
+    assert_eq!(effects, 0, "the run fails before it issues any effect");
+}
+
+#[tokio::test]
+async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_host_globals() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = log().await;
+    let declaration = format!("{REQUIRED}tools:\n  ask: promptforge/user-input/ask\n");
+    let outcome = drive_prompt(
+        dir.path(),
+        &user_input_prompt(
+            &declaration,
+            "return tools.call(ask) .. '|' .. ask.name .. '|' .. type(input.ask) .. '|' \
+             .. type(store.read) .. '|' .. type(tools.call)",
+        ),
+        user_input_services(&log, Some(Arc::new(Scripted("hello")))),
+    )
+    .await;
+    assert_eq!(
+        completed(outcome),
+        "hello|ask|function|function|function",
+        "the alias global is the ask tool, and input, store, and tools are the host's"
     );
 }
 

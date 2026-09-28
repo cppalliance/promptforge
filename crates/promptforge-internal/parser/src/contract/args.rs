@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use super::deserialize_contract_map;
+use super::{ContractKeys, deserialize_contract_map};
 
 /// The closed set of declared arg types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -199,7 +199,17 @@ impl<'de> Deserialize<'de> for ArgsDecl {
     where
         D: serde::Deserializer<'de>,
     {
-        let fields = deserialize_contract_map(deserializer, "arg name", None)?;
+        // Arg names are `argv` fields, never globals, so a reserved name
+        // such as the default declaration's `prose` is a valid arg name.
+        let fields = deserialize_contract_map(
+            deserializer,
+            ContractKeys {
+                map: "args",
+                what: "arg name",
+                deferred: None,
+                installs_global: false,
+            },
+        )?;
         Ok(ArgsDecl {
             fields,
             implicit: false,

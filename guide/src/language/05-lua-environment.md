@@ -51,7 +51,7 @@ On top of the sandbox, the runtime installs host globals in every section VM, wi
 - `call`, `jump`, `fanout`, and `list_from_section`
 - `tasks`
 
-Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
+Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. None of those ever replaces a host global or a sandbox library global: a label or alias that names one fails the parse ([Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels)), and a capability global that names one fails the run before it does anything. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
 
 ### Blocks, sections, and section VMs
 

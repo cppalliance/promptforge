@@ -1,7 +1,10 @@
 //! Tests for the `_G` guard: `argv` and `prose` stay guarded whatever author
 //! code does to `_G`'s metatable, the author's metatable composes behind the
 //! guard, and `setmetatable` and `getmetatable` behave as the base
-//! functions for every other value.
+//! functions for every other value. Also the reserved-name list's own
+//! shape: each name once, and each keyword a word the compiler refuses as
+//! a name. The list against a set-up VM's globals is the engine's test,
+//! over its real section setup.
 
 use std::sync::Arc;
 
@@ -9,7 +12,7 @@ use mlua::{FromLuaMulti, Lua, LuaOptions, StdLib};
 use promptforge_types::untrusted::GuardNonce;
 use serde_json::json;
 
-use super::{GLOBALS_CHUNK_NAME, GLOBALS_SOURCE};
+use super::{GLOBALS_CHUNK_NAME, GLOBALS_SOURCE, RESERVED_NAMES, Reserved, reserved_name};
 use crate::tests::recording::null_emitter;
 use crate::tests::{assert_chunk_name_resolves, refusal_line};
 use crate::{Argv, SectionVm};
@@ -413,4 +416,44 @@ fn sealed_host_values_keep_their_metatable_protection() {
         var_refusal,
         "[string \"probe\"]:2: cannot change a protected metatable"
     );
+}
+
+#[test]
+fn each_reserved_name_is_listed_once() {
+    let mut names: Vec<&str> = RESERVED_NAMES.iter().map(|(name, _)| *name).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), RESERVED_NAMES.len(), "a name is listed twice");
+}
+
+#[test]
+fn the_compiler_refuses_each_reserved_keyword_as_a_name_and_takes_every_other_entry() {
+    let lua = Lua::new();
+    let compiles = |source: &str| lua.load(source).into_function().is_ok();
+    for (name, kind) in RESERVED_NAMES {
+        let as_local = compiles(&format!("local {name} = 1"));
+        match kind {
+            Reserved::LuaKeyword if name == "global" => {
+                assert!(
+                    as_local,
+                    "`global` is contextual in the vendored compat build"
+                );
+                assert!(compiles("global declared"), "`global` opens a declaration");
+            }
+            Reserved::LuaKeyword => assert!(!as_local, "`{name}` is a keyword"),
+            Reserved::HostGlobal | Reserved::LuaGlobal => {
+                assert!(as_local, "`{name}` is an ordinary Lua name");
+            }
+        }
+    }
+}
+
+#[test]
+fn reserved_name_classifies_whole_case_sensitive_names_only() {
+    assert_eq!(reserved_name("store"), Some(Reserved::HostGlobal));
+    assert_eq!(reserved_name("pairs"), Some(Reserved::LuaGlobal));
+    assert_eq!(reserved_name("end"), Some(Reserved::LuaKeyword));
+    for name in ["Store", "stores", "input", "search", ""] {
+        assert_eq!(reserved_name(name), None, "{name:?} is not reserved");
+    }
 }

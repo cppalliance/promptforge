@@ -247,6 +247,135 @@ fn tool_slot_aliases_must_match_the_alias_grammar() {
     parse(&yaml).expect_err("a 65-character alias must be rejected");
 }
 
+/// One reserved name from each category, with the category the refusal
+/// names: a guarded host global, a host table, a Lua base function, and a
+/// Lua keyword (quoted so YAML keeps `true` a string).
+const RESERVED_SAMPLES: [(&str, &str); 5] = [
+    ("argv", "a host global"),
+    ("store", "a host global"),
+    ("pairs", "a Lua standard-library global"),
+    ("end", "a Lua keyword"),
+    ("true", "a Lua keyword"),
+];
+
+#[test]
+fn a_reserved_name_is_refused_as_a_tool_alias_naming_the_map_and_the_category() {
+    for (name, kind) in RESERVED_SAMPLES {
+        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n");
+        let error = parse(&yaml).expect_err("a reserved tool alias must be rejected");
+        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+        assert!(
+            error.to_string().contains(&format!(
+                "tool alias `{name}` in `tools` is reserved ({kind}): tool aliases and model \
+                 role labels install as section VM globals, so none may take a reserved name"
+            )),
+            "the refusal names the alias, the map, and why: {error}"
+        );
+        assert_eq!(error.line(), Some(5), "the alias's own line: {error}");
+    }
+}
+
+#[test]
+fn a_reserved_name_is_refused_as_a_model_role_label_naming_the_map_and_the_category() {
+    for (name, kind) in RESERVED_SAMPLES {
+        let yaml = format!("name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n");
+        let error = parse(&yaml).expect_err("a reserved role label must be rejected");
+        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+        assert!(
+            error.to_string().contains(&format!(
+                "model role label `{name}` in `models` is reserved ({kind}): tool aliases and \
+                 model role labels install as section VM globals, so none may take a reserved \
+                 name"
+            )),
+            "the refusal names the label, the map, and why: {error}"
+        );
+        assert_eq!(error.line(), Some(5), "the label's own line: {error}");
+    }
+}
+
+#[test]
+fn every_reserved_name_is_refused_in_both_maps() {
+    for (name, _) in promptforge_lua::RESERVED_NAMES {
+        // `_G` and `_VERSION` fail the grammar's leading-letter rule first.
+        let expected = if name.starts_with('_') {
+            "invalid"
+        } else {
+            "is reserved"
+        };
+        for yaml in [
+            format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n"),
+            format!("name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n"),
+        ] {
+            let error = parse(&yaml).expect_err("a reserved name must be rejected");
+            assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+            assert!(
+                error.to_string().contains(&format!("`{name}`"))
+                    && error.to_string().contains(expected),
+                "{name}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_name_that_only_resembles_a_reserved_one_still_parses() {
+    // Lua names are case-sensitive, and the rule matches whole names only.
+    for name in ["Store", "stores", "my_argv", "pairs2", "ending", "search"] {
+        let prompt = parse(&format!(
+            "name: x\ndescription: d\ntools:\n  {name}: promptforge/web/search\n\
+             models:\n  {name}_model: {{}}\n"
+        ))
+        .expect("a non-reserved alias and role label parse");
+        assert!(prompt.frontmatter().tools().get(name).is_some(), "{name}");
+        assert!(
+            prompt
+                .frontmatter()
+                .models()
+                .get(&format!("{name}_model"))
+                .is_some(),
+            "{name}_model"
+        );
+    }
+}
+
+#[test]
+fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "args:\n",
+        "  prose:\n    type: string\n",
+        "  store:\n    type: string\n",
+        "  end:\n    type: boolean\n",
+    ))
+    .expect("reserved names parse as arg names");
+    let args = prompt.frontmatter().args();
+    assert_eq!(args.len(), 3);
+    assert!(args.get("store").is_some() && args.get("end").is_some());
+}
+
+#[test]
+fn one_name_as_both_a_tool_alias_and_a_model_role_label_is_refused() {
+    let error = parse(concat!(
+        "name: x\ndescription: d\n",
+        "tools:\n  scout: promptforge/web/search\n  writer: promptforge/web/fetch\n",
+        "models:\n  writer: {}\n  scout: {}\n",
+    ))
+    .expect_err("a name in both maps must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
+    assert_eq!(
+        error.to_string(),
+        "invalid frontmatter: `scout` is both a tool alias in `tools` and a model role label \
+         in `models`; each installs as a section VM global of its own name, so the two must \
+         differ",
+        "the refusal names the first shared name in sorted order"
+    );
+    assert_eq!(
+        error.name(),
+        None,
+        "a frontmatter failure predates the name"
+    );
+}
+
 #[test]
 fn args_declarations_round_trip() {
     let prompt = parse(concat!(

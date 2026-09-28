@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 
 use serde::Deserialize;
 
-use super::deserialize_contract_map;
+use super::{ContractKeys, deserialize_contract_map};
 
 /// The closed model-keyword vocabulary.
 ///
@@ -76,7 +76,10 @@ impl ModelRole {
 /// The prompt's declared model roles: label to role.
 ///
 /// Labels are prompt-local (the alias grammar); the model never sees a
-/// concrete model id in the declaration.
+/// concrete model id in the declaration. Each label installs as a section
+/// VM global, so a label that names a host global, a Lua standard-library
+/// global the sandbox keeps, or a Lua keyword is rejected at parse, as is
+/// a label that is also a tool alias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelRoles {
@@ -115,7 +118,15 @@ impl<'de> Deserialize<'de> for ModelRoles {
     where
         D: serde::Deserializer<'de>,
     {
-        let roles = deserialize_contract_map(deserializer, "model role label", None)?;
+        let roles = deserialize_contract_map(
+            deserializer,
+            ContractKeys {
+                map: "models",
+                what: "model role label",
+                deferred: None,
+                installs_global: true,
+            },
+        )?;
         Ok(ModelRoles { roles })
     }
 }

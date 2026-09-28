@@ -45,6 +45,7 @@ Every frontmatter key and value rule, with top-level keys first and nested keys 
 | Name grammar for aliases, role labels, and arg names | `[A-Za-z][A-Za-z0-9_-]{0,63}` | none | [Prompt File Structure](02-file-structure.md#names-for-aliases-roles-and-args) |
 | `output.description` | string | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `output.path` | store filename, such as `report.md` | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
+| Reserved names for tool aliases and role labels | no host global, sandbox Lua global, or Lua keyword, such as `store`, `argv`, `pairs`, or `end`, and no name under both `tools` and `models`; the chapter lists every one | none | [Prompt File Structure](02-file-structure.md#reserved-names-for-aliases-and-role-labels) |
 | Tool path in `tools.{alias}` | `namespace/pack/name`, such as `promptforge/web/fetch` | none | [Tools](12-tools.md#capability-ids-and-tool-paths) |
 | `tools.{alias}` | tool path string | none | [Tools](12-tools.md#tool-slots-and-tool-objects) |
 
@@ -266,7 +267,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 
 | Name | Form | Returns | Taught in |
 |---|---|---|---|
-| `{alias}` | `{alias}` | Tool object for that bound tool slot | [Tools](12-tools.md#tool-slots-and-tool-objects) |
+| `{alias}` | `{alias}` | Tool object for that bound tool slot; never a reserved name | [Tools](12-tools.md#tool-slots-and-tool-objects) |
 | `args` | `args` | the raw argument string | [Arguments](06-arguments.md#input-basics) |
 | `argv` | `argv` | the parsed argument string; `{ prose = args }` without `args:`, nil when structured input is not JSON | [Arguments](06-arguments.md#prose-input-and-structured-input) |
 | `call` | `call(target, input?)` | the called chain's result as a string | [Jump and Call](08-jump-and-call.md#jump-and-call-at-a-glance) |
@@ -285,7 +286,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `item` | `item` | the arm's member inside a fanout arm, or a task's `item` option | [Fanout](14-fanout.md#inside-an-arm) |
 | `item.key` and `item.value` | `item.key`, `item.value` | a keyed member's key and value | [Fanout](14-fanout.md#collections-and-member-order) |
 | `jump` | `jump(target)` | nothing; ends the block and the walk continues at `target` | [Jump and Call](08-jump-and-call.md#jump-and-call-at-a-glance) |
-| `{label}` | `{label}` | model handle for that bound role | [Models](10-models.md#model-handles) |
+| `{label}` | `{label}` | model handle for that bound role; never a reserved name | [Models](10-models.md#model-handles) |
 | `list_from_section` | `list_from_section(heading)` | 1-based array of the list section's item strings | [Blocks and Prose](03-blocks-and-prose.md#reading-list-items-from-lua) |
 | `log` | `log(message)` | nothing; records a `lua` checkpoint event | [The Lua Environment](05-lua-environment.md#checkpoints-with-log) |
 | `messages` | `messages.new()` | the `messages` namespace | [Conversations](11-conversations.md#building-message-lists) |

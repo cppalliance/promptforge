@@ -134,6 +134,7 @@ pub use coro::{install_section_loop_shim, install_store_shims};
 pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
+pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
 pub use host::{run_store_op, store_error_message};
 pub use models::ModelRuntime;

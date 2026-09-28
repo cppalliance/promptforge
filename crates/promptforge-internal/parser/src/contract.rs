@@ -2,10 +2,11 @@
 //!
 //! The YAML is the whole contract: capabilities install, tools bind, models
 //! declare, args type. Parsing validates the static shape - capability id
-//! arity, the alias grammar on slot keys, the closed model-keyword
-//! vocabulary, arg name and type sanity - and exposes the FULL declaration
-//! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
-//! against the host environment is prepare's job, never the parser's.
+//! arity, the alias grammar on slot keys, the reserved names no tool alias
+//! or model role label may take, the closed model-keyword vocabulary, arg
+//! name and type sanity - and exposes the FULL declaration on the parsed
+//! [`Prompt`](crate::Prompt); satisfying the declaration against the host
+//! environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
 //! capability and tool-slot shapes plus the map deserializer all four keys
@@ -45,26 +46,35 @@ fn is_valid_alias(alias: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+/// How one contract map's keys are checked beyond the alias grammar.
+#[derive(Clone, Copy)]
+pub(crate) struct ContractKeys {
+    /// The frontmatter key the map sits under (`tools`), for error
+    /// messages.
+    pub(crate) map: &'static str,
+    /// The key kind (`tool alias`), for error messages.
+    pub(crate) what: &'static str,
+    /// A key that satisfies the grammar but is rejected because its
+    /// posture is deferred (the open toolset's `open`).
+    pub(crate) deferred: Option<&'static str>,
+    /// Whether each key installs as a section VM global of its own name,
+    /// so a reserved name ([`promptforge_lua::RESERVED_NAMES`]) is refused.
+    pub(crate) installs_global: bool,
+}
+
 /// Deserializes a contract map (`tools`, `models`, `args`): string keys
-/// validated against the alias grammar, values deserialized as `T`,
-/// duplicates rejected.
-///
-/// `what` names the key kind in error messages ("tool alias", "model role
-/// label", "arg name"); `reserved` names a key that satisfies the grammar
-/// but is rejected because its posture is deferred (the open toolset's
-/// `open`).
+/// validated against the alias grammar and `keys`, values deserialized as
+/// `T`, duplicates rejected.
 pub(crate) fn deserialize_contract_map<'de, D, T>(
     deserializer: D,
-    what: &'static str,
-    reserved: Option<&'static str>,
+    keys: ContractKeys,
 ) -> Result<BTreeMap<String, T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
     deserializer.deserialize_map(MapVisitor {
-        what,
-        reserved,
+        keys,
         _marker: PhantomData,
     })
 }
@@ -72,10 +82,8 @@ where
 /// The visitor behind [`deserialize_contract_map`]: a streaming map walk so
 /// rejections keep their source position.
 struct MapVisitor<T> {
-    /// The key kind, for error messages.
-    what: &'static str,
-    /// A grammatically valid key that is rejected as reserved.
-    reserved: Option<&'static str>,
+    /// The checks the map's keys get.
+    keys: ContractKeys,
     /// The value type, without ownership or variance claims.
     _marker: PhantomData<fn() -> T>,
 }
@@ -87,31 +95,44 @@ where
     type Value = BTreeMap<String, T>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map of {} keys to declarations", self.what)
+        write!(
+            formatter,
+            "a map of {} keys to declarations",
+            self.keys.what
+        )
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
+        let ContractKeys {
+            map: map_key,
+            what,
+            deferred,
+            installs_global,
+        } = self.keys;
         let mut entries: BTreeMap<String, T> = BTreeMap::new();
         while let Some(key) = map.next_key::<String>()? {
-            if self.reserved == Some(key.as_str()) {
+            if deferred == Some(key.as_str()) {
                 return Err(de::Error::custom(format!(
-                    "the `{key}` key is reserved for the deferred open toolset posture; it is not a usable {}",
-                    self.what
+                    "the `{key}` key is reserved for the deferred open toolset posture; it is not a usable {what}"
                 )));
             }
             if !is_valid_alias(&key) {
                 return Err(de::Error::custom(format!(
-                    "invalid {} `{key}`: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}",
-                    self.what
+                    "invalid {what} `{key}`: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}"
+                )));
+            }
+            if installs_global && let Some(kind) = promptforge_lua::reserved_name(&key) {
+                return Err(de::Error::custom(format!(
+                    "{what} `{key}` in `{map_key}` is reserved ({kind}): tool aliases and model \
+                     role labels install as section VM globals, so none may take a reserved name"
                 )));
             }
             if entries.contains_key(&key) {
                 return Err(de::Error::custom(format!(
-                    "duplicate {} `{key}`: contract map keys must be unique",
-                    self.what
+                    "duplicate {what} `{key}`: contract map keys must be unique"
                 )));
             }
             entries.insert(key, map.next_value::<T>()?);
@@ -299,7 +320,10 @@ impl Visitor<'_> for ToolSlotVisitor {
 /// Aliases are prompt-local (the alias grammar); the model only ever sees
 /// the alias, never the global path. The reserved `open` key (the deferred
 /// open toolset posture) is rejected at parse, so a prompt cannot silently
-/// half-declare the posture.
+/// half-declare the posture. Each alias installs as a section VM global,
+/// so an alias that names a host global, a Lua standard-library global the
+/// sandbox keeps, or a Lua keyword is rejected too, as is an alias that is
+/// also a model role label.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolSlots {
@@ -339,7 +363,30 @@ impl<'de> Deserialize<'de> for ToolSlots {
     where
         D: Deserializer<'de>,
     {
-        let slots = deserialize_contract_map(deserializer, "tool alias", Some("open"))?;
+        let slots = deserialize_contract_map(
+            deserializer,
+            ContractKeys {
+                map: "tools",
+                what: "tool alias",
+                deferred: Some("open"),
+                installs_global: true,
+            },
+        )?;
         Ok(ToolSlots { slots })
+    }
+}
+
+/// Refuses a name declared both as a tool alias and as a model role label:
+/// both install as section VM globals of their own name, so the model
+/// handle would silently replace the tool handle. Returns the refusal's
+/// message, naming the first shared name in sorted order.
+pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> Result<(), String> {
+    match tools.iter().find(|(alias, _)| models.get(alias).is_some()) {
+        Some((alias, _)) => Err(format!(
+            "invalid frontmatter: `{alias}` is both a tool alias in `tools` and a model role \
+             label in `models`; each installs as a section VM global of its own name, so the \
+             two must differ"
+        )),
+        None => Ok(()),
     }
 }
