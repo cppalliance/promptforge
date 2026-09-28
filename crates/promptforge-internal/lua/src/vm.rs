@@ -253,10 +253,10 @@ impl LocalTools {
 impl SectionVm {
     /// Creates a hardened section VM.
     ///
-    /// Construction installs only the sandbox, the deterministic
-    /// `pairs`/`next` walk, the default resource ceilings, the instruction
-    /// hook, and `untrusted` (wrapping under the run's
-    /// `nonce`). Everything else - the run's
+    /// Construction installs only the sandbox (the `_G` guard included),
+    /// the deterministic `pairs`/`next` walk, the default resource
+    /// ceilings, the instruction hook, and `untrusted` (wrapping under the
+    /// run's `nonce`). Everything else - the run's
     /// limits, the host values, the persistent host APIs, the control
     /// globals, the shared-library replay, and the captured alias globals -
     /// is a separate explicit step the caller drives in that order (see the
@@ -790,7 +790,7 @@ impl SectionVm {
     }
 
     /// Installs the pending Markdown buffer as this VM's fresh read-only
-    /// lazy `prose` global, replacing any previous pair's handler.
+    /// lazy `prose` global, replacing any previous pair's render.
     ///
     /// The executor calls this before each Lua coroutine starts. `render`
     /// runs at most once, on the first runtime read of `prose`, with the
@@ -799,7 +799,8 @@ impl SectionVm {
     /// the template is rejected as recursive.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the guard metatable cannot be installed.
+    /// Returns [`Error::Lua`] if the read cannot be built or the `_G` guard
+    /// cannot record it.
     pub fn install_lazy_prose<F>(&self, render: F) -> Result<()>
     where
         F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,

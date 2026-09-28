@@ -95,6 +95,7 @@ pub use error_value::{
     ErrorField, ErrorKind, ErrorValue, Raised, error_table, store_error_fields, store_error_reason,
     store_error_value_fields,
 };
+mod globals;
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;

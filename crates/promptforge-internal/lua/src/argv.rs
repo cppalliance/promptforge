@@ -7,15 +7,14 @@
 //! the frozen value: reads work (absent fields read nil), and any
 //! assignment - `argv = ...` or `argv.field = ...` at any depth - raises.
 //!
-//! The freeze sits on the `_G` metatable, the same composition the lazy
-//! `prose` guard uses: `argv` is never a raw global in a frozen section, so
-//! every read and every write of the name crosses the guard, and every
-//! other key delegates to whatever metatable was installed first (the
-//! `prose` guard installs later and shadows this pair as its delegates, so
-//! the two compose). The table value itself is deep-frozen behind proxy
-//! tables whose `__newindex` rejects every write.
+//! The freeze sits on the `_G` guard ([`crate::globals`]): `argv` is never
+//! a raw global in a frozen section, so every read and every write of the
+//! name crosses the guard, which serves the frozen value and refuses the
+//! assignment before any metatable author code set on `_G` sees the key.
+//! The table value itself is deep-frozen behind proxy tables whose
+//! `__newindex` rejects every write.
 
-use super::{Error, Json, Lua, LuaSerdeExt, MultiValue, Result, Value};
+use super::{Error, Json, Lua, LuaSerdeExt, Result, Value};
 use crate::proxy::read_only_proxy;
 
 /// How a section VM installs the `argv` global at host injection. `None`
@@ -31,13 +30,8 @@ pub enum Argv<'a> {
     Frozen(Option<&'a Json>),
 }
 
-/// Marker field on a metatable this module installed: a re-install reuses
-/// the recorded delegates instead of chaining a new handler over its own.
-const GUARD_MARKER: &str = "__promptforge_argv_guard";
-/// The metatable field recording the `__index` the guard shadows.
-const DELEGATE_INDEX: &str = "__promptforge_argv_delegate_index";
-/// The metatable field recording the `__newindex` the guard shadows.
-const DELEGATE_NEWINDEX: &str = "__promptforge_argv_delegate_newindex";
+/// The refusal an assignment of the frozen `argv` global raises.
+pub(crate) const ASSIGNMENT_REFUSAL: &str = "argv is frozen outside H1: assign it in H1 only";
 
 /// Installs `argv` as a plain writable global: the H1 pass's mode. `None`
 /// (malformed args, or JSON null) installs nil, so `if argv then` is the
@@ -58,91 +52,10 @@ pub(crate) fn install_writable(lua: &Lua, argv: Option<&Json>) -> Result<()> {
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the value cannot be bridged or the guard
-/// metatable cannot be built or installed.
+/// cannot record it.
 pub(crate) fn install_frozen(lua: &Lua, argv: Option<&Json>) -> Result<()> {
     let frozen = frozen_json_value(lua, argv)?;
-    let globals = lua.globals();
-    let old = globals.metatable();
-    // The delegates the new guard shadows: a metatable of our own already
-    // recorded its delegates, so a re-install reuses them rather than
-    // chaining over the previous handler; any other metatable (the prose
-    // guard's, a shared library's) contributes its own index pair.
-    let (delegate_index, delegate_newindex) = match &old {
-        Some(old) if matches!(old.raw_get::<Value>(GUARD_MARKER), Ok(Value::Boolean(true))) => (
-            old.raw_get::<Value>(DELEGATE_INDEX).map_err(Error::lua)?,
-            old.raw_get::<Value>(DELEGATE_NEWINDEX)
-                .map_err(Error::lua)?,
-        ),
-        Some(old) => (
-            old.raw_get::<Value>("__index").map_err(Error::lua)?,
-            old.raw_get::<Value>("__newindex").map_err(Error::lua)?,
-        ),
-        None => (Value::Nil, Value::Nil),
-    };
-    let metatable = lua.create_table().map_err(Error::lua)?;
-    // Copy every other field the previous metatable installed, then shadow
-    // the index pair with the argv guard.
-    if let Some(old) = &old {
-        // `pairs` order is unspecified; each iteration only assigns one
-        // non-shadowed metatable field, so the copy's content is fixed.
-        for pair in old.clone().pairs::<Value, Value>() {
-            let (key, value) = pair.map_err(Error::lua)?;
-            let shadowed =
-                matches!(&key, Value::String(name) if name == "__index" || name == "__newindex");
-            if !shadowed {
-                metatable.raw_set(key, value).map_err(Error::lua)?;
-            }
-        }
-    }
-    metatable.raw_set(GUARD_MARKER, true).map_err(Error::lua)?;
-    metatable
-        .raw_set(DELEGATE_INDEX, delegate_index.clone())
-        .map_err(Error::lua)?;
-    metatable
-        .raw_set(DELEGATE_NEWINDEX, delegate_newindex.clone())
-        .map_err(Error::lua)?;
-
-    let index = lua
-        .create_function(move |_, (target, key): (mlua::Table, Value)| {
-            if matches!(&key, Value::String(name) if name == "argv") {
-                return Ok(frozen.clone());
-            }
-            match &delegate_index {
-                Value::Function(function) => Ok(function
-                    .call::<MultiValue>((target, key))?
-                    .into_iter()
-                    .next()
-                    .unwrap_or(Value::Nil)),
-                Value::Table(table) => table.get(key),
-                _ => Ok(Value::Nil),
-            }
-        })
-        .map_err(Error::lua)?;
-    metatable.raw_set("__index", index).map_err(Error::lua)?;
-
-    let newindex = lua
-        .create_function(
-            move |_, (target, key, value): (mlua::Table, Value, Value)| -> mlua::Result<()> {
-                if matches!(&key, Value::String(name) if name == "argv") {
-                    return Err(mlua::Error::runtime(
-                        "argv is frozen outside H1: assign it in H1 only",
-                    ));
-                }
-                match &delegate_newindex {
-                    Value::Function(function) => {
-                        function.call::<MultiValue>((target, key, value))?;
-                        Ok(())
-                    }
-                    Value::Table(table) => table.set(key, value),
-                    _ => target.raw_set(key, value),
-                }
-            },
-        )
-        .map_err(Error::lua)?;
-    metatable
-        .raw_set("__newindex", newindex)
-        .map_err(Error::lua)?;
-    globals.set_metatable(Some(metatable)).map_err(Error::lua)
+    crate::globals::freeze_argv(lua, frozen)
 }
 
 /// Builds the frozen Lua form of an argv JSON value: tables become

@@ -248,11 +248,11 @@ Every section VM runs Lua 5.5 with these libraries and base functions.
 | `_VERSION` | `_VERSION` | the Lua version string | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `assert` | `assert(condition, message)` | raises `message` when `condition` is false | [The Lua Environment](05-lua-environment.md#calls-that-wait-and-errors-that-raise) |
 | `error` | `error(message)` | raises `message` | [The Lua Environment](05-lua-environment.md#calls-that-wait-and-errors-that-raise) |
-| `getmetatable` | `getmetatable(v)` | as in standard Lua 5.5; `var` and `sys` give a guard string | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| `getmetatable` | `getmetatable(v)` | as in standard Lua 5.5; `var` and `sys` give a guard string, and `_G` gives the metatable you set or nil | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `ipairs` | `ipairs(t)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `math` library | `math.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `select` | `select(n, ...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
-| `setmetatable` | `setmetatable(t, mt)` | `t` | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| `setmetatable` | `setmetatable(t, mt)` | `t`; on `_G`, `mt` composes behind the `argv` and `prose` guard | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `string` library | `string.upper(s)`, `s:match(pattern)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table` library | `table.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-host-calls) |

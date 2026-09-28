@@ -1557,15 +1557,15 @@ First: one. Second: two.
 
 The first block keeps its rendered text in `var.first`. The second block's `prose` is rendered fresh from the second paragraph with the new value of `var.word`, and the kept string does not change.
 
-A block with no Markdown before it reads `prose` as the empty string `''`.
+A block with no Markdown before it reads `prose` as the empty string `''`. Code that runs before any block has started, such as the shared library while it loads ([How the shared library loads](#how-the-shared-library-loads)), reads `prose` as nil.
 
-`prose` is read-only. Assigning to it at any time, before or after the first read, raises this Lua error:
+`prose` is read-only. Assigning to it at any time, before or after the first read and in the shared library too, raises this Lua error:
 
 ````text
 prose is read-only: assign to `var` or a section global instead
 ````
 
-Put derived text in `var` or in another global.
+Put derived text in `var` or in another global. A metatable of your own on `_G` never changes how `prose` reads or refuses assignment ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)).
 
 [`models.infer(prose)`](10-models.md#running-a-round-with-modelsinfer) sends the prose written above a block to the model: the rendered text is what the model is asked, and the call returns the reply. This prompt makes one model call carrying `Say something.` and returns the reply:
 
@@ -1871,14 +1871,14 @@ A block can then `return ask(prose)`. Library functions look up globals when the
 
 Declaring a tool slot under `tools:` or a model role under `models:` gives the prompt a global of the same name, an alias global ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). Alias globals install after the replay, so they are nil while the library's top-level code runs and present in every block after it, and a declared alias wins over a same-named global the library defines. The `tools` and `models` tables themselves are present at load, so a top-level `tools.add('search')` works.
 
-The library can install a metatable on `_G`:
+The library can install a metatable on `_G` ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)):
 
 ````lua
 captured = {}
 setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })
 ````
 
-The host sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read.
+The host sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
 
 In a fanout arm, `item` is installed before the replay, so the library's top-level code sees the arm's member and can set globals the worker section reads. With a library line `captured_by_shared = item`, a worker section that returns `tostring(captured_by_shared) .. '|' .. tostring(item)` gives `alpha|alpha` for the member `alpha`.
 
@@ -2687,7 +2687,7 @@ Each section's Lua runs in a sandbox whose standard libraries are `string`, `tab
 - `tonumber`, `tostring`, and `type`
 - `_G` and `_VERSION`
 
-That list is the whole toolkit. File access, the operating system, loading modules, and loading code from strings are outside it. Four of the base functions behave in a PromptForge way: `pairs` and `next` visit keys in a fixed order ([Deterministic table iteration](#deterministic-table-iteration)), and `pcall` and `xpcall` hand back error values ([Catching and inspecting errors](#catching-and-inspecting-errors)).
+That list is the whole toolkit. File access, the operating system, loading modules, and loading code from strings are outside it. Six of the base functions behave in a PromptForge way: `pairs` and `next` visit keys in a fixed order ([Deterministic table iteration](#deterministic-table-iteration)), `pcall` and `xpcall` hand back error values ([Catching and inspecting errors](#catching-and-inspecting-errors)), and `setmetatable` and `getmetatable` give `_G` a metatable of your own that never replaces the guard on `argv` and `prose` ([Your own metatable on _G](#your-own-metatable-on-_g)). On every other value, `setmetatable` and `getmetatable` are standard Lua 5.5.
 
 The smallest block that uses the sandbox calls a library function and returns the result:
 
@@ -2882,14 +2882,31 @@ The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `ta
 
 ### Your own metatable on _G
 
-You can install your own metatable on `_G`, for example from the `lua shared` fence ([The shared library](03-blocks-and-prose.md#the-shared-library)), and it keeps working alongside the `prose` global ([The prose global](03-blocks-and-prose.md#the-prose-global)). Reads and writes of every other global still go through your `__index` and `__newindex`, the metatable's other fields are kept, and your handlers run once per lookup no matter how many blocks have run.
+You can give `_G` a metatable of your own with `setmetatable(_G, mt)`, for example from the `lua shared` fence ([The shared library](03-blocks-and-prose.md#the-shared-library)), to give missing globals a default, to raise an error for an undefined global, or to hook the writes of new globals. A read of a global that `_G` does not hold goes to your `__index`, and an assignment of a new global goes to your `__newindex`, as in standard Lua. Both are read from your metatable at every lookup, so a later change to that table takes effect at once, and your handlers run once per lookup no matter how many blocks have run.
 
 ````lua
 local defaults = { tone = 'friendly' }
 setmetatable(_G, { __index = defaults })
 ````
 
-With that in the shared library, reading the unset global `tone` in any block gives `friendly`, while `prose` still reads the section's rendered prose.
+With that in the shared library, reading the unset global `tone` in any block gives `friendly`, and `{{ tone }}` in prose renders `friendly` too.
+
+A strict metatable works the same way:
+
+````lua
+setmetatable(_G, {
+  __index = function(_, name) error('undefined global ' .. name, 2) end,
+})
+````
+
+With that in the shared library, a block that reads an undefined global fails at the reading line with your message, and `pcall` hands back your message string exactly as you raised it.
+
+`argv` and `prose` are handled before your metatable and never reach it. Outside the H1 pass, reading `argv` gives the frozen value and assigning it raises `argv is frozen outside H1: assign it in H1 only` ([Frozen argv](06-arguments.md#frozen-argv)). In the H1 pass, `argv` is an ordinary writable global that your metatable never sees, so a nil `argv` reads as nil and the repair `argv = repaired` lands in `_G` even under a strict or write-hooking metatable ([The H1 repair pattern](06-arguments.md#the-h1-repair-pattern)). Reading `prose` gives the block's rendered prose, and assigning it raises ``prose is read-only: assign to `var` or a section global instead`` ([The prose global](03-blocks-and-prose.md#the-prose-global)). No metatable you set, clear, or change alters any of that, and neither name is ever passed to your `__index` or `__newindex`.
+
+- `getmetatable(_G)` returns your metatable, the very table you passed, or nil when you have set none. It never returns the guard that serves `argv` and `prose`.
+- `setmetatable(_G, mt)` returns `_G`, and `setmetatable(_G, nil)` removes your metatable. `mt` must be a table or nil; anything else raises the standard message, such as `bad argument #2 to 'setmetatable' (nil or table expected, got number)`.
+- A `__metatable` field in your metatable protects `_G` as it would any table: `getmetatable(_G)` returns that field's value, and a later `setmetatable(_G, ...)` raises `cannot change a protected metatable`.
+- Your metatable's other fields, such as `__call` or `__tostring`, apply to `_G` as they stand when you call `setmetatable(_G, mt)`. A later change to one of them takes effect at your next `setmetatable(_G, mt)`, while `__index` and `__newindex` are always read live.
 
 ## Deterministic table iteration
 
@@ -4080,7 +4097,7 @@ Run with `{}`, the assertion fails and `## Search` never runs. Because the failu
 
 The H1 body's Lua is the only place a prompt can write `argv`. When the H1 pass completes, before the walk starts, the value the H1 body left in `argv` is read back and frozen. Every other section gets `argv` read-only, including every section on the walk and every section in a [called chain](08-jump-and-call.md#call-input-and-args), the walk that a `call` starts.
 
-Inside the H1 body, `argv` is an ordinary writable global with no guard in the way. That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
+Inside the H1 body, `argv` is an ordinary writable global with no guard in the way, and a metatable you put on `_G` never sees it, so a nil `argv` reads as nil and the repair lands even under a strict or write-hooking metatable ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)). That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
 
 ````markdown
 ---
@@ -4179,6 +4196,8 @@ Outside the H1 body, read arrays with `ipairs` or indexing and read object field
 Outside the H1 body, `getmetatable` on any `argv` table returns the string `"argv is frozen"`, and its metatable cannot be replaced, so `setmetatable` on it raises an error.
 
 Only the name `argv` is guarded. Every other global can still be defined, read, and assigned normally, so `scratch = 42` followed by `assert(scratch == 42)` works in any section. The [`prose` global](03-blocks-and-prose.md#the-prose-global), the rendered Markdown above a fence, keeps working normally beside it.
+
+A metatable of your own on `_G` cannot lift the freeze. After `setmetatable(_G, mt)`, `setmetatable(_G, nil)`, or any change to the table `getmetatable(_G)` returns, `argv` still reads the frozen value and assigning it still raises the freeze error, and your `__index` and `__newindex` never see the name ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)).
 
 ## Freeze errors
 
@@ -12977,11 +12996,11 @@ Every section VM runs Lua 5.5 with these libraries and base functions.
 | `_VERSION` | `_VERSION` | the Lua version string | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `assert` | `assert(condition, message)` | raises `message` when `condition` is false | [The Lua Environment](05-lua-environment.md#calls-that-wait-and-errors-that-raise) |
 | `error` | `error(message)` | raises `message` | [The Lua Environment](05-lua-environment.md#calls-that-wait-and-errors-that-raise) |
-| `getmetatable` | `getmetatable(v)` | as in standard Lua 5.5; `var` and `sys` give a guard string | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| `getmetatable` | `getmetatable(v)` | as in standard Lua 5.5; `var` and `sys` give a guard string, and `_G` gives the metatable you set or nil | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `ipairs` | `ipairs(t)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `math` library | `math.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `select` | `select(n, ...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
-| `setmetatable` | `setmetatable(t, mt)` | `t` | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| `setmetatable` | `setmetatable(t, mt)` | `t`; on `_G`, `mt` composes behind the `argv` and `prose` guard | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `string` library | `string.upper(s)`, `s:match(pattern)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table` library | `table.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-host-calls) |

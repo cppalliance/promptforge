@@ -255,6 +255,35 @@ fn argv_and_prose_collide_though_the_g_metatable_serves_them() {
 }
 
 #[test]
+fn a_prelude_sets_and_reads_metatables_as_the_base_functions_do() {
+    let vm = section_vm();
+    install_preludes(
+        vm.lua(),
+        &[prelude(
+            "acme/meta",
+            "kit = {}\n\
+             local shape = { __index = function(_, key) return key .. '!' end }\n\
+             function kit.make() return setmetatable({}, shape) end\n\
+             function kit.shaped(t) return getmetatable(t) == shape end\n\
+             function kit.lock()\n\
+               local t = setmetatable({}, { __metatable = 'locked' })\n\
+               local ok, err = pcall(setmetatable, t, {})\n\
+               return getmetatable(t), ok, tostring(err)\n\
+             end",
+        )],
+        &[],
+    )
+    .expect("the prelude installs");
+    let (field, shaped): (String, bool) =
+        eval(&vm, "local t = kit.make()\nreturn t.x, kit.shaped(t)");
+    assert_eq!((field.as_str(), shaped), ("x!", true));
+    let (label, ok, message): (String, bool, String) = eval(&vm, "return kit.lock()");
+    assert_eq!(label, "locked");
+    assert!(!ok, "a protected metatable refuses replacement");
+    assert_eq!(message, "cannot change a protected metatable");
+}
+
+#[test]
 fn a_global_that_collides_with_a_frontmatter_alias_fails_naming_the_alias() {
     let vm = section_vm();
     let message = install_preludes(vm.lua(), &[prelude("acme/kit", "search = {}")], &["search"])

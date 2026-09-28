@@ -367,7 +367,7 @@ Run with `{}`, the assertion fails and `## Search` never runs. Because the failu
 
 The H1 body's Lua is the only place a prompt can write `argv`. When the H1 pass completes, before the walk starts, the value the H1 body left in `argv` is read back and frozen. Every other section gets `argv` read-only, including every section on the walk and every section in a [called chain](08-jump-and-call.md#call-input-and-args), the walk that a `call` starts.
 
-Inside the H1 body, `argv` is an ordinary writable global with no guard in the way. That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
+Inside the H1 body, `argv` is an ordinary writable global with no guard in the way, and a metatable you put on `_G` never sees it, so a nil `argv` reads as nil and the repair lands even under a strict or write-hooking metatable ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)). That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
 
 ````markdown
 ---
@@ -466,6 +466,8 @@ Outside the H1 body, read arrays with `ipairs` or indexing and read object field
 Outside the H1 body, `getmetatable` on any `argv` table returns the string `"argv is frozen"`, and its metatable cannot be replaced, so `setmetatable` on it raises an error.
 
 Only the name `argv` is guarded. Every other global can still be defined, read, and assigned normally, so `scratch = 42` followed by `assert(scratch == 42)` works in any section. The [`prose` global](03-blocks-and-prose.md#the-prose-global), the rendered Markdown above a fence, keeps working normally beside it.
+
+A metatable of your own on `_G` cannot lift the freeze. After `setmetatable(_G, mt)`, `setmetatable(_G, nil)`, or any change to the table `getmetatable(_G)` returns, `argv` still reads the frozen value and assigning it still raises the freeze error, and your `__index` and `__newindex` never see the name ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)).
 
 ## Freeze errors
 

@@ -14,7 +14,7 @@ Each section's Lua runs in a sandbox whose standard libraries are `string`, `tab
 - `tonumber`, `tostring`, and `type`
 - `_G` and `_VERSION`
 
-That list is the whole toolkit. File access, the operating system, loading modules, and loading code from strings are outside it. Four of the base functions behave in a PromptForge way: `pairs` and `next` visit keys in a fixed order ([Deterministic table iteration](#deterministic-table-iteration)), and `pcall` and `xpcall` hand back error values ([Catching and inspecting errors](#catching-and-inspecting-errors)).
+That list is the whole toolkit. File access, the operating system, loading modules, and loading code from strings are outside it. Six of the base functions behave in a PromptForge way: `pairs` and `next` visit keys in a fixed order ([Deterministic table iteration](#deterministic-table-iteration)), `pcall` and `xpcall` hand back error values ([Catching and inspecting errors](#catching-and-inspecting-errors)), and `setmetatable` and `getmetatable` give `_G` a metatable of your own that never replaces the guard on `argv` and `prose` ([Your own metatable on _G](#your-own-metatable-on-_g)). On every other value, `setmetatable` and `getmetatable` are standard Lua 5.5.
 
 The smallest block that uses the sandbox calls a library function and returns the result:
 
@@ -209,14 +209,31 @@ The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `ta
 
 ### Your own metatable on _G
 
-You can install your own metatable on `_G`, for example from the `lua shared` fence ([The shared library](03-blocks-and-prose.md#the-shared-library)), and it keeps working alongside the `prose` global ([The prose global](03-blocks-and-prose.md#the-prose-global)). Reads and writes of every other global still go through your `__index` and `__newindex`, the metatable's other fields are kept, and your handlers run once per lookup no matter how many blocks have run.
+You can give `_G` a metatable of your own with `setmetatable(_G, mt)`, for example from the `lua shared` fence ([The shared library](03-blocks-and-prose.md#the-shared-library)), to give missing globals a default, to raise an error for an undefined global, or to hook the writes of new globals. A read of a global that `_G` does not hold goes to your `__index`, and an assignment of a new global goes to your `__newindex`, as in standard Lua. Both are read from your metatable at every lookup, so a later change to that table takes effect at once, and your handlers run once per lookup no matter how many blocks have run.
 
 ````lua
 local defaults = { tone = 'friendly' }
 setmetatable(_G, { __index = defaults })
 ````
 
-With that in the shared library, reading the unset global `tone` in any block gives `friendly`, while `prose` still reads the section's rendered prose.
+With that in the shared library, reading the unset global `tone` in any block gives `friendly`, and `{{ tone }}` in prose renders `friendly` too.
+
+A strict metatable works the same way:
+
+````lua
+setmetatable(_G, {
+  __index = function(_, name) error('undefined global ' .. name, 2) end,
+})
+````
+
+With that in the shared library, a block that reads an undefined global fails at the reading line with your message, and `pcall` hands back your message string exactly as you raised it.
+
+`argv` and `prose` are handled before your metatable and never reach it. Outside the H1 pass, reading `argv` gives the frozen value and assigning it raises `argv is frozen outside H1: assign it in H1 only` ([Frozen argv](06-arguments.md#frozen-argv)). In the H1 pass, `argv` is an ordinary writable global that your metatable never sees, so a nil `argv` reads as nil and the repair `argv = repaired` lands in `_G` even under a strict or write-hooking metatable ([The H1 repair pattern](06-arguments.md#the-h1-repair-pattern)). Reading `prose` gives the block's rendered prose, and assigning it raises ``prose is read-only: assign to `var` or a section global instead`` ([The prose global](03-blocks-and-prose.md#the-prose-global)). No metatable you set, clear, or change alters any of that, and neither name is ever passed to your `__index` or `__newindex`.
+
+- `getmetatable(_G)` returns your metatable, the very table you passed, or nil when you have set none. It never returns the guard that serves `argv` and `prose`.
+- `setmetatable(_G, mt)` returns `_G`, and `setmetatable(_G, nil)` removes your metatable. `mt` must be a table or nil; anything else raises the standard message, such as `bad argument #2 to 'setmetatable' (nil or table expected, got number)`.
+- A `__metatable` field in your metatable protects `_G` as it would any table: `getmetatable(_G)` returns that field's value, and a later `setmetatable(_G, ...)` raises `cannot change a protected metatable`.
+- Your metatable's other fields, such as `__call` or `__tostring`, apply to `_G` as they stand when you call `setmetatable(_G, mt)`. A later change to one of them takes effect at your next `setmetatable(_G, mt)`, while `__index` and `__newindex` are always read live.
 
 ## Deterministic table iteration
 
