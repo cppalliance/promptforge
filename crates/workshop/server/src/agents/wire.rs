@@ -238,7 +238,6 @@ impl AgentEvent {
             metrics: None,
         };
         Some(match event {
-            Event::UserInput { text, .. } => base(AgentEventKind::UserInput, 0, text.clone()),
             Event::Thinking {
                 turn, model, text, ..
             } => AgentEvent {

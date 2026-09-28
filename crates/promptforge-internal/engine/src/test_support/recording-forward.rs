@@ -80,7 +80,6 @@ lifecycle_pairs! {
     StoreGlobFailed,
     StoreExistsSucceeded,
     StoreExistsFailed,
-    UserInputWaitStarted,
 }
 
 /// The lifecycle and task variants with payloads, the ones
@@ -106,7 +105,6 @@ macro_rules! content_variants {
             | Event::AssistantReply { .. }
             | Event::AssistantToolCalls { .. }
             | Event::ToolResult { .. }
-            | Event::UserInput { .. }
             | Event::TaskNotice { .. }
     };
 }
@@ -323,12 +321,6 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             &content,
             trusted,
         ),
-        Event::UserInput {
-            execution,
-            section,
-            text,
-            ..
-        } => observer.on_user_input(&execution, &section, &text),
         Event::TaskNotice {
             execution,
             section,

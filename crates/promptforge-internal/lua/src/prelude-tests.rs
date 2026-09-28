@@ -13,7 +13,7 @@ use super::install_preludes;
 use crate::tests::recording::null_emitter;
 use crate::{
     Argv, CoroStep, LuaProgram, Request, SectionVm, YieldParse, install_section_loop_shim,
-    install_section_user_input_shim, install_ui,
+    install_ui,
 };
 
 const SECTION: &str = "Prelude";
@@ -52,7 +52,6 @@ fn section_vm_with_var(var: Option<&serde_json::Value>) -> SectionVm {
     vm.install_coro_shims(1)
         .expect("the coroutine shims install");
     install_section_loop_shim(vm.lua()).expect("the loop shim installs");
-    install_section_user_input_shim(vm.lua()).expect("the user_input shim installs");
     vm
 }
 

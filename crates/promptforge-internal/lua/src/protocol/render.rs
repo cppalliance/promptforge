@@ -215,13 +215,6 @@ impl<E: ErrorValue> Answer<E> {
                 lua.to_value(&args)?,
             ],
             Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
-            // The availability flag is a third resume value beside the text,
-            // so the shim returns both and the broker's fixed fallback
-            // sentence stays unspoofable by identical human text.
-            Answer::UserInput(Ok(outcome)) => vec![
-                Value::String(lua.create_string(&outcome.text)?),
-                Value::Boolean(outcome.available),
-            ],
             Answer::Store(Ok(outcome)) => vec![store_value(lua, outcome)?],
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
@@ -238,8 +231,7 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::DrainTaskNotices(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
-            | Answer::Store(Err(error))
-            | Answer::UserInput(Err(error)) => {
+            | Answer::Store(Err(error)) => {
                 let table = error_table(lua, &error)?;
                 return Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::Table(table)]),

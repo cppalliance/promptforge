@@ -895,7 +895,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-13>
 
-### Step 13: Delete the engine's user-input facility
+### Step 13: Delete the engine's user-input facility [completed]
 
 - Component: Engine user-input removal
 - Piece: The removal change (third of three steps)

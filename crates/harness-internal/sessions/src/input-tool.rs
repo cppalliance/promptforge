@@ -45,8 +45,8 @@ impl Drop for WaitGuard {
 }
 
 /// The session's wait registry behind the harness's input broker: what
-/// the engine's `UserInput` effect, issued for the script-side
-/// `user_input()`, suspends on.
+/// the `promptforge/user-input` ask tool, called by the script-side
+/// `input.ask()`, suspends on.
 ///
 /// One broker per session: each [`wait`](InputBroker::wait) opens a
 /// wait in the session's [`WaitRegistry`], announces it with the durable

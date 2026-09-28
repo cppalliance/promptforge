@@ -108,10 +108,6 @@ pub trait Observer: Send + Sync {
     ) {
     }
 
-    /// Records text the user supplied, byte-exact.
-    #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_user_input(&self, execution: &str, section: &str, text: &str) {}
-
     /// Records one model-task notice as it was queued for the task's owner.
     #[expect(unused_variables, reason = "the default body discards the report")]
     fn on_task_notice(

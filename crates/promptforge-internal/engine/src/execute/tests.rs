@@ -397,7 +397,6 @@ mod exit_rules;
 mod fanout_acceptance;
 mod full_id_calls;
 mod happens_before;
-mod input;
 mod live_infer;
 mod local_tools;
 mod model_and_reply;

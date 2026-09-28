@@ -1,5 +1,5 @@
 //! Effects as values: every leaf request kind a section yields - `infer`
-//! and `chat`, `tool_call`, `user_input`, `store`, `timer` - issues
+//! and `chat`, `tool_call`, `store`, `timer` - issues
 //! exactly one `Effect` out of the run's `step`, and each effect's record
 //! round-trips through serde; only a `chat` round streams its deltas to
 //! the host. The run's answer rules (a drop, an orphan, a wrong kind) are
@@ -10,10 +10,8 @@ use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::protocol::StoreOp;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
-use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::model::StreamDelta;
-use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// Serializes a record and reads it back: the round trip a run log and a
@@ -59,20 +57,6 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
         execution: EXECUTION.to_owned(),
         section: section.to_owned(),
         caller,
-    }
-}
-
-/// A broker that always answers with the same operator text.
-struct TextBroker(&'static str);
-
-#[async_trait::async_trait]
-impl TestBroker for TextBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        Ok(InputOutcome::Text(self.0.to_owned()))
     }
 }
 
@@ -212,30 +196,6 @@ async fn a_script_tool_call_records_the_section_that_made_it() {
         ],
         "each call names the section it was made in"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn user_input_issues_exactly_one_user_input_effect() {
-    let prompt = parse(&loop_prompt(
-        "local text, available = user_input()\n\
-         return text .. '|' .. tostring(available)",
-    ));
-    let input_host = RunHost::new().input_broker(Arc::new(TextBroker("typed")));
-    let (ctx, host) = effect_context(&prompt, ToolSet::default(), input_host);
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
-    let records = scheduler.record_effects_for_test();
-    let out = scheduler.drive().await.expect("the wait completes");
-    assert_eq!(out, "typed|true");
-
-    let records = records.lock().expect("the tap mutex is not poisoned");
-    assert_eq!(
-        *records,
-        vec![EffectRecord::UserInput {
-            execution: EXECUTION.to_owned(),
-            section: "Only".to_owned(),
-        }]
-    );
-    assert_round_trips(&records);
 }
 
 #[tokio::test(flavor = "current_thread")]

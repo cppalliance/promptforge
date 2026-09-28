@@ -2,14 +2,13 @@
 //! host answers with.
 //!
 //! A leaf request a section VM yields - a model round, a bound tool call,
-//! a wait for operator input, a store operation, a timer - is not
-//! performed where it is dispatched. The arm builds an [`Effect`], a plain
-//! description of the work, and the run returns it from `step` for the
-//! host to perform; the host's [`EffectAnswer`] comes back through
-//! `resume` keyed by the effect's [`EffectId`], and the scheduler applies
-//! it on the caller's thread, emitting the round's events there. The
-//! engine thus decides *what* to do and *what it means*; performing is the
-//! host's job.
+//! a store operation, a timer - is not performed where it is dispatched.
+//! The arm builds an [`Effect`], a plain description of the work, and the
+//! run returns it from `step` for the host to perform; the host's
+//! [`EffectAnswer`] comes back through `resume` keyed by the effect's
+//! [`EffectId`], and the scheduler applies it on the caller's thread,
+//! emitting the round's events there. The engine thus decides *what* to do
+//! and *what it means*; performing is the host's job.
 //!
 //! An [`Effect`] may hold a live handle (the store access capability) and
 //! so does not serialize itself. [`Effect::record`] projects it onto an
@@ -29,7 +28,6 @@ use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::input::{InputError, InputOutcome};
 use crate::model::{Completion, CompletionError, CompletionResult, Message, ToolSchema};
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
 use promptforge_vfs::{Access, VfsError};
@@ -96,13 +94,6 @@ pub enum Effect {
         /// The run, the section, and the kind of caller that made the
         /// call.
         origin: ToolCallOrigin,
-    },
-    /// One wait for operator input, for `section` of `execution`.
-    UserInput {
-        /// The run's execution identifier.
-        execution: String,
-        /// The section asking.
-        section: String,
     },
     /// One store operation under the chain's store view: an ordinary
     /// access the engine derived from the chain's capability at dispatch,
@@ -184,10 +175,6 @@ impl Effect {
                 args: args.clone(),
                 origin: origin.clone(),
             },
-            Effect::UserInput { execution, section } => EffectRecord::UserInput {
-                execution: execution.clone(),
-                section: section.clone(),
-            },
             Effect::Store { op, .. } => EffectRecord::Store { op: op.clone() },
             Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
             Effect::TaskEvents { task, last } => EffectRecord::TaskEvents {
@@ -235,13 +222,6 @@ pub enum EffectRecord {
         /// The run, the section, and the kind of caller that made the
         /// call.
         origin: ToolCallOrigin,
-    },
-    /// One wait for operator input.
-    UserInput {
-        /// The run's execution identifier.
-        execution: String,
-        /// The section asking.
-        section: String,
     },
     /// One store operation.
     Store {
@@ -299,8 +279,6 @@ pub enum EffectAnswer {
     /// The tool's own output or its own failure, before the engine's
     /// trust and count rules apply.
     ToolCall(std::result::Result<ToolOutput, ToolError>),
-    /// The broker's outcome or its failure.
-    UserInput(std::result::Result<InputOutcome, InputError>),
     /// The store operation's outcome or the store's own structured
     /// failure.
     Store(std::result::Result<StoreOutcome, VfsError>),
@@ -335,11 +313,6 @@ impl EffectAnswer {
                 }),
                 Err(error) => Err(error.to_string()),
             }),
-            EffectAnswer::UserInput(result) => AnswerRecord::UserInput(match result {
-                Ok(InputOutcome::Text(text)) => Ok(InputAnswerRecord::Text(text.clone())),
-                Ok(InputOutcome::Unavailable) => Ok(InputAnswerRecord::Unavailable),
-                Err(error) => Err(error.to_string()),
-            }),
             EffectAnswer::Store(result) => AnswerRecord::Store(match result {
                 Ok(outcome) => Ok(outcome.clone()),
                 Err(error) => Err(error.to_string()),
@@ -360,8 +333,6 @@ pub enum AnswerRecord {
     Chat(std::result::Result<ChatAnswerRecord, String>),
     /// The tool call's outcome.
     ToolCall(std::result::Result<ToolAnswerRecord, String>),
-    /// The input wait's outcome.
-    UserInput(std::result::Result<InputAnswerRecord, String>),
     /// The store operation's outcome, the [`StoreOutcome`] itself as the
     /// success payload, or its failure's display text.
     Store(std::result::Result<StoreOutcome, String>),
@@ -416,15 +387,6 @@ pub struct ToolAnswerRecord {
     pub text: String,
     /// Whether the tool declared its output trusted.
     pub trusted: bool,
-}
-
-/// An input wait's outcome as the log records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InputAnswerRecord {
-    /// The operator supplied text.
-    Text(String),
-    /// The host had no input to give.
-    Unavailable,
 }
 
 #[cfg(test)]

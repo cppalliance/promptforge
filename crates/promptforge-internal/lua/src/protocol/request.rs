@@ -201,10 +201,6 @@ pub enum Request {
         /// section's current model.
         binding: Option<ModelBinding>,
     },
-    /// `user_input()`: a direct operator-input request to the run's input
-    /// broker. The request is argument-free: the broker and its host
-    /// policy own the whole interaction.
-    UserInput,
     /// `store.*(...)`: one run-scoped store operation as a leaf yield.
     /// Section VMs and the live H1 VM run the store shims. Every operation
     /// takes this path uniformly - memory- and host-backed alike, with no

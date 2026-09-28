@@ -2,7 +2,7 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer(handle?, prompt)`, `call`,
-//! `tasks.spawn`, `fanout`, `tools.call`, `user_input()`, `store.*`, and
+//! `tasks.spawn`, `fanout`, `tools.call`, `store.*`, and
 //! the `chat` and `tool_call` rounds the `models.loop` shim yields on the
 //! author's behalf) is a Lua-side shim that yields a request table; the driver validates the
 //! yield into a [`Request`], dispatches it, and resumes the coroutine with
@@ -24,9 +24,7 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use answer::{
-    Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, UserInputOutcome,
-};
+pub use answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
 pub use parse::YieldParse;
 pub use request::{
     ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request, StoreOp,

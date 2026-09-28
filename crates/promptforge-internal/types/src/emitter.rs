@@ -347,16 +347,6 @@ impl Emitter {
         });
     }
 
-    /// Reports text the user supplied, byte-exact.
-    pub fn user_input(&self, section: &str, text: &str) {
-        self.emit(section, |execution, section, provenance| Event::UserInput {
-            execution,
-            section,
-            provenance,
-            text: text.to_owned(),
-        });
-    }
-
     /// Reports one model-task notice as it is queued for the task's owner.
     pub fn task_notice(&self, section: &str, turn: u32, task: &TaskId, text: &str) {
         self.emit(section, |execution, section, provenance| {

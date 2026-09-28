@@ -1,16 +1,16 @@
 //! The user-input wait: the [`WaitRegistry`] of single-use wait tokens,
-//! the session's input broker behind the script-side `user_input()` (the
-//! harness's `InputBroker`), and the producer seam that completes a
+//! the session's input broker (the harness's `InputBroker`) handed to
+//! each run the session launches, and the producer seam that completes a
 //! wait with the operator's text.
 //!
-//! An agent prompt asks its operator for input through the session's
-//! input broker - session-supplied code, never advertised to a model. The
-//! engine issues the call as a `UserInput` effect; the broker performs it
-//! by registering a wait, announcing it with a durable
-//! [`WaitFrame::Required`], and suspending on the wait's receiver until
-//! the session completes the wait with the operator's answer or the wait
-//! dies. A dying wait is an outcome, never silence: every path out of an
-//! unresolved wait - the future dropped by a turn-cancel, the wait
+//! An agent prompt asks its operator for input through a capability that
+//! holds the run's broker: the `promptforge/user-input` capability's
+//! `input.ask()` calls its ask tool, which waits on the broker. The
+//! broker performs each wait by registering it, announcing it with a
+//! durable [`WaitFrame::Required`], and suspending on the wait's receiver
+//! until the session completes the wait with the operator's answer or the
+//! wait dies. A dying wait is an outcome, never silence: every path out
+//! of an unresolved wait - the future dropped by a turn-cancel, the wait
 //! cancelled out of the registry - removes the entry and pushes a durable
 //! [`WaitFrame::Cancelled`], so a client never pins its input box to a
 //! dead token. Unresolved waits are retained across socket loss and
@@ -57,7 +57,7 @@ pub enum WaitFrame {
 }
 
 /// One unresolved wait: its single-use token, and the sender that resumes
-/// the suspended `user_input` call with the operator's text.
+/// the suspended ask with the operator's text.
 struct Wait {
     /// The unguessable token an `input_response` must echo.
     token: String,
@@ -264,11 +264,11 @@ pub enum WaitError {
 /// Completes the wait holding `token` with the operator's `text` without
 /// recording anything: the producer side of an operator's answer.
 ///
-/// The engine records the operator's text consumer-side, as a
-/// `UserInput` event when the suspended `user_input` call resumes, so
-/// a producer-side record here would double the event. The
+/// The run records the operator's text consumer-side, as the ask tool's
+/// answer record and its `ToolResult` event when the suspended ask
+/// resumes, so a producer-side record here would double it. The
 /// `before_completion` seam runs after the response is accepted and
-/// before the suspended call resumes.
+/// before the suspended ask resumes.
 ///
 /// # Errors
 /// Returns [`WaitError::UnknownToken`] when no unresolved wait holds

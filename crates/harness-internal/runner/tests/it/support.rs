@@ -9,12 +9,11 @@ use std::time::Duration;
 use harness_log::{RunId, RunOutcome};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::performers::{
-    BoxFuture, ChatPerformer, InputPerformer, Performers, StorePerformer, TaskEventsPerformer,
-    TimerPerformer, ToolPerformer,
+    BoxFuture, ChatPerformer, Performers, StorePerformer, TaskEventsPerformer, TimerPerformer,
+    ToolPerformer,
 };
 use promptforge::event::Event;
 use promptforge::ids::TaskId;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
@@ -119,16 +118,6 @@ impl ToolPerformer for Unused {
     }
 }
 
-impl InputPerformer for Unused {
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        unreachable!("this test issues no UserInput effect")
-    }
-}
-
 impl StorePerformer for Unused {
     fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
         unreachable!("this test issues no Store effect")
@@ -154,7 +143,6 @@ pub(crate) fn unused() -> Performers {
     Performers {
         chat: unused.clone(),
         tool: unused.clone(),
-        input: unused.clone(),
         store: unused.clone(),
         timer: unused.clone(),
         task_events: unused,

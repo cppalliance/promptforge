@@ -62,8 +62,8 @@ pub use requirements::{
     CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement,
 };
 pub use run::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
-    InputAnswerRecord, Run, Step, ToolAnswerRecord, ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, Step,
+    ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 // The store vocabulary a `Store` effect holds and its answer returns:
 // named here so a host's store performer can be written against this one
@@ -119,8 +119,6 @@ pub fn perform_store_op(
 ///   or instructions) was exhausted.
 /// - [`RunErrorKind::ContextExhausted`] - the selected compactor exhausted the
 ///   model's context window.
-/// - [`RunErrorKind::Input`] - the host's input broker failed a `user_input`
-///   request.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
 /// - [`RunErrorKind::Determinism`] - two live execution identities claimed

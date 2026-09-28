@@ -7,19 +7,19 @@
 //! timer effect is answered however the closure sees fit, so a test's
 //! timeouts are instant.
 //!
-//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat`,
-//! `ToolCall`, and `UserInput` effects through the caller's [`Performers`]
+//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
+//! `ToolCall` effects through the caller's [`Performers`]
 //! (a struct of boxed async closures, one per kind) on the current tokio
 //! runtime, runs store operations on the blocking pool, sleeps timers on
 //! the timer wheel, and hands every event to the caller's sink. It is the
 //! host the engine's own suites drive.
 //!
 //! [`RunHost`] bundles the resources the suites used to hand the retired
-//! in-crate loop - an observer, a client, a fixture tool table, a broker, a
-//! delta hook - and [`run_with_host`] is that loop's implicit-prepare path
-//! over the tokio driver: prepare, refuse or run. The tool and broker
-//! fixtures implement the stand-in traits [`TestTool`] and [`TestBroker`];
-//! the production traits are the harness's, which no engine crate names.
+//! in-crate loop - an observer, a client, a fixture tool table, a delta
+//! hook - and [`run_with_host`] is that loop's implicit-prepare path over
+//! the tokio driver: prepare, refuse or run. The tool fixtures implement
+//! the stand-in trait [`TestTool`]; the production trait is the harness's,
+//! which no engine crate names.
 //! [`Observer`](recording::Observer) and
 //! [`Observation`](recording::Observation) are the suites' recording
 //! vocabulary, and [`forward`] is the adapter that replays returned events
@@ -50,7 +50,7 @@ pub(crate) mod tools;
 pub use host::{ChatClient, DeltaHook, RunHost};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
-pub use tools::{TestBroker, TestTool, TestToolTable};
+pub use tools::{TestTool, TestToolTable};
 
 /// The suites' mock-gateway client performs a `Chat` round over its
 /// dev-only HTTP under the run's limits.

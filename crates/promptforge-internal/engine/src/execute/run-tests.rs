@@ -128,23 +128,6 @@ fn a_tool_call_record_serializes_its_origin_in_snake_case() {
 }
 
 #[test]
-fn a_user_input_effect_records_its_execution_and_section() {
-    let effect = Effect::UserInput {
-        execution: "run-1".to_owned(),
-        section: "Only".to_owned(),
-    };
-    let record = effect.record();
-    assert_eq!(
-        record,
-        EffectRecord::UserInput {
-            execution: "run-1".to_owned(),
-            section: "Only".to_owned(),
-        }
-    );
-    assert_eq!(round_trip(&record), record);
-}
-
-#[test]
 fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
     let access = Arc::new(
         promptforge_vfs::VfsRef::default()

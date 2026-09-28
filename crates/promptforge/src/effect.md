@@ -1,6 +1,6 @@
 Every kind of outside work that a run hands to its host, the answer for each kind, and the log records for both.
 
-A run never performs outside work itself. Each model round, tool call, wait for operator input, store operation, timer, and read of a task's history reaches your program as an [`Effect`], and your program sends back exactly one [`EffectAnswer`]. This module is that whole contract: six effect kinds, seven answer kinds, and a pair of serializable records for logging them. By the end of this page you can answer every kind of effect, give up on one cleanly, and log each effect with its answer.
+A run never performs outside work itself. Each model round, tool call, store operation, timer, and read of a task's history reaches your program as an [`Effect`], and your program sends back exactly one [`EffectAnswer`]. This module is that whole contract: five effect kinds, six answer kinds, and a pair of serializable records for logging them. By the end of this page you can answer every kind of effect, give up on one cleanly, and log each effect with its answer.
 
 # Where this fits
 
@@ -10,16 +10,15 @@ Each effect kind has one performer on the host side:
 
 - [`Effect::Chat`] is a model round, answered with [`EffectAnswer::Chat`].
 - [`Effect::ToolCall`] is a call into the host's own tool implementation, answered with [`EffectAnswer::ToolCall`].
-- [`Effect::UserInput`] is a question for the host's operator, answered with [`EffectAnswer::UserInput`].
 - [`Effect::Store`] is a store operation, performed with [`perform_store_op`](crate::vfs::perform_store_op) and answered with [`EffectAnswer::Store`].
 - [`Effect::Timer`] is a sleep, answered with [`EffectAnswer::Timer`].
 - [`Effect::TaskEvents`] is a filter over the host's own event log, answered with [`EffectAnswer::TaskEvents`].
 
-The seventh answer, [`EffectAnswer::Dropped`], gives up on any kind of effect.
+The sixth answer, [`EffectAnswer::Dropped`], gives up on any kind of effect.
 
 # A host that answers every kind
 
-This host drives a prompt whose one section asks the operator a question, writes the reply to the store, reads it back, and returns it. The host has no operator, so it answers the question as unavailable.
+This host drives a prompt whose one section writes a note to the store, reads it back, and returns it. The host answers every other kind of effect too, so the example shows the shape of each answer.
 
 ````
 use std::sync::Arc;
@@ -27,7 +26,6 @@ use std::time::Duration;
 
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::event::Event;
-use promptforge::input::InputOutcome;
 use promptforge::model::{Completion, CompletionResult};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::ToolError;
@@ -36,23 +34,22 @@ use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 let source = concat!(
     "---\n",
-    "name: asker\n",
-    "description: asks the operator\n",
+    "name: keeper\n",
+    "description: keeps a note\n",
     "promptforge: 0\n",
     "---\n",
     "\n",
-    "# Asker\n",
+    "# Keeper\n",
     "\n",
-    "## Ask\n",
+    "## Keep\n",
     "\n",
     "```lua\n",
-    "local text = user_input()\n",
-    "store.write('reply.md', text)\n",
-    "return store.read('reply.md')\n",
+    "store.write('note.md', 'a kept note')\n",
+    "return store.read('note.md')\n",
     "```\n",
 );
-let (parsed, _parse_events) = Prompt::parse(source, "asker");
-let ctx = RunContext::new("asker", 7, Timestamp::UNIX_EPOCH);
+let (parsed, _parse_events) = Prompt::parse(source, "keeper");
+let ctx = RunContext::new("keeper", 7, Timestamp::UNIX_EPOCH);
 let mut run = Run::new(Arc::new(parsed?), "", ctx);
 
 let mut log: Vec<Event> = Vec::new();
@@ -69,7 +66,6 @@ let result = loop {
                     Effect::ToolCall { .. } => {
                         EffectAnswer::ToolCall(Err(ToolError::message("this host has no tools")))
                     }
-                    Effect::UserInput { .. } => EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)),
                     Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
                     Effect::Timer { seconds } => {
                         std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO));
@@ -96,9 +92,7 @@ let result = loop {
 };
 
 match result {
-    RunResult::Ok(text) => {
-        assert_eq!(text, "User input is unavailable in this host; continue without it.");
-    }
+    RunResult::Ok(text) => assert_eq!(text, "a kept note"),
     other => panic!("the run should succeed: {other:?}"),
 }
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -106,9 +100,9 @@ match result {
 
 Here is what each part does.
 
-1. **The prompt.** The section calls `user_input()`, which issues an [`Effect::UserInput`]. Its two store calls each issue an [`Effect::Store`]. The other four arms never fire for this prompt, but each one shows the shape of its answer.
-2. **One arm per kind.** Neither [`Effect`] nor [`EffectAnswer`] is `#[non_exhaustive]`, so the `match` lists all six effect kinds and needs no wildcard arm.
-3. **The unavailable answer.** This host has no operator, so it answers [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable). The section resumes with a fixed sentence in place of operator text, stores it, and returns it, so the sentence becomes the text of [`RunResult::Ok`](crate::RunResult::Ok).
+1. **The prompt.** The section's two store calls each issue an [`Effect::Store`]. The other four arms never fire for this prompt, but each one shows the shape of its answer.
+2. **One arm per kind.** Neither [`Effect`] nor [`EffectAnswer`] is `#[non_exhaustive]`, so the `match` lists all five effect kinds and needs no wildcard arm.
+3. **The store answers.** The host passes each store effect's view and operation to [`perform_store_op`](crate::vfs::perform_store_op) and answers with its result as it is. The section reads back the note it wrote and returns it, so the note becomes the text of [`RunResult::Ok`](crate::RunResult::Ok).
 4. **Answering in place.** Every arm here produces its answer on the calling thread before the next effect. A real host may perform one step's effects concurrently and resume them in any order.
 
 # One answer per effect
@@ -121,7 +115,7 @@ Every issued effect receives exactly one answer, and [`Step::Done`](crate::Step:
 
 # Answering each kind
 
-This section takes the six effect kinds in turn. For each one it names the answer variant, says how the host produces the answer, and says what the run does with it.
+This section takes the five effect kinds in turn. For each one it names the answer variant, says how the host produces the answer, and says what the run does with it.
 
 **Chat.** [`Effect::Chat`] asks for one model round. The host sees it for each round of a section's `models.loop`, and for a nested `models.infer`. Answer it with [`EffectAnswer::Chat`], which holds a [`Result`] of a [`Box`] of a [`Completion`](crate::model::Completion) or a [`CompletionError`](crate::model::CompletionError). Both kinds of round take the same answer.
 
@@ -138,14 +132,6 @@ To produce the answer, resolve the effect's [`tool`](Effect#variant.ToolCall.fie
 The effect's [`origin`](Effect#variant.ToolCall.field.origin) says who asked for the call: the run's execution, the section whose Lua was running, and whether the section's script or a model round made the request. It plays no part in resolving the implementation. A host can read it to log the call, or to treat the same tool differently depending on who called it.
 
 The run counts the call when it issues the effect, before the host runs the tool. After the answer arrives, the run applies its trust rule, which wraps untrusted output in a nonce envelope. A local tool is a Lua function on the section's own Lua state, and the run answers it internally, so it never becomes an [`Effect::ToolCall`].
-
-**UserInput.** [`Effect::UserInput`] is one wait for operator input. The host sees one for every `user_input()` call, whether or not it has an operator. Answer it with [`EffectAnswer::UserInput`], which holds a [`Result`] of an [`InputOutcome`](crate::input::InputOutcome) or an [`InputError`](crate::input::InputError). In Lua, `user_input()` returns two values: the text and an `available` flag. There are three answers:
-
-- [`InputOutcome::Text`](crate::input::InputOutcome::Text) in [`Ok`] carries the operator's text, which the section receives byte-exact. The section resumes with `available` set to true.
-- [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable) in [`Ok`] means the host has no input to give. The section resumes with the fixed sentence "User input is unavailable in this host; continue without it." and `available` set to false.
-- An [`InputError`](crate::input::InputError) in [`Err`] reports that the host's input handling failed. Build it with [`InputError::message`](crate::input::InputError::message) or [`InputError::with_source`](crate::input::InputError::with_source). It raises a [`RunErrorKind::Input`](crate::RunErrorKind::Input) failure at the Lua call site.
-
-A blocking host may hold the effect until the operator answers, and the rest of the run keeps moving meanwhile. The [`input`](crate::input) module page covers the outcomes.
 
 **Store.** [`Effect::Store`] is one store operation through the chain's store view. The host sees one for every `store.*` call, whatever backend serves the store. Answer it with [`EffectAnswer::Store`], which holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError). To produce the answer, pass a reference to the effect's [`access`](Effect#variant.Store.field.access) and its [`op`](Effect#variant.Store.field.op) to [`perform_store_op`](crate::vfs::perform_store_op). Its return value is exactly the variant's payload, so wrap it in [`EffectAnswer::Store`] as it is.
 
@@ -240,9 +226,6 @@ This part covers every item in the module: the effect handle, the effect and ans
   - [`Effect::ToolCall::alias`](Effect#variant.ToolCall.field.alias), a [`String`], is the prompt-local name used in the call. It is kept for the record and plays no part in resolving the implementation.
   - [`Effect::ToolCall::args`](Effect#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments. Pass it to the tool implementation.
   - [`Effect::ToolCall::origin`](Effect#variant.ToolCall.field.origin), a [`ToolCallOrigin`], says who made the call and where: the run's execution identifier, the section that made the call, and a [`ToolCaller`] naming the script or the model. Like the alias, it plays no part in resolving the implementation.
-- [`Effect::UserInput`]: one wait for operator input on behalf of one section. The host sees one for every `user_input()` call. Answer it with [`EffectAnswer::UserInput`].
-  - [`Effect::UserInput::execution`](Effect#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, which is the `name` the host passed to [`RunContext::new`](crate::RunContext::new).
-  - [`Effect::UserInput::section`](Effect#variant.UserInput.field.section), a [`String`], is the name of the section asking for input.
 - [`Effect::Store`]: one store operation through the chain's store view. The host sees one for every `store.*` call. Answer it with [`EffectAnswer::Store`].
   - [`Effect::Store::access`](Effect#variant.Store.field.access), an [`Arc`](std::sync::Arc) of an [`Access`](crate::vfs::Access), is the chain's store view: an ordinary access rooted at the handle's declared store, confined to its mount, under the chain's identity, derived by the engine at dispatch. Pass a reference to it to [`perform_store_op`](crate::vfs::perform_store_op). It is not recorded, and when it drops never affects correctness: claims follow happens-before within the run's scope, which the run ends at [`Step::Done`](crate::Step::Done) or when it is dropped.
   - [`Effect::Store::op`](Effect#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation: a write, append, read, numbered read, string replace, delete, glob, or existence check. Pass it by value to [`perform_store_op`](crate::vfs::perform_store_op).
@@ -260,13 +243,12 @@ This part covers every item in the module: the effect handle, the effect and ans
 
 - [`EffectAnswer::Chat`] holds a [`Result`] of a [`Box`] of a [`Completion`](crate::model::Completion) or a [`CompletionError`](crate::model::CompletionError). It answers an [`Effect::Chat`], including one from a nested `models.infer`. The completion is boxed because it holds both the request and response bodies.
 - [`EffectAnswer::ToolCall`] holds a [`Result`] of the tool's own [`ToolOutput`](crate::tools::ToolOutput) or [`ToolError`](crate::tools::ToolError). It answers an [`Effect::ToolCall`], and the run applies its trust rule after it arrives.
-- [`EffectAnswer::UserInput`] holds a [`Result`] of an [`InputOutcome`](crate::input::InputOutcome) or an [`InputError`](crate::input::InputError). It answers an [`Effect::UserInput`].
 - [`EffectAnswer::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError), which is exactly the return type of [`perform_store_op`](crate::vfs::perform_store_op). It answers an [`Effect::Store`].
 - [`EffectAnswer::Timer`] carries no data. It answers an [`Effect::Timer`] once the effect's [`seconds`](Effect#variant.Timer.field.seconds) have passed.
 - [`EffectAnswer::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values: the task's events after the read's [`last`](Effect#variant.TaskEvents.field.last), in the host's log order. It answers an [`Effect::TaskEvents`].
 - [`EffectAnswer::Dropped`] carries no data. It answers any kind of effect without performing it, as [One answer per effect](#one-answer-per-effect) describes.
 
-[`EffectAnswer::record`] borrows the answer and returns its [`AnswerRecord`]. It cannot fail. A failure is recorded as its [`Display`](std::fmt::Display) text. A completion is recorded as a [`ChatAnswerRecord`], because the round's bodies travel as debug events and its metrics travel in the turn's event. A tool output becomes a [`ToolAnswerRecord`], input outcomes become an [`InputAnswerRecord`], a store outcome keeps its [`StoreOutcome`](crate::vfs::StoreOutcome), and task events are cloned.
+[`EffectAnswer::record`] borrows the answer and returns its [`AnswerRecord`]. It cannot fail. A failure is recorded as its [`Display`](std::fmt::Display) text. A completion is recorded as a [`ChatAnswerRecord`], because the round's bodies travel as debug events and its metrics travel in the turn's event. A tool output becomes a [`ToolAnswerRecord`], a store outcome keeps its [`StoreOutcome`](crate::vfs::StoreOutcome), and task events are cloned.
 
 ## EffectRecord
 
@@ -285,9 +267,6 @@ This part covers every item in the module: the effect handle, the effect and ans
   - [`EffectRecord::ToolCall::alias`](EffectRecord#variant.ToolCall.field.alias), a [`String`], is the prompt-local alias named in the call.
   - [`EffectRecord::ToolCall::args`](EffectRecord#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments.
   - [`EffectRecord::ToolCall::origin`](EffectRecord#variant.ToolCall.field.origin), a [`ToolCallOrigin`], is who made the call and where. It serializes as an object with `execution`, `section`, and `caller` keys, for example `{"execution":"echoer","section":"Only","caller":"script"}`.
-- [`EffectRecord::UserInput`]: one wait for operator input, recorded from an [`Effect::UserInput`] with both fields cloned.
-  - [`EffectRecord::UserInput::execution`](EffectRecord#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, the name given to [`RunContext::new`](crate::RunContext::new).
-  - [`EffectRecord::UserInput::section`](EffectRecord#variant.UserInput.field.section), a [`String`], is the name of the section that asked.
 - [`EffectRecord::Store`]: one store operation, recorded from an [`Effect::Store`] without its store view.
   - [`EffectRecord::Store::op`](EffectRecord#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation. It serializes through its own serde form.
 - [`EffectRecord::Timer`]: one sleep, recorded from an [`Effect::Timer`].
@@ -313,11 +292,10 @@ This part covers every item in the module: the effect handle, the effect and ans
 
 ## AnswerRecord
 
-[`AnswerRecord`] is an [`EffectAnswer`] as a run log stores it, with one variant per answer kind. The host gets one from [`EffectAnswer::record`], or deserializes one from a stored log. Every variant can also be built directly. The four variants that hold a [`Result`] put the failure's [`Display`](std::fmt::Display) text in [`Err`] as a [`String`].
+[`AnswerRecord`] is an [`EffectAnswer`] as a run log stores it, with one variant per answer kind. The host gets one from [`EffectAnswer::record`], or deserializes one from a stored log. Every variant can also be built directly. The three variants that hold a [`Result`] put the failure's [`Display`](std::fmt::Display) text in [`Err`] as a [`String`].
 
 - [`AnswerRecord::Chat`] holds a [`Result`] of a [`ChatAnswerRecord`] or the [`CompletionError`](crate::model::CompletionError)'s text. It is recorded from an [`EffectAnswer::Chat`].
 - [`AnswerRecord::ToolCall`] holds a [`Result`] of a [`ToolAnswerRecord`] or the [`ToolError`](crate::tools::ToolError)'s text. It is recorded from an [`EffectAnswer::ToolCall`]. The text is the model-safe message only, so a cause attached with [`ToolError::with_source`](crate::tools::ToolError::with_source) is not recorded.
-- [`AnswerRecord::UserInput`] holds a [`Result`] of an [`InputAnswerRecord`] or the [`InputError`](crate::input::InputError)'s message. It is recorded from an [`EffectAnswer::UserInput`].
 - [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`]. The success payload's JSON is byte-identical to the retired store answer record's shape: the outcome serializes through serde's externally tagged form.
 - [`AnswerRecord::Timer`] carries no data. It records that the timer fired.
 - [`AnswerRecord::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values, a clone of the answered events.
@@ -340,11 +318,4 @@ A [`CompletionResult`](crate::model::CompletionResult) variant that this build d
 
 - [`ToolAnswerRecord::text`], a [`String`], is the output text before the run's trust rule applies, so untrusted output appears here without its envelope.
 - [`ToolAnswerRecord::trusted`], a [`bool`], is `true` when the tool built its output with [`ToolOutput::trusted`](crate::tools::ToolOutput::trusted), and `false` otherwise.
-
-## InputAnswerRecord
-
-[`InputAnswerRecord`] is the successful outcome of an input wait as a run log records it. It is the success payload of [`AnswerRecord::UserInput`]. The host gets one from [`EffectAnswer::record`], builds one directly, or deserializes one. It serializes as `{"Text":"..."}` or `"Unavailable"`.
-
-- [`InputAnswerRecord::Text`] holds a [`String`], the operator's text, recorded byte-exact from [`InputOutcome::Text`](crate::input::InputOutcome::Text).
-- [`InputAnswerRecord::Unavailable`] records that the host had no input to give, from [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable). The fallback sentence that the section received is not stored.
 

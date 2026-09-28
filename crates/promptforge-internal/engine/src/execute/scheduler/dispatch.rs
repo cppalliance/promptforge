@@ -94,7 +94,6 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
         Request::Call { .. } => Some("call"),
         Request::JoinAny { .. } | Request::TaskEvents { .. } => Some("tasks"),
         Request::ToolCall { .. } => Some("tool_call"),
-        Request::UserInput => Some("user_input"),
         Request::Store { .. } => Some("store"),
         Request::Spawn { .. }
         | Request::Timer { .. }
@@ -214,10 +213,6 @@ impl Scheduler {
                 Ok(())
             }
             Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),
-            Request::UserInput => {
-                self.dispatch_user_input(id);
-                Ok(())
-            }
             Request::Store { op } => self.dispatch_store(id, op),
             Request::Chat { messages, binding } => {
                 self.dispatch_chat(id, &messages, binding);
@@ -272,28 +267,6 @@ impl Scheduler {
         };
         self.issue(id, effect, Continuation::Infer);
         Ok(())
-    }
-
-    /// Dispatches a `user_input` request: the host answers the issued
-    /// `UserInput` effect exactly as a leaf I/O round does, so a blocking
-    /// wait parks its chain - the section's VM and message history intact -
-    /// without blocking the run, and a cancel drops it with every other
-    /// outstanding effect. Every request is issued whether or not the host
-    /// has an operator to ask: a host without one answers with the
-    /// unavailable-fallback policy (the fixed fallback sentence with
-    /// `available` false). The wait is reported here; a delivered response
-    /// is reported when its answer is applied; an unavailable answer
-    /// records no input.
-    fn dispatch_user_input(&mut self, id: ChainIndex) {
-        let chain = &self.chains[id.index()];
-        let execution = chain.ctx.execution().to_owned();
-        let section = chain.section_name().to_owned();
-        chain
-            .ctx
-            .emitter()
-            .report(&section, lifecycle::USER_INPUT_WAIT_STARTED);
-        let effect = Effect::UserInput { execution, section };
-        self.issue(id, effect, Continuation::UserInput);
     }
 
     /// Dispatches a `store` request: derives the store view from the

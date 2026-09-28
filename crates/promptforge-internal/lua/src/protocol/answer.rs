@@ -133,23 +133,6 @@ pub struct ChatResult {
     pub turn: u32,
 }
 
-/// The successful answer to a `user_input` request: the resumed text and
-/// its availability flag.
-///
-/// `available` is `true` when `text` is the operator's own input and
-/// `false` when the host had no input to give and `text` is the broker's
-/// fixed fallback sentence. The flag sits beside the text - never encoded
-/// into it - so a human typing exactly the fallback sentence cannot spoof
-/// the unavailable state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserInputOutcome {
-    /// The operator's text, or the fixed fallback sentence when
-    /// `available` is `false`.
-    pub text: String,
-    /// Whether `text` is real operator input.
-    pub available: bool,
-}
-
 /// One task's delivery to a `join_any` waiter: which member ended and how.
 ///
 /// `outcome` is the task's final text, or its failure as the error value
@@ -187,8 +170,8 @@ pub struct TaskStatus {
     /// The section the backing chain is currently in, while it is live and
     /// inside one.
     pub section: Option<String>,
-    /// What the backing chain is parked on (`chat`, `tool_call`,
-    /// `user_input`, `store`, `timer`, `tasks`, `call`), or `queued`
+    /// What the backing chain is parked on (`chat`, `tool_call`, `store`,
+    /// `timer`, `tasks`, `call`), or `queued`
     /// while it waits for a concurrency slot, while it is.
     pub blocked: Option<&'static str>,
     /// The task's model-turn count so far.
@@ -261,9 +244,6 @@ pub enum Answer<E> {
     Chat(std::result::Result<Box<ChatResult>, E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
-    /// The outcome of a `user_input` request: the resumed text and its
-    /// availability flag.
-    UserInput(std::result::Result<UserInputOutcome, E>),
     /// The outcome of a `store` request: the operation's return value.
     Store(std::result::Result<StoreOutcome, E>),
 }
@@ -293,7 +273,6 @@ impl<E> Answer<E> {
             Answer::DrainTaskNotices(result) => Answer::DrainTaskNotices(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
-            Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
             Answer::Store(result) => Answer::Store(result.map_err(map)),
         }
     }

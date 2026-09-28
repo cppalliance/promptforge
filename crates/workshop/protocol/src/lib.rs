@@ -43,8 +43,9 @@
 //!
 //! # Agent-session input frames
 //!
-//! An agent session asks its operator for input through the Workshop's
-//! `user_input` tool. Three frames make up that conversation: the server
+//! An agent session asks its operator for input through the harness's
+//! `promptforge/user-input` capability, whose `input.ask()` waits on the
+//! session. Three frames make up that conversation: the server
 //! pushes [`InputFrame::Required`] when a wait opens and
 //! [`InputFrame::Cancelled`] when one dies unresolved, and the client
 //! answers with an `input_response` frame parsed as [`InputResponse`].

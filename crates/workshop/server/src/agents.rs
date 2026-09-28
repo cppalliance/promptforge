@@ -183,8 +183,7 @@ impl AgentSessions {
     }
 
     /// Delivers a fixture response after running `after_acceptance`
-    /// between its acceptance and the waiting `user_input` call's
-    /// resumption.
+    /// between its acceptance and the waiting ask's resumption.
     #[cfg(feature = "test-fixtures")]
     pub fn deliver_input_after_acceptance_for_test(
         &self,

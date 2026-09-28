@@ -221,9 +221,7 @@ impl Request {
             },
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
             // No author arguments exist to fail validation: a well-formed
-            // `user_input` or `drain_task_notices` yield is always the unit
-            // request.
-            "user_input" => YieldParse::Request(Request::UserInput),
+            // `drain_task_notices` yield is always the unit request.
             "drain_task_notices" => YieldParse::Request(Request::DrainTaskNotices),
             "store" => classify(parse_store(table), |error| Answer::Store(Err(error))),
             "mcp" => match parse_mcp(lua, table) {

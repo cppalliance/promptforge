@@ -81,7 +81,6 @@ pub(crate) mod detail {
         STORE_GLOB_FAILED => StoreGlobFailed,
         STORE_EXISTS_SUCCEEDED => StoreExistsSucceeded,
         STORE_EXISTS_FAILED => StoreExistsFailed,
-        USER_INPUT_WAIT_STARTED => UserInputWaitStarted,
     }
 }
 
@@ -191,8 +190,6 @@ pub enum Observation {
     StoreExistsSucceeded,
     /// A harness-mediated store existence check failed.
     StoreExistsFailed,
-    /// A section began waiting on operator input.
-    UserInputWaitStarted,
     /// A task chain was started; the payload is its spawn seeds.
     TaskStarted {
         /// The task's id.
@@ -293,7 +290,6 @@ impl Observation {
             Observation::StoreGlobFailed => "Store glob failed",
             Observation::StoreExistsSucceeded => "Store exists succeeded",
             Observation::StoreExistsFailed => "Store exists failed",
-            Observation::UserInputWaitStarted => "User input wait started",
             Observation::TaskStarted { .. } => "Task started",
             Observation::TaskSucceeded { .. } => "Task succeeded",
             Observation::TaskFailed { .. } => "Task failed",

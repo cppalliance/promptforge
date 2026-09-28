@@ -194,8 +194,7 @@ impl Session {
 
     /// Answers the wait holding `token` with the operator's `text`.
     /// `before_resume` runs after the answer is accepted and before the
-    /// suspended `user_input()` call resumes, for a client's own turn
-    /// bookkeeping.
+    /// suspended ask resumes, for a client's own turn bookkeeping.
     ///
     /// # Errors
     /// Returns [`WaitError::UnknownToken`] when no unresolved wait holds

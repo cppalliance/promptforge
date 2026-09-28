@@ -31,7 +31,6 @@ use harness_capabilities::{CapabilityRegistry, InputBroker, RunServices, activat
 use harness_log::{LogError, Record, RecordKind, RunId, RunMeta, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::ModelDescriptor;
 use promptforge::timestamp::Timestamp;
 use promptforge::vfs::VfsRef;
@@ -42,8 +41,7 @@ use sha2::{Digest as _, Sha256};
 use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};
 use crate::performers::{
-    ActivatedTools, BoxFuture, ChatPerformer, InputPerformer, LogTaskEvents, Performers,
-    TokioTimer, VfsStore,
+    ActivatedTools, ChatPerformer, LogTaskEvents, Performers, TokioTimer, VfsStore,
 };
 
 /// What the caller owns and preparation borrows: the registry of
@@ -67,9 +65,8 @@ pub struct Services {
     /// Performs the run's `Chat` effects.
     pub chat: Arc<dyn ChatPerformer>,
     /// The operator's input broker, when the host has someone to ask:
-    /// handed to every capability activated for the run, and the broker
-    /// behind the run's `UserInput` effects. `None` is a host with nobody
-    /// to ask, where a `user_input()` call gets the unavailable fallback.
+    /// handed to every capability activated for the run. `None` is a host
+    /// with nobody to ask.
     pub input: Option<Arc<dyn InputBroker>>,
     /// The session launching the run: the row's `session_id` and the
     /// run's execution identifier.
@@ -107,9 +104,9 @@ pub struct Prepared {
     pub seed: u64,
     /// The start the run was given, as written to its row.
     pub started_at: Timestamp,
-    /// The performers for the run: the caller's chat performer and an
-    /// input performer over its optional broker, beside the runner's own
-    /// over the activated tools, the VFS, tokio's timer, and the log.
+    /// The performers for the run: the caller's chat performer beside the
+    /// runner's own over the activated tools, the VFS, tokio's timer, and
+    /// the log.
     pub performers: Performers,
     /// What parsing reported, already recorded in the log ahead of the
     /// run's own events; the caller hands them to its sink so the session
@@ -298,7 +295,6 @@ pub async fn prepare_source(
     let performers = Performers {
         chat,
         tool: Arc::new(ActivatedTools::new(activation.tools)),
-        input: Arc::new(BrokerInput(input)),
         store: Arc::new(VfsStore),
         timer: Arc::new(TokioTimer),
         task_events: Arc::new(LogTaskEvents::new(Arc::clone(&log), run_id)),
@@ -311,43 +307,6 @@ pub async fn prepare_source(
         performers,
         parse_events,
     })
-}
-
-/// The run's `UserInput` performer over the host's optional broker: the
-/// broker's text when there is one, the unavailable fallback when there
-/// is none.
-struct BrokerInput(Option<Arc<dyn InputBroker>>);
-
-impl InputPerformer for BrokerInput {
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        let broker = self.0.clone();
-        Box::pin(async move {
-            let Some(broker) = broker else {
-                return Ok(InputOutcome::Unavailable);
-            };
-            broker
-                .wait()
-                .await
-                .map(InputOutcome::Text)
-                .map_err(engine_input_error)
-        })
-    }
-}
-
-/// The broker's failure as the engine's: the same message, and the
-/// broker's error as the cause only when it has a cause of its own, so a
-/// message-only failure stays message-only.
-fn engine_input_error(error: harness_capabilities::InputError) -> InputError {
-    let message = error.to_string();
-    if std::error::Error::source(&error).is_some() {
-        InputError::with_source(message, error)
-    } else {
-        InputError::message(message)
-    }
 }
 
 /// Closes `run_id`'s row with `outcome`, a run that ended before the loop

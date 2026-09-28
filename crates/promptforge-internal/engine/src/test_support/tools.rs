@@ -1,16 +1,15 @@
-//! The suites' stand-ins for the harness's tool and input-broker
-//! implementations: [`TestTool`], [`TestBroker`], and the [`TestToolTable`]
-//! a `ToolCall` effect's id resolves in.
+//! The suites' stand-in for the harness's tool implementations:
+//! [`TestTool`], and the [`TestToolTable`] a `ToolCall` effect's id
+//! resolves in.
 //!
 //! The engine holds no implementation and names no implementation trait;
-//! the production traits (`Tool`, `InputPerformer`) are the harness's, in
-//! `harness-capabilities` and `harness-runner`, and a `promptforge-*` crate
-//! never depends on a harness crate. The suites still need something to
-//! perform a `ToolCall` or answer a `UserInput` effect with, so these are
-//! the test doubles: the same method shapes as the harness's traits (so a
-//! fixture reads like a production tool), built into the [`Performers`]
-//! the tokio test driver takes by [`RunHost`](super::RunHost). Nothing
-//! here reaches the engine.
+//! the production trait (`Tool`) is the harness's, in
+//! `harness-capabilities`, and a `promptforge-*` crate never depends on a
+//! harness crate. The suites still need something to perform a `ToolCall`
+//! effect with, so these are the test doubles: the same method shapes as
+//! the harness's trait (so a fixture reads like a production tool), built
+//! into the [`Performers`] the tokio test driver takes by
+//! [`RunHost`](super::RunHost). Nothing here reaches the engine.
 //!
 //! The async methods are declared in the boxed form
 //! `#[async_trait::async_trait]` expands an `async fn` to, so a suite
@@ -28,8 +27,6 @@ use std::sync::Arc;
 use promptforge_types::tools::{
     ToolCatalog, ToolCatalogError, ToolDescriptor, ToolError, ToolId, ToolOutput,
 };
-
-use crate::input::{InputError, InputOutcome};
 
 /// The future a fixture's async method returns: boxed, `Send`, and bounded
 /// by the borrow of `self`, exactly as `#[async_trait::async_trait]`
@@ -85,25 +82,6 @@ pub trait TestTool: Send + Sync {
     ) -> FixtureFuture<'async_trait, Result<ToolOutput, ToolError>>
     where
         'life0: 'async_trait,
-        Self: 'async_trait;
-}
-
-/// A fixture broker the tokio test driver answers a `UserInput` effect
-/// through: the suites' stand-in for the harness's `InputPerformer`.
-pub trait TestBroker: Send + Sync {
-    /// Waits for the answer to one input request for `section` of
-    /// `execution`. The future resolves to the outcome, or to an
-    /// [`InputError`] when the wait fails rather than answering or
-    /// declining.
-    fn user_input<'life0, 'life1, 'life2, 'async_trait>(
-        &'life0 self,
-        execution: &'life1 str,
-        section: &'life2 str,
-    ) -> FixtureFuture<'async_trait, Result<InputOutcome, InputError>>
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        'life2: 'async_trait,
         Self: 'async_trait;
 }
 

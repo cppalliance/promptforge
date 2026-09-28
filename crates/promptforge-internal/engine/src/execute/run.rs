@@ -15,8 +15,8 @@ use promptforge_types::ids::Provenance;
 mod effect;
 
 pub use effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
-    InputAnswerRecord, ToolAnswerRecord, ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, ToolAnswerRecord,
+    ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;

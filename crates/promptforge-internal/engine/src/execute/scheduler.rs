@@ -244,8 +244,8 @@ struct Chain {
     /// otherwise.
     awaiting: Option<AwaitTasks>,
     /// What the chain's suspended request is parked on, as `tasks.status`
-    /// reports it (`chat`, `tool_call`, `user_input`, `store`, `timer`,
-    /// `tasks`, `call`, or `queued` while the chain waits for a
+    /// reports it (`chat`, `tool_call`, `store`, `timer`, `tasks`, `call`,
+    /// or `queued` while the chain waits for a
     /// concurrency slot): set at dispatch or spawn, cleared when the
     /// answer resumes the chain. `None` while the chain runs or between
     /// blocks.

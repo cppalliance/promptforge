@@ -1,6 +1,5 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `tool_call`, `local_tool_done`, `user_input`, the reserved
-//! `mcp`), and the
+//! `call`, `tool_call`, `local_tool_done`, the reserved `mcp`), and the
 //! malformed-yield rejections shared by every op. The task-operation
 //! requests (`spawn`, `timer`, `drain_task_notices`) are in `parse_tasks`.
 
@@ -343,17 +342,6 @@ fn a_local_tool_done_without_a_boolean_ok_is_a_malformed_yield() {
     truthy.raw_set("ok", 1).expect("raw_set");
     truthy.raw_set("value", "hi").expect("raw_set");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(truthy)));
-}
-
-#[test]
-fn a_user_input_yield_parses_to_the_request() {
-    let lua = Lua::new();
-    let table = request_table(&lua, "user_input");
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
-    assert!(
-        matches!(request, Request::UserInput),
-        "a user_input yield is the unit request, got {request:?}"
-    );
 }
 
 #[test]

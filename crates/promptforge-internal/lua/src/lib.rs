@@ -128,7 +128,7 @@ pub use collection::render_item;
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
 #[cfg(feature = "test-support")]
 pub use coro::install_model_tool_call_shim;
-pub use coro::{install_section_loop_shim, install_section_user_input_shim, install_store_shims};
+pub use coro::{install_section_loop_shim, install_store_shims};
 pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
@@ -141,7 +141,7 @@ pub use prose::ProseState;
 pub use protocol::{
     Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole,
     Request, StoreOp, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord,
-    UserInputOutcome, YieldParse,
+    YieldParse,
 };
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 pub use sys::enrich_sys_model;

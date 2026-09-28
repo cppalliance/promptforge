@@ -152,14 +152,14 @@ fn content_reports_land_in_the_buffer_in_order() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
     walk.tool_result("Chat", 3, "call_1", "echo", "out", OutputTrust::Trusted);
-    walk.user_input("Chat", "typed");
+    walk.thinking("Chat", 3, "m", "hmm");
     let events = sink.take();
     assert!(matches!(
         &events[0],
         Event::ToolResult { turn: 3, tool_call_id, alias, content, trusted: true, .. }
             if tool_call_id == "call_1" && alias == "echo" && content == "out"
     ));
-    assert!(matches!(&events[1], Event::UserInput { text, .. } if text == "typed"));
+    assert!(matches!(&events[1], Event::Thinking { text, .. } if text == "hmm"));
     assert_eq!(events[1].provenance().seq, 1);
 }
 

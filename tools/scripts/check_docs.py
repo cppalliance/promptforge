@@ -19,8 +19,8 @@ sys.dont_write_bytecode = True
 import facade  # noqa: E402
 
 CODE_SPAN = re.compile(r"`([^`\n]+)`")
-LUA_GLOBALS = {"user_input", "ui", "jump", "call", "fanout", "list_from_section", "tostring", "pcall", "print", "require"}
-LUA_TABLES = {"messages", "models", "tools", "store", "tasks", "sys", "var", "argv", "compactors", "string", "table", "math"}
+LUA_GLOBALS = {"ui", "jump", "call", "fanout", "list_from_section", "tostring", "pcall", "print", "require"}
+LUA_TABLES = {"messages", "models", "tools", "store", "tasks", "sys", "var", "argv", "compactors", "input", "string", "table", "math"}
 SOURCE = "(source)"
 
 

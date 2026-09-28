@@ -147,7 +147,6 @@ where
     vm.install_scheduler_control_globals(list_callback)?;
     vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
-    crate::lua::install_section_user_input_shim(vm.lua())?;
     // The preludes read `tools` and `store` from `_G` as they install, so
     // they follow the yield shims, and they precede the shared replay so
     // the shared library can call what they define.

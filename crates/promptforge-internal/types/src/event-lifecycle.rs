@@ -88,7 +88,6 @@ lifecycle_constants! {
     STORE_GLOB_FAILED => StoreGlobFailed,
     STORE_EXISTS_SUCCEEDED => StoreExistsSucceeded,
     STORE_EXISTS_FAILED => StoreExistsFailed,
-    USER_INPUT_WAIT_STARTED => UserInputWaitStarted,
 }
 
 #[cfg(test)]

@@ -191,7 +191,7 @@ assert!(task_events(&log, &worker, Some(1)).is_empty());
 
 # Building a transcript
 
-A host builds a conversation transcript from six content events: [`Event::Thinking`], [`Event::AssistantReply`], [`Event::AssistantToolCalls`], [`Event::ToolResult`], [`Event::UserInput`], and [`Event::TaskNotice`]. The lifecycle events around them say how each model round and tool call went.
+A host builds a conversation transcript from five content events: [`Event::Thinking`], [`Event::AssistantReply`], [`Event::AssistantToolCalls`], [`Event::ToolResult`], and [`Event::TaskNotice`]. The lifecycle events around them say how each model round and tool call went. A run reaches the operator only through a tool the host provides, so the operator's reply arrives as that tool call's [`Event::ToolResult`].
 
 Each model round reports its events in this order:
 
@@ -224,8 +224,6 @@ assert_eq!(origin, ReplyOrigin::Chat);
 assert_eq!(serde_json::to_string(&ReplyOrigin::Infer)?, r#""infer""#);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
-
-**Operator input.** The run reports [`Event::UserInputWaitStarted`] when a section begins waiting on operator input, before it issues the [`Effect::UserInput`](crate::effect::Effect::UserInput). A host can use it to show a "waiting for input" indicator. The host answers the effect with an [`EffectAnswer::UserInput`](crate::effect::EffectAnswer::UserInput). When the answer resolves to [`InputOutcome::Text`](crate::input::InputOutcome::Text), the run reports [`Event::UserInput`] with the operator's reply, byte-exact. The unavailable fallback, [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable), reports no [`Event::UserInput`].
 
 # Following tasks
 
@@ -271,11 +269,10 @@ assert_eq!(ctx.name(), "debug-run");
 
 # Untrusted content
 
-The content variants hold text written by a model, a tool, or a user, and the debug variants hold raw, unredacted request bodies that include the full prompt. A host that persists or forwards events must treat all of that content as untrusted. These fields hold it:
+The content variants hold text written by a model, a tool, or a prompt's own Lua, and the debug variants hold raw, unredacted request bodies that include the full prompt. A host that persists or forwards events must treat all of that content as untrusted. These fields hold it:
 
 - [`Event::Thinking::text`](Event#variant.Thinking.field.text), [`Event::AssistantReply::text`](Event#variant.AssistantReply.field.text), and [`Event::AssistantToolCalls::calls`](Event#variant.AssistantToolCalls.field.calls), written by the model.
 - [`Event::ToolResult::content`](Event#variant.ToolResult.field.content), written by a tool, unless [`Event::ToolResult::trusted`](Event#variant.ToolResult.field.trusted) is `true`.
-- [`Event::UserInput::text`](Event#variant.UserInput.field.text), written by the operator.
 - [`Event::TaskNote::text`](Event#variant.TaskNote.field.text), and the spawn seeds in [`Event::TaskStarted`].
 - [`Event::Request::body`](Event#variant.Request.field.body) and [`Event::Response::body`](Event#variant.Response.field.body), the raw bodies.
 - [`Event::ModelMetadataDegraded::message`](Event#variant.ModelMetadataDegraded.field.message), the one lifecycle payload that may quote values from a backend's response.
@@ -421,14 +418,6 @@ Every harness-mediated store operation reports one of these pairs. Their section
 - [`Event::StoreGlobFailed`], kind `store_glob_failed`: a store glob failed. Fields: [`Event::StoreGlobFailed::execution`](Event#variant.StoreGlobFailed.field.execution), [`Event::StoreGlobFailed::section`](Event#variant.StoreGlobFailed.field.section), and [`Event::StoreGlobFailed::provenance`](Event#variant.StoreGlobFailed.field.provenance).
 - [`Event::StoreExistsSucceeded`], kind `store_exists_succeeded`: a store existence check succeeded. Fields: [`Event::StoreExistsSucceeded::execution`](Event#variant.StoreExistsSucceeded.field.execution), [`Event::StoreExistsSucceeded::section`](Event#variant.StoreExistsSucceeded.field.section), and [`Event::StoreExistsSucceeded::provenance`](Event#variant.StoreExistsSucceeded.field.provenance).
 - [`Event::StoreExistsFailed`], kind `store_exists_failed`: a store existence check failed. Fields: [`Event::StoreExistsFailed::execution`](Event#variant.StoreExistsFailed.field.execution), [`Event::StoreExistsFailed::section`](Event#variant.StoreExistsFailed.field.section), and [`Event::StoreExistsFailed::provenance`](Event#variant.StoreExistsFailed.field.provenance).
-
-### Input events
-
-These report operator input. Their section is the section that asked for input, and their provenance is the asking task.
-
-- [`Event::UserInputWaitStarted`], kind `user_input_wait_started`: a section began waiting on operator input. It is reported before the run issues the [`Effect::UserInput`](crate::effect::Effect::UserInput). A host can show that the run is waiting on the operator. Fields: [`Event::UserInputWaitStarted::execution`](Event#variant.UserInputWaitStarted.field.execution), [`Event::UserInputWaitStarted::section`](Event#variant.UserInputWaitStarted.field.section), and [`Event::UserInputWaitStarted::provenance`](Event#variant.UserInputWaitStarted.field.provenance).
-- [`Event::UserInput`], kind `user_input`: the operator's reply. It is reported only when the [`EffectAnswer::UserInput`](crate::effect::EffectAnswer::UserInput) resolves to [`InputOutcome::Text`](crate::input::InputOutcome::Text), and never for [`InputOutcome::Unavailable`](crate::input::InputOutcome::Unavailable). A host appends it to the transcript as the operator's turn. Fields: [`Event::UserInput::execution`](Event#variant.UserInput.field.execution), [`Event::UserInput::section`](Event#variant.UserInput.field.section), [`Event::UserInput::provenance`](Event#variant.UserInput.field.provenance), and:
-  - [`Event::UserInput::text`](Event#variant.UserInput.field.text), a [`String`], is the operator's text, byte-exact and untrusted.
 
 ### Task events
 

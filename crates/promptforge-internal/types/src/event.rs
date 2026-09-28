@@ -278,9 +278,7 @@ events! {
         StoreExistsSucceeded {},
         /// A harness-mediated store existence check failed.
         StoreExistsFailed {},
-        // Lifecycle: input and the author's checkpoints.
-        /// A section began waiting on operator input.
-        UserInputWaitStarted {},
+        // Lifecycle: the author's checkpoints.
         /// The one author-controlled checkpoint: a validated Lua
         /// `log(message)`. Prompt authors must never place arguments,
         /// replies, tool data, credentials, paths, or store contents in it.
@@ -400,11 +398,6 @@ events! {
             /// Whether the dispatch treated the tool as trusted (its output
             /// not nonce-wrapped).
             trusted: bool,
-        },
-        /// Text the user supplied, byte-exact.
-        UserInput {
-            /// The user's text: untrusted input.
-            text: String,
         },
         /// One model-task notice as it is queued for the task's owner: the
         /// engine's own sentence telling the model how a task it started

@@ -231,11 +231,11 @@ fn every_event_exposes_its_coordinates() {
             section: "Gather".to_owned(),
             provenance: provenance("0", 11),
         },
-        Event::UserInput {
+        Event::Lua {
             execution: "run-1".to_owned(),
             section: "Gather".to_owned(),
             provenance: provenance("0", 12),
-            text: "hello".to_owned(),
+            message: "hello".to_owned(),
         },
         Event::TaskResumed {
             execution: "run-1".to_owned(),

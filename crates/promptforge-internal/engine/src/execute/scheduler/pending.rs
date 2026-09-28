@@ -27,9 +27,6 @@ pub(super) enum Continuation {
     /// dispatch body (counts already taken at dispatch, then the
     /// succeeded/failed event, the trust rule, and the `ToolResult`).
     ToolCall(ToolCallContinuation),
-    /// A `user_input` wait: the broker's text is reported and resumes with
-    /// its availability flag.
-    UserInput,
     /// A store operation: the operation itself (for the answer's rendered
     /// message and conflict classification) and the succeeded/failed
     /// observation pair its outcome reports; `None` for an op this crate

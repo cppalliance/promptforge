@@ -19,9 +19,7 @@
 //! [`VfsStore`], [`LogTaskEvents`], and [`ActivatedTools`] - because each
 //! is machinery it already holds: tokio's timer wheel, the engine's store
 //! operation, the run log, and the tool table run preparation activated.
-//! The chat performer lives with what it reaches, the gateway client; run
-//! preparation builds the input performer over the host's optional input
-//! broker.
+//! The chat performer lives with what it reaches, the gateway client.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,7 +27,6 @@ use std::sync::Arc;
 
 use promptforge::event::Event;
 use promptforge::ids::TaskId;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
@@ -80,17 +77,6 @@ pub trait ToolPerformer: Send + Sync {
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// Performs a `UserInput` effect: one wait for operator input.
-pub trait InputPerformer: Send + Sync {
-    /// Waits for the operator's text for `section` of `execution`, or
-    /// reports that none is available.
-    fn wait(
-        &self,
-        execution: String,
-        section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>>;
-}
-
 /// Performs a `Store` effect: one store operation through the store
 /// view the effect carries.
 ///
@@ -133,8 +119,6 @@ pub struct Performers {
     pub chat: Arc<dyn ChatPerformer>,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
-    /// Performs `UserInput` effects.
-    pub input: Arc<dyn InputPerformer>,
     /// Performs `Store` effects.
     pub store: Arc<dyn StorePerformer>,
     /// Performs `Timer` effects.

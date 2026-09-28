@@ -297,20 +297,6 @@ local function models_loop(...)
   raise("tool_loop_exhausted", { message = "tool-call loop did not converge" })
 end
 
--- user_input(): direct operator input through the run's input broker. The
--- host installs this as a global. The resume is (ok, text, available): on
--- success the call returns the text plus the availability flag, so the
--- broker's fixed fallback sentence cannot be spoofed by identical human
--- text; on failure the call raises the host's message at the call site.
-local function user_input(...)
-  if select('#', ...) > 0 then
-    raise("lua", { message = "user_input takes no arguments" })
-  end
-  local ok, text, available = yield({ op = "user_input" })
-  if not ok then fail(text) end
-  return text, available
-end
-
 -- store.*: every store operation is a leaf yield, answered by the driver
 -- against the sync VFS uniformly for all backends - no inline fast path,
 -- so interleaving behavior never depends on which backend serves the
@@ -405,7 +391,6 @@ return {
   infer = infer,
   loop = models_loop,
   model_tool_call = tools_call_as_model,
-  user_input = user_input,
   guard = guard,
   pcall = protected_call,
   xpcall = protected_xcall,

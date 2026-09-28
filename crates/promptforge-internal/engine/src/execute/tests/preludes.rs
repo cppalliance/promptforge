@@ -183,21 +183,6 @@ fn a_prelude_defining_ui_or_item_collides_on_a_host_that_binds_neither() {
 }
 
 #[test]
-fn a_prelude_global_named_user_input_collides_with_the_user_input_shim() {
-    assert_fails_before_any_effect(
-        EFFECT_FIRST,
-        vec![prelude(
-            "acme/asker",
-            "function user_input() return 'shadowed' end",
-        )],
-        &[
-            "capability `acme/asker`: its prelude defines the global `user_input`",
-            "which is already a host global",
-        ],
-    );
-}
-
-#[test]
 fn the_shared_chunk_a_fanout_arm_and_a_spawned_task_all_see_a_prelude_global() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Preludes\n\n\

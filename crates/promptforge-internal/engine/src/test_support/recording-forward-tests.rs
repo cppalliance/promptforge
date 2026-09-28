@@ -54,13 +54,6 @@ impl Observer for Recorder {
             ));
     }
 
-    fn on_user_input(&self, _execution: &str, section: &str, text: &str) {
-        self.content
-            .lock()
-            .expect("the recorder mutex is not poisoned")
-            .push(format!("{section}: input {text}"));
-    }
-
     fn on_thinking(
         &self,
         _execution: &str,
@@ -248,7 +241,6 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
         StoreGlobFailed,
         StoreExistsSucceeded,
         StoreExistsFailed,
-        UserInputWaitStarted,
     ];
     let task: TaskId = "0.1".parse().expect("a task id parses");
     events.extend([
@@ -410,15 +402,6 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
             Seam::Content,
         ),
         (
-            Event::UserInput {
-                execution: "run".to_owned(),
-                section: "A".to_owned(),
-                provenance: provenance(),
-                text: "typed".to_owned(),
-            },
-            Seam::Content,
-        ),
-        (
             Event::TaskNotice {
                 execution: "run".to_owned(),
                 section: "A".to_owned(),
@@ -513,11 +496,13 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
             metrics: None,
             origin: ReplyOrigin::Chat,
         },
-        Event::UserInput {
+        Event::Thinking {
             execution: "run".to_owned(),
             section: "A".to_owned(),
             provenance: provenance(),
-            text: "typed".to_owned(),
+            turn: 1,
+            model: "m".to_owned(),
+            text: "hmm".to_owned(),
         },
         Event::Lua {
             execution: "run".to_owned(),
@@ -546,7 +531,7 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
         vec![
             "A: reply origin=Chat chain=0 depth=0 turn=1 text=hi finish=Some(\"stop\") model=m"
                 .to_owned(),
-            "A: input typed".to_owned(),
+            "A: thinking turn=1 model=m text=hmm".to_owned(),
         ]
     );
     assert_eq!(

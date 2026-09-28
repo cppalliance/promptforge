@@ -2,12 +2,11 @@
 //! tokio test driver.
 //!
 //! A [`Run`](crate::execute::Run) issues effects and reports events as
-//! values; it holds no client, no tool implementation, no broker, and no
-//! sink. Those belong to whoever performs the effects. `RunHost` is that
-//! bundle for the suites: the [`ChatClient`] a `Chat` effect is performed
-//! with, the [`TestToolTable`] a `ToolCall` effect's id resolves in, the
-//! [`TestBroker`] a `UserInput` effect waits on, the delta hook a
-//! streaming round forwards to, and the observer and capture the run's
+//! values; it holds no client, no tool implementation, and no sink. Those
+//! belong to whoever performs the effects. `RunHost` is that bundle for
+//! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
+//! [`TestToolTable`] a `ToolCall` effect's id resolves in, the delta hook
+//! a streaming round forwards to, and the observer and capture the run's
 //! events are replayed onto. [`performers`](RunHost::performers) and
 //! [`sink`](RunHost::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. None of it reaches the
@@ -23,7 +22,7 @@ use super::recording::{self, DebugCapture, NullObserver, Observer};
 #[cfg(test)]
 use super::tokio_driver::EventSink;
 use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
-use super::tools::{TestBroker, TestToolTable};
+use super::tools::TestToolTable;
 use crate::execute::RunLimits;
 use crate::execute::{Effect, EffectAnswer};
 use crate::model::{
@@ -66,9 +65,6 @@ pub struct RunHost {
     pub(crate) client: Option<Arc<dyn ChatClient>>,
     /// The implementations `ToolCall` effects resolve their ids in.
     pub(crate) tools: TestToolTable,
-    /// The broker `UserInput` effects wait on; `None` answers every wait
-    /// with the unavailable fallback.
-    pub(crate) input: Option<Arc<dyn TestBroker>>,
     /// The live streaming-delta callback a section's model rounds forward
     /// their chunks to; `None` drops deltas at the leaf.
     pub(crate) on_delta: Option<DeltaHook>,
@@ -76,7 +72,7 @@ pub struct RunHost {
 
 impl RunHost {
     /// Builds the silent host: a null observer, no capture, no client, no
-    /// tools, no broker, no delta hook.
+    /// tools, no delta hook.
     #[must_use]
     pub fn new() -> RunHost {
         RunHost {
@@ -84,7 +80,6 @@ impl RunHost {
             debug: None,
             client: None,
             tools: TestToolTable::new(),
-            input: None,
             on_delta: None,
         }
     }
@@ -125,15 +120,6 @@ impl RunHost {
         self
     }
 
-    /// Sets the broker `UserInput` effects wait on. The default (`None`)
-    /// is the unavailable-fallback policy: every wait resolves to
-    /// `INPUT_UNAVAILABLE_FALLBACK` with `available` false.
-    #[must_use]
-    pub fn input_broker(mut self, broker: Arc<dyn TestBroker>) -> RunHost {
-        self.input = Some(broker);
-        self
-    }
-
     /// Sets the live streaming-delta callback `models.loop` rounds forward
     /// their chunks to. The default (`None`) drops deltas at the leaf.
     #[must_use]
@@ -146,8 +132,7 @@ impl RunHost {
     /// [`Performers::refusing`] and overriding the slots this host
     /// supplies: with a client, a `Chat` runs on it under `limits`'
     /// request timeout and body cap; a `ToolCall` resolves its id in the
-    /// tool table (a miss is the refusal); with a broker, a `UserInput`
-    /// waits on it.
+    /// tool table (a miss is the refusal).
     #[must_use]
     pub fn performers(&self, limits: RunLimits) -> Performers {
         let mut performers = Performers::refusing();
@@ -198,17 +183,6 @@ impl RunHost {
                 EffectAnswer::ToolCall(tool.call(args).await)
             })
         });
-        if let Some(broker) = self.input.clone() {
-            performers.user_input = Box::new(move |effect| {
-                let broker = Arc::clone(&broker);
-                Box::pin(async move {
-                    let Effect::UserInput { execution, section } = effect else {
-                        return EffectAnswer::Dropped;
-                    };
-                    EffectAnswer::UserInput(broker.user_input(&execution, &section).await)
-                })
-            });
-        }
         performers
     }
 
@@ -240,7 +214,6 @@ impl fmt::Debug for RunHost {
             .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())
             .field("tools", &self.tools)
-            .field("input", &self.input.is_some())
             .field("on_delta", &self.on_delta.is_some())
             .finish()
     }

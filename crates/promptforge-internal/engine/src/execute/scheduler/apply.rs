@@ -2,25 +2,24 @@
 //! back into the scheduler.
 //!
 //! The host hands back a raw [`EffectAnswer`] - a completion, a tool's own
-//! output, a broker outcome, a store outcome, a timer's firing - and knows
-//! nothing of what the parked chain asked for. `apply_answer` pairs the
-//! answer with the effect's [`Continuation`] and turns it into the chain's
-//! protocol [`Answer`] on the caller's thread, emitting the round's events
-//! there: the model turn's boundaries and content, the tool call's
-//! succeeded/failed event and `ToolResult` under the trust rule, the
-//! operator's input, the store operation's outcome, a task history read's
-//! events as the shim's sequence or the model's untrusted text. A timer's
-//! firing completes its slot and wakes the waiter instead of resuming a
-//! chain. A `Dropped` answer resumes the chain with the cancelled error,
-//! whatever it was parked on.
+//! output, a store outcome, a timer's firing - and knows nothing of what
+//! the parked chain asked for. `apply_answer` pairs the answer with the
+//! effect's [`Continuation`] and turns it into the chain's protocol
+//! [`Answer`] on the caller's thread, emitting the round's events there:
+//! the model turn's boundaries and content, the tool call's
+//! succeeded/failed event and `ToolResult` under the trust rule, the store
+//! operation's outcome, a task history read's events as the shim's
+//! sequence or the model's untrusted text. A timer's firing completes its
+//! slot and wakes the waiter instead of resuming a chain. A `Dropped`
+//! answer resumes the chain with the cancelled error, whatever it was
+//! parked on.
 
 use promptforge_types::tools::{ToolError, ToolOutput};
 use promptforge_vfs::VfsError;
 
 use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
 use crate::execute::tools::accept_infer;
-use crate::input::{INPUT_UNAVAILABLE_FALLBACK, InputError, InputOutcome};
-use crate::lua::{ModelReport, UserInputOutcome, prepare_dispatch, prepare_model_dispatch};
+use crate::lua::{ModelReport, prepare_dispatch, prepare_model_dispatch};
 use crate::model::{Completion, CompletionError};
 use crate::{Error, Result};
 
@@ -39,7 +38,6 @@ fn dropped_answer(resume: &Continuation) -> Answer<Error> {
         Continuation::Infer => Answer::Infer(Err(Error::Interrupted)),
         Continuation::Chat => Answer::Chat(Err(Error::Interrupted)),
         Continuation::ToolCall(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
-        Continuation::UserInput => Answer::UserInput(Err(Error::Interrupted)),
         // A timer's drop never reaches here; the cancelled store answer
         // is the harmless stand-in should it ever do so.
         Continuation::Store(_) | Continuation::Timer => Answer::Store(Err(Error::Interrupted)),
@@ -84,9 +82,6 @@ impl Scheduler {
             }
             (Continuation::ToolCall(call), EffectAnswer::ToolCall(result)) => {
                 Answer::ToolCallResult(self.accept_tool_call(chain, &call, result))
-            }
-            (Continuation::UserInput, EffectAnswer::UserInput(result)) => {
-                Answer::UserInput(self.accept_user_input(chain, result))
             }
             (Continuation::Store(continuation), EffectAnswer::Store(result)) => {
                 match self.accept_store(chain, &continuation, result) {
@@ -184,32 +179,6 @@ impl Scheduler {
                 .map_err(Error::from),
                 Err(error) => Err(Error::from(error)),
             },
-        }
-    }
-
-    /// Applies a broker's answer: delivered text is reported byte-exact
-    /// and resumes with `available` true; an unavailable answer is the
-    /// fixed fallback sentence with `available` false and records no
-    /// input; a broker failure is the call's typed input error.
-    fn accept_user_input(
-        &self,
-        chain: ChainIndex,
-        result: std::result::Result<InputOutcome, InputError>,
-    ) -> Result<UserInputOutcome> {
-        let chain = &self.chains[chain.index()];
-        match result {
-            Ok(InputOutcome::Text(text)) => {
-                chain.ctx.emitter().user_input(chain.section_name(), &text);
-                Ok(UserInputOutcome {
-                    text,
-                    available: true,
-                })
-            }
-            Ok(InputOutcome::Unavailable) => Ok(UserInputOutcome {
-                text: INPUT_UNAVAILABLE_FALLBACK.to_owned(),
-                available: false,
-            }),
-            Err(error) => Err(Error::from(error)),
         }
     }
 

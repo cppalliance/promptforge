@@ -2,8 +2,8 @@
 //! the task-events read. Each is machinery the runner already holds -
 //! tokio's timer wheel, the engine's store operation over the effect's
 //! own access, and the run log the loop writes - so none needs a crate of
-//! its own. The chat, tool, and input performers reach outward (a gateway,
-//! activated capabilities, an operator) and live with what they reach.
+//! its own. The chat and tool performers reach outward (a gateway and the
+//! activated capabilities) and live with what they reach.
 
 use std::fmt;
 use std::sync::Arc;

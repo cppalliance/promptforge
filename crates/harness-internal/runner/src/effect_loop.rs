@@ -323,12 +323,6 @@ impl<'a> Driver<'a> {
                     answer.post(EffectAnswer::ToolCall(call.await));
                 })
             }
-            Effect::UserInput { execution, section } => {
-                let wait = self.performers.input.wait(execution, section);
-                spawn_tagged(tag, async move {
-                    answer.post(EffectAnswer::UserInput(wait.await));
-                })
-            }
             Effect::Store { access, op } => {
                 let store = Arc::clone(&self.performers.store);
                 spawn_blocking_tagged(tag, move || {
@@ -415,9 +409,9 @@ impl<'a> Driver<'a> {
 
 /// Aborts every performer still out when the driver is dropped mid-run -
 /// a log failure, or a host tearing the loop down. Dropping a bare
-/// `JoinHandle` detaches the task, which would strand an input wait or a
-/// model round forever, so the drop applies the same abort the run's end
-/// does.
+/// `JoinHandle` detaches the task, which would strand a tool call waiting
+/// on the operator or a model round forever, so the drop applies the same
+/// abort the run's end does.
 impl Drop for Driver<'_> {
     fn drop(&mut self) {
         for in_flight in self.outstanding.values() {

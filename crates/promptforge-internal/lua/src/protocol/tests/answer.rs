@@ -340,48 +340,6 @@ fn from_dispatch_classifies_by_the_declared_output_kind() {
 }
 
 #[test]
-fn an_ok_user_input_answer_round_trips_text_and_availability() {
-    let lua = Lua::new();
-    let outcome = UserInputOutcome {
-        text: "the operator's answer".to_owned(),
-        available: true,
-    };
-    let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, text, available): (bool, String, bool) = lua
-        .load("local ok, text, available = ...; return ok, text, available")
-        .call(envelope)
-        .expect("the three resume values read back through Lua");
-    assert!(ok);
-    assert_eq!(text, "the operator's answer");
-    assert!(available, "operator text resumes as available");
-}
-
-#[test]
-fn an_unavailable_user_input_answer_resumes_the_fallback_as_unavailable() {
-    let lua = Lua::new();
-    let outcome = UserInputOutcome {
-        text: "User input is unavailable in this host; continue without it.".to_owned(),
-        available: false,
-    };
-    let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, available): (bool, bool) = lua
-        .load("local ok, text, available = ...; return ok, available")
-        .call(envelope)
-        .expect("the resume values read back through Lua");
-    assert!(ok);
-    assert!(
-        !available,
-        "the fallback sentence resumes with available false, so identical human text cannot spoof it"
-    );
-}
-
-#[test]
 fn an_ok_drain_task_notices_answer_resumes_the_texts_as_a_sequence() {
     let lua = Lua::new();
     let notices = vec![
@@ -424,21 +382,4 @@ fn an_empty_drain_task_notices_answer_resumes_an_empty_sequence() {
         .expect("the sequence reads back through Lua");
     assert!(ok);
     assert_eq!(len, 0, "no notices resume as an empty sequence, never nil");
-}
-
-#[test]
-fn an_err_user_input_answer_round_trips_and_retains_the_typed_error() {
-    let lua = Lua::new();
-    let (envelope, retained) = Answer::UserInput(Err(Error::Lua("broker down".to_owned())))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    match retained {
-        Some(Error::Lua(message)) => assert_eq!(message, "broker down"),
-        other => panic!("expected the retained Lua error, got {other:?}"),
-    }
-    let (ok, result) = echo_through_lua(&lua, envelope);
-    assert!(!ok);
-    let (kind, message) = failure_parts(&lua, result);
-    assert_eq!(kind, "lua");
-    assert_eq!(message, "broker down");
 }

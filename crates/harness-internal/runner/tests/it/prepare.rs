@@ -4,10 +4,10 @@
 //! `Parse` kind; each preparation draws a fresh seed and start, both
 //! written to `runs`; and the prepared tool performer resolves a
 //! `ToolCall` effect's id in the activated table. The host's optional
-//! input broker - handed to every activated capability, answering
-//! `user_input()`, and behind the `promptforge/user-input` capability -
-//! sits in the `input` child module, and a capability's prelude reaching
-//! the prepared run sits in the `prelude` child module.
+//! input broker - handed to every activated capability and behind the
+//! `promptforge/user-input` capability - sits in the `input` child
+//! module, and a capability's prelude reaching the prepared run sits in
+//! the `prelude` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

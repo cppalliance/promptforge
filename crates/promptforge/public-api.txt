@@ -8,7 +8,6 @@
 #[non_exhaustive] pub enum promptforge::event::ReplyOrigin
 #[non_exhaustive] pub enum promptforge::ids::AbandonReason
 #[non_exhaustive] pub enum promptforge::ids::TaskOrigin
-#[non_exhaustive] pub enum promptforge::input::InputOutcome
 #[non_exhaustive] pub enum promptforge::model::CompletionErrorKind
 #[non_exhaustive] pub enum promptforge::model::CompletionResult
 #[non_exhaustive] pub enum promptforge::model::ModelCatalogError
@@ -44,7 +43,6 @@
 #[non_exhaustive] pub struct promptforge::capabilities::CapabilityId(/* private fields */)
 #[non_exhaustive] pub struct promptforge::capabilities::CapabilityIdError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::capabilities::GlobalNameError { /* private fields */ }
-#[non_exhaustive] pub struct promptforge::input::InputError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::Completion { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::CompletionError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::CompletionOptions { /* private fields */ }
@@ -112,7 +110,6 @@ auto promptforge::effect::Effect: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !Un
 auto promptforge::effect::EffectAnswer: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::effect::InputAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolCallOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolCaller: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -125,8 +122,6 @@ auto promptforge::ids::ParseIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, U
 auto promptforge::ids::Provenance: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::TaskId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ids::TaskOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::input::InputError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
-auto promptforge::input::InputOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::metrics::CallMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::metrics::ClientTiming: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::metrics::LlamaTimings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -240,7 +235,6 @@ derives promptforge::effect::Effect: Debug
 derives promptforge::effect::EffectAnswer: Debug
 derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
-derives promptforge::effect::InputAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolCallOrigin: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolCaller: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
@@ -253,8 +247,6 @@ derives promptforge::ids::ParseIdError: Clone, Debug, Eq, PartialEq
 derives promptforge::ids::Provenance: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::ids::TaskId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::ids::TaskOrigin: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
-derives promptforge::input::InputError: Debug
-derives promptforge::input::InputOutcome: Clone, Debug, Eq, PartialEq
 derives promptforge::metrics::CallMetrics: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::metrics::ClientTiming: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::metrics::LlamaTimings: Clone, Debug, Deserialize, PartialEq, Serialize
@@ -348,7 +340,6 @@ impl core::error::Error for promptforge::RunError
 impl core::error::Error for promptforge::capabilities::CapabilityIdError
 impl core::error::Error for promptforge::capabilities::GlobalNameError
 impl core::error::Error for promptforge::ids::ParseIdError
-impl core::error::Error for promptforge::input::InputError
 impl core::error::Error for promptforge::model::CompletionError
 impl core::error::Error for promptforge::model::ModelCatalogError
 impl core::error::Error for promptforge::model::ModelIdError
@@ -369,7 +360,6 @@ impl core::fmt::Display for promptforge::effect::EffectId
 impl core::fmt::Display for promptforge::ids::ChainId
 impl core::fmt::Display for promptforge::ids::ParseIdError
 impl core::fmt::Display for promptforge::ids::TaskId
-impl core::fmt::Display for promptforge::input::InputError
 impl core::fmt::Display for promptforge::model::CompletionError
 impl core::fmt::Display for promptforge::model::ModelCatalogError
 impl core::fmt::Display for promptforge::model::ModelIdError
@@ -420,7 +410,6 @@ pub enum promptforge::effect::AnswerRecord
 pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
-pub enum promptforge::effect::InputAnswerRecord
 pub enum promptforge::event::DebugMode
 pub enum promptforge::transport::ClientError
 pub enum promptforge::vfs::Mode
@@ -519,8 +508,6 @@ pub fn promptforge::ids::ChainId::root() -> Self
 pub fn promptforge::ids::ParseIdError::input(&self) -> &str
 pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option<Self>
 pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
-pub fn promptforge::input::InputError::message(text: impl core::convert::Into<alloc::string::String>) -> promptforge::input::InputError
-pub fn promptforge::input::InputError::with_source(text: impl core::convert::Into<alloc::string::String>, source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> promptforge::input::InputError
 pub fn promptforge::model::Completion::client_timing(&self) -> core::option::Option<&promptforge::metrics::ClientTiming>
 pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
@@ -724,7 +711,6 @@ pub mod promptforge::capabilities
 pub mod promptforge::effect
 pub mod promptforge::event
 pub mod promptforge::ids
-pub mod promptforge::input
 pub mod promptforge::metrics
 pub mod promptforge::model
 pub mod promptforge::prompt
@@ -753,7 +739,6 @@ pub promptforge::RunErrorKind::Cancelled
 pub promptforge::RunErrorKind::Completion
 pub promptforge::RunErrorKind::ContextExhausted
 pub promptforge::RunErrorKind::Determinism
-pub promptforge::RunErrorKind::Input
 pub promptforge::RunErrorKind::Internal
 pub promptforge::RunErrorKind::Lua
 pub promptforge::RunErrorKind::Parse
@@ -798,8 +783,6 @@ pub promptforge::effect::AnswerRecord::TaskEvents::0: alloc::vec::Vec<promptforg
 pub promptforge::effect::AnswerRecord::Timer
 pub promptforge::effect::AnswerRecord::ToolCall(..)
 pub promptforge::effect::AnswerRecord::ToolCall::0: core::result::Result<promptforge::effect::ToolAnswerRecord, alloc::string::String>
-pub promptforge::effect::AnswerRecord::UserInput(..)
-pub promptforge::effect::AnswerRecord::UserInput::0: core::result::Result<promptforge::effect::InputAnswerRecord, alloc::string::String>
 pub promptforge::effect::ChatAnswerRecord::finish_reason: core::option::Option<alloc::string::String>
 pub promptforge::effect::ChatAnswerRecord::model: alloc::string::String
 pub promptforge::effect::ChatAnswerRecord::reply: core::option::Option<alloc::string::String>
@@ -823,9 +806,6 @@ pub promptforge::effect::Effect::ToolCall::alias: alloc::string::String
 pub promptforge::effect::Effect::ToolCall::args: serde_json::value::Value
 pub promptforge::effect::Effect::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::Effect::ToolCall::tool: promptforge::tools::ToolId
-pub promptforge::effect::Effect::UserInput { .. }
-pub promptforge::effect::Effect::UserInput::execution: alloc::string::String
-pub promptforge::effect::Effect::UserInput::section: alloc::string::String
 pub promptforge::effect::EffectAnswer::Chat(..)
 pub promptforge::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxed::Box<promptforge::model::Completion>, promptforge::model::CompletionError>
 pub promptforge::effect::EffectAnswer::Dropped
@@ -836,8 +816,6 @@ pub promptforge::effect::EffectAnswer::TaskEvents::0: alloc::vec::Vec<promptforg
 pub promptforge::effect::EffectAnswer::Timer
 pub promptforge::effect::EffectAnswer::ToolCall(..)
 pub promptforge::effect::EffectAnswer::ToolCall::0: core::result::Result<promptforge::tools::ToolOutput, promptforge::tools::ToolError>
-pub promptforge::effect::EffectAnswer::UserInput(..)
-pub promptforge::effect::EffectAnswer::UserInput::0: core::result::Result<promptforge::input::InputOutcome, promptforge::input::InputError>
 pub promptforge::effect::EffectRecord::Chat { .. }
 pub promptforge::effect::EffectRecord::Chat::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
@@ -858,12 +836,6 @@ pub promptforge::effect::EffectRecord::ToolCall::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::ToolCall::args: serde_json::value::Value
 pub promptforge::effect::EffectRecord::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::EffectRecord::ToolCall::tool: promptforge::tools::ToolId
-pub promptforge::effect::EffectRecord::UserInput { .. }
-pub promptforge::effect::EffectRecord::UserInput::execution: alloc::string::String
-pub promptforge::effect::EffectRecord::UserInput::section: alloc::string::String
-pub promptforge::effect::InputAnswerRecord::Text(..)
-pub promptforge::effect::InputAnswerRecord::Text::0: alloc::string::String
-pub promptforge::effect::InputAnswerRecord::Unavailable
 pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
 pub promptforge::effect::ToolAnswerRecord::trusted: bool
 pub promptforge::effect::ToolCallOrigin::caller: promptforge::effect::ToolCaller
@@ -1177,15 +1149,6 @@ pub promptforge::event::Event::ToolScopeValidationSucceeded { .. }
 pub promptforge::event::Event::ToolScopeValidationSucceeded::execution: alloc::string::String
 pub promptforge::event::Event::ToolScopeValidationSucceeded::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::ToolScopeValidationSucceeded::section: alloc::string::String
-pub promptforge::event::Event::UserInput { .. }
-pub promptforge::event::Event::UserInput::execution: alloc::string::String
-pub promptforge::event::Event::UserInput::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::UserInput::section: alloc::string::String
-pub promptforge::event::Event::UserInput::text: alloc::string::String
-pub promptforge::event::Event::UserInputWaitStarted { .. }
-pub promptforge::event::Event::UserInputWaitStarted::execution: alloc::string::String
-pub promptforge::event::Event::UserInputWaitStarted::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::UserInputWaitStarted::section: alloc::string::String
 pub promptforge::event::ReplyOrigin::Chat
 pub promptforge::event::ReplyOrigin::Infer
 pub promptforge::ids::AbandonReason::OwnerAborted
@@ -1197,9 +1160,6 @@ pub promptforge::ids::Provenance::seq: u32
 pub promptforge::ids::Provenance::task: promptforge::ids::TaskId
 pub promptforge::ids::TaskOrigin::Author
 pub promptforge::ids::TaskOrigin::Model
-pub promptforge::input::InputOutcome::Text(..)
-pub promptforge::input::InputOutcome::Text::0: alloc::string::String
-pub promptforge::input::InputOutcome::Unavailable
 pub promptforge::metrics::CallMetrics::client: core::option::Option<promptforge::metrics::ClientTiming>
 pub promptforge::metrics::CallMetrics::llama: core::option::Option<promptforge::metrics::LlamaTimings>
 pub promptforge::metrics::CallMetrics::usage: core::option::Option<promptforge::metrics::Usage>

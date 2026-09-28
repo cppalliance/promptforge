@@ -19,7 +19,6 @@ use super::scheduler::scheduler_context_from;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
 use crate::execute::task_history;
-use crate::input::InputOutcome;
 use crate::lua::run_store_op;
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
@@ -54,8 +53,8 @@ pub(super) fn infer_prompt(effect: &Effect) -> String {
 }
 
 /// Performs one effect locally, with no I/O: a store operation runs on the
-/// effect's own access handle, a timer fires at once, an input wait is
-/// unavailable, a bound tool is unbound, and a model round is answered by
+/// effect's own access handle, a timer fires at once, a bound tool is
+/// unbound, and a model round is answered by
 /// `chat`, a function of the effect alone so the answer never depends on
 /// arrival order.
 pub(super) fn perform_locally(
@@ -67,7 +66,6 @@ pub(super) fn perform_locally(
         Effect::ToolCall { alias, .. } => EffectAnswer::ToolCall(Err(ToolError::message(format!(
             "no tool is bound as {alias} in this test"
         )))),
-        Effect::UserInput { .. } => EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)),
         Effect::Store { access, op } => EffectAnswer::Store(run_store_op(access, op.clone())),
         Effect::Timer { .. } => EffectAnswer::Timer,
         Effect::TaskEvents { .. } => panic!("the driver answers a history read itself"),

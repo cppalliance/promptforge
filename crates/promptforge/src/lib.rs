@@ -27,7 +27,6 @@ pub mod effect {
     pub use promptforge_engine::EffectAnswer;
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
-    pub use promptforge_engine::InputAnswerRecord;
     pub use promptforge_engine::ToolAnswerRecord;
     pub use promptforge_engine::ToolCallOrigin;
     pub use promptforge_engine::ToolCaller;
@@ -194,13 +193,6 @@ pub mod metrics {
     pub use promptforge_types::metrics::ToolCallEvent;
     pub use promptforge_types::metrics::Usage;
     pub use promptforge_types::metrics::VllmMetrics;
-}
-
-pub mod input {
-    #![doc = include_str!("input.md")]
-
-    pub use promptforge_engine::input::InputError;
-    pub use promptforge_engine::input::InputOutcome;
 }
 
 pub mod replay {

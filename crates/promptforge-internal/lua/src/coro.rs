@@ -68,10 +68,6 @@ const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 /// no VM ever installs it as a global.
 const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
 
-/// The registry key for the shim's `user_input`, stashed by the prelude
-/// install so the section setup can install it as the `user_input` global.
-const USER_INPUT_REGISTRY: &str = "promptforge.impl_coro.user_input";
-
 /// The registry key for the shim's store function table, stashed by the
 /// prelude install so the executor can install the store yield shims onto a
 /// VM's `store` table after the shared library replays.
@@ -249,9 +245,6 @@ pub(crate) fn install_shim_prelude(
     let model_tool_call: Function = shims.raw_get("model_tool_call").map_err(Error::lua)?;
     lua.set_named_registry_value(MODEL_TOOL_CALL_REGISTRY, model_tool_call)
         .map_err(Error::lua)?;
-    let user_input: Function = shims.raw_get("user_input").map_err(Error::lua)?;
-    lua.set_named_registry_value(USER_INPUT_REGISTRY, user_input)
-        .map_err(Error::lua)?;
     let store: Table = shims.raw_get("store").map_err(Error::lua)?;
     lua.set_named_registry_value(STORE_REGISTRY, store)
         .map_err(Error::lua)?;
@@ -391,24 +384,6 @@ pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
     models.raw_set("loop", models_loop).map_err(Error::lua)
-}
-
-/// Installs the `user_input` yield shim as a global on a VM whose shim
-/// prelude already ran (`install_shim_prelude` stashed the shim in the
-/// registry).
-///
-/// The executor's section setup is the only caller.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the shim prelude was never installed on this
-/// VM or the install fails.
-pub fn install_section_user_input_shim(lua: &Lua) -> Result<()> {
-    let user_input: Function = lua
-        .named_registry_value(USER_INPUT_REGISTRY)
-        .map_err(Error::lua)?;
-    lua.globals()
-        .raw_set("user_input", user_input)
-        .map_err(Error::lua)
 }
 
 /// Installs the model-issued `tool_call` form as `tools.call_as_model` on a

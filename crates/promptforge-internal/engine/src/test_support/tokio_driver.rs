@@ -3,7 +3,7 @@
 //! to a caller's sink.
 //!
 //! The loop is `step -> perform -> await an answer -> resume`. Every
-//! `Chat`, `ToolCall`, and `UserInput` effect the step hands out goes to
+//! `Chat` and `ToolCall` effect the step hands out goes to
 //! the matching performer closure, whose future is spawned as one task
 //! that posts its answer on a channel under the effect's id; the loop
 //! resumes the run with each arriving answer and steps again. The
@@ -72,7 +72,7 @@ pub use performers::{BoxFuture, Performer, Performers};
 pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 
 /// Drives `run` to its end on the current tokio runtime, performing its
-/// `Chat`, `ToolCall`, and `UserInput` effects through `performers`,
+/// `Chat` and `ToolCall` effects through `performers`,
 /// handing every event to `sink` in order, and cancelling the run when
 /// `cancel` fires. Returns the run's result.
 ///
@@ -397,10 +397,6 @@ impl<'a> TokioDriver<'a> {
             }
             Effect::ToolCall { .. } => {
                 let future = (self.performers.tool_call)(effect);
-                tokio::spawn(async move { post(&tx, id, future.await) })
-            }
-            Effect::UserInput { .. } => {
-                let future = (self.performers.user_input)(effect);
                 tokio::spawn(async move { post(&tx, id, future.await) })
             }
             Effect::Store { access, op } => {
