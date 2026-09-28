@@ -224,7 +224,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - On this host every cargo command runs in WSL2 through `bash vibe/scratch/wsl-cargo.sh <cargo args>` (Ubuntu-24.04, cargo 1.98.1, target directory `~/promptforge-verify-target`, with `RUSTFLAGS` and `RUSTDOCFLAGS` passed through). `crates/gateway/config-ui/ui/node_modules` is a Linux install that the operator's WSL Talktron gateway build uses, so a Windows build of `gateway-config-ui` finds no `esbuild.cmd` and fails; the operator chose to keep it. `cargo xtask site --books-only` still runs on Windows, where mdBook 0.4.44 is installed.
 - Focused test command pattern:
   - CI form: `cargo nextest run --locked -p <package> --all-features [<filter>]`. cargo-nextest is not installed on this host (`cargo nextest` is "no such command"), so run `cargo test --locked -p <package> --all-features [--lib | --test it] [<module-path filter>]`.
-  - This plan's areas: `cargo test --locked -p gateway-config --lib config::tests::` (submodules `validation::`, `schema::`, `serialize::`), `cargo test --locked -p gateway-local --lib artifacts::assets::tests::`, `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`.
+  - This plan's areas: `cargo test --locked -p gateway-config --lib -- config::tests:: config::stt::tests::` (submodules `validation::`, `schema::`, `serialize::`, plus the inline tests in `config/stt.rs`, which `config::tests::` alone does not match), `cargo test --locked -p gateway-local --lib artifacts::assets::tests::`, `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`.
   - One crate's doctests: `cargo test --locked --doc -p <package>`.
   - Native whisper tests are `#[ignore]`d; they run as `-- --ignored --test-threads=1` with `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO` set, as `.github/workflows/stt-miri.yml` does on the self-hosted Windows CUDA runner.
 - Full-suite test command:
@@ -367,7 +367,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Deliberately broken packages fail the job's checks: a CPU-only build fails the CUDA check, and a missing CUDA runtime library or a stray system library fails the `ldd` check.
   - In an `ubuntu:24.04` container with no GPU and no `libcuda`, the load fails with `libcuda.so.1: cannot open shared object file: No such file or directory`; the same container with the stub mounted loads the library and reports CUDA.
 
-### Step 4: Add the `[stt] whisper_backend` setting
+### Step 4: Add the `[stt] whisper_backend` setting [completed]
 
 - `crates/gateway/config/src/config/stt.rs` gains `WhisperBackend`: `Auto` (the default), `Cpu`, and `Cuda`, with kebab-case serde, `#[non_exhaustive]`, and `is_auto()`, shaped like `LlamaBackend` in `crates/gateway/config/src/config.rs`.
 - `SttPipelineConfig` and `RawSttPipelineConfig` gain `whisper_backend` with `#[serde(default, skip_serializing_if = "WhisperBackend::is_auto")]`, carried through both `Default` impls, `TryFrom<RawSttPipelineConfig>`, and `From<&SttPipelineConfig>`.

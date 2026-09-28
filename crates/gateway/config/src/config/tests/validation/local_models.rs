@@ -139,6 +139,51 @@ llama_backend = "tensorrt"
 }
 
 #[test]
+fn parses_each_whisper_backend() {
+    for (spelling, backend) in [
+        ("auto", WhisperBackend::Auto),
+        ("cpu", WhisperBackend::Cpu),
+        ("cuda", WhisperBackend::Cuda),
+    ] {
+        let toml = format!(
+            "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n\
+             [stt]\nwhisper_backend = \"{spelling}\"\n"
+        );
+        let config = Config::from_toml_str(&toml).unwrap();
+        assert_eq!(
+            config.stt().map(SttPipelineConfig::whisper_backend),
+            Some(backend),
+            "whisper_backend = \"{spelling}\""
+        );
+    }
+}
+
+#[test]
+fn rejects_an_unknown_whisper_backend_naming_the_accepted_values() {
+    let toml = r#"
+config-version = 0
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[stt]
+whisper_backend = "vulkan"
+"#;
+    let error = Config::from_toml_str(toml).unwrap_err();
+    assert_eq!(error.kind(), crate::ConfigErrorKind::Parse);
+    let mut chain = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(inner) = source {
+        chain.push_str(": ");
+        chain.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    for name in ["`vulkan`", "`auto`", "`cpu`", "`cuda`"] {
+        assert!(chain.contains(name), "the error names {name}: {chain}");
+    }
+}
+
+#[test]
 fn rejects_duplicate_name_across_remote_and_local() {
     let toml = r#"
 config-version = 0
