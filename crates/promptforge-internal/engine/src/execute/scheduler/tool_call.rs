@@ -36,7 +36,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome};
-use crate::execute::run::Effect;
+use crate::execute::run::{Effect, ToolCallOrigin, ToolCaller};
 use crate::execute::section_context::LocalCall;
 use crate::lua::{ScriptReport, current_tool_bindings};
 use crate::{Error, Result};
@@ -117,7 +117,9 @@ impl Scheduler {
     /// model, so the scope does not gate it; the model-advertised set stays
     /// section-scoped) or, for a script call that names no frontmatter
     /// alias, against the catalog by full id, the full id then standing as
-    /// the alias; then the attempt counted, and the issued effect. The
+    /// the alias; then the attempt counted, and the issued effect, whose
+    /// origin names the model as caller when a `call_id` is present and
+    /// the script otherwise. The
     /// answer's rules - the model-issued body under a `call_id`, else the
     /// script body classified by the binding's declared output kind - are
     /// the continuation's, applied when the answer lands.
@@ -191,10 +193,20 @@ impl Scheduler {
         // exactly as the shared body has always counted it.
         counts.ensure(binding.alias())?;
         counts.increment(binding.alias())?;
+        let origin = ToolCallOrigin {
+            execution: ctx.execution().to_owned(),
+            section: self.chains[id.index()].section_name().to_owned(),
+            caller: if call_id.is_some() {
+                ToolCaller::Model
+            } else {
+                ToolCaller::Script
+            },
+        };
         let effect = Effect::ToolCall {
             tool: binding.id().clone(),
             alias: binding.alias().to_owned(),
             args,
+            origin,
         };
         let resume = Continuation::ToolCall(ToolCallContinuation {
             binding,

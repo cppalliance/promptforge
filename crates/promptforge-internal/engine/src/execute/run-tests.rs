@@ -78,12 +78,22 @@ fn a_chat_effect_records_its_model_messages_tools_and_invocation() {
     assert_eq!(round_trip(&record), record);
 }
 
+/// The origin of a call the model made in section `Only` of `run-1`.
+fn model_origin() -> ToolCallOrigin {
+    ToolCallOrigin {
+        execution: "run-1".to_owned(),
+        section: "Only".to_owned(),
+        caller: ToolCaller::Model,
+    }
+}
+
 #[test]
-fn a_tool_call_effect_records_its_identity_alias_and_args() {
+fn a_tool_call_effect_records_its_identity_alias_args_and_origin() {
     let effect = Effect::ToolCall {
         tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({ "value": "hi" }),
+        origin: model_origin(),
     };
     let record = effect.record();
     assert_eq!(
@@ -92,7 +102,27 @@ fn a_tool_call_effect_records_its_identity_alias_and_args() {
             tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
+            origin: model_origin(),
         }
+    );
+    assert_eq!(round_trip(&record), record);
+}
+
+#[test]
+fn a_tool_call_record_serializes_its_origin_in_snake_case() {
+    let record = EffectRecord::ToolCall {
+        tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
+        alias: "echo".to_owned(),
+        args: json!({}),
+        origin: ToolCallOrigin {
+            caller: ToolCaller::Script,
+            ..model_origin()
+        },
+    };
+    let wire = serde_json::to_value(&record).expect("a record serializes");
+    assert_eq!(
+        wire["ToolCall"]["origin"],
+        json!({ "execution": "run-1", "section": "Only", "caller": "script" })
     );
     assert_eq!(round_trip(&record), record);
 }

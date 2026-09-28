@@ -84,8 +84,8 @@ pub enum Effect {
     /// One bound tool call: `tool` is the stable identity the performer
     /// resolves to an implementation (a host against its activated
     /// capabilities, the engine's internal table against the run's
-    /// catalog), `alias` the prompt-local name it was called by, kept
-    /// for the record.
+    /// catalog), `alias` the prompt-local name it was called by, and
+    /// `origin` who made the call and where, both kept for the record.
     ToolCall {
         /// The tool's stable live identity.
         tool: ToolId,
@@ -93,6 +93,9 @@ pub enum Effect {
         alias: String,
         /// The call's arguments.
         args: Value,
+        /// The run, the section, and the kind of caller that made the
+        /// call.
+        origin: ToolCallOrigin,
     },
     /// One wait for operator input, for `section` of `execution`.
     UserInput {
@@ -170,10 +173,16 @@ impl Effect {
                     thinking: invocation.thinking,
                 }
             }
-            Effect::ToolCall { tool, alias, args } => EffectRecord::ToolCall {
+            Effect::ToolCall {
+                tool,
+                alias,
+                args,
+                origin,
+            } => EffectRecord::ToolCall {
                 tool: tool.clone(),
                 alias: alias.clone(),
                 args: args.clone(),
+                origin: origin.clone(),
             },
             Effect::UserInput { execution, section } => EffectRecord::UserInput {
                 execution: execution.clone(),
@@ -223,6 +232,9 @@ pub enum EffectRecord {
         alias: String,
         /// The call's arguments.
         args: Value,
+        /// The run, the section, and the kind of caller that made the
+        /// call.
+        origin: ToolCallOrigin,
     },
     /// One wait for operator input.
     UserInput {
@@ -248,6 +260,31 @@ pub enum EffectRecord {
         /// The highest sequence number the reader has already seen.
         last: Option<u32>,
     },
+}
+
+/// Who made one tool call and where: the run's execution, the section
+/// whose Lua was running, and whether the section's script or a model
+/// round asked for the call. A log attributes the call by it, and a host
+/// can apply different policy to the same tool depending on its caller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallOrigin {
+    /// The run's execution identifier.
+    pub execution: String,
+    /// The section that made the call.
+    pub section: String,
+    /// Which kind of code asked for the call.
+    pub caller: ToolCaller,
+}
+
+/// Which kind of code asked for one tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolCaller {
+    /// The section's own Lua called the tool through `tools.call`.
+    Script,
+    /// A model round requested the call.
+    Model,
 }
 
 /// What a performer answers one [`Effect`] with: one variant per effect

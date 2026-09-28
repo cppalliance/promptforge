@@ -16,7 +16,7 @@ mod effect;
 
 pub use effect::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
-    InputAnswerRecord, ToolAnswerRecord,
+    InputAnswerRecord, ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;

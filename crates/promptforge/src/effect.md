@@ -135,6 +135,8 @@ The run reads the answer this way. A backend error that reports a provider conte
 
 To produce the answer, resolve the effect's [`tool`](Effect#variant.ToolCall.field.tool) to your own implementation. It is the tool's stable [`ToolId`](crate::tools::ToolId), and it names the implementation behind the tool slot that [`Environment::prepare`](crate::Environment::prepare) filled. The [`alias`](Effect#variant.ToolCall.field.alias) is only the prompt's local name, so never resolve by it. Call the implementation with the effect's [`args`](Effect#variant.ToolCall.field.args). Build a success with [`ToolOutput::trusted`](crate::tools::ToolOutput::trusted) or [`ToolOutput::untrusted`](crate::tools::ToolOutput::untrusted), and a failure with [`ToolError::message`](crate::tools::ToolError::message) or [`ToolError::with_source`](crate::tools::ToolError::with_source), optionally refined with [`ToolError::with_kind`](crate::tools::ToolError::with_kind). When the id resolves to nothing in your table, answer an error, as the example above does. The [`tools`](crate::tools) module page covers tool implementations.
 
+The effect's [`origin`](Effect#variant.ToolCall.field.origin) says who asked for the call: the run's execution, the section whose Lua was running, and whether the section's script or a model round made the request. It plays no part in resolving the implementation. A host can read it to log the call, or to treat the same tool differently depending on who called it.
+
 The run counts the call when it issues the effect, before the host runs the tool. After the answer arrives, the run applies its trust rule, which wraps untrusted output in a nonce envelope. A local tool is a Lua function on the section's own Lua state, and the run answers it internally, so it never becomes an [`Effect::ToolCall`].
 
 **UserInput.** [`Effect::UserInput`] is one wait for operator input. The host sees one for every `user_input()` call, whether or not it has an operator. Answer it with [`EffectAnswer::UserInput`], which holds a [`Result`] of an [`InputOutcome`](crate::input::InputOutcome) or an [`InputError`](crate::input::InputError). In Lua, `user_input()` returns two values: the text and an `available` flag. There are three answers:
@@ -237,6 +239,7 @@ This part covers every item in the module: the effect handle, the effect and ans
   - [`Effect::ToolCall::tool`](Effect#variant.ToolCall.field.tool), a [`ToolId`](crate::tools::ToolId), is the tool's stable identity, in `namespace/pack/name` form. The host resolves this field to its implementation.
   - [`Effect::ToolCall::alias`](Effect#variant.ToolCall.field.alias), a [`String`], is the prompt-local name used in the call. It is kept for the record and plays no part in resolving the implementation.
   - [`Effect::ToolCall::args`](Effect#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments. Pass it to the tool implementation.
+  - [`Effect::ToolCall::origin`](Effect#variant.ToolCall.field.origin), a [`ToolCallOrigin`], says who made the call and where: the run's execution identifier, the section that made the call, and a [`ToolCaller`] naming the script or the model. Like the alias, it plays no part in resolving the implementation.
 - [`Effect::UserInput`]: one wait for operator input on behalf of one section. The host sees one for every `user_input()` call. Answer it with [`EffectAnswer::UserInput`].
   - [`Effect::UserInput::execution`](Effect#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, which is the `name` the host passed to [`RunContext::new`](crate::RunContext::new).
   - [`Effect::UserInput::section`](Effect#variant.UserInput.field.section), a [`String`], is the name of the section asking for input.
@@ -277,10 +280,11 @@ This part covers every item in the module: the effect handle, the effect and ans
   - [`EffectRecord::Chat::temperature`](EffectRecord#variant.Chat.field.temperature), an [`Option`] of [`f64`], is the frozen sampling temperature from the binding's invocation, when the binding declared one.
   - [`EffectRecord::Chat::max_tokens`](EffectRecord#variant.Chat.field.max_tokens), an [`Option`] of [`u32`], is the frozen generation cap from the binding's invocation, when the binding declared one. [`Effect::record`] never produces `Some(0)`, because the cap it copies is non-zero.
   - [`EffectRecord::Chat::thinking`](EffectRecord#variant.Chat.field.thinking), an [`Option`] of [`bool`], is the frozen thinking switch from the binding's invocation, when the binding declared one.
-- [`EffectRecord::ToolCall`]: one call to a bound tool, recorded from an [`Effect::ToolCall`] with all three fields cloned.
+- [`EffectRecord::ToolCall`]: one call to a bound tool, recorded from an [`Effect::ToolCall`] with all four fields cloned.
   - [`EffectRecord::ToolCall::tool`](EffectRecord#variant.ToolCall.field.tool), a [`ToolId`](crate::tools::ToolId), is the tool's stable identity. It serializes as its `namespace/pack/name` string and is validated when deserialized.
   - [`EffectRecord::ToolCall::alias`](EffectRecord#variant.ToolCall.field.alias), a [`String`], is the prompt-local alias named in the call.
   - [`EffectRecord::ToolCall::args`](EffectRecord#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments.
+  - [`EffectRecord::ToolCall::origin`](EffectRecord#variant.ToolCall.field.origin), a [`ToolCallOrigin`], is who made the call and where. It serializes as an object with `execution`, `section`, and `caller` keys, for example `{"execution":"echoer","section":"Only","caller":"script"}`.
 - [`EffectRecord::UserInput`]: one wait for operator input, recorded from an [`Effect::UserInput`] with both fields cloned.
   - [`EffectRecord::UserInput::execution`](EffectRecord#variant.UserInput.field.execution), a [`String`], is the run's execution identifier, the name given to [`RunContext::new`](crate::RunContext::new).
   - [`EffectRecord::UserInput::section`](EffectRecord#variant.UserInput.field.section), a [`String`], is the name of the section that asked.
@@ -291,6 +295,21 @@ This part covers every item in the module: the effect handle, the effect and ans
 - [`EffectRecord::TaskEvents`]: one read of a task's reported history, recorded from an [`Effect::TaskEvents`].
   - [`EffectRecord::TaskEvents::task`](EffectRecord#variant.TaskEvents.field.task), a [`TaskId`](crate::ids::TaskId), is the task whose events were read. It serializes as its dot-separated path string, for example `"0.2"`.
   - [`EffectRecord::TaskEvents::last`](EffectRecord#variant.TaskEvents.field.last), an [`Option`] of [`u32`], is the highest sequence number already seen by the reader, or [`None`] when it had seen none.
+
+## ToolCallOrigin
+
+[`ToolCallOrigin`] says who made one tool call and where. [`Effect::ToolCall::origin`](Effect#variant.ToolCall.field.origin) and [`EffectRecord::ToolCall::origin`](EffectRecord#variant.ToolCall.field.origin) each hold one. The run fills it when it issues the effect, so a host only needs to read it. All three fields are public, so a struct literal can also build one, for example in a test. It serializes as a JSON object with one key per field, named exactly as the fields below.
+
+- [`ToolCallOrigin::execution`], a [`String`], is the run's execution identifier, the `name` the host passed to [`RunContext::new`](crate::RunContext::new). It is the same for every tool call of a run.
+- [`ToolCallOrigin::section`], a [`String`], is the name of the section whose Lua was running when the call was made. For a call made in the prompt's H1, it is the prompt's title.
+- [`ToolCallOrigin::caller`], a [`ToolCaller`], says whether the section's script or a model round asked for the call.
+
+## ToolCaller
+
+[`ToolCaller`] names which kind of code asked for one tool call. It is `#[non_exhaustive]`, so more kinds may be added later, and a host's `match` on it needs a wildcard arm. It serializes as a snake case string, `"script"` or `"model"`.
+
+- [`ToolCaller::Script`] means the section's own Lua called the tool through `tools.call`, by a frontmatter alias or by the tool's full id.
+- [`ToolCaller::Model`] means a model round inside `models.loop` requested the call.
 
 ## AnswerRecord
 

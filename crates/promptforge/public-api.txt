@@ -3,6 +3,7 @@
 #[non_exhaustive] pub enum promptforge::RunErrorKind
 #[non_exhaustive] pub enum promptforge::capabilities::CapabilityIdErrorKind
 #[non_exhaustive] pub enum promptforge::capabilities::GlobalNameErrorKind
+#[non_exhaustive] pub enum promptforge::effect::ToolCaller
 #[non_exhaustive] pub enum promptforge::event::Event
 #[non_exhaustive] pub enum promptforge::event::ReplyOrigin
 #[non_exhaustive] pub enum promptforge::ids::AbandonReason
@@ -110,6 +111,8 @@ auto promptforge::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, Un
 auto promptforge::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::InputAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::ToolCallOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::effect::ToolCaller: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::event::DebugMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::event::Event: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::event::ReplyOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -234,6 +237,8 @@ derives promptforge::effect::EffectId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::effect::InputAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::effect::ToolCallOrigin: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::effect::ToolCaller: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
 derives promptforge::event::DebugMode: Clone, Copy, Debug, Default, Eq, PartialEq
 derives promptforge::event::Event: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::event::ReplyOrigin: Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize
@@ -803,6 +808,7 @@ pub promptforge::effect::Effect::Timer::seconds: f64
 pub promptforge::effect::Effect::ToolCall { .. }
 pub promptforge::effect::Effect::ToolCall::alias: alloc::string::String
 pub promptforge::effect::Effect::ToolCall::args: serde_json::value::Value
+pub promptforge::effect::Effect::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::Effect::ToolCall::tool: promptforge::tools::ToolId
 pub promptforge::effect::Effect::UserInput { .. }
 pub promptforge::effect::Effect::UserInput::execution: alloc::string::String
@@ -837,6 +843,7 @@ pub promptforge::effect::EffectRecord::Timer::seconds: f64
 pub promptforge::effect::EffectRecord::ToolCall { .. }
 pub promptforge::effect::EffectRecord::ToolCall::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::ToolCall::args: serde_json::value::Value
+pub promptforge::effect::EffectRecord::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::EffectRecord::ToolCall::tool: promptforge::tools::ToolId
 pub promptforge::effect::EffectRecord::UserInput { .. }
 pub promptforge::effect::EffectRecord::UserInput::execution: alloc::string::String
@@ -846,6 +853,11 @@ pub promptforge::effect::InputAnswerRecord::Text::0: alloc::string::String
 pub promptforge::effect::InputAnswerRecord::Unavailable
 pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
 pub promptforge::effect::ToolAnswerRecord::trusted: bool
+pub promptforge::effect::ToolCallOrigin::caller: promptforge::effect::ToolCaller
+pub promptforge::effect::ToolCallOrigin::execution: alloc::string::String
+pub promptforge::effect::ToolCallOrigin::section: alloc::string::String
+pub promptforge::effect::ToolCaller::Model
+pub promptforge::effect::ToolCaller::Script
 pub promptforge::event::DebugMode::Off
 pub promptforge::event::DebugMode::On
 pub promptforge::event::Event::AssistantReply { .. }
@@ -1426,6 +1438,7 @@ pub struct promptforge::capabilities::GlobalName { /* private fields */ }
 pub struct promptforge::effect::ChatAnswerRecord { .. }
 pub struct promptforge::effect::EffectId(/* private fields */)
 pub struct promptforge::effect::ToolAnswerRecord { .. }
+pub struct promptforge::effect::ToolCallOrigin { .. }
 pub struct promptforge::ids::ChainId(/* private fields */)
 pub struct promptforge::ids::ParseIdError { /* private fields */ }
 pub struct promptforge::ids::Provenance { .. }

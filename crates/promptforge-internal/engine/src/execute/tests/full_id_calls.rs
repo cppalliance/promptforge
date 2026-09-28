@@ -5,7 +5,7 @@
 
 use super::models_loop::loop_models;
 use super::*;
-use crate::execute::run::EffectRecord;
+use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// The echo fixture's full id.
@@ -14,6 +14,15 @@ const ECHO_ID: &str = "tests/tools/echo";
 /// The echo fixture's full id as a [`ToolId`].
 fn echo_id() -> ToolId {
     ToolId::parse(ECHO_ID).expect("valid id")
+}
+
+/// The origin of a script call made in the fixture prompt's one section.
+fn script_origin() -> ToolCallOrigin {
+    ToolCallOrigin {
+        execution: EXECUTION.to_owned(),
+        section: "Only".to_owned(),
+        caller: ToolCaller::Script,
+    }
 }
 
 /// A one-section prompt around `lua`. `slots` holds the YAML lines under
@@ -87,6 +96,7 @@ async fn a_script_calls_an_unaliased_catalog_tool_by_full_id_and_records_the_ful
             tool: echo_id(),
             alias: ECHO_ID.to_owned(),
             args: json!({ "value": "hi" }),
+            origin: script_origin(),
         }]
     );
 }
@@ -193,6 +203,7 @@ async fn a_frontmatter_bound_tool_issues_the_same_effect_by_alias_and_by_full_id
         tool: echo_id(),
         alias: alias.to_owned(),
         args: json!({ "value": "hi" }),
+        origin: script_origin(),
     };
     assert_eq!(
         *records.lock().expect("the tap mutex is not poisoned"),

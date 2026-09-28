@@ -672,7 +672,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-3>
 
-### Step 3: Record each tool call's origin
+### Step 3: Record each tool call's origin [completed]
 
 - Component: Tool-call addressing and attribution
 - Piece: Origin, one step

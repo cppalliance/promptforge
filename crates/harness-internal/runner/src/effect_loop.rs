@@ -315,7 +315,9 @@ impl<'a> Driver<'a> {
                     answer.post(EffectAnswer::Chat(round.await));
                 })
             }
-            Effect::ToolCall { tool, alias, args } => {
+            Effect::ToolCall {
+                tool, alias, args, ..
+            } => {
                 let call = self.performers.tool.call(tool, alias, args);
                 spawn_tagged(tag, async move {
                     answer.post(EffectAnswer::ToolCall(call.await));

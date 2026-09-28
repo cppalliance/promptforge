@@ -6,11 +6,12 @@ A prompt calls tools by prompt-local aliases, but the tools themselves belong to
 
 The host builds a [`ToolCatalog`] from the tools of its activated capabilities and installs it with [`Environment::tools`](crate::Environment::tools). [`Environment::prepare`](crate::Environment::prepare) then fills the prompt's tool slots into the context, where [`RunContext::tool_bindings`](crate::RunContext::tool_bindings) reads them back. When a slot's capability contributed nothing to the catalog, prepare adds that capability to [`Requirements::missing_required`](crate::Requirements::missing_required).
 
-Once [`Run::new`](crate::Run::new) has consumed the context, any [`Step::Pending`](crate::Step::Pending) from [`Run::step`](crate::Run::step) can hold an [`Effect::ToolCall`](crate::effect::Effect::ToolCall). The run issues one when a section's script calls a bound tool, or when a model round requests one. The effect has three fields:
+Once [`Run::new`](crate::Run::new) has consumed the context, any [`Step::Pending`](crate::Step::Pending) from [`Run::step`](crate::Run::step) can hold an [`Effect::ToolCall`](crate::effect::Effect::ToolCall). The run issues one when a section's script calls a bound tool, or when a model round requests one. The effect has four fields:
 
 - [`Effect::ToolCall::tool`](crate::effect::Effect#variant.ToolCall.field.tool), a [`ToolId`], is the stable identity of the tool to run.
 - [`Effect::ToolCall::alias`](crate::effect::Effect#variant.ToolCall.field.alias), a [`String`], is the prompt-local alias used by the call.
 - [`Effect::ToolCall::args`](crate::effect::Effect#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments.
+- [`Effect::ToolCall::origin`](crate::effect::Effect#variant.ToolCall.field.origin), a [`ToolCallOrigin`](crate::effect::ToolCallOrigin), says which section made the call and whether its script or a model round asked for it.
 
 The host looks up the id in its own implementation table, never the alias. It runs the tool with the arguments and calls [`Run::resume`](crate::Run::resume) with an [`EffectAnswer::ToolCall`](crate::effect::EffectAnswer::ToolCall), which holds a [`Result`] of a [`ToolOutput`] or a [`ToolError`].
 
@@ -86,7 +87,7 @@ let result = loop {
         Step::Pending { effects, .. } => {
             for (effect_id, _provenance, effect) in effects {
                 let answer = match effect {
-                    Effect::ToolCall { tool, alias, args } => {
+                    Effect::ToolCall { tool, alias, args, .. } => {
                         assert_eq!(alias, "echo");
                         let output = match table.get(&tool) {
                             Some(implementation) => implementation(&args),

@@ -28,6 +28,8 @@ pub mod effect {
     pub use promptforge_engine::EffectRecord;
     pub use promptforge_engine::InputAnswerRecord;
     pub use promptforge_engine::ToolAnswerRecord;
+    pub use promptforge_engine::ToolCallOrigin;
+    pub use promptforge_engine::ToolCaller;
 }
 
 pub mod event {

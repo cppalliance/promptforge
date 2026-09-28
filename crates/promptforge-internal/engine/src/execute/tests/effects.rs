@@ -9,7 +9,7 @@ use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::protocol::StoreOp;
-use crate::execute::run::EffectRecord;
+use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
 use crate::model::StreamDelta;
@@ -51,6 +51,15 @@ fn effect_context(
         .expect("the model set mutex is not poisoned") = loop_models();
     let host = tools.into().install(&ctx, host);
     (ctx, host)
+}
+
+/// The origin of a call made by `caller` in `section` of the test run.
+fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
+    ToolCallOrigin {
+        execution: EXECUTION.to_owned(),
+        section: section.to_owned(),
+        caller,
+    }
 }
 
 /// A broker that always answers with the same operator text.
@@ -139,8 +148,9 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
             tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
+            origin: origin("Only", ToolCaller::Model),
         },
-        "the model's call is one tool_call effect naming the bound identity"
+        "the model's call is one tool_call effect naming the bound identity and the model"
     );
     assert!(
         matches!(&records[2], EffectRecord::Chat { messages, .. } if messages.len() == 3),
@@ -166,9 +176,42 @@ async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
             tool: ToolId::parse("tests/tools/echo").expect("a valid id"),
             alias: "echo".to_owned(),
             args: json!({ "value": "hi" }),
+            origin: origin("Only", ToolCaller::Script),
         }]
     );
     assert_round_trips(&records);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_records_the_section_that_made_it() {
+    let prompt = parse(
+        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n\
+         ## First\n\n```lua\ntools.call('echo', { value = 'a' })\n```\n\n\
+         ## Second\n\n```lua\nreturn tools.call('echo', { value = 'b' })\n```\n",
+    );
+    let (ctx, host) = effect_context(&prompt, echo_tools(), RunHost::new());
+    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let records = scheduler.record_effects_for_test();
+    let out = scheduler.drive().await.expect("both calls complete");
+    assert_eq!(out, "echoed: b");
+
+    let origins: Vec<ToolCallOrigin> = records
+        .lock()
+        .expect("the tap mutex is not poisoned")
+        .iter()
+        .filter_map(|record| match record {
+            EffectRecord::ToolCall { origin, .. } => Some(origin.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        origins,
+        vec![
+            origin("First", ToolCaller::Script),
+            origin("Second", ToolCaller::Script),
+        ],
+        "each call names the section it was made in"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
