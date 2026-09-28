@@ -1,11 +1,12 @@
 // The one tab renderer every dock panel uses: the default chip's structure
 // (same classes, so the theme styles it identically) driven by the panel
-// type's registry entry. A closable type gets the close action, which runs
-// Close with the tab's { panelId } so the part confirms first, and a
-// right-click menu over MenuId.EditorTitleContext at the pointer, whose
-// rows run against the clicked tab and read activeEditor as its type; a
-// `closable: false` type gets neither. Delete and Backspace on the focused
-// tab run the same Close, and do nothing on a `closable: false` type.
+// type's registry entry. A closable type gets the close action, which calls
+// the layout core's close path (panel-close.ts) with the tab's { panelId }
+// so the part confirms first, and a right-click menu over
+// MenuId.EditorTitleContext at the pointer, whose rows run against the
+// clicked tab and read activeEditor as its type; a `closable: false` type
+// gets neither. Delete and Backspace on the focused tab make the same
+// call, and do nothing on a `closable: false` type.
 //
 // The loading shimmer: while its panel is loading, the title span takes
 // @workshop/look's .ws-shimmer-text; the negative animation-delay against
@@ -20,7 +21,6 @@
 
 import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
-import { Commands } from "@workshop/platform/command-registry";
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { MenuId } from "@workshop/platform/menu-registry";
 import { panelTypeEntry } from "@workshop/platform/panel-registry";
@@ -28,14 +28,12 @@ import { panelTypeEntry } from "@workshop/platform/panel-registry";
 // contribution surface, and lazy panels import this module for
 // setTabLoading.
 import { Menu, reportCommandFailure } from "../menu/menu";
+import { closeActiveEditor } from "./panel-close";
 
-/** The command the X runs; the tab menu's Close row runs it too. */
-const CLOSE_COMMAND = "workbench.action.closeActiveEditor";
-
-/** Runs Close on one panel, so its part confirms before it goes. */
+/** Closes one panel through the layout core, so its part confirms before it goes. */
 function closePanel(panelId: string): void {
-  void Commands.execute(CLOSE_COMMAND, { panelId }).catch((error: unknown) => {
-    reportCommandFailure(CLOSE_COMMAND, error);
+  void closeActiveEditor({ panelId }).catch((error: unknown) => {
+    reportCommandFailure("workbench.action.closeActiveEditor", error);
   });
 }
 
@@ -128,7 +126,7 @@ export class PanelTab extends Disposable implements ITabRenderer {
    * this renderer is appended into, which Dockview replaces when the
    * panel moves groups and never hands to the renderer, so the keys are
    * caught in the document's capture phase and only while that wrapper
-   * is the target.
+   * is the target, and call the layout core's close path directly.
    */
   private interceptCloseKeys(panelId: string, closable: boolean): void {
     const onKeydown = (event: KeyboardEvent): void => {

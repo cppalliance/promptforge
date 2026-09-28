@@ -21,7 +21,7 @@ import { registerAction, type ActionDescriptor } from "@workshop/platform/action
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingsRegistry, KeybindingWeight } from "@workshop/platform/keybinding-registry";
-import { MenuId, Menus } from "@workshop/platform/menu-registry";
+import { MenuId } from "@workshop/platform/menu-registry";
 import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { getService } from "@workshop/platform/service-registry";
@@ -207,20 +207,15 @@ addAction({
   },
 });
 
-// The workbench-level editor rows: Save, Close Editor,
-// the four directional splits, and editor cycling. The menu-spec test
-// assembles the full tree, so these register here with the rest of the
-// editor's rows. Save and the splits follow the editor-owned default -
-// keybinding when editorTextFocus, menu precondition
-// activeEditor == 'editor' - and Close keeps the bare activeEditor, so
-// it acts on every panel type, while Next/Previous Editor bind no when
-// (the catalog's "-" cell): Ctrl+Tab cycles from anywhere, as in VS
-// Code. The splits move the active panel into a fresh dockview group in
-// the direction.
-// Close and Close Others take an optional { panelId } argument naming
-// the panel to act on, else the active one; the editor tab menu passes
-// the clicked tab's. Its Close row is appended directly so it reads
-// Close, not the command's Close Editor.
+// The workbench-level editor rows: Save, the four directional splits,
+// and editor cycling. The menu-spec test assembles the full tree, so
+// these register here with the rest of the editor's rows. Save and the
+// splits follow the editor-owned default - keybinding when
+// editorTextFocus, menu precondition activeEditor == 'editor' - while
+// Next/Previous Editor bind no when (the catalog's "-" cell): Ctrl+Tab
+// cycles from anywhere, as in VS Code. The splits move the active panel
+// into a fresh dockview group in the direction. Close and Close Others
+// register from the layout contribution.
 addAction({
   id: "workbench.action.files.save",
   title: "Save",
@@ -229,29 +224,6 @@ addAction({
   keybinding: { keybinding: "ctrlcmd+s", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
   menu: [{ id: MenuId.MenubarFileMenu, group: "4_save", order: 1 }],
   run: runEditorTask((commands) => commands.saveActiveEditor),
-});
-
-addAction({
-  id: "workbench.action.closeActiveEditor",
-  title: "Close Editor",
-  f1: true,
-  precondition: "activeEditor",
-  keybinding: { keybinding: "ctrlcmd+f4", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
-  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 2 }],
-  run: runEditorTask((commands) => commands.closeActiveEditor),
-});
-Menus.appendMenuItem(MenuId.EditorTitleContext, {
-  command: "workbench.action.closeActiveEditor",
-  title: "Close",
-  group: "1_close",
-  order: 1,
-});
-
-addAction({
-  id: "workbench.action.closeOtherEditors",
-  title: "Close Others",
-  menu: [{ id: MenuId.EditorTitleContext, group: "1_close", order: 2 }],
-  run: runEditorTask((commands) => commands.closeOtherEditors),
 });
 
 /** One split row: a direction and its Editor Layout placement. */

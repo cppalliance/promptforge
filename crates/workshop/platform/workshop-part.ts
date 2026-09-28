@@ -5,7 +5,8 @@
 // the first init - dockview calls init when the panel mounts, and a
 // restored or re-added panel must never rebuild its DOM - and provides the
 // layout() hook panels override when they care about their dimensions and
-// the confirmClose() veto the close commands await. Disposal comes from
+// the confirmClose() veto the close commands await, beside the isDirty()
+// query the close path re-checks. Disposal comes from
 // Disposable: every child a panel registers through _register tears down
 // with one dispose() from the dock.
 //
@@ -52,6 +53,11 @@ export abstract class WorkshopPart extends Disposable implements IContentRendere
    */
   confirmClose(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  /** Whether the part holds unsaved changes; the close path re-checks it. */
+  isDirty(): boolean {
+    return false;
   }
 
   /**

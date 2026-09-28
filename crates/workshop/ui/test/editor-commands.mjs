@@ -515,9 +515,8 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "workbench.action.reopenClosedEditor",
     "workbench.action.gotoLine",
     // Step 20: the workbench-level editor rows registered when the menu
-    // tree assembled - Save, Close Editor, the four splits, and cycling.
+    // tree assembled - Save, the four splits, and cycling.
     "workbench.action.files.save",
-    "workbench.action.closeActiveEditor",
     "workbench.action.splitEditorUp",
     "workbench.action.splitEditorDown",
     "workbench.action.splitEditorLeft",
@@ -562,14 +561,13 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
         .every((id) => goMenu.includes(id)),
   );
   const fileMenu = Menus.getMenuItems(MenuId.MenubarFileMenu).map((row) => row.command);
-  // Updated in step 20: the editor contribution also registers Save and
-  // Close Editor (File 4_save / 6_close) when the menu tree assembled.
+  // Updated in step 20: the editor contribution also registers Save
+  // (File 4_save) when the menu tree assembled; Close Editor registers
+  // from the layout contribution.
   check(
-    "the File menu lists New Text File, Save, and Close Editor",
-    fileMenu.length === 3 &&
-      ["workbench.action.files.newUntitledFile", "workbench.action.files.save", "workbench.action.closeActiveEditor"].every((id) =>
-        fileMenu.includes(id),
-      ),
+    "the File menu lists New Text File and Save",
+    fileMenu.length === 2 &&
+      ["workbench.action.files.newUntitledFile", "workbench.action.files.save"].every((id) => fileMenu.includes(id)),
   );
   const recentMenu = Menus.getMenuItems(MenuId.MenubarRecentMenu).map((row) => row.command);
   check(

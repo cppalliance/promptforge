@@ -34,6 +34,8 @@ const bundle = await esbuild.build({
       import "./src/parts/workspace/workspace.contribution.ts";
       import "./src/parts/editor/editor.contribution.ts";
       import "./src/parts/agent/agent.contribution.ts";
+      // Close and Close Others, the tab menu's rows.
+      import "./src/parts/layout/layout.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,

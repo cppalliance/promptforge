@@ -158,7 +158,7 @@ export class EditorPanel extends WorkshopPart {
   }
 
   /** The panel's dirty state, for close prompts and save shortcuts. */
-  isDirty(): boolean {
+  override isDirty(): boolean {
     return this.surface.isDirty();
   }
 

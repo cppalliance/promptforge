@@ -1,17 +1,15 @@
 // The editor's command layer, in two halves.
 //
-// Workshop-level commands - save the active editor, close a panel or the
-// other panels in its group (each part confirming through confirmClose),
-// and cycle the open editors - resolve the dock through the service
-// registry (the DOCK token, registered by initZones) instead of capturing
-// it.
+// Workshop-level commands - save the active editor and cycle the open
+// editors - resolve the dock through the service registry (the DOCK
+// token, registered by initZones) instead of capturing it.
 //
 // The CodeMirror-backed catalog rows: runInActiveEditor
 // and withActiveEditor resolve the active editor through the dock, the
 // built-in CodeMirror commands are re-exported so the contribution file
 // has exactly one lazy import site, and the custom StateCommands
 // (duplicate selection, cursor add rows, previous occurrence) plus the
-// smart-select selection stack live here beside save/close/cycle.
+// smart-select selection stack live here beside save and cycle.
 // Keeping every CodeMirror import in this module is what lets
 // editor.contribution.ts stay out of the initial bundle.
 
@@ -31,9 +29,8 @@ import {
 import { nextDiagnostic, previousDiagnostic } from "@codemirror/lint";
 import { openSearchPanel, SearchCursor, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 
-import { DOCK, panelTypeEntry, resolvePanelContent } from "@workshop/platform/panel-registry";
+import { DOCK, resolvePanelContent } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
-import { WorkshopPart } from "@workshop/platform/workshop-part";
 import { EditorPanel } from "./editor-panel";
 
 // The built-in CodeMirror commands behind the catalog rows, re-exported
@@ -75,105 +72,6 @@ export function saveActiveEditor(): void {
   if (editor !== null) {
     // save() handles its own failures (error bar, conflict dialog).
     void editor.save();
-  }
-}
-
-/**
- * The panel a close command acts on: the one a `{ panelId }` argument
- * names, else the active panel. An argument naming no open panel targets
- * nothing.
- */
-function closeTarget(arg: unknown): IDockviewPanel | undefined {
-  const dock = getService(DOCK);
-  if (typeof arg === "object" && arg !== null && "panelId" in arg) {
-    return typeof arg.panelId === "string" ? dock.getPanel(arg.panelId) : undefined;
-  }
-  return dock.activePanel;
-}
-
-/** False for a panel whose type registered `closable: false`. */
-function isClosable(panel: IDockviewPanel): boolean {
-  return panelTypeEntry(panel.api.component)?.closable !== false;
-}
-
-/**
- * Whether the panel is still in the dock. A confirmation can outlive it,
- * and Dockview removes by id: closing a panel that already left throws,
- * or removes one reopened under its id.
- */
-function isInDock(panel: IDockviewPanel): boolean {
-  return getService(DOCK).getPanel(panel.id) === panel;
-}
-
-/** Whether the panel is an editor holding unsaved changes. */
-function isUnsaved(panel: IDockviewPanel): boolean {
-  return asEditor(panel)?.isDirty() === true;
-}
-
-/**
- * The panel part's confirmClose() answer. An unsaved editor is activated
- * first: its prompt renders inside the panel, and Save As saves the
- * active panel. Content that is not a WorkshopPart needs no confirmation.
- */
-function confirmPanelClose(panel: IDockviewPanel): Promise<boolean> {
-  const content = resolvePanelContent(panel.view.content);
-  if (!(content instanceof WorkshopPart)) {
-    return Promise.resolve(true);
-  }
-  if (isUnsaved(panel)) {
-    panel.api.setActive();
-  }
-  return content.confirmClose();
-}
-
-/**
- * Close (Ctrl+F4): closes the `{ panelId }` argument's panel, else the
- * active one, once its part confirms. A non-closable panel is left alone.
- */
-export async function closeActiveEditor(arg?: unknown): Promise<void> {
-  const panel = closeTarget(arg);
-  if (panel === undefined || !isClosable(panel)) {
-    return;
-  }
-  if ((await confirmPanelClose(panel)) && isInDock(panel)) {
-    panel.api.close();
-  }
-}
-
-/**
- * Close Others: closes the other closable panels in the group of the
- * `{ panelId }` argument's panel, else the active one's. Every panel
- * confirms first, one at a time; the first refusal aborts the batch with
- * nothing closed, though saves and discards already made stand. An
- * editor confirmed clean that gains unsaved changes while a later prompt
- * is up voids the batch too. Otherwise the whole batch closes, clean
- * panels included.
- */
-export async function closeOtherEditors(arg?: unknown): Promise<void> {
-  const target = closeTarget(arg);
-  if (target === undefined) {
-    return;
-  }
-  const batch = target.group.panels.filter((panel) => panel !== target && isClosable(panel));
-  const confirmedClean: IDockviewPanel[] = [];
-  for (const panel of batch) {
-    if (!isInDock(panel)) {
-      continue;
-    }
-    if (!(await confirmPanelClose(panel))) {
-      return;
-    }
-    if (!isUnsaved(panel)) {
-      confirmedClean.push(panel);
-    }
-  }
-  if (confirmedClean.some((panel) => isInDock(panel) && isUnsaved(panel))) {
-    return;
-  }
-  for (const panel of batch) {
-    if (isInDock(panel)) {
-      panel.api.close();
-    }
   }
 }
 

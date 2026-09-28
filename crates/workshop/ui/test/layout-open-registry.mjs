@@ -10,8 +10,8 @@
 // keys side-by-side instances and reopening one reveals it; a custom
 // panelId and title function govern identity and the tab title; a
 // `closable: false` type opens and keeps the flag; the generic tab gives
-// every closable variant a close button and a right-click menu over a
-// test-only tab-menu row, and the `closable: false` variant neither, before
+// every closable variant a close button and a right-click menu over the
+// core's Close rows and a test-only row, and the `closable: false` variant neither, before
 // and after a restore; ids holding a Windows
 // drive colon still resolve their type; save-then-restore brings every
 // panel back with its params, title, and zone; a duplicate registration
@@ -19,7 +19,13 @@
 // anchor "pinned", right anchor "probe") seeds the default layout, gets
 // a lost anchor back after a restore without seeding, and gives the
 // Secondary Side Bar toggle its right anchor to open when the right zone
-// was never built - the layout core names no feature.
+// was never built - the layout core names no feature. With no editor
+// contribution in the bundle, the layout core's close path still runs: a
+// probe tab's X and Delete on its focused tab close it, and Close Others
+// voids its batch when a part confirmed clean turns dirty through
+// WorkshopPart.isDirty() while a later part confirms; closeActiveEditor
+// resolves true on a confirmed close and false on a refusal, a
+// `closable: false` panel, or a panelId naming no open panel.
 // Run: node --test test/layout-open-registry.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -45,7 +51,11 @@ const bundle = await esbuild.build({
         registerPanelFactory,
         isPanelType,
         panelTypeEntry,
+        resolvePanelContent,
       } from "@workshop/platform/panel-registry";
+      // The dirty-capable probe subclasses this copy, the one the close
+      // path's instanceof check sees.
+      export { WorkshopPart } from "@workshop/platform/workshop-part";
       export {
         initZones,
         openInZone,
@@ -57,6 +67,7 @@ const bundle = await esbuild.build({
       export { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
       export { restoreLayout, buildLayoutEnvelope } from "./src/parts/layout/layout-persistence.ts";
       export { applyLayoutOrDefault } from "./src/parts/layout/layout-boot.ts";
+      export { closeActiveEditor } from "./src/parts/layout/panel-close.ts";
       export { Commands } from "@workshop/platform/command-registry";
       export { MenuId, Menus } from "@workshop/platform/menu-registry";
       export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
@@ -135,6 +146,8 @@ const {
   registerPanelFactory,
   isPanelType,
   panelTypeEntry,
+  resolvePanelContent,
+  WorkshopPart,
   initZones,
   openInZone,
   panelIdFor,
@@ -147,6 +160,7 @@ const {
   restoreLayout,
   buildLayoutEnvelope,
   applyLayoutOrDefault,
+  closeActiveEditor,
   Commands,
   MenuId,
   Menus,
@@ -281,10 +295,12 @@ check(
 
 // --- The generic tab: closable variants get an X and a menu ---------------------
 
-// The core registers no tab-menu row, so the test places one the way a
-// feature contribution does.
+// The core's own tab-menu rows are Close and Close Others, from the
+// layout contribution; the test places one more the way a feature
+// contribution does.
 Commands.register("test.tabRow", { title: "Tab Row", run() {} });
 Menus.appendMenuItem(MenuId.EditorTitleContext, { command: "test.tabRow" });
+const TAB_MENU_ROWS = ["test.tabRow", "workbench.action.closeActiveEditor", "workbench.action.closeOtherEditors"].join("|");
 
 const closeButtonOf = (panel) => panel.view.tab.element.querySelector(".dv-default-tab-action");
 /** The shown tab menu's row keys after a right-click on the panel's tab, or null when none opened. */
@@ -310,7 +326,7 @@ for (const [name, panel] of [
   ["the custom type", custom],
 ]) {
   check(`${name} shows a close button`, closeButtonOf(panel)?.getAttribute("aria-label") === "Close");
-  check(`${name} opens the tab menu on right-click`, tabMenuRows(panel)?.join("|") === "test.tabRow");
+  check(`${name} opens the tab menu on right-click`, tabMenuRows(panel)?.join("|") === TAB_MENU_ROWS);
 }
 check("the closable: false variant shows no close button", closeButtonOf(pinned) === null);
 check("the closable: false variant opens no tab menu", tabMenuRows(pinned) === null);
@@ -415,6 +431,92 @@ await Commands.execute("workbench.action.toggleAuxiliaryBar");
 check(
   "the next toggle hides the right anchor's group",
   bare.getPanel("probe")?.group.api.isVisible === false && contextKeys.getValue("auxiliaryBarVisible") === false,
+);
+
+// --- Closing through the layout core ----------------------------------------------
+
+// The bundle holds no editor contribution, so every close below runs the
+// layout core's own path.
+const closing = createDock(window.document.createElement("div"));
+initZones(closing);
+resetZones();
+
+const xProbe = openInZone("probe", { instance: "x" });
+const keyProbe = openInZone("probe", { instance: "delete" });
+await flush();
+closeButtonOf(xProbe)?.click();
+await flush();
+check("a closable probe tab's X closes its panel", closing.getPanel(xProbe.id) === undefined);
+const keyWrapper = keyProbe.view.tab.element.parentElement;
+keyWrapper?.focus();
+keyWrapper?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }));
+await flush();
+check("Delete on a focused probe tab closes its panel", closing.getPanel(keyProbe.id) === undefined);
+
+// A part that is not an editor, with a settable dirty flag and a
+// scriptable confirmClose(), so Close Others' re-check reads isDirty().
+class DirtyProbePart extends WorkshopPart {
+  dirty = false;
+  confirms = 0;
+  onConfirm = () => true;
+  create() {}
+  isDirty() {
+    return this.dirty;
+  }
+  confirmClose() {
+    this.confirms += 1;
+    return Promise.resolve(this.onConfirm());
+  }
+}
+const dirtyFeature = {
+  register() {
+    registerPanelFactory("dirty", () => new DirtyProbePart());
+  },
+};
+registerPanelType({ type: "dirty", title: "Dirty", defaultZone: "main", load: () => Promise.resolve(dirtyFeature) });
+
+const target = openInZone("custom", { name: "target" });
+const cleanFirst = openInZone("dirty", { instance: "first" });
+const dirtiesFirst = openInZone("dirty", { instance: "second" });
+await flush();
+const firstPart = resolvePanelContent(cleanFirst.view.content);
+const secondPart = resolvePanelContent(dirtiesFirst.view.content);
+secondPart.onConfirm = () => {
+  firstPart.dirty = true;
+  return true;
+};
+const batch = [target, cleanFirst, dirtiesFirst];
+const sameGroup = batch.every((panel) => panel.group === target.group);
+const ran = await Commands.execute("workbench.action.closeOtherEditors", { panelId: target.id });
+await flush();
+check(
+  "Close Others asks each probe and keeps the group open when one confirmed clean turns dirty",
+  sameGroup &&
+    ran === true &&
+    firstPart.confirms === 1 &&
+    secondPart.confirms === 1 &&
+    batch.every((panel) => closing.getPanel(panel.id) === panel),
+);
+
+// closeActiveEditor resolves true only when it closed the panel.
+secondPart.onConfirm = () => false;
+check(
+  "closeActiveEditor resolves false when the part refuses, leaving the panel open",
+  (await closeActiveEditor({ panelId: dirtiesFirst.id })) === false && closing.getPanel(dirtiesFirst.id) === dirtiesFirst,
+);
+const closingPinned = openInZone("pinned", {});
+await flush();
+check(
+  "closeActiveEditor resolves false for a closable: false panel, leaving it open",
+  (await closeActiveEditor({ panelId: closingPinned.id })) === false && closing.getPanel(closingPinned.id) === closingPinned,
+);
+check(
+  "closeActiveEditor resolves false for a panelId naming no open panel",
+  (await closeActiveEditor({ panelId: "probe:never-opened" })) === false,
+);
+check(
+  "closeActiveEditor resolves true when the part confirms and the panel closes",
+  (await closeActiveEditor({ panelId: cleanFirst.id })) === true && closing.getPanel(cleanFirst.id) === undefined,
 );
 
 if (failures.length > 0) {

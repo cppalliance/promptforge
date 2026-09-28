@@ -9,6 +9,13 @@
 // auxiliaryBarVisible. The key binds with a visible-by-default value on
 // first toggle; the workspace directory's register() binds it at chunk
 // load so the Appearance checkbox reads true from first paint.
+//
+// Close and Close Others run the layout core's close path in
+// panel-close.ts over every panel type, so Close keeps the bare
+// activeEditor precondition. Both take an optional { panelId } argument
+// naming the panel to act on, else the active one; the generic tab menu
+// passes the clicked tab's. Its Close row is appended directly so it
+// reads Close, not the command's Close Editor.
 
 import type { IDisposable } from "@workshop/platform/lifecycle";
 import { registerAction, type ActionDescriptor } from "@workshop/platform/action-registry";
@@ -16,9 +23,11 @@ import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { LAYOUT_POLICY } from "../../services/layout-policy";
-import { MenuId } from "@workshop/platform/menu-registry";
+import { KeybindingWeight } from "@workshop/platform/keybinding-registry";
+import { MenuId, Menus } from "@workshop/platform/menu-registry";
 import { panelTypeEntry } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
+import { closeActiveEditor, closeOtherEditors } from "./panel-close";
 import { openInZone, toggleZoneVisibility } from "./zones";
 
 /** The Appearance flyout's id; the menubar contribution declares the submenu. */
@@ -60,4 +69,29 @@ addAction({
     }
     setVisibilityKey("auxiliaryBarVisible", visible);
   },
+});
+
+addAction({
+  id: "workbench.action.closeActiveEditor",
+  title: "Close Editor",
+  f1: true,
+  precondition: "activeEditor",
+  keybinding: { keybinding: "ctrlcmd+f4", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
+  menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 2 }],
+  run: async (arg?: unknown) => {
+    await closeActiveEditor(arg);
+  },
+});
+Menus.appendMenuItem(MenuId.EditorTitleContext, {
+  command: "workbench.action.closeActiveEditor",
+  title: "Close",
+  group: "1_close",
+  order: 1,
+});
+
+addAction({
+  id: "workbench.action.closeOtherEditors",
+  title: "Close Others",
+  menu: [{ id: MenuId.EditorTitleContext, group: "1_close", order: 2 }],
+  run: (arg?: unknown) => closeOtherEditors(arg),
 });

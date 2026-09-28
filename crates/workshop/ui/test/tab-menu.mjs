@@ -3,7 +3,8 @@
 // through panel-types.ts), the menu widget's context overlay
 // (src/parts/menu/menu.ts), the EditorTitleContext rows the editor and
 // stub contributions register, and the confirm-then-close path the X and
-// the Close row share (src/parts/editor/editor-commands.ts). Mounts a real
+// the Close row share (src/parts/layout/panel-close.ts, registered by
+// layout.contribution.ts). Mounts a real
 // Dockview dock in jsdom with synthetic panel types - "doc" builds a real
 // EditorPanel over a stub surface and stub file I/O, "agent", "probe" and
 // "side" are bare WorkshopParts, and "pinned" registers closable: false -
@@ -34,6 +35,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/editor/editor.contribution.ts";
+      import "./src/parts/layout/layout.contribution.ts";
       import "./src/parts/menu/stubs.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export { registerPanelFactory, registerPanelType, resolvePanelContent } from "@workshop/platform/panel-registry";

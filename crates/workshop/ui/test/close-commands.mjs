@@ -1,8 +1,8 @@
 // Integration test for the confirm-then-close path: WorkshopPart's default
 // confirmClose (@workshop/platform/workshop-part.ts), the editor's
 // unsaved-changes confirmation (src/parts/editor/editor-panel.ts), and the
-// Close and Close Others commands (src/parts/editor/editor-commands.ts,
-// registered by editor.contribution.ts). Mounts a real Dockview dock in
+// Close and Close Others commands (src/parts/layout/panel-close.ts,
+// registered by layout.contribution.ts). Mounts a real Dockview dock in
 // jsdom with synthetic panel types - "doc" builds a real EditorPanel over a
 // stub surface and stub file I/O, "probe" is a bare WorkshopPart, "plain"
 // is a renderer that is not a WorkshopPart, and "pinned" registers
@@ -35,6 +35,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       import "./src/parts/editor/editor.contribution.ts";
+      import "./src/parts/layout/layout.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export {
         registerPanelFactory,
