@@ -4,8 +4,9 @@
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
 // real index.html, and drives the public API. Covers: the agent-session
 // and Workshop panels mount through the registry; the agent panel is a
-// singleton whose reopen focuses it; every panel renders a normal chip
-// tab and the Workshop tree's tab has no close button; the tree requests
+// singleton whose reopen focuses it; every panel renders the generic chip
+// tab, the Workshop tree's has no close button, and the agent's opens the
+// registry tab menu on right-click; the tree requests
 // directory paths from /workspace/tree and never file contents;
 // openInZone places panels by affinity and honors per-panel overrides; a
 // zone group is rebuilt empty after its last panel closes and the next
@@ -41,7 +42,7 @@ const bundle = await esbuild.build({
         setZoneOverride,
         zoneOfPanel,
       } from "./src/parts/layout/zones.ts";
-      export { createPanelComponent, createPanelTabComponent, isPanelType } from "./src/parts/layout/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent, isPanelType, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -227,6 +228,7 @@ const {
   createPanelComponent,
   createPanelTabComponent,
   isPanelType,
+  PANEL_TAB,
 } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -254,6 +256,7 @@ const fileCalls = () => calls.filter((url) => url.startsWith("/workspace/file"))
 const dock = createDockview(window.document.getElementById("dock"), {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,
   hideBorders: true,
@@ -302,19 +305,22 @@ agentTab.dispatchEvent(
     clientY: 30,
   }),
 );
-const agentTabMenu = window.document.querySelector(".menu-popup");
-const agentTabMenuLabels = [...(agentTabMenu?.querySelectorAll(".menu-item__label") ?? [])]
+const shownTabMenus = () =>
+  [...window.document.querySelectorAll(".ws-window-titlebar__popover")].filter((popover) => !popover.hidden);
+const agentTabMenuLabels = [...(shownTabMenus()[0]?.querySelectorAll(".ws-window-titlebar__item-label") ?? [])]
   .map((label) => label.textContent)
   .join(",");
 check(
-  "right-clicking an agent tab opens the SPA context menu",
+  `right-clicking an agent tab opens the registry tab menu (got: ${agentTabMenuLabels})`,
   agentTabMenuLabels === "Close,Close Others",
 );
 window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
-check("an outside pointer closes the agent tab menu", !window.document.querySelector(".menu-popup"));
+check("an outside pointer closes the agent tab menu", shownTabMenus().length === 0);
+treeTab.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+check("right-clicking the tree tab opens no menu", shownTabMenus().length === 0);
 treePanel.api.setTitle("Renamed");
 check(
-  "the permanent tab follows title changes",
+  "the tree tab follows title changes",
   treeTab.querySelector(".dv-default-tab-content")?.textContent === "Renamed",
 );
 treePanel.api.setTitle("Workshop");

@@ -6,7 +6,8 @@
 // distinct from Digit0), the pure resolver's NoMatchingKb /
 // MoreChordsNeeded / KbFound outcomes with when filtering and weight
 // tiers, and the registry's mac/linux overrides, disposable
-// unregistration, and per-platform lookupKeybinding labels. Bundles the
+// unregistration, and per-platform lookupKeybinding labels, which a
+// context lookup steers to the first rule whose when passes. Bundles the
 // modules with esbuild and drives them.
 // Run: node --test test/keybindings.mjs (from crates/workshop/platform).
 import path from "node:path";
@@ -286,6 +287,18 @@ check("KeybindingWeight defines the VS Code tiers", KeybindingWeight.EditorCore 
   const label = registry.lookupKeybinding("chrome.resetZoom");
   check("lookupKeybinding labels the first registered rule", label !== undefined && label.getLabel() === "Ctrl+NumPad0");
   check("lookupKeybinding is undefined for an unknown command", registry.lookupKeybinding("nope") === undefined);
+}
+{
+  // A context lookup picks the first rule whose when passes, else the first registered.
+  const registry = createKeybindingsRegistry("windows");
+  registry.registerKeybindingRule({ id: "tab.close", keybinding: "ctrl+f4", when: "editorTextFocus" });
+  registry.registerKeybindingRule({ id: "tab.close", keybinding: "ctrl+w", when: "activeEditor == 'agent'" });
+  const values = new Map([["activeEditor", "agent"]]);
+  const label = (context) => registry.lookupKeybinding("tab.close", context)?.getLabel();
+  check("a context lookup labels the first rule its when passes", label((key) => values.get(key)) === "Ctrl+W");
+  values.set("activeEditor", "editor");
+  check("a context no rule passes falls back to the first registered rule", label((key) => values.get(key)) === "Ctrl+F4");
+  check("a lookup without context labels the first registered rule", label(undefined) === "Ctrl+F4");
 }
 {
   const macRegistry = createKeybindingsRegistry("mac");

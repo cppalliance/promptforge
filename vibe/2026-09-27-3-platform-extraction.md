@@ -600,7 +600,7 @@ Five components, built in dependency order. The first four are each useful on th
 
 <step-7>
 
-### Step 7: Replace the tab classes with one generic tab and a registry-driven tab menu
+### Step 7: Replace the tab classes with one generic tab and a registry-driven tab menu [completed]
 
 - Component: generic tab and tab menu
 - Piece: tab surface. Built last in this component, jointly in one commit: the tab, its menu, the rows and the removal of the old tabs land together, because an interim inline menu would let editor tabs close unsaved work without a prompt, and a split would drop the agent tab's menu.

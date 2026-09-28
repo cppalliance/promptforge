@@ -1,7 +1,7 @@
 // Integration test for layout boot, persistence, and shortcuts
 // (src/parts/layout/layout-persistence.ts, src/parts/layout/layout-boot.ts,
 // the keybinding dispatcher resolving the contribution surface's chords,
-// the zone-state serialization in zones.ts, and EditorPanel.requestClose).
+// the zone-state serialization in zones.ts, and EditorPanel.confirmClose).
 // Bundles the modules with esbuild, mounts real Dockview docks in jsdom
 // against the real index.html, and drives the public API with a fake
 // UI-state adapter (test/helpers/ui-storage.mjs) standing in for the
@@ -11,7 +11,7 @@
 // into one debounced write; a mid-session restore (the Open path) writes
 // nothing while the next real change still saves; a throwing writer is
 // logged, never escapes;
-// stale schema versions (1 and 2) are rejected; a null, non-object,
+// stale schema versions (1, 2, and 4) are rejected; a null, non-object,
 // version-mismatched, or unloadable envelope falls back to defaults;
 // applyLayoutOrDefault seeds the registered layout policy (the product's
 // shape: tree left, agent right) from null, clearing a live dock's panels
@@ -36,13 +36,14 @@ const bundle = await esbuild.build({
     contents: `
       export { createDockview, themeDark } from "dockview";
       export {
+        bindActiveEditorKey,
         initZones,
         openInZone,
         panelIdFor,
         resetZones,
         zoneOfPanel,
       } from "./src/parts/layout/zones.ts";
-      export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
       export {
         restoreLayout,
         buildLayoutEnvelope,
@@ -224,6 +225,7 @@ await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,
   themeDark,
+  bindActiveEditorKey,
   initZones,
   openInZone,
   panelIdFor,
@@ -231,6 +233,7 @@ const {
   zoneOfPanel,
   createPanelComponent,
   createPanelTabComponent,
+  PANEL_TAB,
   restoreLayout,
   buildLayoutEnvelope,
   startLayoutPersistence,
@@ -284,6 +287,7 @@ function createDock(element) {
   return createDockview(element, {
     createComponent: createPanelComponent,
     createTabComponent: createPanelTabComponent,
+    defaultTabComponent: PANEL_TAB,
     theme: themeDark,
     disableFloatingGroups: true,
     hideBorders: true,
@@ -317,6 +321,7 @@ const dockEl = window.document.getElementById("dock");
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,
   hideBorders: true,
@@ -455,6 +460,8 @@ check("the debounced write omits the lock state",
 // the physical key's code.
 const dispatcher = new KeybindingDispatcher();
 const contextKeys = getService(CONTEXT_KEY_SERVICE);
+// Save and Close are gated on activeEditor, which main.ts binds to the dock.
+bindActiveEditorKey(dock2);
 const press = (key, code, options = {}) =>
   window.document.body.dispatchEvent(
     new window.KeyboardEvent("keydown", { key, code, ctrlKey: true, bubbles: true, cancelable: true, ...options }),
@@ -522,8 +529,9 @@ openInZone("agent", {});
 openInZone("tree", {});
 check("the non-object fallback mounts the default layout", dock3.panels.length === 2);
 
-// Stale schema versions are rejected: v1 (the locked-era envelope) and
-// v2 (before panels serialized their tabComponent).
+// Stale schema versions are rejected: v1 (the locked-era envelope), v2
+// (before panels serialized their tab component), and v4 (panels naming
+// the per-type tab components the generic tab replaced).
 const dock4 = createDock(window.document.createElement("div"));
 initZones(dock4);
 check("a version 1 snapshot fails the restore",
@@ -531,6 +539,8 @@ check("a version 1 snapshot fails the restore",
     false);
 check("a version 2 snapshot fails the restore",
   restoreLayout(dock4, { version: 2, zones: {}, overrides: {}, layout: { grid: {} } }) === false);
+check("a version 4 snapshot fails the restore",
+  restoreLayout(dock4, { ...envelope, version: 4 }) === false && dock4.panels.length === 0);
 
 // A structurally valid envelope whose layout fromJSON rejects.
 const dock5 = createDock(window.document.createElement("div"));
@@ -668,7 +678,7 @@ check("the unloadable-layout fallback mounts the default layout", dock5.panels.l
     dockBad.panels.length === 2 && dockBad.groups.length === 2 && !!dockBad.getPanel("tree"));
 }
 
-// --- EditorPanel.requestClose: the dirty close prompt ---------------------
+// --- EditorPanel.confirmClose: the dirty close prompt ---------------------
 
 function createStubSurface() {
   const listeners = new Set();
@@ -707,30 +717,39 @@ function createStubSurface() {
   };
 }
 
-function fakeParameters(path, onClose) {
-  return { params: { path }, api: { setTitle() {}, close: onClose } };
+function fakeParameters(path) {
+  return { params: { path }, api: { setTitle() {} } };
 }
 
-// A clean panel closes without a prompt.
-let cleanClosed = false;
-const cleanPanel = new EditorPanel({ createSurface: () => createStubSurface() });
-cleanPanel.init(fakeParameters(`${ROOT}\\clean.txt`, () => { cleanClosed = true; }));
-await flush();
-cleanPanel.requestClose();
-check("closing a clean editor skips the prompt",
-  cleanClosed && cleanPanel.element.querySelector(".ws-editor-close-overlay") === null);
+// The answer confirmClose() has settled on, or null while it is pending.
+function watchAnswer(promise) {
+  const watch = { answer: null };
+  void promise.then((confirmed) => {
+    watch.answer = confirmed;
+  });
+  return watch;
+}
 
-// A dirty panel prompts; Cancel keeps it, Discard closes it.
-let dirtyClosed = false;
+// A clean panel confirms without a prompt.
+const cleanPanel = new EditorPanel({ createSurface: () => createStubSurface() });
+cleanPanel.init(fakeParameters(`${ROOT}\\clean.txt`));
+await flush();
+const cleanClose = watchAnswer(cleanPanel.confirmClose());
+await flush();
+check("closing a clean editor skips the prompt",
+  cleanClose.answer === true && cleanPanel.element.querySelector(".ws-editor-close-overlay") === null);
+
+// A dirty panel prompts; Cancel keeps it, Discard lets it close.
 const dirtyStub = createStubSurface();
 const dirtyPanel = new EditorPanel({ createSurface: () => dirtyStub });
-dirtyPanel.init(fakeParameters(`${ROOT}\\dirty.txt`, () => { dirtyClosed = true; }));
+dirtyPanel.init(fakeParameters(`${ROOT}\\dirty.txt`));
 await flush();
 window.document.body.appendChild(dirtyPanel.element);
 dirtyStub.type("unsaved\n");
-dirtyPanel.requestClose();
+const cancelClose = watchAnswer(dirtyPanel.confirmClose());
+await flush();
 const closeOverlay = dirtyPanel.element.querySelector(".ws-editor-close-overlay");
-check("closing a dirty editor prompts instead of closing", !dirtyClosed && !!closeOverlay);
+check("closing a dirty editor prompts instead of closing", cancelClose.answer === null && !!closeOverlay);
 check("the close prompt is a modal dialog",
   closeOverlay?.querySelector(".ws-editor-close")?.getAttribute("role") === "dialog" &&
     closeOverlay.querySelector(".ws-editor-close")?.getAttribute("aria-modal") === "true");
@@ -739,29 +758,32 @@ const closeButton = (label) =>
     (button) => button.textContent === label,
   );
 closeButton("Cancel").click();
+await flush();
 check("Cancel keeps the dirty editor open",
-  !dirtyClosed && dirtyPanel.element.querySelector(".ws-editor-close-overlay") === null);
+  cancelClose.answer === false && dirtyPanel.element.querySelector(".ws-editor-close-overlay") === null);
 check("Cancel leaves the editor dirty", dirtyPanel.isDirty());
-dirtyPanel.requestClose();
+const discardClose = watchAnswer(dirtyPanel.confirmClose());
+await flush();
 closeButton("Discard").click();
-check("Discard closes the dirty editor", dirtyClosed);
+await flush();
+check("Discard closes the dirty editor", discardClose.answer === true);
 
-// Save writes, then closes once the write succeeds.
-let saveClosed = false;
+// Save writes, then confirms once the write succeeds.
 const saveStub = createStubSurface();
 const savePanel = new EditorPanel({ createSurface: () => saveStub });
-savePanel.init(fakeParameters(`${ROOT}\\save.txt`, () => { saveClosed = true; }));
+savePanel.init(fakeParameters(`${ROOT}\\save.txt`));
 await flush();
 saveStub.type("keep me\n");
 const putsBeforeDialogSave = puts.length;
-savePanel.requestClose();
+const saveClose = watchAnswer(savePanel.confirmClose());
+await flush();
 [...savePanel.element.querySelectorAll(".ws-editor-close__button")]
   .find((button) => button.textContent === "Save")
   .click();
 await flush();
 check("Save writes the dirty editor's text",
   puts.length === putsBeforeDialogSave + 1 && puts.at(-1).text === "keep me\n");
-check("Save closes the editor once the write succeeds", saveClosed && !saveStub.isDirty());
+check("Save closes the editor once the write succeeds", saveClose.answer === true && !saveStub.isDirty());
 
 if (failures.length > 0) {
   console.error(`workshop-layout: ${failures.length} failure(s)`);

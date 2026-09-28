@@ -62,8 +62,6 @@ export interface PanelTypeEntry {
    * recoverable by splitting at the first colon.
    */
   readonly panelId?: (params: PanelParams) => string;
-  /** The named tab renderer, or undefined for Dockview's default tab. */
-  readonly tabComponent?: string;
   /** Loads the feature directory's barrel; esbuild splits it into a chunk. */
   readonly load: () => Promise<PanelFeatureModule>;
 }

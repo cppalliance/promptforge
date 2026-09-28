@@ -8,7 +8,7 @@
 // against jsdom with a synthetic lazy feature
 // (test/helpers/lazy-feature.mjs). Covers: the feature panel types'
 // metadata as their contribution modules register it (zone affinity,
-// title, tab renderer), isPanelType narrowing, the unknown-name placeholder, lazy
+// title, closability), isPanelType narrowing, the unknown-name placeholder, lazy
 // mount with init params forwarded, register-once semantics, disposal
 // reaching the real panel, and the registration outliving the panel.
 // Run: node test/panel-registry.mjs
@@ -54,11 +54,10 @@ const bundle = await esbuild.build({
         type: "fake",
         defaultZone: "main",
         title: "Fake",
-        tabComponent: undefined,
         load: () => import("./test/helpers/lazy-feature.mjs"),
       });
       export { registerPanelType, isPanelType, panelTypeEntry } from "@workshop/platform/panel-registry";
-      export { createPanelComponent, PERMANENT_TAB, AGENT_TAB, RUN_TAB } from "./src/parts/layout/panel-types.ts";
+      export { createPanelComponent } from "./src/parts/layout/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -82,9 +81,6 @@ const {
   registerPanelType,
   isPanelType,
   panelTypeEntry,
-  PERMANENT_TAB,
-  AGENT_TAB,
-  RUN_TAB,
   createPanelComponent,
 } = await import(pathToFileURL(bundlePath).href);
 
@@ -105,16 +101,15 @@ const editorTitle = panelTypeEntry("editor")?.title;
 const editorPanelId = panelTypeEntry("editor")?.panelId;
 const runTitle = panelTypeEntry("run")?.title;
 check(
-  "the tree anchors the left zone with the permanent, closeless tab",
+  "the tree anchors the left zone and is not closable",
   panelTypeEntry("tree")?.defaultZone === "left" &&
     panelTypeEntry("tree")?.title === "Workshop" &&
-    panelTypeEntry("tree")?.closable === false &&
-    panelTypeEntry("tree")?.tabComponent === PERMANENT_TAB,
+    panelTypeEntry("tree")?.closable === false,
 );
 check(
-  "the editor opens in the main zone with the default tab",
+  "the editor opens in the main zone and is closable",
   panelTypeEntry("editor")?.defaultZone === "main" &&
-    panelTypeEntry("editor")?.tabComponent === undefined,
+    panelTypeEntry("editor")?.closable !== false,
 );
 check(
   "the editor titles by base name, else Editor",
@@ -135,15 +130,14 @@ check(
     panelTypeEntry("config")?.title === "Gateway Config",
 );
 check(
-  "the agent session opens in the right zone with its own tab",
+  "the agent session opens in the right zone and is closable",
   panelTypeEntry("agent")?.defaultZone === "right" &&
     panelTypeEntry("agent")?.title === "Agent Session" &&
-    panelTypeEntry("agent")?.tabComponent === AGENT_TAB,
+    panelTypeEntry("agent")?.closable !== false,
 );
 check(
   "the Run window opens in the main zone, titled after its file",
   panelTypeEntry("run")?.defaultZone === "main" &&
-    panelTypeEntry("run")?.tabComponent === RUN_TAB &&
     typeof runTitle === "function" &&
     runTitle({ path: "C:\\project\\p.md" }) === "Run: p.md" &&
     runTitle({}) === "Run",

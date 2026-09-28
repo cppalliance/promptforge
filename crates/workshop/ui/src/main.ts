@@ -45,7 +45,7 @@ import { register as registerWorkspaceDocument } from "./parts/workspace-documen
 import { persistZoom, restoreZoom } from "./parts/chrome/zoom";
 import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
-import { createPanelComponent, createPanelTabComponent } from "./parts/layout/panel-types";
+import { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./parts/layout/panel-types";
 import { bindActiveEditorKey, initZones, openInZone } from "./parts/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
@@ -229,13 +229,15 @@ registerService(LAYOUT_POLICY, () => ({
 // affinity (tree left, editors main, the agent session right). The
 // workbench is always unlocked: user drags rearrange panels at any time,
 // and the zone registry records the placement overrides. Every panel
-// renders a normal chip tab (no singleTabMode: a lone tab stretched
+// renders the generic chip tab (no singleTabMode: a lone tab stretched
 // full-width reads as a second title bar and hides that tabs exist at
-// all); the Workshop tree's tab comes from the close-button-free renderer.
+// all), which drops the close button and tab menu for a type registered
+// closable: false, the Workshop tree.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,
   hideBorders: true,

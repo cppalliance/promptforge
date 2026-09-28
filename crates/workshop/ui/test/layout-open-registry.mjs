@@ -9,7 +9,10 @@
 // opens in its default zone with its static title; the `instance` param
 // keys side-by-side instances and reopening one reveals it; a custom
 // panelId and title function govern identity and the tab title; a
-// `closable: false` type opens and keeps the flag; ids holding a Windows
+// `closable: false` type opens and keeps the flag; the generic tab gives
+// every closable variant a close button and a right-click menu over a
+// test-only tab-menu row, and the `closable: false` variant neither, before
+// and after a restore; ids holding a Windows
 // drive colon still resolve their type; save-then-restore brings every
 // panel back with its params, title, and zone; a duplicate registration
 // throws; and a registered layout policy over the synthetic types (left
@@ -51,10 +54,11 @@ const bundle = await esbuild.build({
         setZoneOverride,
         zoneOfPanel,
       } from "./src/parts/layout/zones.ts";
-      export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
       export { restoreLayout, buildLayoutEnvelope } from "./src/parts/layout/layout-persistence.ts";
       export { applyLayoutOrDefault } from "./src/parts/layout/layout-boot.ts";
       export { Commands } from "@workshop/platform/command-registry";
+      export { MenuId, Menus } from "@workshop/platform/menu-registry";
       export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
       export { getService, registerService } from "@workshop/platform/service-registry";
       export { LAYOUT_POLICY } from "./src/services/layout-policy.ts";
@@ -139,10 +143,13 @@ const {
   zoneOfPanel,
   createPanelComponent,
   createPanelTabComponent,
+  PANEL_TAB,
   restoreLayout,
   buildLayoutEnvelope,
   applyLayoutOrDefault,
   Commands,
+  MenuId,
+  Menus,
   CONTEXT_KEY_SERVICE,
   getService,
   registerService,
@@ -167,6 +174,7 @@ function createDock(element) {
   return createDockview(element, {
     createComponent: createPanelComponent,
     createTabComponent: createPanelTabComponent,
+    defaultTabComponent: PANEL_TAB,
     theme: themeDark,
     disableFloatingGroups: true,
     hideBorders: true,
@@ -271,6 +279,42 @@ check(
   openInZone("probe", { instance: "a" }) === first && dock.panels.length === 5,
 );
 
+// --- The generic tab: closable variants get an X and a menu ---------------------
+
+// The core registers no tab-menu row, so the test places one the way a
+// feature contribution does.
+Commands.register("test.tabRow", { title: "Tab Row", run() {} });
+Menus.appendMenuItem(MenuId.EditorTitleContext, { command: "test.tabRow" });
+
+const closeButtonOf = (panel) => panel.view.tab.element.querySelector(".dv-default-tab-action");
+/** The shown tab menu's row keys after a right-click on the panel's tab, or null when none opened. */
+function tabMenuRows(panel) {
+  panel.view.tab.element.dispatchEvent(
+    new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }),
+  );
+  const shown = [...window.document.querySelectorAll(".ws-window-titlebar__popover")].filter(
+    (popover) => !popover.hidden,
+  );
+  window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+  if (shown.length === 0) {
+    return null;
+  }
+  return shown.flatMap((popover) =>
+    [...popover.querySelectorAll(".ws-window-titlebar__item")].map((row) => row.dataset.menuRowKey),
+  );
+}
+
+for (const [name, panel] of [
+  ["the singleton probe", single],
+  ["a probe instance", first],
+  ["the custom type", custom],
+]) {
+  check(`${name} shows a close button`, closeButtonOf(panel)?.getAttribute("aria-label") === "Close");
+  check(`${name} opens the tab menu on right-click`, tabMenuRows(panel)?.join("|") === "test.tabRow");
+}
+check("the closable: false variant shows no close button", closeButtonOf(pinned) === null);
+check("the closable: false variant opens no tab menu", tabMenuRows(pinned) === null);
+
 // --- Windows ids split at the first colon ---------------------------------------
 
 const windowsId = panelIdFor("custom", { name: "C:\\dir\\f.txt" });
@@ -306,6 +350,10 @@ check(
   zoneOfPanel(relaunched.getPanel("probe:a")) === "right" &&
     zoneOfPanel(relaunched.getPanel("custom:x")) === "main" &&
     zoneOfPanel(relaunched.getPanel("pinned")) === "left",
+);
+check(
+  "restored tabs keep the closable rule",
+  closeButtonOf(relaunched.getPanel("probe:a")) !== null && closeButtonOf(relaunched.getPanel("pinned")) === null,
 );
 
 // --- A registered layout policy the core never names ----------------------------

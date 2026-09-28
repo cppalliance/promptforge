@@ -453,36 +453,19 @@ export class EditorPanel extends WorkshopPart {
    */
   override confirmClose(): Promise<boolean> {
     return new Promise((resolve) => {
-      this.askToClose(resolve);
-    });
-  }
-
-  /**
-   * Confirms, then closes: a clean panel closes at once, a dirty one once
-   * the unsaved-changes dialog agrees.
-   */
-  requestClose(): void {
-    this.askToClose((confirmed) => {
-      if (confirmed) {
-        this.panelApi?.close();
+      if (!this.surface.isDirty()) {
+        resolve(true);
+        return;
       }
-    });
-  }
-
-  /** The confirmation behind confirmClose and requestClose; calls `answer` once. */
-  private askToClose(answer: (confirmed: boolean) => void): void {
-    if (!this.surface.isDirty()) {
-      answer(true);
-      return;
-    }
-    if (this.closePending) {
-      answer(false);
-      return;
-    }
-    this.closePending = true;
-    this.showCloseDialog((confirmed) => {
-      this.closePending = false;
-      answer(confirmed);
+      if (this.closePending) {
+        resolve(false);
+        return;
+      }
+      this.closePending = true;
+      this.showCloseDialog((confirmed) => {
+        this.closePending = false;
+        resolve(confirmed);
+      });
     });
   }
 

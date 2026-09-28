@@ -24,14 +24,12 @@ import { MenuId } from "@workshop/platform/menu-registry";
 import { DOCK, registerPanelType } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { baseName } from "../../base/paths";
-import { RUN_TAB } from "../layout/panel-types";
 import { openInZone } from "../layout/zones";
 
 registerPanelType({
   type: "run",
   title: (params) => (typeof params.path === "string" ? `Run: ${baseName(params.path)}` : "Run"),
   defaultZone: "main",
-  tabComponent: RUN_TAB,
   load: () => import("./index"),
 });
 

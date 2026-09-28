@@ -332,7 +332,7 @@ dock.removePanel(editorB);
 await flush();
 check("the main zone survives the editor's close as an empty group", zoneGroup(dock, "main")?.panels.length === 0);
 const envelope = JSON.parse(JSON.stringify(buildLayoutEnvelope(dock)));
-check("the envelope reports schema version 4", envelope.version === 4);
+check("the envelope reports schema version 5", envelope.version === 5);
 check(
   "the envelope's panels omit placeholder ids",
   !Object.keys(envelope.layout.panels).some((id) => id.startsWith("placeholder:")),

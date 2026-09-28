@@ -3,7 +3,9 @@
 // after bundling every contribution module - the menubar and stub
 // tables from this step plus the feature contributions from steps
 // 13-19. Covers: the eight top-level menus in order; every spec row in
-// its menu and group, in spec render order within each menu; every
+// its menu and group, in spec render order within each menu, the editor
+// tab menu and the second placement of Move Editor into New Window
+// included; every
 // wired row listed in the command palette (f1); every stub row
 // registered with precondition "false" (always disabled) and absent
 // from the palette; the constant toggled expressions on the checkable
@@ -378,6 +380,17 @@ const SPEC = {
     ["workbench.action.openProcessExplorer", "5_devtools", "stub", "Open Process Explorer"],
     ["workbench.action.showAboutDialog", "z_about", "wired"],
   ],
+  "editor/title/context": [
+    ["workbench.action.closeActiveEditor", "1_close", "wired", "Close"],
+    ["workbench.action.closeOtherEditors", "1_close", "wired", "Close Others"],
+    ["workbench.action.closeEditorsToTheRight", "1_close", "stub", "Close to the Right"],
+    ["workbench.action.closeUnmodifiedEditors", "1_close", "stub", "Close Saved"],
+    ["workbench.action.closeAllEditors", "1_close", "stub", "Close All"],
+    ["workbench.action.reopenWithEditor", "1_open", "stub", "Reopen Editor With..."],
+    ["workbench.action.keepEditor", "3_preview", "stub", "Keep Open"],
+    ["workbench.action.pinEditor", "3_preview", "stub", "Pin"],
+    ["workbench.action.moveEditorToNewWindow", "7_new_window", "stub", "Move Editor into New Window"],
+  ],
 };
 
 // --- Every spec row in its menu and group, in spec order ------------------------
@@ -413,8 +426,9 @@ for (const rows of Object.values(SPEC)) {
 }
 
 // Wired rows that deliberately omit f1: menu-only commands. New Run
-// Window is one menu row by design (no palette row, no keybinding).
-const WIRED_WITHOUT_F1 = new Set(["workbench.action.newRunWindow"]);
+// Window is one menu row by design (no palette row, no keybinding), and
+// Close Others is a tab-menu row acting on the clicked tab's group.
+const WIRED_WITHOUT_F1 = new Set(["workbench.action.newRunWindow", "workbench.action.closeOtherEditors"]);
 
 for (const id of wiredIds) {
   if (WIRED_WITHOUT_F1.has(id)) {

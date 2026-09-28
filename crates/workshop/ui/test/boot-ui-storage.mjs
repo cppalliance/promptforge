@@ -96,12 +96,12 @@ const USER_DOC = {
 };
 const DEFAULT_EDITOR_SETTINGS = { wordWrap: false, renderWhitespace: false, renderControlCharacters: true, columnSelection: false };
 
-// The workspace bucket (.pfwork kv rows): a v4 layout envelope as
+// The workspace bucket (.pfwork kv rows): a v5 layout envelope as
 // buildLayoutEnvelope writes it (tree left, agent right) whose group ids
 // are distinctive, so a restore is told from the default layout by the
 // zone map alone; an expanded set; a closed stack.
 const SEEDED_LAYOUT = {
-  version: 4,
+  version: 5,
   zones: { left: "seeded-left", right: "seeded-right" },
   overrides: {},
   layout: {
@@ -119,8 +119,8 @@ const SEEDED_LAYOUT = {
       orientation: "HORIZONTAL",
     },
     panels: {
-      tree: { id: "tree", contentComponent: "tree", tabComponent: "permanent", title: "Workshop" },
-      agent: { id: "agent", contentComponent: "agent", tabComponent: "agent-tab", title: "Agent Session" },
+      tree: { id: "tree", contentComponent: "tree", tabComponent: "panel-tab", title: "Workshop" },
+      agent: { id: "agent", contentComponent: "agent", tabComponent: "panel-tab", title: "Agent Session" },
     },
     activeGroup: "seeded-right",
   },

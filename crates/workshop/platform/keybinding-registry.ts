@@ -71,14 +71,15 @@ export interface KeybindingsRegistry {
   getResolver(): KeybindingResolver;
   /**
    * The display label for a command's keybinding, or undefined when no
-   * rule binds it. With several rules for one command, the first
-   * registered is the label.
+   * rule binds it. With several rules for one command, the first whose
+   * when passes against `context` is the label, else the first
+   * registered.
    */
-  lookupKeybinding(commandId: string): KeybindingLabel | undefined;
+  lookupKeybinding(commandId: string, context?: (key: string) => unknown): KeybindingLabel | undefined;
 }
 
 interface StoredRule {
-  readonly resolved: ResolvedKeybindingRule;
+  readonly resolved: ResolvedKeybindingRule & { readonly when?: ContextKeyExpression };
   readonly chords: ResolvedKeybindingRule["chords"];
 }
 
@@ -128,8 +129,11 @@ export function createKeybindingsRegistry(platform: KeybindingPlatform): Keybind
     getResolver(): KeybindingResolver {
       return new KeybindingResolver(rules.map((rule) => rule.resolved));
     },
-    lookupKeybinding(commandId: string): KeybindingLabel | undefined {
-      const found = rules.find((rule) => rule.resolved.commandId === commandId);
+    lookupKeybinding(commandId: string, context?: (key: string) => unknown): KeybindingLabel | undefined {
+      const bound = rules.filter((rule) => rule.resolved.commandId === commandId);
+      const matching =
+        context === undefined ? undefined : bound.find((rule) => rule.resolved.when?.evaluate(context) ?? true);
+      const found = matching ?? bound[0];
       if (found === undefined) {
         return undefined;
       }

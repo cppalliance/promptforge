@@ -3,7 +3,7 @@
 // not whatever the editor holds when the PUT resolves. Keystrokes typed
 // while a write is in flight must stay dirty - previously markSaved()
 // snapshotted the live text, so those keystrokes were baselined as saved
-// and requestClose() skipped the unsaved-changes prompt: silent data
+// and confirmClose() skipped the unsaved-changes prompt: silent data
 // loss. Drives the real EditorPanel with a stubbed surface and a writer
 // that stalls until the test releases it.
 // Run: node test/editor-save-race.mjs
@@ -148,8 +148,8 @@ function createStallingWriter() {
   };
 }
 
-function fakeParameters(filePath, onClose) {
-  return { params: { path: filePath }, api: { setTitle() {}, close: onClose ?? (() => {}) } };
+function fakeParameters(filePath) {
+  return { params: { path: filePath }, api: { setTitle() {} } };
 }
 
 const readFile = async () => ({ path: FILE_PATH, size: 0, token: "t100", text: "" });
@@ -197,7 +197,6 @@ await assertNoLeaks(lifecycle, async () => {
 
   // --- The close-dialog Save path keeps the panel open while text is unsaved
 
-  let closed = false;
   const closeStub = createStubSurface();
   const closeWriter = createStallingWriter();
   const closePanel = new EditorPanel({
@@ -205,13 +204,14 @@ await assertNoLeaks(lifecycle, async () => {
     readFile,
     writeFile: closeWriter.write,
   });
-  closePanel.init(fakeParameters(FILE_PATH, () => {
-    closed = true;
-  }));
+  closePanel.init(fakeParameters(FILE_PATH));
   await flush();
 
   closeStub.type("A");
-  closePanel.requestClose();
+  let dialogAnswer = null;
+  void closePanel.confirmClose().then((confirmed) => {
+    dialogAnswer = confirmed;
+  });
   check(
     "a dirty panel opens the unsaved-changes dialog",
     closePanel.element.querySelector(".ws-editor-close-overlay") !== null,
@@ -224,14 +224,17 @@ await assertNoLeaks(lifecycle, async () => {
   closeWriter.release();
   await flush();
 
-  check("the close-dialog Save does not close while a keystroke is unsaved", !closed);
+  check("the close-dialog Save does not close while a keystroke is unsaved", dialogAnswer === false);
   check("the panel is still dirty after the close-dialog Save", closePanel.isDirty());
 
   const finishSave = closePanel.save();
   closeWriter.release();
   await finishSave;
-  closePanel.requestClose();
-  check("once fully saved, the panel closes without a prompt", closed);
+  check(
+    "once fully saved, the panel closes without a prompt",
+    (await closePanel.confirmClose()) === true &&
+      closePanel.element.querySelector(".ws-editor-close-overlay") === null,
+  );
   closePanel.dispose();
 
   // --- The saving guard does not wedge the conflict dialog's Overwrite ------

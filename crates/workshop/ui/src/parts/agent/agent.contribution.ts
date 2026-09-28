@@ -19,14 +19,12 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { MenuId } from "@workshop/platform/menu-registry";
 import { registerPanelType } from "@workshop/platform/panel-registry";
-import { AGENT_TAB } from "../layout/panel-types";
 import { openInZone } from "../layout/zones";
 
 registerPanelType({
   type: "agent",
   title: "Agent Session",
   defaultZone: "right",
-  tabComponent: AGENT_TAB,
   load: () => import("./index"),
 });
 

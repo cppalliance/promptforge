@@ -38,7 +38,6 @@ import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { RECENT_FILES_STORE } from "../../services/recent-files-store";
 import { getService } from "@workshop/platform/service-registry";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
-import { PERMANENT_TAB } from "../layout/panel-types";
 import { createFileQuickAccessProvider, createRecentMenuProvider } from "./open-recent";
 import { focusWorkshopTree, toggleWorkshopPanel } from "./workshop-panel";
 
@@ -47,7 +46,6 @@ registerPanelType({
   title: "Workshop",
   defaultZone: "left",
   closable: false,
-  tabComponent: PERMANENT_TAB,
   load: () => import("./index"),
 });
 

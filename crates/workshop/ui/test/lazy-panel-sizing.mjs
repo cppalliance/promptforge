@@ -38,7 +38,6 @@ const bundle = await esbuild.build({
         type: "sized",
         defaultZone: "main",
         title: "Sized",
-        tabComponent: undefined,
         load: () =>
           Promise.resolve({
             register() {

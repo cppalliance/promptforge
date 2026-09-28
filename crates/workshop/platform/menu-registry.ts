@@ -33,6 +33,7 @@ export const MenuId = {
   MenubarRecentMenu: "menubar/file/recent",
   CommandPalette: "commandPalette",
   CommandCenter: "commandCenter",
+  EditorTitleContext: "editor/title/context",
 } as const;
 
 /** A menu id. Plain string so features add their own. */

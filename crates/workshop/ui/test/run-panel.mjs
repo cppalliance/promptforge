@@ -1,11 +1,13 @@
-// Integration test for the Run window panel (src/parts/run/, the run tab's
-// loading shimmer in src/parts/layout/run-tab.ts, the tree's drag-out in
+// Integration test for the Run window panel (src/parts/run/, the tab's
+// loading shimmer through setTabLoading in src/parts/layout/panel-tab.ts,
+// the tree's drag-out in
 // workshop-panel.ts, and the drop-target dispatch in workspace-drops.ts).
 // Bundles the modules with esbuild, mounts a real Dockview dock in jsdom,
 // and scripts fetch for /workspace/tree, /workspace/file, /prompts/contract,
 // and /workspace/grant. Covers: the empty open; a pre-filled open reaching
 // ready with one row per contract item; the shimmer class on the tab title
-// in loading and its absence in ready and error; tree dragstart setting
+// in loading and its absence in ready and error, including after the
+// overflow list inits a second tab for the panel; tree dragstart setting
 // application/x-workshop-path and a tree drop loading the prompt; an OS
 // drop granting then loading the first .md; a Browse pick granted then
 // loading to ready; a parse failure rendering the
@@ -31,7 +33,7 @@ const bundle = await esbuild.build({
       import "./src/parts/run/run.contribution.ts";
       export { createDockview, themeDark } from "dockview";
       export { initZones, openInZone, panelIdFor, zoneOfPanel } from "./src/parts/layout/zones.ts";
-      export { createPanelComponent, createPanelTabComponent } from "./src/parts/layout/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
       export { setupWorkspaceDrops } from "./src/parts/workspace/workspace-drops.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
@@ -250,6 +252,7 @@ const {
   panelIdFor,
   createPanelComponent,
   createPanelTabComponent,
+  PANEL_TAB,
   setupWorkspaceDrops,
 } = await import(pathToFileURL(bundlePath).href);
 
@@ -281,6 +284,7 @@ function runElement(panel) {
 const dock = createDockview(window.document.getElementById("dock"), {
   createComponent: createPanelComponent,
   createTabComponent: createPanelTabComponent,
+  defaultTabComponent: PANEL_TAB,
   theme: themeDark,
   disableFloatingGroups: true,
   hideBorders: true,
@@ -319,10 +323,17 @@ check(
   filledTabContent?.classList.contains("ws-shimmer-text") === true,
 );
 check("the body stays blank while loading", filledEl?.querySelector(".ws-run-panel__rows") === null);
+// The overflow list's row renderer: a second tab for the same panel id,
+// which Dockview never disposes.
+const overflowTab = filledRun.view.createTabRenderer("headerOverflow");
+check(
+  "an overflow copy of the tab picks up the loading shimmer",
+  overflowTab.element.querySelector(".dv-default-tab-content")?.classList.contains("ws-shimmer-text") === true,
+);
 releaseDeferred(PROMPT);
 await flush();
 check(
-  "the shimmer clears on ready",
+  "the shimmer clears on ready, on the header tab and not its overflow copy",
   filledTabContent?.classList.contains("ws-shimmer-text") === false,
 );
 check(

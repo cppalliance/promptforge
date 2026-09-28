@@ -27,23 +27,40 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { appendMenuItem, MenuId } from "@workshop/platform/menu-registry";
 
-/** One stub row: a disabled command with its menu placement and shortcut label. */
-interface StubRow {
-  /** The command id, VS Code's where one is public. */
-  readonly id: string;
-  /** The row label. */
-  readonly title: string;
+/** One menu placement of a stub row. */
+interface StubPlacement {
   /** The menu the row lands in. */
-  readonly menu: MenuId;
+  readonly id: MenuId;
   /** The sort group, so separators fall where the spec has them. */
   readonly group: string;
   /** The position within the group, matching the spec's row order. */
   readonly order: number;
+}
+
+/** One stub row: a disabled command with its menu placements and shortcut label. */
+type StubRow = {
+  /** The command id, VS Code's where one is public. */
+  readonly id: string;
+  /** The row label. */
+  readonly title: string;
   /** The spec's chord, bound so the disabled row renders its label. */
   readonly keybinding?: string;
   /** The constant toggled expression on checkable rows. */
   readonly toggled?: string;
-}
+} & (
+  | {
+      /** The menu the row lands in. */
+      readonly menu: MenuId;
+      /** The sort group, so separators fall where the spec has them. */
+      readonly group: string;
+      /** The position within the group, matching the spec's row order. */
+      readonly order: number;
+    }
+  | {
+      /** Every placement of a row that lands in several menus. */
+      readonly menu: readonly StubPlacement[];
+    }
+);
 
 const stubRows = [
   // File
@@ -109,8 +126,15 @@ const stubRows = [
   { id: "workbench.action.editorActionsPositionTabBar", title: "Tab Bar", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 1, toggled: "true" },
   { id: "workbench.action.editorActionsPositionTitleBar", title: "Title Bar", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 2, toggled: "false" },
   { id: "workbench.action.editorActionsPositionHidden", title: "Hidden", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 3, toggled: "false" },
-  // View > Editor Layout
-  { id: "workbench.action.moveEditorToNewWindow", title: "Move Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 1 },
+  // View > Editor Layout (Move Editor into New Window is in the editor tab menu too)
+  {
+    id: "workbench.action.moveEditorToNewWindow",
+    title: "Move Editor into New Window",
+    menu: [
+      { id: "menubar/view/editorLayout", group: "2_new_window", order: 1 },
+      { id: MenuId.EditorTitleContext, group: "7_new_window", order: 1 },
+    ],
+  },
   { id: "workbench.action.copyEditorToNewWindow", title: "Copy Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 2, keybinding: "ctrlcmd+m o" },
   { id: "workbench.action.editorLayoutSingle", title: "Single", menu: "menubar/view/editorLayout", group: "3_layout", order: 1 },
   { id: "workbench.action.editorLayoutTwoColumns", title: "Two Columns", menu: "menubar/view/editorLayout", group: "3_layout", order: 2 },
@@ -197,6 +221,13 @@ const stubRows = [
   { id: "workbench.action.openLicenseUrl", title: "View License", menu: MenuId.MenubarHelpMenu, group: "4_license", order: 1 },
   { id: "workbench.action.toggleDevTools", title: "Toggle Developer Tools", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 1 },
   { id: "workbench.action.openProcessExplorer", title: "Open Process Explorer", menu: MenuId.MenubarHelpMenu, group: "5_devtools", order: 2 },
+  // Editor tab menu (Close and Close Others are wired by the editor contribution; the split rows wait for commands that take a target)
+  { id: "workbench.action.closeEditorsToTheRight", title: "Close to the Right", menu: MenuId.EditorTitleContext, group: "1_close", order: 3 },
+  { id: "workbench.action.closeUnmodifiedEditors", title: "Close Saved", menu: MenuId.EditorTitleContext, group: "1_close", order: 4, keybinding: "ctrlcmd+m u" },
+  { id: "workbench.action.closeAllEditors", title: "Close All", menu: MenuId.EditorTitleContext, group: "1_close", order: 5, keybinding: "ctrlcmd+m w" },
+  { id: "workbench.action.reopenWithEditor", title: "Reopen Editor With...", menu: MenuId.EditorTitleContext, group: "1_open", order: 1 },
+  { id: "workbench.action.keepEditor", title: "Keep Open", menu: MenuId.EditorTitleContext, group: "3_preview", order: 1, keybinding: "ctrlcmd+m enter" },
+  { id: "workbench.action.pinEditor", title: "Pin", menu: MenuId.EditorTitleContext, group: "3_preview", order: 2, keybinding: "ctrlcmd+m shift+enter" },
 ] satisfies readonly StubRow[];
 
 for (const row of stubRows) {
@@ -206,7 +237,7 @@ for (const row of stubRows) {
     precondition: "false",
     toggled: row.toggled,
     keybinding: row.keybinding === undefined ? undefined : { keybinding: row.keybinding },
-    menu: [{ id: row.menu, group: row.group, order: row.order }],
+    menu: typeof row.menu === "string" ? [{ id: row.menu, group: row.group, order: row.order }] : row.menu,
     run: () => {},
   });
   if (!result.ok) {

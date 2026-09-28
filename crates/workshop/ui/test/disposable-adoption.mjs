@@ -5,7 +5,7 @@
 // from the real index.html. Covers: the Menubar releasing its
 // document-level listeners and popovers, EditorPanel disposing its surface
 // child and dirty subscription, StatusBar cancelling its LED decay timer,
-// and PermanentTab dropping its title subscription (emitter delivery
+// and the generic panel tab dropping its title subscription (emitter delivery
 // stops after the root disposes). A final section drives WorkshopSocket
 // against a scripted fake WebSocket: emitter fan-out and unsubscribe, a
 // normal server close still reconnecting, and disposal closing the
@@ -34,7 +34,7 @@ const bundle = await esbuild.build({
       export { StatusBar } from "./src/parts/status/status-bar.ts";
       export { Menubar } from "./src/parts/menu/menubar.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
-      export { createPanelTabComponent, PERMANENT_TAB } from "./src/parts/layout/panel-types.ts";
+      export { createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -76,7 +76,7 @@ const {
   Menubar,
   EditorPanel,
   createPanelTabComponent,
-  PERMANENT_TAB,
+  PANEL_TAB,
 } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -223,14 +223,19 @@ check(
   led.classList.contains("status-bar__led--generating"),
 );
 
-// --- PermanentTab: the title subscription ------------------------------------
+// --- The panel tab: the title subscription -----------------------------------
 
-const tab = root.add(createPanelTabComponent({ name: PERMANENT_TAB }));
+const tab = root.add(createPanelTabComponent({ name: PANEL_TAB }));
 const titleChanges = new Emitter();
-tab.init({ title: "Workshop", api: { onDidTitleChange: titleChanges.event }, tabLocation: "header" });
-check("the permanent tab renders its initial title", tab.element.textContent === "Workshop");
+tab.init({
+  title: "Workshop",
+  api: { id: "workshop", component: "workshop", onDidTitleChange: titleChanges.event },
+  tabLocation: "header",
+});
+const tabTitle = () => tab.element.querySelector(".dv-default-tab-content")?.textContent;
+check("the panel tab renders its initial title", tabTitle() === "Workshop");
 titleChanges.fire({ title: "Renamed" });
-check("the tab follows title changes before disposal", tab.element.textContent === "Renamed");
+check("the tab follows title changes before disposal", tabTitle() === "Renamed");
 
 // --- One dispose() up the tree ------------------------------------------------
 
@@ -265,9 +270,9 @@ check(
   led.classList.contains("status-bar__led--generating"),
 );
 
-// PermanentTab: emitter delivery stops.
+// The panel tab: emitter delivery stops.
 titleChanges.fire({ title: "After" });
-check("the disposed tab ignores title changes", tab.element.textContent === "Renamed");
+check("the disposed tab ignores title changes", tabTitle() === "Renamed");
 
 // A second root dispose is harmless.
 root.dispose();

@@ -1,9 +1,13 @@
 // The menu popover widget: one self-sufficient popover that renders a
 // menu id from the registries and owns its own dismissal (Escape,
 // outside pointer, window blur). It takes only a MenuId, an anchor (an
-// element or a point), and an optional context value passed as the first
-// run argument to every row, so the menubar, and later a context menu at
-// a pointer position, drive the same widget with no changes here.
+// element or a point), an optional context value passed as the first
+// run argument to every row, and an optional overlay of context keys, so
+// the menubar and the tab's context menu at a pointer position drive the
+// same widget. The overlay describes the menu's target (the clicked tab,
+// not the active one): its keys are read before the global context-key
+// service for every row's when, precondition and toggled, for submenus,
+// and for the keybinding labels.
 //
 // Rows are rebuilt from getMenuItems at every open: command rows versus
 // submenu rows, group boundaries render separators (there is no
@@ -34,6 +38,9 @@ import { STATUS_BAR } from "@workshop/platform/status-bar";
 /** Where the popover opens: below an element, or at a pointer position. */
 export type MenuAnchor = HTMLElement | { readonly x: number; readonly y: number };
 
+/** Context keys one open evaluates before the global context-key service. */
+export type MenuContextOverlay = Readonly<Record<string, unknown>>;
+
 /** Registry and service overrides; tests inject their own instances. */
 export interface MenuDependencies {
   readonly menus?: MenuRegistry;
@@ -47,6 +54,18 @@ interface RowHandle {
   readonly key: string;
   readonly element: HTMLButtonElement;
   readonly row: MenuRow;
+}
+
+/** Reports a failed menu row or tab command on the status bar. */
+export function reportCommandFailure(commandId: string, error: unknown): void {
+  const statusBar = getServiceOrNull(STATUS_BAR);
+  if (statusBar === null) {
+    // No composition root (a widget test): keep the failure loud.
+    console.error(`command '${commandId}' failed`, error);
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  statusBar.showLocal(`Could not run '${commandId}': ${message}`, "error");
 }
 
 /**
@@ -69,6 +88,7 @@ export class Menu extends Disposable {
   private openMenuId: MenuId | null = null;
   private anchor: MenuAnchor | null = null;
   private context: unknown;
+  private overlay: MenuContextOverlay | undefined;
   private watchedKeys: ReadonlySet<string> = new Set();
   private openStore: DisposableStore | null = null;
   private child: Menu | null = null;
@@ -116,13 +136,16 @@ export class Menu extends Disposable {
   /**
    * Shows the menu's popover anchored to `anchor`, rebuilding its rows
    * from the registry. `context` becomes the first run argument of every
-   * command row. Opening while open replaces the current menu.
+   * command row, and `overlay` answers its keys ahead of the global
+   * context for this open and its flyouts. Opening while open replaces
+   * the current menu.
    */
-  open(menuId: MenuId, anchor: MenuAnchor, context?: unknown): void {
+  open(menuId: MenuId, anchor: MenuAnchor, context?: unknown, overlay?: MenuContextOverlay): void {
     this.close();
     this.openMenuId = menuId;
     this.anchor = anchor;
     this.context = context;
+    this.overlay = overlay;
     const popover = this.ensurePopover();
     this.rebuildRows();
     this.positionPopover(anchor);
@@ -295,7 +318,15 @@ export class Menu extends Disposable {
     for (const key of result.value.keys()) {
       watched.add(key);
     }
-    return result.value.evaluate((key) => this.contextKeys.getValue(key));
+    return result.value.evaluate((key) => this.lookupKey(key));
+  }
+
+  /** A context key's value: the open's overlay first, then the global service. */
+  private lookupKey(key: string): unknown {
+    if (this.overlay !== undefined && Object.hasOwn(this.overlay, key)) {
+      return this.overlay[key];
+    }
+    return this.contextKeys.getValue(key);
   }
 
   private buildCommandRow(item: MenuItem, watched: Set<string>): RowHandle {
@@ -325,7 +356,7 @@ export class Menu extends Disposable {
     label.className = "ws-window-titlebar__item-label";
     label.textContent = item.title ?? action?.title ?? item.command;
     element.appendChild(label);
-    const shortcut = this.keybindings.lookupKeybinding(item.command)?.getLabel();
+    const shortcut = this.keybindings.lookupKeybinding(item.command, (key) => this.lookupKey(key))?.getLabel();
     if (shortcut !== undefined) {
       const hint = document.createElement("span");
       hint.className = "ws-window-titlebar__shortcut";
@@ -372,14 +403,7 @@ export class Menu extends Disposable {
     // never stacks it under a stale popover.
     this.closeRoot();
     void this.commands.execute(row.command, ...args).catch((error: unknown) => {
-      const statusBar = getServiceOrNull(STATUS_BAR);
-      if (statusBar === null) {
-        // No composition root (a widget test): keep the failure loud.
-        console.error(`menu command '${row.command}' failed`, error);
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      statusBar.showLocal(`Could not run '${row.command}': ${message}`, "error");
+      reportCommandFailure(row.command, error);
     });
   }
 
@@ -403,7 +427,7 @@ export class Menu extends Disposable {
     this.child = child;
     this.childRow = handle.element;
     handle.element.setAttribute("aria-expanded", "true");
-    child.open(row.submenu, handle.element, this.context);
+    child.open(row.submenu, handle.element, this.context, this.overlay);
     if (focusFirst) {
       child.focusRow(0);
     }

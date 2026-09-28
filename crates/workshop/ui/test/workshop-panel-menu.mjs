@@ -133,7 +133,7 @@ function rowByName(panel, name) {
 // --- Missing roots render with the label, the class, and a working menu -----
 
 const panelA = new WorkshopTreePanel(statusBar);
-panelA.init();
+panelA.init({ params: {}, api: {} });
 window.document.body.appendChild(panelA.element);
 await flush();
 
@@ -225,7 +225,7 @@ panelA.dispose();
   window.__TAURI_INTERNALS__ = {};
   window.__TAURI_DIALOG__ = { calls: [], answer: null };
   const panelB = new WorkshopTreePanel(statusBar);
-  panelB.init();
+  panelB.init({ params: {}, api: {} });
   window.document.body.appendChild(panelB.element);
   await flush();
 
@@ -261,7 +261,7 @@ panelA.dispose();
 {
   delete window.__TAURI_INTERNALS__;
   const panelC = new WorkshopTreePanel(statusBar);
-  panelC.init();
+  panelC.init({ params: {}, api: {} });
   window.document.body.appendChild(panelC.element);
   await flush();
 
@@ -301,7 +301,7 @@ panelA.dispose();
 
 {
   const panelD = new WorkshopTreePanel(statusBar);
-  panelD.init();
+  panelD.init({ params: {}, api: {} });
   window.document.body.appendChild(panelD.element);
   await flush();
 

@@ -21,7 +21,7 @@ import { registerAction, type ActionDescriptor } from "@workshop/platform/action
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { KeybindingsRegistry, KeybindingWeight } from "@workshop/platform/keybinding-registry";
-import { MenuId } from "@workshop/platform/menu-registry";
+import { MenuId, Menus } from "@workshop/platform/menu-registry";
 import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { getService } from "@workshop/platform/service-registry";
@@ -218,7 +218,9 @@ addAction({
 // Code. The splits move the active panel into a fresh dockview group in
 // the direction.
 // Close and Close Others take an optional { panelId } argument naming
-// the panel to act on, else the active one.
+// the panel to act on, else the active one; the editor tab menu passes
+// the clicked tab's. Its Close row is appended directly so it reads
+// Close, not the command's Close Editor.
 addAction({
   id: "workbench.action.files.save",
   title: "Save",
@@ -238,10 +240,17 @@ addAction({
   menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 2 }],
   run: runEditorTask((commands) => commands.closeActiveEditor),
 });
+Menus.appendMenuItem(MenuId.EditorTitleContext, {
+  command: "workbench.action.closeActiveEditor",
+  title: "Close",
+  group: "1_close",
+  order: 1,
+});
 
 addAction({
   id: "workbench.action.closeOtherEditors",
   title: "Close Others",
+  menu: [{ id: MenuId.EditorTitleContext, group: "1_close", order: 2 }],
   run: runEditorTask((commands) => commands.closeOtherEditors),
 });
 

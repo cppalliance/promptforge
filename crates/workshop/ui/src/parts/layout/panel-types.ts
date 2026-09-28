@@ -1,24 +1,22 @@
 // The dockview renderer seam for the panel registry. The panel kinds
-// themselves - zone affinity, title, tab renderer, and the import thunk
+// themselves - zone affinity, title, closability, and the import thunk
 // that lazy-loads the feature directory - are registered by each feature
 // into @workshop/platform/panel-registry; this file holds the DOM side:
 // the LazyPanel that stands in for a panel while its chunk loads (Home
-// Assistant's partial-panel-resolver pattern), the tab renderers, and
-// Dockview's createComponent / createTabComponent dispatch. main.ts and
-// the tests build the dock's dispatch from here.
+// Assistant's partial-panel-resolver pattern) and Dockview's
+// createComponent / createTabComponent dispatch. main.ts and the tests
+// build the dock's dispatch from here.
 
 import type {
   CreateComponentOptions,
   GroupPanelPartInitParameters,
   IContentRenderer,
   ITabRenderer,
-  TabPartInitParameters,
 } from "dockview";
 
 import { Disposable } from "@workshop/platform/lifecycle";
 import { loadPanelType, panelTypeEntry } from "@workshop/platform/panel-registry";
-import { DropdownMenu } from "@workshop/look/dropdown";
-import { RunTab } from "./run-tab";
+import { PanelTab } from "./panel-tab";
 
 export {
   isPanelType,
@@ -28,12 +26,8 @@ export {
 } from "@workshop/platform/panel-registry";
 export type { PanelFeatureModule, PanelType, PanelTypeEntry } from "@workshop/platform/panel-registry";
 
-/** The registered name of the close-button-free tab renderer. */
-export const PERMANENT_TAB = "permanent";
-/** The registered name of the agent tab renderer with an SPA context menu. */
-export const AGENT_TAB = "agent-tab";
-/** The registered name of the Run window's shimmering-title tab renderer. */
-export const RUN_TAB = "run-tab";
+/** The registered name of the generic tab; the dock's default tab component. */
+export const PANEL_TAB = "panel-tab";
 
 /**
  * A dockview content renderer standing in for a panel whose feature
@@ -131,96 +125,9 @@ export function createPanelComponent(options: CreateComponentOptions): IContentR
 }
 
 /**
- * The tab for panels that must never be closed from the tab strip: the
- * default chip's structure (same classes, so the theme styles it
- * identically) minus the close action.
- */
-class PermanentTab extends Disposable implements ITabRenderer {
-  public readonly element = document.createElement("div");
-  private readonly content = document.createElement("div");
-
-  constructor() {
-    super();
-    this.element.className = "dv-default-tab";
-    this.content.className = "dv-default-tab-content";
-    this.element.appendChild(this.content);
-  }
-
-  public init(parameters: TabPartInitParameters): void {
-    this.content.textContent = parameters.title;
-    // Dockview calls dispose() when the tab is removed; the inherited
-    // Disposable dispose releases this subscription.
-    this._register(
-      parameters.api.onDidTitleChange((event) => {
-        this.content.textContent = event.title;
-      }),
-    );
-  }
-}
-
-class AgentTab extends Disposable implements ITabRenderer {
-  public readonly element = document.createElement("div");
-  private readonly content = document.createElement("div");
-  private readonly close = document.createElement("button");
-  private readonly menu = this._register(new DropdownMenu());
-
-  constructor() {
-    super();
-    this.element.className = "dv-default-tab";
-    this.content.className = "dv-default-tab-content";
-    this.close.type = "button";
-    this.close.className = "dv-default-tab-action";
-    this.close.setAttribute("aria-label", "Close");
-    this.close.textContent = "×";
-    this.element.append(this.content, this.close);
-  }
-
-  public init(parameters: TabPartInitParameters): void {
-    this.content.textContent = parameters.title;
-    this._register(
-      parameters.api.onDidTitleChange((event) => {
-        this.content.textContent = event.title;
-      }),
-    );
-    this.close.addEventListener("click", (event) => {
-      event.stopPropagation();
-      parameters.api.close();
-    });
-    this.element.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.menu.show(
-        this.element,
-        [
-          { label: "Close", onClick: () => parameters.api.close() },
-          {
-            label: "Close Others",
-            onClick: () => {
-              for (const panel of [...parameters.api.group.panels]) {
-                if (panel.api.id !== parameters.api.id) {
-                  panel.api.close();
-                }
-              }
-            },
-          },
-        ],
-        { x: event.clientX, y: event.clientY },
-      );
-    });
-  }
-}
-
-/**
  * Dockview's createTabComponent dispatch. Returning undefined for any
- * other name (including panels that never named a tab component) makes
- * Dockview fall back to its default closable tab.
+ * other name makes Dockview fall back to its default closable tab.
  */
 export function createPanelTabComponent(options: CreateComponentOptions): ITabRenderer | undefined {
-  if (options.name === PERMANENT_TAB) {
-    return new PermanentTab();
-  }
-  if (options.name === RUN_TAB) {
-    return new RunTab();
-  }
-  return options.name === AGENT_TAB ? new AgentTab() : undefined;
+  return options.name === PANEL_TAB ? new PanelTab() : undefined;
 }

@@ -229,7 +229,7 @@ function makeFakeDock() {
     panels.set(id, panel);
     if (id === "tree") {
       treePanel = new WorkshopTreePanel(null);
-      treePanel.init();
+      treePanel.init({ params: {}, api: {} });
       window.document.body.appendChild(treePanel.element);
     }
     dock.fireLayoutChange();

@@ -18,11 +18,11 @@ import type { DockviewApi, SerializedDockview } from "dockview";
 import { DisposableStore, toDisposable, type IDisposable } from "@workshop/platform/lifecycle";
 import { resetZones, restoreZoneState, serializeZoneState, withZoneRestore } from "./zones";
 
-// v4: the placeholder panel type is gone - an emptied zone persists as a
-// dockview grid leaf with no views. A v3 snapshot could hold a
-// `placeholder:*` panel, which would now restore as an unknown-panel
-// stub, so v3 falls back to the default layout like v1 and v2 before it.
-export const LAYOUT_SCHEMA_VERSION = 4;
+// v5: every panel's tab is the generic "panel-tab". A v4 snapshot names
+// the per-type tab components that no longer exist ("permanent",
+// "agent-tab", "run-tab"), so v4 falls back to the default layout like
+// every version before it.
+export const LAYOUT_SCHEMA_VERSION = 5;
 
 const SAVE_DEBOUNCE_MS = 250;
 

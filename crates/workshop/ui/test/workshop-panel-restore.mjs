@@ -160,7 +160,7 @@ const state = new TreeStateService(storage.get("workspace", "tree"), (value) =>
 registerService(TREE_STATE, () => state);
 
 let panel = new WorkshopTreePanel(null);
-panel.init();
+panel.init({ params: {}, api: {} });
 window.document.body.appendChild(panel.element);
 await flush();
 
@@ -237,7 +237,7 @@ await flush();
   panel.dispose();
   panel.element.remove();
   panel = new WorkshopTreePanel(null);
-  panel.init();
+  panel.init({ params: {}, api: {} });
   window.document.body.appendChild(panel.element);
   await flush();
   check("the re-created panel starts the one roots fetch", fetched.slice(before).filter((p) => p === null).length === 1);

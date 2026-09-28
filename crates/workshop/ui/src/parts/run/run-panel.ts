@@ -1,7 +1,7 @@
 // The Run window panel: one window per instance, in the main zone. The
 // state machine is empty (no prompt chosen: the prompt field, Browse,
 // and the drop target), loading (the tab title shimmers through
-// run-tab.ts; the body stays blank), ready (the contract rows and the
+// setTabLoading; the body stays blank), ready (the contract rows and the
 // enabled Run button, whose click handler is deliberately empty in this
 // slice), and error (the parser's or transport's message as one row,
 // with Choose Prompt). A generation counter discards a superseded load,
@@ -26,7 +26,7 @@ import { fetchPromptContract, type RunContract } from "../../services/run-api";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { fetchFile } from "../../services/workspace-api";
 import { showPanelDialog } from "../shared/panel-dialog";
-import { setRunTabLoading } from "../layout/run-tab";
+import { setTabLoading } from "../layout/panel-tab";
 import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { grantPath, WORKSPACE_FILE_DROP_EVENT } from "../workspace/workspace-drops";
 import { renderContractRows } from "./run-rows";
@@ -166,7 +166,7 @@ export class RunPanel extends WorkshopPart {
   private setState(state: RunState): void {
     this.state = state;
     if (this.panelId !== null) {
-      setRunTabLoading(this.panelId, state === "loading");
+      setTabLoading(this.panelId, state === "loading");
     }
     this.render();
   }
