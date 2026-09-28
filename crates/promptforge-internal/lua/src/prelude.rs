@@ -116,8 +116,10 @@ pub fn install_preludes(lua: &Lua, preludes: &[Prelude], aliases: &[&str]) -> Re
     Ok(())
 }
 
-/// Builds one prelude's fresh environment table over a fresh lookup
-/// table, so no prelude can change what another one sees.
+/// Builds one prelude's environment. Each prelude gets its own
+/// environment and lookup table, so no prelude sees another prelude's
+/// globals, and the `string`, `table`, `math`, `tools`, and `store` tables
+/// it reads through that lookup are shared with the rest of the VM.
 fn environment(lua: &Lua, globals: &Table) -> Result<Table> {
     let lookup = lua.create_table().map_err(Error::lua)?;
     for name in VISIBLE_GLOBALS {

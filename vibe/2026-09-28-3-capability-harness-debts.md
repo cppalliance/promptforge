@@ -230,7 +230,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Correct the three docs the redesign left stale
+### Step 3: Correct the three docs the redesign left stale [completed]
 
 - Component: Doc corrections
 - Piece: three corrections, built jointly in one commit. None changes behavior, so no test covers any one of them alone, and one pass (the Lua docs build, the guide regeneration, and the book build) verifies all three.
