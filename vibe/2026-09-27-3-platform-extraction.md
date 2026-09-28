@@ -554,7 +554,7 @@ Four components, built in dependency order. Each is useful on its own and resemb
 
 <step-5>
 
-### Step 5: Route Close and Close Others through confirm-then-close
+### Step 5: Route Close and Close Others through confirm-then-close [completed]
 
 - Component: generic tab and tab menu
 - Piece: close path. Built first in this component, sequentially, because the generic tab's X and its menu rows call these commands, and step 6 widens Close's precondition to every panel type.

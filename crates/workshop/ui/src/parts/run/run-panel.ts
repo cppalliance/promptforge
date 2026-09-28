@@ -17,7 +17,7 @@
 // workshop:file-drop dispatch reaches this panel; the first .md wins).
 
 import { open } from "@tauri-apps/plugin-dialog";
-import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
+import type { GroupPanelPartInitParameters } from "dockview";
 
 import { toDisposable } from "@workshop/platform/lifecycle";
 import { WorkshopPart } from "@workshop/platform/workshop-part";
@@ -47,7 +47,6 @@ export class RunPanel extends WorkshopPart {
   private state: RunState = "empty";
   private generation = 0;
   private panelId: string | null = null;
-  private panelApi: DockviewPanelApi | null = null;
   private contract: RunContract | null = null;
   private failure: string | null = null;
   private promptPath: string | null = null;
@@ -70,7 +69,6 @@ export class RunPanel extends WorkshopPart {
 
   override init(parameters: GroupPanelPartInitParameters): void {
     this.panelId = parameters.api.id;
-    this.panelApi = parameters.api;
     super.init(parameters);
     const path = parameters.params?.path;
     if (typeof path === "string" && path.length > 0) {

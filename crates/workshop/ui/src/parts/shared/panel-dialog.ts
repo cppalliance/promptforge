@@ -40,6 +40,8 @@ export interface PanelDialogOptions {
   readonly message: string;
   readonly field?: PanelDialogField;
   readonly buttons: readonly PanelDialogButton[];
+  /** Called when Escape dismisses the dialog; no button's run fires then. */
+  readonly onDismiss?: () => void;
 }
 
 /**

@@ -77,12 +77,14 @@ function runEditorCommand(pick: EditorActionRow["pick"]): () => Promise<void> {
     });
 }
 
-/** Builds a run body that loads the editor chunk on demand and calls one command-layer function. */
-function runEditorTask(pick: (commands: EditorCommands) => () => void): () => Promise<void> {
-  return () =>
-    import("./editor-commands").then((commands) => {
-      pick(commands)();
-    });
+/**
+ * Builds a run body that loads the editor chunk on demand and calls one
+ * command-layer function with the command's arguments.
+ */
+function runEditorTask(
+  pick: (commands: EditorCommands) => (...args: readonly unknown[]) => void | Promise<void>,
+): (...args: readonly unknown[]) => Promise<void> {
+  return (...args) => import("./editor-commands").then((commands) => pick(commands)(...args));
 }
 
 const editorActions = [
@@ -213,6 +215,8 @@ addAction({
 // activeEditor - while Next/Previous Editor bind no when (the catalog's
 // "-" cell): Ctrl+Tab cycles from anywhere, as in VS Code. The splits
 // move the active panel into a fresh dockview group in the direction.
+// Close and Close Others take an optional { panelId } argument naming
+// the panel to act on, else the active one.
 addAction({
   id: "workbench.action.files.save",
   title: "Save",
@@ -231,6 +235,12 @@ addAction({
   keybinding: { keybinding: "ctrlcmd+f4", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
   menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 2 }],
   run: runEditorTask((commands) => commands.closeActiveEditor),
+});
+
+addAction({
+  id: "workbench.action.closeOtherEditors",
+  title: "Close Others",
+  run: runEditorTask((commands) => commands.closeOtherEditors),
 });
 
 /** One split row: a direction and its Editor Layout placement. */

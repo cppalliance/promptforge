@@ -8,7 +8,7 @@
 
 import "./editor-panel.css";
 
-import type { DockviewPanelApi, GroupPanelPartInitParameters } from "dockview";
+import type { GroupPanelPartInitParameters } from "dockview";
 import type { EditorView } from "@codemirror/view";
 
 import { Emitter } from "@workshop/platform/event";
@@ -69,7 +69,6 @@ export const onDidInitEditorPanel = didInitEmitter.event;
 
 export class EditorPanel extends WorkshopPart {
   private readonly surface: EditorSurface;
-  private panelApi: DockviewPanelApi | null = null;
   private path: string | null = null;
   private untitled = false;
   private title = "Editor";
@@ -79,6 +78,8 @@ export class EditorPanel extends WorkshopPart {
   /** The text of the last write attempt, for reconciling an unknown token. */
   private lastSentText: string | null = null;
   private saving = false;
+  /** True from the unsaved-changes prompt opening until it answers. */
+  private closePending = false;
 
   constructor(private readonly deps: EditorPanelDeps = {}) {
     super();
@@ -102,7 +103,6 @@ export class EditorPanel extends WorkshopPart {
 
   override init(parameters: GroupPanelPartInitParameters): void {
     super.init(parameters);
-    this.panelApi = parameters.api;
     const path = filePathParam(parameters.params);
     if (path !== null) {
       this.path = path;
@@ -444,55 +444,95 @@ export class EditorPanel extends WorkshopPart {
   }
 
   /**
-   * Close entry point for the Ctrl+W shortcut: a clean panel closes
-   * immediately; a dirty panel opens the unsaved-changes dialog instead
-   * of silently losing edits.
+   * Whether the panel may close. A clean panel answers true at once; a
+   * dirty one opens the unsaved-changes dialog, answering true after a
+   * successful Save or after Discard and false on Cancel, Escape, a
+   * failed save, or the panel's disposal before any of those. A request
+   * made while the dialog's answer is pending answers false instead of
+   * opening a second dialog.
    */
-  requestClose(): void {
-    if (!this.surface.isDirty()) {
-      this.panelApi?.close();
-      return;
-    }
-    this.showCloseDialog();
+  override confirmClose(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.askToClose(resolve);
+    });
   }
 
   /**
-   * The unsaved-changes modal. Save writes and closes only when the write
-   * succeeds; Discard closes without writing; Cancel keeps the panel.
+   * Confirms, then closes: a clean panel closes at once, a dirty one once
+   * the unsaved-changes dialog agrees.
    */
-  private showCloseDialog(): void {
-    this._register(showPanelDialog({
+  requestClose(): void {
+    this.askToClose((confirmed) => {
+      if (confirmed) {
+        this.panelApi?.close();
+      }
+    });
+  }
+
+  /** The confirmation behind confirmClose and requestClose; calls `answer` once. */
+  private askToClose(answer: (confirmed: boolean) => void): void {
+    if (!this.surface.isDirty()) {
+      answer(true);
+      return;
+    }
+    if (this.closePending) {
+      answer(false);
+      return;
+    }
+    this.closePending = true;
+    this.showCloseDialog((confirmed) => {
+      this.closePending = false;
+      answer(confirmed);
+    });
+  }
+
+  /**
+   * The unsaved-changes modal. Save answers once the write settles, true
+   * only when it left the panel clean; Discard answers true without
+   * writing; Cancel and Escape answer false, as does disposing the panel
+   * before any answer. `answer` runs once.
+   */
+  private showCloseDialog(answer: (confirmed: boolean) => void): void {
+    let answered = false;
+    const reply = (confirmed: boolean): void => {
+      if (!answered) {
+        answered = true;
+        answer(confirmed);
+      }
+    };
+    const dialog = showPanelDialog({
       host: this.element,
       classPrefix: "ws-editor-close",
       titleId: "editor-close-title",
       title: "Unsaved changes",
       message: `${this.title} has unsaved changes. Save before closing, or discard them.`,
+      onDismiss: () => reply(false),
       buttons: [
         {
           label: "Save",
           run: () => {
             void this.save()
-              .then(() => {
-                // A failed or conflicted save leaves the panel open.
-                if (!this.surface.isDirty()) {
-                  this.panelApi?.close();
-                }
-              })
+              // A failed or conflicted save, or a keystroke typed during
+              // the write, leaves the panel dirty.
+              .then(() => reply(!this.surface.isDirty()))
               .catch((error: unknown) => {
                 this.showError(error);
+                reply(false);
               });
           },
         },
-        {
-          label: "Discard",
-          danger: true,
-          run: () => {
-            this.panelApi?.close();
-          },
-        },
-        { label: "Cancel", run: () => undefined },
+        { label: "Discard", danger: true, run: () => reply(true) },
+        { label: "Cancel", run: () => reply(false) },
       ],
-    }));
+    });
+    // Tearing the dialog down with the panel fires no button and no
+    // onDismiss; answer here, or an awaiting close command never settles.
+    this._register(
+      toDisposable(() => {
+        dialog.dispose();
+        reply(false);
+      }),
+    );
   }
 
   /**
