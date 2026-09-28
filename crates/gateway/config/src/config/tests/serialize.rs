@@ -110,6 +110,7 @@ open_browser = true
 window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
+whisper_backend = "cuda"
 
 [[profile]]
 name = "work"
@@ -179,7 +180,18 @@ fn canonical_stt_input_round_trips_as_canonical_stt() {
     let json = config.to_json();
 
     assert_eq!(json["stt"]["window_seconds"], 8);
+    assert!(
+        json["stt"].get("whisper_backend").is_none(),
+        "the default `auto` backend is omitted: {json}"
+    );
     assert!(json["workshop"].is_null());
+
+    let cuda = Config::from_toml_str(
+        "config-version = 0\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\
+         [stt]\nwhisper_backend = \"cuda\"\n",
+    )
+    .expect("a non-default whisper backend parses");
+    assert_eq!(cuda.to_json()["stt"]["whisper_backend"], "cuda");
 }
 
 #[test]
@@ -241,6 +253,9 @@ fn enums_round_trip_with_their_toml_spellings() {
     check(ModelKind::Speech, "speech");
     check(SttRole::Interim, "interim");
     check(SttRole::Final, "final");
+    check(WhisperBackend::Auto, "auto");
+    check(WhisperBackend::Cpu, "cpu");
+    check(WhisperBackend::Cuda, "cuda");
 }
 
 #[test]
