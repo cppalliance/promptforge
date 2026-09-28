@@ -8,6 +8,13 @@
 //! failure-atomic: a sibling temp file plus rename, so a failed
 //! operation leaves source, destination, and accounting unchanged.
 //!
+//! Paths resolve two ways. Operations on a path itself (`remove`,
+//! `exists`, `stat`, `mkdir`, `rename`) contain the parent and act on a
+//! final-component link as a link, never its target. Operations on
+//! contents (`read`, `read_range`, `write`, `append`, `list`, `glob`,
+//! `copy`) follow links under the containment check, which denies a
+//! link that resolves outside the root.
+//!
 //! Stage 2 hardening (the Bashkit RealFs resolver trio, symlink
 //! policies, Windows long paths and device names) is deferred. The
 //! known stage 1 limitation: containment canonicalizes the nearest
@@ -151,6 +158,30 @@ fn contain(root: &Path, candidate: &Path, original: &VfsPath) -> Result<PathBuf,
     }
 }
 
+/// No-follow containment: the candidate's parent is contained as in
+/// [`contain`], so its nearest existing ancestor must sit under the
+/// root, and the final component is appended unchanged, so a
+/// final-component link is addressed as a link. The root itself
+/// resolves to the root.
+fn contain_no_follow(
+    root: &Path,
+    candidate: &Path,
+    original: &VfsPath,
+) -> Result<PathBuf, VfsError> {
+    if candidate == root {
+        return Ok(root.to_path_buf());
+    }
+    let (Some(parent), Some(name)) = (candidate.parent(), candidate.file_name()) else {
+        return Err(VfsError::PermissionDenied {
+            path: original.to_string(),
+            reason: format!("{original} escapes the mounted root"),
+        });
+    };
+    let mut resolved = contain(root, parent, original)?;
+    resolved.push(name);
+    Ok(resolved)
+}
+
 /// Uniquifies failure-atomic temp file names within the process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -272,6 +303,21 @@ fn file_type_of(file_type: fs::FileType) -> FileType {
     } else {
         FileType::File
     }
+}
+
+/// Whether the entry is a directory link, a junction included, which
+/// Windows removes with `remove_dir`: `remove_file` fails on one.
+#[cfg(windows)]
+fn is_dir_link(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::FileTypeExt;
+    metadata.file_type().is_symlink_dir()
+}
+
+/// Whether the entry is a directory link needing `remove_dir`: never
+/// off Windows, where `remove_file` removes any link.
+#[cfg(not(windows))]
+fn is_dir_link(_: &fs::Metadata) -> bool {
+    false
 }
 
 /// POSIX mode bits where the host tracks them.
@@ -399,6 +445,19 @@ impl HostAccess {
         }
     }
 
+    /// Resolves a canonical virtual path to its host path without
+    /// following a final-component link, applying containment to the
+    /// parent in rooted mode.
+    fn resolve_no_follow(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
+        match &self.root {
+            HostRoot::Identity => Ok(identity_to_host(path.as_str())),
+            HostRoot::Rooted(root) => {
+                let candidate = join_virtual(root, path.as_str());
+                contain_no_follow(root, &candidate, path)
+            }
+        }
+    }
+
     /// Translates a host path back to its virtual spelling.
     fn to_virtual(&self, host: &Path) -> String {
         match &self.root {
@@ -499,7 +558,7 @@ impl VfsAccess for HostAccess {
                 reason: "the mounted root cannot be removed".into(),
             });
         }
-        let host = self.resolve(path)?;
+        let host = self.resolve_no_follow(path)?;
         let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
         // symlink_metadata does not follow links: a symlink is removed
         // as a link, never its target.
@@ -509,6 +568,8 @@ impl VfsAccess for HostAccess {
             } else {
                 fs::remove_dir(&host)
             }
+        } else if is_dir_link(&metadata) {
+            fs::remove_dir(&host)
         } else {
             fs::remove_file(&host)
         }
@@ -516,7 +577,7 @@ impl VfsAccess for HostAccess {
     }
 
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        let host = self.resolve(path)?;
+        let host = self.resolve_no_follow(path)?;
         // symlink_metadata counts a dangling link as existing. Only a
         // confirmed absence is Ok(false); every other failure (a
         // denied permission, a genuine I/O error) surfaces as Err, as
@@ -572,14 +633,14 @@ impl VfsAccess for HostAccess {
     }
 
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        let host = self.resolve(path)?;
+        let host = self.resolve_no_follow(path)?;
         let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
         Ok(stat_of(&metadata))
     }
 
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
         self.check_writable(path)?;
-        let host = self.resolve(path)?;
+        let host = self.resolve_no_follow(path)?;
         if fs::symlink_metadata(&host).is_ok() {
             return Err(VfsError::AlreadyExists {
                 path: path.to_string(),
@@ -613,8 +674,8 @@ impl VfsAccess for HostAccess {
                 reason: PathReason::IntoDescendant,
             });
         }
-        let host_from = self.resolve(from)?;
-        let host_to = self.resolve(to)?;
+        let host_from = self.resolve_no_follow(from)?;
+        let host_to = self.resolve_no_follow(to)?;
         // Validation finishes before the rename syscall, so a failed
         // rename changes nothing; the rename itself is atomic.
         fs::symlink_metadata(&host_from).map_err(|err| map_io(from.as_str(), &err))?;
@@ -731,6 +792,38 @@ mod tests {
         std::os::unix::fs::symlink(target, link).is_ok()
     }
 
+    /// Creates a file link, returning false only when Windows refuses
+    /// for want of the symlink privilege (raw OS error 1314,
+    /// `ERROR_PRIVILEGE_NOT_HELD`). Every other failure is an error.
+    #[cfg(windows)]
+    fn make_file_link(link: &Path, target: &Path) -> Result<bool, VfsError> {
+        const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+        match std::os::windows::fs::symlink_file(target, link) {
+            Ok(()) => Ok(true),
+            Err(err) if err.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+                eprintln!(
+                    "skipped: Windows refused a file symlink without the symlink privilege \
+                     (enable Developer Mode or run elevated)"
+                );
+                Ok(false)
+            }
+            Err(err) => Err(map_io("creating the file link", &err)),
+        }
+    }
+
+    /// Creates a file link.
+    #[cfg(unix)]
+    fn make_file_link(link: &Path, target: &Path) -> Result<bool, VfsError> {
+        std::os::unix::fs::symlink(target, link)
+            .map_err(|err| map_io("creating the file link", &err))?;
+        Ok(true)
+    }
+
+    /// Whether `host` itself is a link, without following it.
+    fn is_link(host: &Path) -> bool {
+        fs::symlink_metadata(host).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    }
+
     #[test]
     fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> {
         let temp = TempDir::new()?;
@@ -811,6 +904,145 @@ mod tests {
             b"classified"
         );
         assert!(!outside.path().join("new.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target()
+    -> Result<(), VfsError> {
+        let root = TempDir::new()?;
+        fs::write(root.path().join("target.txt"), b"kept")
+            .map_err(|err| map_io("seeding the target file", &err))?;
+        if !make_file_link(&root.path().join("link"), &root.path().join("target.txt"))? {
+            return Ok(());
+        }
+        let mut access = rooted_access(root.path())?;
+        access.remove(&path("/link")?, false)?;
+        assert!(!is_link(&root.path().join("link")), "the link must be gone");
+        assert_eq!(access.read(&path("/target.txt")?)?, b"kept");
+        Ok(())
+    }
+
+    #[test]
+    fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), VfsError> {
+        let outside = TempDir::new()?;
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, b"classified")
+            .map_err(|err| map_io("seeding the outside file", &err))?;
+        let root = TempDir::new()?;
+        if !make_file_link(&root.path().join("link"), &secret)? {
+            return Ok(());
+        }
+        let mut access = rooted_access(root.path())?;
+        assert!(access.exists(&path("/link")?)?);
+        assert_eq!(access.stat(&path("/link")?)?.file_type, FileType::Symlink);
+        assert!(matches!(
+            access.mkdir(&path("/link")?, false),
+            Err(VfsError::AlreadyExists { .. })
+        ));
+        assert!(
+            matches!(
+                access.read(&path("/link")?),
+                Err(VfsError::PermissionDenied { .. })
+            ),
+            "a read through the escaping link must be denied"
+        );
+        assert!(
+            matches!(
+                access.write(&path("/link")?, b"x"),
+                Err(VfsError::PermissionDenied { .. })
+            ),
+            "a write through the escaping link must be denied"
+        );
+        access.rename(&path("/link")?, &path("/moved")?)?;
+        assert!(!access.exists(&path("/link")?)?);
+        assert!(
+            is_link(&root.path().join("moved")),
+            "the link itself must move"
+        );
+        assert!(
+            secret.is_file(),
+            "the outside target must stay where it was"
+        );
+        access.remove(&path("/moved")?, false)?;
+        assert!(!access.exists(&path("/moved")?)?);
+        assert_eq!(
+            fs::read(&secret).map_err(|err| map_io("reading the outside file", &err))?,
+            b"classified"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_dangling_link_succeeds() -> Result<(), VfsError> {
+        let root = TempDir::new()?;
+        if !make_file_link(
+            &root.path().join("dangling"),
+            &root.path().join("missing.txt"),
+        )? {
+            return Ok(());
+        }
+        let mut access = rooted_access(root.path())?;
+        access.remove(&path("/dangling")?, false)?;
+        assert!(
+            !is_link(&root.path().join("dangling")),
+            "the link must be gone"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_directory_link_keeps_the_target_directory_and_its_contents()
+    -> Result<(), VfsError> {
+        let root = TempDir::new()?;
+        let target = root.path().join("real");
+        fs::create_dir(&target).map_err(|err| map_io("creating the target directory", &err))?;
+        fs::write(target.join("keep.txt"), b"kept")
+            .map_err(|err| map_io("seeding the target file", &err))?;
+        let mut access = rooted_access(root.path())?;
+        for recursive in [false, true] {
+            let link = root.path().join("dirlink");
+            assert!(
+                make_dir_link(&link, &target),
+                "the directory link must be created"
+            );
+            access.remove(&path("/dirlink")?, recursive)?;
+            assert!(
+                !is_link(&link),
+                "the link must be gone (recursive: {recursive})"
+            );
+            assert_eq!(access.read(&path("/real/keep.txt")?)?, b"kept");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link()
+    -> Result<(), VfsError> {
+        let outside = TempDir::new()?;
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, b"classified")
+            .map_err(|err| map_io("seeding the outside file", &err))?;
+        let root = TempDir::new()?;
+        assert!(
+            make_dir_link(&root.path().join("link"), outside.path()),
+            "the directory link must be created"
+        );
+        let mut access = rooted_access(root.path())?;
+        assert!(access.exists(&path("/link")?)?);
+        assert_eq!(access.stat(&path("/link")?)?.file_type, FileType::Symlink);
+        access.rename(&path("/link")?, &path("/moved")?)?;
+        assert!(!access.exists(&path("/link")?)?);
+        assert!(
+            is_link(&root.path().join("moved")),
+            "the link itself must move"
+        );
+        access.remove(&path("/moved")?, true)?;
+        assert!(!access.exists(&path("/moved")?)?);
+        assert_eq!(
+            fs::read(&secret).map_err(|err| map_io("reading the outside file", &err))?,
+            b"classified"
+        );
         Ok(())
     }
 
