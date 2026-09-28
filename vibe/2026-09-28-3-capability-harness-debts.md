@@ -250,7 +250,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Gate the engine's private-item docs in CI
+### Step 4: Gate the engine's private-item docs in CI [completed]
 
 - Component: Engine private docs gate
 - Piece: one CI step, one step.

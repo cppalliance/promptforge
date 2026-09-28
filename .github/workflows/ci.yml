@@ -148,6 +148,9 @@ jobs:
       - name: Harness facade docs
         run: cargo doc -p harness --no-deps
 
+      - name: Engine docs (private items)
+        run: cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items
+
   check-workshop:
     runs-on: windows-latest
     steps:
