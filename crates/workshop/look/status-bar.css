@@ -151,15 +151,15 @@
 			box-shadow var(--led-pulse-ms) ease-out;
 	}
 
-	.status-bar__led--generating,
-	.status-bar__led--thinking,
-	.status-bar__led--recording {
+	.status-bar__led--green,
+	.status-bar__led--amber,
+	.status-bar__led--red {
 		transition:
 			background var(--led-fade-in-ms) ease-in,
 			box-shadow var(--led-fade-in-ms) ease-in;
 	}
 
-	.status-bar__led--generating {
+	.status-bar__led--green {
 		background: radial-gradient(circle, var(--led-core) 0%, var(--led-green) 60%);
 		box-shadow:
 			0 0 calc(var(--led-glow-radius) / 2) var(--led-green),
@@ -167,7 +167,7 @@
 			0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-green) 55%, transparent);
 	}
 
-	.status-bar__led--thinking {
+	.status-bar__led--amber {
 		background: radial-gradient(circle, var(--led-core) 0%, var(--led-amber) 60%);
 		box-shadow:
 			0 0 calc(var(--led-glow-radius) / 2) var(--led-amber),
@@ -175,13 +175,13 @@
 			0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-amber) 55%, transparent);
 	}
 
-	/* The recording LED: the same lit treatment in red while the mic
-	   records. Idle is the shared unlit lens of the base rule. */
-	.status-bar__led--recording {
-		background: radial-gradient(circle, var(--led-core) 0%, #ff2a4d 60%);
+	/* The red lit treatment (the workshop's recording LED). Idle is the
+	   shared unlit lens of the base rule. */
+	.status-bar__led--red {
+		background: radial-gradient(circle, var(--led-core) 0%, var(--led-red) 60%);
 		box-shadow:
-			0 0 calc(var(--led-glow-radius) / 2) #ff2a4d,
-			0 0 var(--led-glow-radius) #ff2a4d,
-			0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, #ff2a4d 55%, transparent);
+			0 0 calc(var(--led-glow-radius) / 2) var(--led-red),
+			0 0 var(--led-glow-radius) var(--led-red),
+			0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-red) 55%, transparent);
 	}
 }

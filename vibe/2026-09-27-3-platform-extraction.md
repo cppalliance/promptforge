@@ -638,7 +638,7 @@ Five components, built in dependency order. The first four are each useful on th
 
 <step-8>
 
-### Step 8: Add status indicator slots and contribute the activity LED
+### Step 8: Add status indicator slots and contribute the activity LED [completed]
 
 - Component: status bar indicators
 - Piece: slots and the activity LED. Built jointly, because the status bar host stops lighting the activity LED in the same change that the contributed indicator starts, and before the recording LED, which needs the slot contract.

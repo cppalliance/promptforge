@@ -18,7 +18,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
     failures.push("the agent session mounted no mic beside its input");
     return;
   }
-  if (recEl.classList.contains("status-bar__led--recording")) {
+  if (recEl.classList.contains("status-bar__led--red")) {
     failures.push("the recording LED must start dark");
   }
   // Realtime negotiation resolves a tick after mount.
@@ -34,7 +34,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
       if (
         socket &&
         typeof socket.onmessage === "function" &&
-        recEl.classList.contains("status-bar__led--recording")
+        recEl.classList.contains("status-bar__led--red")
       ) {
         return socket;
       }
@@ -66,7 +66,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   ) {
     failures.push("the Realtime socket did not negotiate the hypothesis extension");
   }
-  if (!recEl.classList.contains("status-bar__led--recording")) {
+  if (!recEl.classList.contains("status-bar__led--red")) {
     failures.push("starting dictation did not light the recording LED");
   }
   sttSocket.onmessage({
@@ -98,7 +98,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
 
   // The scripted socket never fires onclose on its own; a drop dims the LED.
   sttSocket.onclose?.();
-  if (recEl.classList.contains("status-bar__led--recording")) {
+  if (recEl.classList.contains("status-bar__led--red")) {
     failures.push("a dropped Realtime socket did not dim the recording LED");
   }
   if (input.getAttribute("contenteditable") !== "true") {

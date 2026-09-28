@@ -21,6 +21,7 @@
     "./reconnect-backoff": "./reconnect-backoff.ts",
     "./text-control-service": "./text-control-service.ts",
     "./status-bar": "./status-bar.ts",
+    "./status-indicators": "./status-indicators.ts",
     "./workshop-part": "./workshop-part.ts",
     "./panel-registry": "./panel-registry.ts"
   },

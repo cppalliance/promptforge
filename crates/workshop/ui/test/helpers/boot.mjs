@@ -362,8 +362,8 @@ export async function bootWorkbench(name, run, options = {}) {
   const statusSlot = window.document.querySelector(".status-bar__slot");
   const barberpoleEl = window.document.querySelector(".status-bar__barberpole");
   const indicatorsEl = window.document.querySelector(".status-bar__indicators");
-  const ledEl = window.document.querySelector(".status-bar__led:not(.status-bar__led--rec)");
-  const recEl = window.document.querySelector(".status-bar__led--rec");
+  const ledEl = window.document.querySelector('.status-bar__led[data-indicator="activity"]');
+  const recEl = window.document.querySelector('.status-bar__led[data-indicator="recording"]');
 
   // Every booted test reads the status bar and the mounted workbench; a
   // boot without them is broken, not a per-feature failure, so fail

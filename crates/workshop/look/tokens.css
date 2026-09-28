@@ -234,6 +234,7 @@
   --led-size: 10px;
   --led-green: #3FA266;
   --led-amber: #F1B467;
+  --led-red: #ff2a4d;
   --led-off: #F0F0F011;
   --led-core: #ffffff;
   --led-glow-radius: 6px;

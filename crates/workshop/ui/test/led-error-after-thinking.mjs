@@ -12,20 +12,20 @@ await bootWorkbench(
   "an error frame after the pulse window returns the LED to idle",
   async ({ emitStatus, ledEl, sleep, failures }) => {
     const ledLit = () =>
-      ledEl.classList.contains("status-bar__led--generating") ||
-      ledEl.classList.contains("status-bar__led--thinking");
+      ledEl.classList.contains("status-bar__led--green") ||
+      ledEl.classList.contains("status-bar__led--amber");
 
     // Let any pulse from boot-time frames decay before starting the repro.
     await sleep(400);
     if (ledLit()) failures.push("the LED did not start idle after the pulse window");
     emitStatus({ label: "Thinking", severity: "info", activity: "thinking" });
-    if (!ledEl.classList.contains("status-bar__led--thinking")) {
+    if (!ledEl.classList.contains("status-bar__led--amber")) {
       failures.push("the thinking status frame did not light the LED amber");
     }
     // The pulse window expires; the decay re-adds the sustained thinking
     // state and clears the timer, so the amber glow survives.
     await sleep(400);
-    if (!ledEl.classList.contains("status-bar__led--thinking")) {
+    if (!ledEl.classList.contains("status-bar__led--amber")) {
       failures.push("the sustained thinking state did not outlive the pulse window");
     }
     emitStatus({

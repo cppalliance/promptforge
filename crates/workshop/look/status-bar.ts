@@ -4,8 +4,8 @@
 // indeterminate busy signal: it shows while work is in flight and hides
 // otherwise, and it never displaces the indicators - the LEDs stay
 // visible either way. Each UI populates the indicators group with its own
-// LEDs (the workshop: recording + activity) and the extras region with
-// its own controls. The view owns no timers, listeners, or polling; the
+// LEDs (the workshop: the indicator slots its features register) and the
+// extras region with its own controls. The view owns no timers, listeners, or polling; the
 // consumer drives it through setText and setBusy and owns every
 // lifecycle.
 

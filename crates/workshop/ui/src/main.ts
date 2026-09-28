@@ -18,6 +18,7 @@ import { EDITOR_SETTINGS_SERVICE } from "./services/editor-settings-service";
 import { LAYOUT_POLICY } from "./services/layout-policy";
 import { QUICK_INPUT_SERVICE } from "./services/quick-input-service";
 import { STATUS_BAR } from "@workshop/platform/status-bar";
+import { STATUS_INDICATORS } from "@workshop/platform/status-indicators";
 import { RECENT_FILES_STORE, RecentFilesStore } from "./services/recent-files-store";
 import { getService, registerService } from "@workshop/platform/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
@@ -31,6 +32,7 @@ import { CommandCenter } from "./parts/chrome/command-center";
 import { ClosedEditors } from "./parts/editor/closed-editors";
 import { EditorSettingsService } from "./parts/editor/editor-settings-service";
 import { setupGatewayConfigBridge } from "./parts/gateway/gateway-config-bridge";
+import { ActivityIndicator } from "./parts/status/activity-indicator";
 import { StatusBar } from "./parts/status/status-bar";
 import { UpdateView } from "./parts/chrome/update-view";
 import { setupWindowChrome } from "./parts/chrome/window-chrome";
@@ -174,6 +176,7 @@ const speechCapture = new SpeechCaptureService();
 // their chunks activate, instead of receiving them through the dock's
 // createComponent seam.
 registerService(STATUS_BAR, () => statusBar);
+registerService(STATUS_INDICATORS, () => statusBar);
 registerService(MODEL_SERVICE, () => modelService);
 registerService(SPEECH_CAPTURE, () => speechCapture);
 
@@ -202,10 +205,23 @@ disposables.add(new CommandCenter(titleCenter));
 // The lazy directories register through the panel registry when their
 // chunks load; every action, menu row, and keybinding registers eagerly
 // from the contribution surface the menu bootstrap imports.
-disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
+// The activity LED is the product's indicator: the status frame type is
+// product protocol, so the bar hosts the slot and this part fills it.
+const activityIndicator = disposables.add(new ActivityIndicator(statusBar));
+disposables.add(
+  workshopSocket.onStatus((frame) => {
+    statusBar.render(frame);
+    activityIndicator.render(frame);
+  }),
+);
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.
-disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
+disposables.add(
+  workshopSocket.onDisconnect(() => {
+    statusBar.reset();
+    activityIndicator.reset();
+  }),
+);
 workshopSocket.connect();
 
 // The default layout is product policy, not layout mechanics: the tree

@@ -4,7 +4,7 @@
 // Bundles the TS modules with esbuild and drives them against jsdom built
 // from the real index.html. Covers: the Menubar releasing its
 // document-level listeners and popovers, EditorPanel disposing its surface
-// child and dirty subscription, StatusBar cancelling its LED decay timer,
+// child and dirty subscription, ActivityIndicator cancelling its LED decay timer,
 // and the generic panel tab dropping its title subscription (emitter delivery
 // stops after the root disposes). A final section drives WorkshopSocket
 // against a scripted fake WebSocket: emitter fan-out and unsubscribe, a
@@ -32,6 +32,7 @@ const bundle = await esbuild.build({
       export { ContextKeyService } from "@workshop/platform/context-key-service";
       export { createKeybindingsRegistry } from "@workshop/platform/keybinding-registry";
       export { StatusBar } from "./src/parts/status/status-bar.ts";
+      export { ActivityIndicator } from "./src/parts/status/activity-indicator.ts";
       export { Menubar } from "./src/parts/menu/menubar.ts";
       export { EditorPanel } from "./src/parts/editor/editor-panel.ts";
       export { createPanelTabComponent, PANEL_TAB } from "./src/parts/layout/panel-types.ts";
@@ -73,6 +74,7 @@ const {
   ContextKeyService,
   createKeybindingsRegistry,
   StatusBar,
+  ActivityIndicator,
   Menubar,
   EditorPanel,
   createPanelTabComponent,
@@ -193,10 +195,11 @@ stub.setDirty(true);
 check("the dirty subscription delivers before disposal", titles.at(-1) === "● a.txt");
 stub.setDirty(false);
 
-// --- StatusBar: the LED decay timer -----------------------------------------
+// --- ActivityIndicator: the LED decay timer ---------------------------------
 
-const statusBar = root.add(new StatusBar(window.document.querySelector(".status-bar")));
-const led = window.document.querySelector(".status-bar__led:not(.status-bar__led--rec)");
+const statusBar = root.add(new StatusBar());
+const activity = root.add(new ActivityIndicator(statusBar));
+const led = window.document.querySelector('.status-bar__led[data-indicator="activity"]');
 const generatingFrame = {
   type: "status",
   label: "Working",
@@ -205,22 +208,22 @@ const generatingFrame = {
   activity: "generating",
   busy: false,
 };
-statusBar.render(generatingFrame);
+activity.render(generatingFrame);
 check(
   "a generating frame lights the LED",
-  led.classList.contains("status-bar__led--generating"),
+  led.classList.contains("status-bar__led--green"),
 );
 // Control: while the bar is live, the decay timer clears the pulse.
 await sleep(400);
 check(
   "the live decay timer clears the pulse",
-  !led.classList.contains("status-bar__led--generating"),
+  !led.classList.contains("status-bar__led--green"),
 );
 // Re-arm the pulse; disposal must cancel this timer.
-statusBar.render(generatingFrame);
+activity.render(generatingFrame);
 check(
   "the re-armed pulse lights the LED again",
-  led.classList.contains("status-bar__led--generating"),
+  led.classList.contains("status-bar__led--green"),
 );
 
 // --- The panel tab: the title subscription -----------------------------------
@@ -263,11 +266,11 @@ const titlesBefore = titles.length;
 stub.setDirty(true);
 check("the dirty subscription is severed after disposal", titles.length === titlesBefore);
 
-// StatusBar: the armed decay timer was cancelled, so the pulse never decays.
+// ActivityIndicator: the armed decay timer was cancelled, so the pulse never decays.
 await sleep(400);
 check(
   "disposal cancels the LED decay timer",
-  led.classList.contains("status-bar__led--generating"),
+  led.classList.contains("status-bar__led--green"),
 );
 
 // The panel tab: emitter delivery stops.
