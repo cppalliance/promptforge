@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
+use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::{Emitter, EventSink};
 use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
@@ -29,7 +30,7 @@ use promptforge_vfs::{Access, VfsRef};
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
-use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv};
+use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv, frontmatter_aliases};
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -114,6 +115,13 @@ pub(crate) struct RunState {
     /// The run's host-state snapshot; its presence gives every section VM
     /// the `ui()` global and the raw-model-id `models.get` fallback.
     ui: Option<Arc<serde_json::Value>>,
+    /// The run's capability preludes, in install order: every section VM
+    /// installs each one before the shared library replays.
+    preludes: Arc<[Prelude]>,
+    /// Every tool and model alias the prompt's frontmatter declares: the
+    /// names a prelude's globals must not take, because the alias globals
+    /// install after the preludes and would silently replace them.
+    frontmatter_aliases: Arc<[String]>,
     /// Test-only: installs the raw `tools.call_as_model` shim in every
     /// section VM, so a fixture section can yield one model-issued
     /// `tool_call` at the scheduler's dispatch arm without going through a
@@ -128,8 +136,9 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free) - and the full-id bindings of `ctx`'s catalog;
-    /// the nonce derives from `ctx`'s seed and `when`
+    /// capability-free) - the full-id bindings of `ctx`'s catalog, and the
+    /// prompt's frontmatter alias names that `ctx`'s preludes are checked
+    /// against; the nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
@@ -154,6 +163,7 @@ impl RunState {
             ctx.report_debug,
         ));
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
+        let frontmatter_aliases = frontmatter_aliases(&prompt).into();
         Self {
             prompt,
             nonce: GuardNonce::from_seed(ctx.seed),
@@ -176,6 +186,8 @@ impl RunState {
             model_set,
             when: Arc::from(ctx.started_at.to_rfc3339()),
             ui: ctx.ui.clone().map(Arc::new),
+            preludes: ctx.preludes.as_slice().into(),
+            frontmatter_aliases,
             #[cfg(test)]
             raw_shims: false,
         }
@@ -360,7 +372,8 @@ impl RunState {
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, the emitter, `shared`, the shim caps) from
+    /// run-wide slots (`args`, the emitter, `shared`, the shim caps, the
+    /// preludes and the alias names they are checked against) from
     /// this context; the driver supplies only its own deltas: the `sys`
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
@@ -384,6 +397,8 @@ impl RunState {
             shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),
             ui: self.ui.as_ref(),
+            preludes: &self.preludes,
+            frontmatter_aliases: &self.frontmatter_aliases,
             #[cfg(test)]
             raw_shims: self.raw_shims,
         }
@@ -439,6 +454,15 @@ impl fmt::Debug for RunState {
             .field("model_set", &self.model_set)
             .field("when", &self.when)
             .field("ui", &self.ui)
+            .field(
+                "preludes",
+                &self
+                    .preludes
+                    .iter()
+                    .map(Prelude::capability)
+                    .collect::<Vec<_>>(),
+            )
+            .field("frontmatter_aliases", &self.frontmatter_aliases)
             .finish()
     }
 }

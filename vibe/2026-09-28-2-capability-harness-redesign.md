@@ -765,7 +765,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-7>
 
-### Step 7: Install preludes in every section VM
+### Step 7: Install preludes in every section VM [completed]
 
 - Component: Capability contract
 - Piece: Prelude contribution (second of three steps)

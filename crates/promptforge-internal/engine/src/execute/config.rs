@@ -5,6 +5,7 @@ use std::fmt;
 #[path = "config-limits.rs"]
 mod limits;
 
+use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::DebugMode;
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
@@ -113,6 +114,12 @@ pub struct RunContext {
     /// fill against the assembled catalog: which concrete tool each
     /// declared alias is bound to, with every fill journaled.
     pub(crate) tool_bindings: ToolBindings,
+    /// The run's capability preludes, in install order. Written by
+    /// [`Environment::prepare`](super::Environment::prepare) from the
+    /// environment's list; every section VM installs each one before the
+    /// shared library replays. Empty on a caller-built context that was
+    /// never prepared.
+    pub(crate) preludes: Vec<Prelude>,
     // No test-only host field: the in-crate suites assemble a
     // `RunHost` themselves and pass it to the tokio driver, so this
     // production struct carries only the engine's inputs.
@@ -147,6 +154,7 @@ impl RunContext {
             model_bindings: ModelBindings::default(),
             tools: ToolCatalog::default(),
             tool_bindings: ToolBindings::default(),
+            preludes: Vec::new(),
         }
     }
 
@@ -351,6 +359,14 @@ impl fmt::Debug for RunContext {
             .field("model_bindings", &self.model_bindings)
             .field("tools", &self.tools)
             .field("tool_bindings", &self.tool_bindings)
+            .field(
+                "preludes",
+                &self
+                    .preludes
+                    .iter()
+                    .map(Prelude::capability)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

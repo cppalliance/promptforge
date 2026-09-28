@@ -1,18 +1,18 @@
-Capability ids, the naming grammar shared by capability and tool names, and the errors that name each broken rule.
+Capability ids, the naming grammar shared by capability and tool names, the errors that name each broken rule, and the Lua preludes capabilities hand a run.
 
-A capability is host code that runs at run setup and makes services, such as tools, available to a run. PromptForge knows a capability only by its identity, a short `namespace/pack` name such as `promptforge/web`. This module turns that text into a validated [`CapabilityId`], checks whether a tool belongs to a capability, and validates any capability or tool name against the one grammar they share. When a name is wrong, the error carries a kind for the host to branch on and a message that states the rule the name broke.
+A capability is host code that runs at run setup and makes services, such as tools, available to a run. PromptForge knows a capability only by its identity, a short `namespace/pack` name such as `promptforge/web`. This module turns that text into a validated [`CapabilityId`], checks whether a tool belongs to a capability, and validates any capability or tool name against the one grammar they share. When a name is wrong, the error carries a kind for the host to branch on and a message that states the rule the name broke. It also holds [`Prelude`], the Lua source a capability can contribute so that prompt authors call friendly functions instead of raw tool calls.
 
 # Where this fits
 
 Capability ids never travel through an [`Effect`](crate::effect::Effect), an [`EffectAnswer`](crate::effect::EffectAnswer), or an [`Event`](crate::event::Event). They matter in the preflight before [`Run::new`](crate::Run::new), where the host works through these steps.
 
 1. **Read the declarations.** [`Frontmatter::capabilities`](crate::prompt::Frontmatter::capabilities) returns the prompt's [`CapabilityDecl`](crate::prompt::CapabilityDecl) values. Each one's [`CapabilityDecl::id`](crate::prompt::CapabilityDecl::id) is a [`GlobalName`], this module's type for a validated name that may be either a capability or a tool, and here it always has two segments. To get a [`CapabilityId`] from it, re-parse its [`Display`](std::fmt::Display) text with [`CapabilityId::parse`].
-2. **Activate.** The host activates those capabilities from its own registry and gathers each tool's [`ToolDescriptor`](crate::tools::ToolDescriptor). A descriptor's [`ToolDescriptor::conflicts`](crate::tools::ToolDescriptor::conflicts) lists [`CapabilityId`] values, which the host checks before activation. The host can confirm that each tool belongs to its capability with [`CapabilityId::contains`].
+2. **Activate.** The host activates those capabilities from its own registry and gathers each tool's [`ToolDescriptor`](crate::tools::ToolDescriptor). A descriptor's [`ToolDescriptor::conflicts`](crate::tools::ToolDescriptor::conflicts) lists [`CapabilityId`] values, which the host checks before activation. The host can confirm that each tool belongs to its capability with [`CapabilityId::contains`]. The host also gathers each activated capability's [`Prelude`], if it has one, in the order the prompt declares the capabilities, and installs the list with [`Environment::preludes`](crate::Environment::preludes).
 3. **Report.** The host records what it could not satisfy in a [`Requirements`](crate::Requirements) value. An absent capability goes onto [`Requirements::missing_required`](crate::Requirements::missing_required). A present, required capability that needs a host service the host does not provide becomes a [`MissingService`](crate::MissingService), built with [`MissingService::new`](crate::MissingService::new) and pushed onto [`Requirements::missing_services`](crate::Requirements::missing_services). A declared clash between two capabilities becomes a [`CapabilityConflict`](crate::CapabilityConflict), built with [`CapabilityConflict::new`](crate::CapabilityConflict::new) and pushed onto [`Requirements::conflicts`](crate::Requirements::conflicts).
 4. **Prepare and merge.** [`Environment::prepare`](crate::Environment::prepare) adds its own [`Requirements::missing_required`](crate::Requirements::missing_required) entries for tool slots whose capability contributed nothing to the catalog. The host folds its report in with [`Requirements::merge`](crate::Requirements::merge).
 5. **Refuse or run.** When [`Requirements::refusal`](crate::Requirements::refusal) returns a [`RunError`](crate::RunError), the host fails the run with it instead of calling [`Run::new`](crate::Run::new). [`Requirements::notice`](crate::Requirements::notice) renders every id through its [`Display`](std::fmt::Display) form, for example `missing required capability: promptforge/web`.
 
-During the run, the capability behind any [`Effect::ToolCall`](crate::effect::Effect::ToolCall) is available from its [`tool`](crate::effect::Effect#variant.ToolCall.field.tool) field through [`ToolId::capability`](crate::tools::ToolId::capability).
+During the run, the capability behind any [`Effect::ToolCall`](crate::effect::Effect::ToolCall) is available from its [`tool`](crate::effect::Effect#variant.ToolCall.field.tool) field through [`ToolId::capability`](crate::tools::ToolId::capability). Every section's Lua machine installs the run's preludes before any of the prompt's own Lua runs, and [Handing preludes to a run](#handing-preludes-to-a-run) describes what that means for the host.
 
 # Parsing a capability id
 
@@ -210,9 +210,79 @@ assert_eq!(active.len(), 2);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
+# Handing preludes to a run
+
+A prelude is a string of Lua source that a capability contributes. It defines tables and functions for prompt authors, such as `greeter.greet(name)`, and those functions reach the capability's own tools through `tools.call`. The engine never learns what a capability does. It knows only the prelude's source and the capability's id, which names the prelude in tracebacks and error messages.
+
+This example hands one prelude to a run whose only section calls it, then shows a second prelude that defines the same global and fails the run.
+
+````
+use std::sync::Arc;
+
+use promptforge::capabilities::{CapabilityId, Prelude};
+use promptforge::timestamp::Timestamp;
+use promptforge::{Environment, Prompt, Run, RunContext, RunErrorKind, RunResult, Step};
+
+let source = concat!(
+    "---\n",
+    "name: greet\n",
+    "description: greets through a prelude\n",
+    "promptforge: 0\n",
+    "---\n",
+    "\n",
+    "# Greet\n",
+    "\n",
+    "## Only\n",
+    "\n",
+    "```lua\n",
+    "return greeter.greet('world')\n",
+    "```\n",
+);
+let (parsed, _parse_events) = Prompt::parse(source, "greet");
+let prompt = Arc::new(parsed?);
+let started_at = Timestamp::from_unix_millis(951_782_400_000);
+
+let greeter = Prelude::new(
+    CapabilityId::parse("example/greeter")?,
+    "greeter = {}\nfunction greeter.greet(name) return 'hello ' .. name end",
+);
+let env = Environment::new().preludes(vec![greeter.clone()]);
+let (ctx, requirements) = env.prepare(&prompt, RunContext::new("greet", 7, started_at));
+assert!(requirements.is_satisfied());
+let mut run = Run::new(Arc::clone(&prompt), "", ctx);
+let Step::Done { result, .. } = run.step() else {
+    panic!("the section issues no effect, so the first step ends the run");
+};
+match result {
+    RunResult::Ok(text) => assert_eq!(text, "hello world"),
+    other => panic!("the run should succeed: {other:?}"),
+}
+
+let clash = Prelude::new(CapabilityId::parse("example/clash")?, "greeter = {}");
+let env = Environment::new().preludes(vec![greeter, clash]);
+let (ctx, _requirements) = env.prepare(&prompt, RunContext::new("clash", 7, started_at));
+let mut run = Run::new(Arc::clone(&prompt), "", ctx);
+let Step::Done { result: RunResult::Failure(error), .. } = run.step() else {
+    panic!("the collision fails the run on its first step");
+};
+assert_eq!(error.kind(), RunErrorKind::Lua);
+assert!(error.to_string().contains(
+    "capability `example/clash`: its prelude defines the global `greeter`, \
+     which capability `example/greeter`'s prelude already defines"
+));
+# Ok::<(), Box<dyn std::error::Error>>(())
+````
+
+Here is what the engine does with the list.
+
+1. **Copy it onto the run.** [`Environment::preludes`](crate::Environment::preludes) stores the list, and [`Environment::prepare`](crate::Environment::prepare) copies it onto the context, the same way it copies the tool catalog.
+2. **Install it in every section.** Each section's Lua machine, the fanout arms and spawned task chains included, installs every prelude in list order. That happens after the host globals such as `tools` and `store` exist, and before the prompt's shared library runs, so the shared library can call what the preludes define.
+3. **Keep each prelude to itself.** A prelude runs in an environment of its own. It sees the base functions that survive the sandbox, the `string`, `table`, and `math` libraries, `tools`, `store`, `untrusted`, and a read-only view of `var`. It does not see the other preludes. Each global it assigns becomes a global of every section. A table global is sealed at its top level: author code can read the table's own fields but cannot add or replace them, a table stored in one of those fields can still be changed, and `pairs` over the sealed table sees nothing.
+4. **Fail early.** A prelude only defines functions. It runs as a plain chunk, not inside a section's coroutine, so a prelude that calls a tool while loading fails. A prelude also fails when one of its globals takes a name already in use: a host global, a name reserved for globals that only some sections have (`ui`, `item`, `argv`, and `prose`), a tool or model alias from the prompt's frontmatter, or a global of an earlier prelude. Either failure ends the run with [`RunErrorKind::Lua`](crate::RunErrorKind::Lua) when the first section's Lua machine is set up, before the run issues any effect, and the message names the capability.
+
 # Reference
 
-This part covers every item in the module. [`CapabilityId`] and its error types come first, then [`GlobalName`] and its error types. The error types and kind enums are `#[non_exhaustive]`, so a `match` on a kind needs a wildcard arm. Every accessor on this page is `#[must_use]`, including [`CapabilityId::contains`] and both error types' kind methods.
+This part covers every item in the module. [`CapabilityId`] and its error types come first, then [`GlobalName`] and its error types, and last [`Prelude`]. The error types and kind enums are `#[non_exhaustive]`, so a `match` on a kind needs a wildcard arm. Every accessor on this page is `#[must_use]`, including [`CapabilityId::contains`] and both error types' kind methods.
 
 ## CapabilityId
 
@@ -304,3 +374,19 @@ It implements [`std::error::Error`].
 - [`GlobalNameErrorKind::SegmentCount`]: the text does not split on `/` into 2 or 3 segments. The host sees it for 1 segment such as `promptforge`, for the empty string, and for 4 or more such as `promptforge/web/fetch/extra`. Supply `namespace/pack` for a capability or `namespace/pack/name` for a tool.
 - [`GlobalNameErrorKind::Empty`]: the count is 2 or 3, but a leading, trailing, or doubled `/` leaves a segment empty, as in `/web`, `promptforge/`, or `promptforge//web`. Remove the stray separator or fill in the missing segment.
 - [`GlobalNameErrorKind::Control`]: a segment contains a byte outside the allowed set. The host sees it for a control byte such as a tab, newline, or DEL, uppercase letters such as `Promptforge/web`, an `@` pin such as `promptforge/web@2`, spaces or other punctuation, and non-ASCII characters such as `promptforge/wéb`. The [`Display`](std::fmt::Display) text tells a control byte apart from the other cases. Use only `a` to `z`, `0` to `9`, `-`, `_`, and `.`, and drop any version suffix.
+
+## Prelude
+
+[`Prelude`] is the Lua source one activated capability contributes to every section of a run, paired with that capability's [`CapabilityId`]. The host builds one per capability that has a prelude and hands the list to [`Environment::preludes`](crate::Environment::preludes). [Handing preludes to a run](#handing-preludes-to-a-run) shows the whole path. Its fields are private, so build it with [`Prelude::new`].
+
+[`Prelude::new`] takes two arguments, cannot fail, and returns the [`Prelude`].
+
+- `capability`, a [`CapabilityId`], is the capability that contributes the source. It names the prelude in tracebacks, as the chunk name `@capability:<id>`, and in every error message about the prelude.
+- `source`, anything that converts into a [`String`], is the Lua source. Nothing checks it here. The engine compiles it as text in every section, so a syntax error or a colliding global surfaces when the run sets up its first section.
+
+The other methods take `&self` and cannot fail.
+
+- [`Prelude::capability`] returns a reference to the contributing [`CapabilityId`].
+- [`Prelude::source`] returns the Lua source as a [`&str`](str).
+
+Caller-relevant traits: [`Clone`], [`Debug`](std::fmt::Debug), [`PartialEq`], and [`Eq`] are derived, so two preludes are equal when both their capability ids and their sources are equal.

@@ -114,6 +114,8 @@ fn scheduler_vm_with_tools(
         shared: &shared,
         max_tool_iterations: 24,
         ui: None,
+        preludes: &[],
+        frontmatter_aliases: &[],
         raw_shims: false,
     };
     let list_callback =

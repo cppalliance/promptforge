@@ -47,6 +47,20 @@ pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding
         .collect()
 }
 
+/// Every tool and model alias the prompt's frontmatter declares, filled or
+/// not: the names a capability prelude's globals must not take, so whether
+/// a prelude installs does not depend on what the host could fill.
+pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
+    let frontmatter = prompt.frontmatter();
+    frontmatter
+        .tools()
+        .iter()
+        .map(|(alias, _)| alias)
+        .chain(frontmatter.models().iter().map(|(label, _)| label))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The keyword's stable kebab-case spelling, journaled onto the binding as
 /// the role's capability set.
 fn keyword_name(keyword: ModelKeyword) -> &'static str {

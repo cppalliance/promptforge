@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use promptforge_types::capabilities::Prelude;
+
 use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
 
@@ -10,7 +12,8 @@ use super::fill::{fill_model_bindings, fill_tool_bindings};
 use super::requirements::Requirements;
 
 /// What exists in this deployment and its standing policy: the nesting
-/// cap and the catalog of tools the host has made available.
+/// cap, the catalog of tools the host has made available, and the
+/// preludes its activated capabilities contributed.
 ///
 /// Safe to share across concurrent runs (`Sync`): everything that can
 /// change per run sits on the [`RunContext`], and the tool implementations
@@ -33,16 +36,21 @@ pub struct Environment {
     /// its activated capabilities. The default is empty, so every exact
     /// slot's capability is reported missing.
     tools: ToolCatalog,
+    /// The Lua source the host's activated capabilities contributed, in
+    /// install order: every section VM of a run installs each one before
+    /// the shared library replays. The default is empty.
+    preludes: Vec<Prelude>,
 }
 
 impl Environment {
-    /// Builds the default environment: a nesting cap of 3 and an empty
-    /// catalog.
+    /// Builds the default environment: a nesting cap of 3, an empty
+    /// catalog, and no preludes.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
             max_depth: 3,
             tools: ToolCatalog::default(),
+            preludes: Vec::new(),
         }
     }
 
@@ -67,9 +75,28 @@ impl Environment {
         self
     }
 
+    /// Sets the preludes a run installs: the Lua source the host's
+    /// activated capabilities contributed, in install order (the order the
+    /// prompt declares the capabilities). [`prepare`](Environment::prepare)
+    /// copies them onto the context, and every section VM of the run
+    /// installs each one after the host globals and before the shared
+    /// library replays, so the shared library can call what they define.
+    ///
+    /// A prelude that fails to load, or that defines a global another
+    /// prelude, a host global, a reserved name, or a frontmatter tool or
+    /// model alias already holds, fails the run as
+    /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) when the first
+    /// section VM is set up, before the run issues any effect.
+    #[must_use]
+    pub fn preludes(mut self, preludes: Vec<Prelude>) -> Environment {
+        self.preludes = preludes;
+        self
+    }
+
     /// Enriches the caller-created context against the prompt's
-    /// declarations: installs the catalog and fills the tool slots and
-    /// model bindings - reporting what the caller must still satisfy. The
+    /// declarations: installs the catalog and the preludes and fills the
+    /// tool slots and model bindings - reporting what the caller must
+    /// still satisfy. The
     /// context's VFS is used as given: the run's whole filesystem, host
     /// roots and the declared store included, is the host's to build.
     ///
@@ -98,6 +125,7 @@ impl Environment {
         let mut ctx = ctx;
         let mut requirements = Requirements::default();
         ctx.tools = self.tools.clone();
+        ctx.preludes.clone_from(&self.preludes);
         ctx.tool_bindings = fill_tool_bindings(prompt, &ctx.tools, &mut requirements);
         ctx.model_bindings = fill_model_bindings(prompt, ctx.model.as_ref(), &mut requirements);
         (ctx, requirements)
@@ -115,6 +143,14 @@ impl fmt::Debug for Environment {
         f.debug_struct("Environment")
             .field("max_depth", &self.max_depth)
             .field("tools", &self.tools)
+            .field(
+                "preludes",
+                &self
+                    .preludes
+                    .iter()
+                    .map(Prelude::capability)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

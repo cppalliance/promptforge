@@ -410,6 +410,7 @@ mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;
+mod preludes;
 mod provenance;
 mod run_inputs;
 mod run_termination;

@@ -113,6 +113,7 @@ pub mod capabilities {
     pub use promptforge_types::capabilities::CapabilityId;
     pub use promptforge_types::capabilities::CapabilityIdError;
     pub use promptforge_types::capabilities::CapabilityIdErrorKind;
+    pub use promptforge_types::capabilities::Prelude;
     pub use promptforge_types::names::GlobalName;
     pub use promptforge_types::names::GlobalNameError;
     pub use promptforge_types::names::GlobalNameErrorKind;

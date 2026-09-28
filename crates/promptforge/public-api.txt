@@ -105,6 +105,7 @@ auto promptforge::capabilities::CapabilityIdErrorKind: Freeze, RefUnwindSafe, Se
 auto promptforge::capabilities::GlobalName: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::capabilities::GlobalNameError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::capabilities::GlobalNameErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::capabilities::Prelude: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::AnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::ChatAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::effect::Effect: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
@@ -232,6 +233,7 @@ derives promptforge::capabilities::CapabilityIdErrorKind: Clone, Copy, Debug, Eq
 derives promptforge::capabilities::GlobalName: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 derives promptforge::capabilities::GlobalNameError: Clone, Debug, Eq, PartialEq
 derives promptforge::capabilities::GlobalNameErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives promptforge::capabilities::Prelude: Clone, Debug, Eq, PartialEq
 derives promptforge::effect::AnswerRecord: Clone, Debug, Deserialize, PartialEq, Serialize
 derives promptforge::effect::ChatAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::effect::Effect: Debug
@@ -428,6 +430,7 @@ pub enum promptforge::vfs::Verdict
 pub fn promptforge::CapabilityConflict::new(first: promptforge::capabilities::CapabilityId, second: promptforge::capabilities::CapabilityId) -> promptforge::CapabilityConflict
 pub fn promptforge::Environment::max_depth(self, max_depth: u32) -> promptforge::Environment
 pub fn promptforge::Environment::new() -> promptforge::Environment
+pub fn promptforge::Environment::preludes(self, preludes: alloc::vec::Vec<promptforge::capabilities::Prelude>) -> promptforge::Environment
 pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
 pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment
 pub fn promptforge::MissingService::new(capability: promptforge::capabilities::CapabilityId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
@@ -501,6 +504,9 @@ pub fn promptforge::capabilities::GlobalName::namespace(&self) -> &str
 pub fn promptforge::capabilities::GlobalName::pack(&self) -> &str
 pub fn promptforge::capabilities::GlobalName::parse(s: &str) -> core::result::Result<promptforge::capabilities::GlobalName, promptforge::capabilities::GlobalNameError>
 pub fn promptforge::capabilities::GlobalNameError::kind(&self) -> promptforge::capabilities::GlobalNameErrorKind
+pub fn promptforge::capabilities::Prelude::capability(&self) -> &promptforge::capabilities::CapabilityId
+pub fn promptforge::capabilities::Prelude::new(capability: promptforge::capabilities::CapabilityId, source: impl core::convert::Into<alloc::string::String>) -> promptforge::capabilities::Prelude
+pub fn promptforge::capabilities::Prelude::source(&self) -> &str
 pub fn promptforge::effect::Effect::record(&self) -> promptforge::effect::EffectRecord
 pub fn promptforge::effect::EffectAnswer::record(&self) -> promptforge::effect::AnswerRecord
 pub fn promptforge::event::Event::execution(&self) -> &str
@@ -1442,6 +1448,7 @@ pub struct promptforge::SourceLocation { .. }
 pub struct promptforge::cancel::CancelHandle { /* private fields */ }
 pub struct promptforge::cancel::Cancelled { /* private fields */ }
 pub struct promptforge::capabilities::GlobalName { /* private fields */ }
+pub struct promptforge::capabilities::Prelude { /* private fields */ }
 pub struct promptforge::effect::ChatAnswerRecord { .. }
 pub struct promptforge::effect::EffectId(/* private fields */)
 pub struct promptforge::effect::ToolAnswerRecord { .. }
