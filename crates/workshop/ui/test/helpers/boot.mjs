@@ -7,7 +7,8 @@
 // waits for the app to settle, then runs `run` under the shared
 // disposable-leak check and reports the verdict through the
 // process exit code. The optional third argument scripts the two UI-state
-// buckets the app preloads (see `uiStateOptions`); every fetch the app
+// buckets the app preloads (see `uiStateOptions`) and the #dock element's
+// client size (`dockSize`); every fetch the app
 // makes, and every service resolution (method RESOLVE), lands in
 // ctx.fetchLog in order, and ctx.resolveService(id) reads any registry
 // service the boot bound. Run after `npm run build`.
@@ -73,6 +74,9 @@ function uiStateOptions(uiState = {}) {
  * elements, the fetch log, and the push helpers; `run` records failed
  * expectations by pushing plain-English messages onto ctx.failures.
  * `options.uiState` scripts the two UI-state buckets (see uiStateOptions).
+ * `options.dockSize` ({ width, height }) gives #dock that client size
+ * before the entry evaluates; without it jsdom reports zero and the dock
+ * boots unsized.
  * This function never returns: it prints the verdict and exits the process,
  * because pending app timers (the status-bar LED pulse, reconnect backoffs)
  * outlive the assertions.
@@ -115,6 +119,11 @@ export async function bootWorkbench(name, run, options = {}) {
   // reads them when a landed dictation final focuses the prompt editor.
   window.Range.prototype.getClientRects = () => [];
   window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
+  if (options.dockSize !== undefined) {
+    const dockEl = window.document.getElementById("dock");
+    Object.defineProperty(dockEl, "clientWidth", { value: options.dockSize.width });
+    Object.defineProperty(dockEl, "clientHeight", { value: options.dockSize.height });
+  }
 
   // A scripted WebSocket stands in for the server's persistent sockets:
   // the workshop /ws connection the composition root opens, and the

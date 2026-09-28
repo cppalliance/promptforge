@@ -3,9 +3,9 @@
 // exists. Layout is a light feature - main.ts already loads zones
 // eagerly - so the run body is a direct call.
 //
-// Secondary Side Bar hides and shows the agent zone's dockview group
-// through group.api.setVisible, so the agent panel's session socket
-// survives - the panel is never removed - and mirrors the outcome into
+// Secondary Side Bar hides and shows the right zone's dockview group
+// through group.api.setVisible, so its panels and their live connections
+// survive - nothing is removed - and mirrors the outcome into
 // auxiliaryBarVisible. The key binds with a visible-by-default value on
 // first toggle; the workspace directory's register() binds it at chunk
 // load so the Appearance checkbox reads true from first paint.
@@ -15,7 +15,9 @@ import { registerAction, type ActionDescriptor } from "@workshop/platform/action
 import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
+import { LAYOUT_POLICY } from "../../services/layout-policy";
 import { MenuId } from "@workshop/platform/menu-registry";
+import { panelTypeEntry } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
 import { openInZone, toggleZoneVisibility } from "./zones";
 
@@ -44,10 +46,15 @@ addAction({
   menu: [{ id: APPEARANCE_MENU, group: "2_workbench_layout", order: 3 }],
   run: () => {
     // A hidden group stays live, so the toggle always finds it; a zone
-    // whose group was never built opens the agent panel instead.
+    // whose group was never built opens the layout policy's right-zone
+    // anchors instead.
     const visible = toggleZoneVisibility("right");
     if (visible === undefined) {
-      openInZone("agent", {});
+      for (const anchor of getService(LAYOUT_POLICY).anchors) {
+        if (panelTypeEntry(anchor)?.defaultZone === "right") {
+          openInZone(anchor, {});
+        }
+      }
       setVisibilityKey("auxiliaryBarVisible", true);
       return;
     }

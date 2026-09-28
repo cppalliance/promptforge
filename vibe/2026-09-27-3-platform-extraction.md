@@ -532,18 +532,20 @@ Four components, built in dependency order. Each is useful on its own and resemb
 
 <step-4>
 
-### Step 4: Move the product layout policy to the composition root
+### Step 4: Move the product layout policy to the composition root [completed]
 
 - Component: open panel registry
 - Piece: layout policy. Sequential after step 3, because it opens anchors by registered type and reads their `defaultZone`.
 - Changes:
   - New `crates/workshop/ui/src/services/layout-policy.ts` with `LayoutPolicy { anchors: readonly string[]; seed(): void }` and the `LAYOUT_POLICY` token made with `createServiceToken`.
   - `main.ts` builds the product policy ("tree left at 280px, agent right") and registers it under `LAYOUT_POLICY` before the dock boots.
+  - Re-planned during the run, as a prerequisite of the 280px check: before this step the tree never held 280px, because the seed sized the tree while it was the dock's only group (a lone group fills the dock) and Dockview doesn't size itself until a resize callback after boot. The policy's seed opens both anchors, then sizes the tree, and `main.ts` lays the dock out to the size of `#dock` before the first layout apply.
   - `applyLayoutOrDefault` (`parts/layout/layout-boot.ts`) resolves the policy with `getService` and loses its agent special cases (lines 35 and 38). Open Workspace (`parts/workspace-document/workspace-document.contribution.ts` line 203) reaches the same policy through it.
   - The Secondary Side Bar toggle (`parts/layout/layout.contribution.ts` line 50) resolves the policy in its run body and opens the policy's anchors whose `defaultZone` is right.
   - Docs: the root `AGENTS.md` `zone` vocabulary entry (line 35) describes the default layout as product policy set at the composition root.
 - Tests:
-  - `workshop-layout.mjs`: the default layout still puts the tree on the left at 280px and the agent on the right.
+  - `workshop-layout.mjs`: the default layout still puts the tree on the left and the agent on the right.
+  - New `layout-policy-boot.mjs` boots the real `main.ts` policy (through a `dockSize` option in `helpers/boot.mjs`, because jsdom reports every element as zero-sized) and checks the tree in the left zone at 280px, the agent on the right, and main empty.
   - `workspace-switch.mjs`: Open Workspace applies the registered policy.
   - Extend `layout-open-registry.mjs`: a test policy whose right anchor is `"probe"` seeds the default layout and drives the Secondary Side Bar toggle, proving the layout core names no feature.
   - Component gate: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`.

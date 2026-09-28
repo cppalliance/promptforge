@@ -30,6 +30,9 @@
 // the target, the switch landed late and the page finishes it as a
 // success does (the tree shows the opened workspace's roots); otherwise
 // the tree re-lists the roots once and nothing is applied or written.
+// Open applies the registered layout policy: a restored open never seeds
+// it, and an open whose file stores no layout clears the dock and seeds
+// the policy's default.
 // Run: node --test test/workspace-switch.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -57,7 +60,8 @@ const bundle = await esbuild.build({
       export { TREE_STATE, TreeStateService } from "./src/services/tree-state-service.ts";
       export { ClosedEditors } from "./src/parts/editor/closed-editors.ts";
       export { CLOSED_EDITORS } from "./src/services/closed-editors.ts";
-      export { initZones } from "./src/parts/layout/zones.ts";
+      export { initZones, openInZone } from "./src/parts/layout/zones.ts";
+      export { LAYOUT_POLICY } from "./src/services/layout-policy.ts";
       export { LAYOUT_SCHEMA_VERSION, startLayoutPersistence } from "./src/parts/layout/layout-persistence.ts";
       export { STATUS_BAR } from "@workshop/platform/status-bar";
       export { WorkshopTreePanel } from "./src/parts/workspace/workshop-panel.ts";
@@ -107,6 +111,8 @@ const {
   CLOSED_EDITORS,
   ClosedEditors,
   initZones,
+  openInZone,
+  LAYOUT_POLICY,
   LAYOUT_SCHEMA_VERSION,
   startLayoutPersistence,
   STATUS_BAR,
@@ -339,6 +345,18 @@ const closed = new ClosedEditors(storage.get("workspace", "closed_editors"), (va
   storage.set("workspace", "closed_editors", value),
 );
 registerService(CLOSED_EDITORS, () => closed);
+// The layout policy in the product's shape: the tree and the agent
+// session anchor the default layout. The seed count tells a default
+// layout apart from a restore.
+let seeds = 0;
+registerService(LAYOUT_POLICY, () => ({
+  anchors: ["tree", "agent"],
+  seed: () => {
+    seeds += 1;
+    openInZone("tree", {});
+    openInZone("agent", {});
+  },
+}));
 
 const dock = makeFakeDock();
 initZones(dock);
@@ -409,6 +427,7 @@ const FILE_CLOSED = ["C:\\beta\\docs\\readme.md", "C:\\beta\\notes.md"];
   check("the title follows the opened workspace's first root", window.document.title === "beta");
   check("a successful open reloads the workspace bucket once", reloads === 1);
   check("dock.fromJSON receives the opened file's layout once", dock.fromJSONCalls.length === 1 && dock.fromJSONCalls[0] === FILE_LAYOUT.layout);
+  check("a restored open never seeds the layout policy", seeds === 0);
   check("the dock holds the file's groups after the apply", dock.groups.map((group) => group.id).join(",") === "beta-left,beta-right");
   check("the expanded set is replaced with the file's", isDeepStrictEqual([...tree.expandedPaths], FILE_EXPANDED));
   check("the closed stack is replaced with the file's, most recent first", isDeepStrictEqual(closed.snapshot().paths, FILE_CLOSED));
@@ -699,6 +718,29 @@ const ZETA_COPY_CURRENT = { ...DELTA_CURRENT, path: ZETA_COPY_PATH, name: "Zeta 
       reloads === reloadsBefore &&
       dock.fromJSONCalls.length === fromJsonBefore &&
       window.__TAURI_EVENTS__.emitted.length === emittedBefore,
+  );
+}
+
+// --- Open: a file with no stored layout gets the registered policy's default ------------
+
+{
+  const IOTA_PATH = "C:\\work\\Iota.pfwork";
+  const seedsBefore = seeds;
+  const clearsBefore = dock.clears;
+  const fromJsonBefore = dock.fromJSONCalls.length;
+  fileState = { tree: { expanded: [] }, closed_editors: { paths: [] } };
+  window.__TAURI_DIALOG__.answer = IOTA_PATH;
+  answerQueue.push({ status: 200, body: { ...CURRENT, path: IOTA_PATH, name: "Iota" } });
+  await Commands.execute("workbench.action.openWorkspace");
+  await flush();
+  check("an open whose file stores no layout seeds the registered policy once", seeds === seedsBefore + 1);
+  check(
+    "the seeded default replaces the live dock without a restore",
+    dock.clears > clearsBefore && dock.fromJSONCalls.length === fromJsonBefore,
+  );
+  check(
+    "the seeded default holds the policy's anchors",
+    dock.panels.map((panel) => panel.id).sort().join(",") === "agent,tree",
   );
 }
 

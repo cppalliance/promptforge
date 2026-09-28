@@ -15,6 +15,7 @@ import { ModelService, MODEL_SERVICE } from "./services/model-service";
 import { CLOSED_EDITORS } from "./services/closed-editors";
 import { COMMANDS_HISTORY } from "./services/commands-history";
 import { EDITOR_SETTINGS_SERVICE } from "./services/editor-settings-service";
+import { LAYOUT_POLICY } from "./services/layout-policy";
 import { QUICK_INPUT_SERVICE } from "./services/quick-input-service";
 import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { RECENT_FILES_STORE, RecentFilesStore } from "./services/recent-files-store";
@@ -45,7 +46,7 @@ import { persistZoom, restoreZoom } from "./parts/chrome/zoom";
 import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./parts/layout/panel-types";
-import { initZones } from "./parts/layout/zones";
+import { initZones, openInZone } from "./parts/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
@@ -207,6 +208,22 @@ disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
 workshopSocket.connect();
 
+// The default layout is product policy, not layout mechanics: the tree
+// opens left and the agent session right, main stays empty until a
+// document opens, and both anchors come back whenever a restored layout
+// lost one. Registered before the dock boots, because the boot's layout
+// apply resolves it.
+registerService(LAYOUT_POLICY, () => ({
+  anchors: ["tree", "agent"],
+  seed: () => {
+    const tree = openInZone("tree", {});
+    openInZone("agent", {});
+    // A lone group always fills the dock, so the tree takes its width only
+    // once the agent's group shares the row.
+    tree.group.api.setSize({ width: 280 });
+  },
+}));
+
 // Panels are created through the panel registry: each component name
 // maps to a lazy import thunk, and openInZone places panels by zone
 // affinity (tree left, editors main, the agent session right). The
@@ -228,10 +245,14 @@ const dock = createDockview(dockEl, {
 disposables.add(dock);
 disposables.add(speechCapture);
 disposables.add(initZones(dock));
+// Dockview first sizes itself from a resize callback that lands after this
+// module runs, and the default layout's pixel widths hold only against a
+// sized dock, so the dock takes its element's size before the boot apply.
+dock.layout(dockEl.clientWidth, dockEl.clientHeight);
 
 // The dock layout belongs to the workspace: the preloaded workspace
 // bucket's "layout" value restores, or any failure falls back to the
-// known-good default (layout-boot.ts). The debounced saver installs after
+// layout policy's default (layout-boot.ts). The debounced saver installs after
 // the boot layout is in place, so the restore never echoes the same
 // envelope back to the file.
 applyLayoutOrDefault(dock, storage.get("workspace", "layout"));

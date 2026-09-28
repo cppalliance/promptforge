@@ -13,9 +13,10 @@
 // logged, never escapes;
 // stale schema versions (1 and 2) are rejected; a null, non-object,
 // version-mismatched, or unloadable envelope falls back to defaults;
-// applyLayoutOrDefault builds the default zones from null (clearing a live
-// dock's panels first, the Open path) and restores a valid envelope
-// through fromJSON; re-ensuring the tree after a restore
+// applyLayoutOrDefault seeds the registered layout policy (the product's
+// shape: tree left, agent right) from null, clearing a live dock's panels
+// first (the Open path), and restores a valid envelope through fromJSON
+// without seeding; re-ensuring the tree after a restore
 // never duplicates it; each shortcut dispatches its command; the status
 // bar never enters the serialized layout.
 // Run: node test/workshop-layout.mjs
@@ -51,7 +52,8 @@ const bundle = await esbuild.build({
       export { applyLayoutOrDefault } from "./src/parts/layout/layout-boot.ts";
       export { KeybindingDispatcher } from "./src/parts/layout/keybinding-dispatcher.ts";
       export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
-      export { getService } from "@workshop/platform/service-registry";
+      export { getService, registerService } from "@workshop/platform/service-registry";
+      export { LAYOUT_POLICY } from "./src/services/layout-policy.ts";
       import "./src/parts/editor/editor.contribution.ts";
       import "./src/parts/layout/layout.contribution.ts";
       import "./src/parts/workspace/workspace.contribution.ts";
@@ -237,6 +239,8 @@ const {
   KeybindingDispatcher,
   CONTEXT_KEY_SERVICE,
   getService,
+  registerService,
+  LAYOUT_POLICY,
   EditorPanel,
   StatusBar,
 } = await import(pathToFileURL(bundlePath).href);
@@ -291,6 +295,21 @@ function createDock(element) {
 const editorAId = panelIdFor("editor", { path: FILE_A });
 const editorBId = panelIdFor("editor", { path: FILE_B });
 const editorCId = panelIdFor("editor", { path: FILE_C });
+
+// A layout policy in the product's shape: the tree anchors the left zone
+// and the agent session the right. The policy main.ts registers, its
+// 280px tree included, is proven on the booted bundle by
+// layout-policy-boot.mjs. The seed count tells a default layout apart
+// from a restore.
+let seeds = 0;
+registerService(LAYOUT_POLICY, () => ({
+  anchors: ["tree", "agent"],
+  seed: () => {
+    seeds += 1;
+    openInZone("tree", {});
+    openInZone("agent", {});
+  },
+}));
 
 // --- Boot: the default layout is three-zone, always unlocked --------------
 
@@ -560,10 +579,10 @@ check("the unloadable-layout fallback mounts the default layout", dock5.panels.l
 
 // --- applyLayoutOrDefault: the boot decision main.ts and Open share -------
 
-// Null (no stored layout): the default zones open, tree left and sized,
-// agent right, main empty. The fallback resets the zone map itself, so
-// the stale group ids the earlier docks left behind are cleared the same
-// way a live dock's would be on Open.
+// Null (no stored layout): the registered policy seeds the default, tree
+// left, agent right, main empty. The fallback resets the zone map itself,
+// so the stale group ids the earlier docks left behind are cleared the
+// same way a live dock's would be on Open.
 {
   const dockDefault = createDock(window.document.createElement("div"));
   initZones(dockDefault);
@@ -573,9 +592,11 @@ check("the unloadable-layout fallback mounts the default layout", dock5.panels.l
     fromJsonCalls += 1;
     return realFromJson(data);
   };
+  const seedsBefore = seeds;
   applyLayoutOrDefault(dockDefault, null);
   await flush();
   check("applyLayoutOrDefault with null never calls fromJSON", fromJsonCalls === 0);
+  check("applyLayoutOrDefault with null seeds the registered policy once", seeds === seedsBefore + 1);
   check("applyLayoutOrDefault with null opens the default zones",
     dockDefault.panels.length === 2 && dockDefault.groups.length === 2);
   check("applyLayoutOrDefault with null places tree left and agent right",
@@ -619,10 +640,12 @@ check("the unloadable-layout fallback mounts the default layout", dock5.panels.l
     received.push(data);
     return realFromJson(data);
   };
+  const seedsBefore = seeds;
   applyLayoutOrDefault(dockRestore, envelope);
   await flush();
   check("applyLayoutOrDefault with a valid envelope calls fromJSON once with it",
     received.length === 1 && received[0] === envelope.layout);
+  check("applyLayoutOrDefault with a valid envelope never seeds the policy", seeds === seedsBefore);
   check("applyLayoutOrDefault restores every persisted panel without duplicates",
     dockRestore.panels.length === Object.keys(envelope.layout.panels).length &&
       !!dockRestore.getPanel("tree") && !!dockRestore.getPanel(editorAId));
