@@ -61,11 +61,17 @@ export class ActivityIndicator extends Disposable {
   }
 
   /**
-   * Drops the sustained state after the persistent socket drops, so a
-   * pending pulse decays to idle instead of the stale thinking glow.
+   * Turns the LED dark after the persistent socket drops: the sustained
+   * state, any pending pulse, and the lit set all clear at once.
    */
   reset(): void {
     this.sustained = null;
+    if (this.ledTimer !== null) {
+      clearTimeout(this.ledTimer);
+      this.ledTimer = null;
+    }
+    this.lit.clear();
+    this.applyLed();
   }
 
   /**

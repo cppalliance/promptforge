@@ -305,7 +305,7 @@ Three components, built in dependency order. Each is useful on its own and resem
 
 <step-4>
 
-### Step 4: Clear the activity LED on reset
+### Step 4: Clear the activity LED on reset [completed]
 
 - Component: Activity LED reset
 - Piece: the `reset()` body (D1-4). One piece, one step.
