@@ -174,6 +174,41 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_during_a_looping_compactor_returns_promptly() {
+    use std::time::{Duration, Instant};
+
+    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user(string.rep('x', 100000))\n\
+         models.loop(msgs, function() while true do end end)\n\
+         return 'unreachable'",
+    );
+    let prompt = parse(&md);
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+
+    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let canceller = driver.cancel_handle();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+
+    let start = Instant::now();
+    let result = driver.drive().await;
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "cancel during a looping compactor must return promptly, took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        matches!(result, Err(crate::Error::Interrupted)),
+        "expected Interrupted, got {result:?}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
     // An author compactor's own untyped raise is re-raised as the value it

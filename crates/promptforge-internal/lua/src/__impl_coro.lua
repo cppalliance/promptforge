@@ -13,15 +13,18 @@
 -- block's raised value for the host before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
--- through unchanged, and `enter_local_handler()` and `leave_local_handler()`
+-- through unchanged, `enter_local_handler()` and `leave_local_handler()`
 -- step the counter the host's `jump` reads, so `jump` refuses while a
--- local tool's handler runs. The `tasks` namespace and the `fanout` shim live in
--- their own chunks (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by
--- the host right after this one over the failure helpers this chunk
--- returns.
+-- local tool's handler runs, and `cancel_requested()` reports whether the
+-- run's cancel flag is set: a failure caught under cancellation is the
+-- instruction hook's abort, which must unwind to the block guard, so every
+-- protected call below raises it again instead of returning it. The `tasks`
+-- namespace and the `fanout` shim live in their own chunks
+-- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the host right
+-- after this one over the failure helpers this chunk returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure, enter_local_handler,
-  leave_local_handler = ...
+  leave_local_handler, cancel_requested = ...
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
@@ -66,8 +69,11 @@ end
 -- author's own table, and an error table already built pass through
 -- untouched. The raw pcall is yieldable, and so is this Lua frame, so a
 -- shim yield inside the protected function still suspends the block.
+-- Under cancellation the raw failure is raised again, so an author loop
+-- around pcall cannot outlive the run.
 local function pcall_outcome(ok, ...)
   if ok then return true, ... end
+  if cancel_requested() then error((...), 0) end
   return false, normalize_failure((...))
 end
 
@@ -76,14 +82,20 @@ local function protected_call(f, ...)
 end
 
 -- The message handler sees the normalized failure; a non-function handler
--- is left to the raw xpcall so its own argument error is unchanged.
+-- is left to the raw xpcall so its own argument error is unchanged. Under
+-- cancellation the handler's result is raised again instead of returned.
+local function xpcall_outcome(ok, ...)
+  if not ok and cancel_requested() then error((...), 0) end
+  return ok, ...
+end
+
 local function protected_xcall(f, handler, ...)
   if type(handler) ~= "function" then
-    return raw_xpcall(f, handler, ...)
+    return xpcall_outcome(raw_xpcall(f, handler, ...))
   end
-  return raw_xpcall(f, function(failure)
+  return xpcall_outcome(raw_xpcall(f, function(failure)
     return handler(normalize_failure(failure))
-  end, ...)
+  end, ...))
 end
 
 -- models.infer(handle?, prompt): an optional leading model handle runs the
@@ -124,10 +136,12 @@ end
 -- (only when it returned) for the driver to report; afterward the
 -- handler's own failure is raised again unchanged, a rejected return
 -- raises the driver's error, and a returned value resumes as its text.
+-- A failure under cancellation is raised at once, with no yield.
 local function run_local_tool(handler, args)
   enter_local_handler()
   local ok, value = raw_pcall(handler, args)
   leave_local_handler()
+  if not ok and cancel_requested() then error(value, 0) end
   local done = { op = "local_tool_done", ok = ok }
   if ok then done.value = value end
   local answered, result = yield(done)
@@ -203,7 +217,7 @@ local EMPTY_MODEL_REPLY = "empty model reply"
 -- is normalized into the structured error table before re-raising, so the
 -- kind reaches an author pcall and the host alike. A compactor that
 -- returns instead of raising is the deferred replacement shape, which the
--- active surface refuses.
+-- active surface refuses. A failure under cancellation is raised raw.
 local function compact(compactor, reason)
   local ok, failure = raw_pcall(compactor, reason)
   if ok then
@@ -212,6 +226,7 @@ local function compact(compactor, reason)
         .. "deferred; compactors.fail is the only shipped policy",
     })
   end
+  if cancel_requested() then error(failure, 0) end
   error(normalize_failure(failure), 0)
 end
 

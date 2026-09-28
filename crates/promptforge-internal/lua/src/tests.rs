@@ -2241,6 +2241,68 @@ fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
     );
 }
 
+/// A section VM with the coroutine shims installed, so the shim's `pcall`
+/// and `xpcall` replacements are live, under `cancel` when one is given.
+fn shim_vm(cancel: Option<promptforge_types::cancel::CancelHandle>) -> SectionVm {
+    let emitter = null_emitter();
+    let mut vm = SectionVm::new(&test_nonce(), &emitter, "Loop").expect("VM must build");
+    vm.inject_host("", &json!({}), &fresh_access())
+        .expect("host values must inject");
+    vm.install_host_apis(&emitter, "Loop")
+        .expect("host APIs must install");
+    vm.install_scheduler_control_globals(|_| {
+        Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
+    })
+    .expect("the control globals must install");
+    vm.install_coro_shims(1).expect("coro shims must install");
+    if let Some(cancel) = cancel {
+        vm.set_cancel(cancel);
+    }
+    vm
+}
+
+/// Starts `source` as a block coroutine on a shim VM whose run is already
+/// cancelled.
+fn start_cancelled_block(source: &str) -> Result<CoroStep> {
+    let handle = promptforge_types::cancel::CancelHandle::new();
+    handle.cancel();
+    shim_vm(Some(handle)).start_block_coro(&program(source))
+}
+
+#[test]
+fn a_cancelled_run_unwinds_through_an_author_pcall_loop() {
+    let outcome =
+        start_cancelled_block("while true do pcall(function() while true do end end) end");
+    assert!(
+        matches!(outcome, Err(Error::Interrupted)),
+        "an author pcall must not swallow cancellation, got {outcome:?}"
+    );
+}
+
+#[test]
+fn a_cancelled_run_unwinds_through_an_author_xpcall_loop() {
+    let outcome = start_cancelled_block(
+        "while true do xpcall(function() while true do end end, function(e) return e end) end",
+    );
+    assert!(
+        matches!(outcome, Err(Error::Interrupted)),
+        "an author xpcall with a message handler must not swallow cancellation, got {outcome:?}"
+    );
+}
+
+#[test]
+fn a_pcall_failure_without_a_cancel_flag_still_returns_false_and_the_error() {
+    let step = shim_vm(None)
+        .start_block_coro(&program(
+            "local ok, err = pcall(error, 'boom')\nreturn tostring(ok) .. '|' .. tostring(err)",
+        ))
+        .expect("a caught failure must not fail the block");
+    let CoroStep::Done(LuaBlockResult::Returned(returned)) = step else {
+        panic!("the block must return, got {step:?}");
+    };
+    assert_eq!(returned.as_deref(), Some("false|boom"));
+}
+
 #[test]
 fn add_without_declarations_fails_as_unbound_in_a_chunk() {
     let error = run("tools.add('web_search')", "").expect_err("an unbound alias must fail loudly");

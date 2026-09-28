@@ -27,7 +27,8 @@ use std::sync::{Arc, LazyLock};
 use mlua::{Function, Table, Value};
 
 use super::{
-    Error, Lua, LuaProgram, Result, SharedSource, StdLib, route_store_to_shims, var_snapshot_table,
+    Error, InstructionBudget, Lua, LuaProgram, Result, SharedSource, StdLib, route_store_to_shims,
+    var_snapshot_table,
 };
 use crate::error_value::{Raised, install_error_value, install_normalize_failure, raised_from};
 
@@ -144,11 +145,14 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// raised failure into the same table. The chunk's `pcall` and `xpcall`
 /// replacements, which run every caught value through that capture, are
 /// installed over the base library's globals here, so a host callback that
-/// fails directly from Rust reaches author code in the one shape. The last
+/// fails directly from Rust reaches author code in the one shape. The next
 /// two captures, `enter_local_handler` and `leave_local_handler`, count up
 /// and down on `local_handler_depth`, the counter the VM's `jump` reads, so
 /// `jump` refuses while a local tool's handler runs, whatever reference
-/// the handler calls it through.
+/// the handler calls it through. The last, `cancel_requested`, reads the
+/// cancel flag of `instruction_budget`, so the chunk's protected calls
+/// raise a failure caught under cancellation again instead of returning
+/// it, and the hook's abort always reaches the block guard.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -157,6 +161,7 @@ pub(crate) fn install_shim_prelude(
     lua: &Lua,
     max_tool_iterations: usize,
     local_handler_depth: &Arc<AtomicU32>,
+    instruction_budget: &InstructionBudget,
 ) -> Result<()> {
     lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
     let globals = lua.globals();
@@ -173,6 +178,10 @@ pub(crate) fn install_shim_prelude(
     let normalize_failure = install_normalize_failure(lua).map_err(Error::lua)?;
     let (enter_local_handler, leave_local_handler) =
         local_handler_captures(lua, local_handler_depth)?;
+    let budget = instruction_budget.clone();
+    let cancel_requested = lua
+        .create_function(move |_, ()| Ok(budget.is_cancelled()))
+        .map_err(Error::lua)?;
     let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
     let shims: Table = program
         .load(lua)?
@@ -188,6 +197,7 @@ pub(crate) fn install_shim_prelude(
             normalize_failure,
             enter_local_handler,
             leave_local_handler,
+            cancel_requested,
         ))
         .map_err(Error::lua)?;
     let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;

@@ -695,7 +695,12 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
     pub fn install_coro_shims(&mut self, max_tool_iterations: usize) -> Result<()> {
-        install_shim_prelude(&self.lua, max_tool_iterations, &self.local_handler_depth)
+        install_shim_prelude(
+            &self.lua,
+            max_tool_iterations,
+            &self.local_handler_depth,
+            &self.instruction_budget,
+        )
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {

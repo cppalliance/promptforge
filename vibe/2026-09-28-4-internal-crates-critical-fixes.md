@@ -281,7 +281,7 @@ The critical fixes are the smallest changes that close each failure path at its 
 
 <step-2>
 
-### Step 2: Let cancellation unwind through every Lua pcall
+### Step 2: Let cancellation unwind through every Lua pcall [completed]
 
 - Component: Lua cancellation
 - Piece: the `cancel_requested` capture and its four re-raise sites, built jointly in one commit. The capture has no use without a site that reads it, and one test set covers all four sites.

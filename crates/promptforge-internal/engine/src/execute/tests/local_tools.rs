@@ -142,6 +142,39 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
+    use std::time::{Duration, Instant};
+
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "grab", "{\"value\":\"hi\"}"),
+        resp_text("unreachable"),
+    ])
+    .await;
+    let prompt = parse(&grab_loop("while true do end"));
+    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+
+    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let canceller = driver.cancel_handle();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+
+    let start = Instant::now();
+    let result = driver.drive().await;
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "cancel during a looping local tool handler must return promptly, took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        matches!(result, Err(crate::Error::Interrupted)),
+        "expected Interrupted, got {result:?}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text() {
     let gateway = ScriptedGateway::start(vec![
