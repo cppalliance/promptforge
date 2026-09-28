@@ -42,8 +42,8 @@ async fn a_full_turn_streams_deltas_and_indexed_events_sharing_the_reply_id() {
         kinds,
         ["user_message", "agent_thought", "agent_message"],
         "the durable record of one turn: input, thinking, reply - the \
-         direct user_input call is not a tool call, so no tool_call_update \
-         exists"
+         script's ask frames as the operator's message, so no \
+         tool_call_update exists"
     );
     let indices: Vec<u64> = turn
         .events

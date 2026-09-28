@@ -13,15 +13,16 @@ use harness_runner::test_support::mock_tag;
 
 /// A session program that infers once, then chats once: the mixed
 /// model-round sequence the reply-id rule must number in order. The second
-/// `user_input()` parks the run between the two rounds, so the infer reply
+/// `input.ask()` parks the run between the two rounds, so the infer reply
 /// settles the accepted turn before any chat round exists.
 const MIXED: &str = "---\nname: mixed\ndescription: infers then chats\npromptforge: 0\n\
+    capabilities:\n  - promptforge/user-input\n\
     models:\n  writer: {}\n---\n\n\
     # Mixed\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\n\
-    local first = user_input()\n\
+    local first = input.ask()\n\
     local inferred = models.infer(first)\n\
-    local second = user_input()\n\
+    local second = input.ask()\n\
     local msgs = messages.new()\n\
     msgs:user(second)\n\
     models.loop(msgs)\n\

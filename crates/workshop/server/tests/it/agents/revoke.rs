@@ -14,6 +14,8 @@ const ROOTS_MD: &str = r"---
 name: roots
 description: The roots test agent on the unified runtime.
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Roots
@@ -25,10 +27,7 @@ local history = messages.new()
 history:user('launch@' .. tostring(ui().workspace_root))
 models.loop(models.get('test-model'), history)
 while true do
-    local text, available = user_input()
-    if not available then
-        return
-    end
+    local text = input.ask()
     history:user(text)
     models.loop(models.get('test-model'), history)
 end

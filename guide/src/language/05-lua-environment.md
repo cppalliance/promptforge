@@ -1,6 +1,6 @@
 # The Lua Environment
 
-Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `user_input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
+Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
 
 ## The sandbox and its globals
 
@@ -45,13 +45,13 @@ HELLO
 On top of the sandbox, the runtime installs host globals in every section VM, with nothing to import. These are always present:
 
 - `args`, `argv`, `sys`, `var`, and `prose`
-- `log` and `user_input`
+- `log`
 - `store` and `untrusted`
 - `models`, `tools`, `messages`, and `compactors`
 - `call`, `jump`, `fanout`, and `list_from_section`
 - `tasks`
 
-Three more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). And every declared model role label and every tool slot alias becomes a bare global of its own. This chapter teaches `var`, `sys`, `ui`, `log`, and `user_input`; each of the others is taught in its own chapter.
+Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
 
 ### Blocks, sections, and section VMs
 
@@ -113,7 +113,7 @@ A saved reference works the same way. A first block can run `saved_log = log` an
 
 ## Calls that wait and errors that raise
 
-Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `user_input`. You write each one as an ordinary Lua call in straight-line code:
+Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
 
 ````lua
 local reply = models.infer(prose)
@@ -148,7 +148,7 @@ The failure is a Lua runtime error whose text includes your message, here `the a
 
 ### Failed host calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
+A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
 Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
 
@@ -674,15 +674,17 @@ lua log cumulative byte budget exceeded
 
 `pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](17-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
 
-## Asking the operator with user_input
+## Asking the operator with input.ask
 
-The operator is the person the host puts in front of the run, answering its questions. `user_input()` asks the operator for text mid-run:
+The operator is the person the host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
 
 ````markdown
 ---
 name: ask-operator
 description: Asks the operator for a topic
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Ask Operator
@@ -690,54 +692,107 @@ promptforge: 0
 ## Ask
 
 ```lua
-local text, available = user_input()
-if available then
-  return 'Topic: ' .. text
-end
-return 'No operator, so the default topic it is.'
+local text = input.ask()
+return 'Topic: ' .. text
 ```
 ````
 
-`user_input` is a suspending call, installed as a global in every section VM. The block waits until the host answers, then gets two values: the text, and an `available` boolean that is `true` when the text is the operator's own input. If the operator types `lighthouses`, the run result is:
+`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the host has someone to ask. If the operator types `lighthouses`, the run result is:
 
 ````text
 Topic: lighthouses
 ````
 
-### Branch on available
+### Declaring the capability
 
-When the host has no input to give, `user_input()` returns this fixed sentence with `available` set to `false`:
+The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
+
+Asking needs an input broker: the part of the host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a host without one.
+
+A plain entry, as in the prompt above, declares the capability required. On a host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+
+````text
+the environment cannot satisfy this prompt:
+- promptforge/user-input needs an input broker, and this host provides none
+````
+
+An entry with `optional: true` always runs. On a host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
+
+````yaml
+capabilities:
+  - ref: promptforge/user-input
+    optional: true
+````
+
+### Checking for an operator
+
+`input.connected()` returns `true` when the host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the host for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
+
+````markdown
+---
+name: topic-or-default
+description: Asks for a topic when someone is there to answer
+promptforge: 0
+capabilities:
+  - ref: promptforge/user-input
+    optional: true
+---
+
+# Topic or Default
+
+## Ask
+
+```lua
+if not input.connected() then
+  return 'No operator, so the default topic it is.'
+end
+local text = input.ask()
+return 'Topic: ' .. text
+```
+````
+
+When nobody is there, `input.ask()` still asks the host, so the host sees every question, and it returns this fixed sentence with `available` set to `false`:
 
 ````text
 User input is unavailable in this host; continue without it.
 ````
 
-That is a normal return, not an error: the section keeps running, and no input is recorded. A host with no input handling at all gives the same answer.
+That is a normal return, not an error: the section keeps running. `available` is always the value `input.connected()` returns. Branch on the flag, never on the text: an operator who types that exact sentence still gets `available == true`, so the flag is the only reliable test.
 
-Always branch on `available`, never on the text. An operator who types that exact sentence still gets `available == true`, so the flag is the only reliable test.
+### What the answer holds
 
-### What the wait keeps
-
-- `user_input()` takes no arguments. Passing any raises an error value of kind `lua` with the message `user_input takes no arguments`.
-- The operator's reply arrives byte for byte as typed, with `available` set to `true`, and the run records that text as operator input. Any text is valid.
+- The operator's text arrives byte for byte as typed. Operator input is trusted, so it never arrives in the [untrusted envelope](09-the-store.md#wrapping-untrusted-text). A prompt that treats pasted text as data, such as a document the operator pastes to be summarized, wraps it with `untrusted(text)` before it reaches a model.
+- `input.ask()` takes no arguments. Passing any raises a Lua error with the message `input.ask takes no arguments`, so a prompt that tries to pass a question fails at once instead of silently losing it.
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
-- A task started with `tasks.spawn` that waits in `user_input()` stays live while other chains keep running, and it ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `user_input()` call reaches the host as one input request naming the run's execution and the section that asked. The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
-- Only Lua asks the operator. A `models.loop` conversation offers the model exactly the tools the prompt adds, and sends no tool list at all when there are none, so the model has no way of its own to reach the operator.
+- A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
-### When input fails or is cancelled
+### Letting the model ask
 
-When the host's input source fails, `user_input` raises at its call site an error value of kind `internal` with this message, where `{message}` is the host's failure text:
+Declaring the capability advertises nothing to the model. A `models.loop` conversation offers the model exactly the tools the prompt adds, so unless the prompt opts in, only Lua asks the operator. To let the model ask as well, bind the ask tool under an alias in `tools:` ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)):
 
-````text
-user input request was not answered: {message}
+````yaml
+capabilities:
+  - promptforge/user-input
+tools:
+  ask: promptforge/user-input/ask
 ````
 
-`pcall(user_input)` catches it:
+Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. On a host with no input broker it reads the fixed sentence instead.
+
+Choose any alias except `input`. A tool alias or model role label named `input` collides with the capability's `input` global, and the run fails before it does anything, with run error kind `Lua` and this message:
+
+````text
+capability `promptforge/user-input`: its prelude defines the global `input`, which the prompt's frontmatter binds as a tool or model alias
+````
+
+### When an ask fails or is cancelled
+
+When the host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
 
 ````lua
-local ok, text, available = pcall(user_input)
+local ok, text = pcall(input.ask)
 if not ok then
   log('no operator input this time')
   return 'Continuing without the operator.'
@@ -745,9 +800,9 @@ end
 return text
 ````
 
-Left uncaught, an input-source failure ends the run with run error kind `Input` and the same message ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
 
-When the host abandons a `user_input()` wait, the call raises a cancelled error; left uncaught, the run ends with the cancelled outcome, not as a failure. When the run is cancelled while a section waits in `user_input()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
+When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
 
 ## Error locations in the prompt file
 
@@ -959,7 +1014,7 @@ Every section, the H1 pass, and every fanout arm gets its own fresh section VM (
 5. `jump` and `list_from_section`.
 6. The suspending calls.
 7. `models.loop`.
-8. `user_input`.
+8. The globals of each declared capability, such as `input`, in declaration order. Each capability supplies them as a prelude, a piece of Lua that only defines tables and functions.
 9. The shared library load.
 10. The store's suspending calls.
 11. The declared alias globals.

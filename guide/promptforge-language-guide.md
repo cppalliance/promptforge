@@ -527,11 +527,10 @@ Lua only ever selects labels that are already bound:
 
 The model calls a bound tool by its alias from `tools:`, such as `search`, never by its tool path, such as `promptforge/web/search`.
 
-The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly six kinds of host work:
+The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly five kinds of host work:
 
 - A model round: `models.infer` sends one round with its prompt text and no tools, and `models.loop` runs rounds ([running a round with models.infer](10-models.md#running-a-round-with-modelsinfer)).
-- A bound tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)).
-- A wait for operator input ([asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input)).
+- A tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)), a wait for operator input included, because `input.ask()` calls a tool ([asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)).
 - A store operation, one for each store call ([what the store is](09-the-store.md#what-the-store-is)).
 - The timer behind a timed wait on tasks ([time limits on waits](15-tasks.md#time-limits-on-waits)).
 - A read of a task's event history ([reading a task's history](16-task-events.md#reading-a-tasks-history)).
@@ -1818,13 +1817,13 @@ A prompt that needs no shared code leaves the `lua shared` fence out. Every sect
 
 ### What top-level library code can use
 
-The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
+The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
 
 | In the library's top-level code | What happens |
 |---|---|
 | Reading `args`, `var`, and `sys` | Works |
 | `store` calls, `log`, and `tools.add` | Work directly |
-| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
+| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
 | `jump` | Fails with `jump is not available during shared library load` |
 | No `return`, or a `return` of a string, number, boolean, or nil | The value is discarded |
 | A `return` of any other value | Fails with ``cannot return a {type} as a result`` |
@@ -2664,7 +2663,7 @@ A prompt can also fail to start for reasons outside the notice: its `promptforge
 
 ## Waiting and reproducibility
 
-Host work, the work the host does for a run ([The prompt and its host](01-what-a-prompt-is.md#the-prompt-and-its-host)), is done by the host while only the calling chain waits. Model requests, tool calls, `user_input()` requests, and store operations are all host work. While one chain waits for its answer, other chains keep running. For example, `store.write('notes.md', 'kept')` issues one piece of host work, and its chain waits for the answer before its next line runs. `user_input()` asks the operator for text ([Asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input)), `store.write` saves a file in the run's store ([What the store is](09-the-store.md#what-the-store-is)), and a script calls tools by alias ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)). Tasks, sections started to run beside the section that started them, are chains that keep running this way ([Starting a task](15-tasks.md#starting-a-task)).
+Host work, the work the host does for a run ([The prompt and its host](01-what-a-prompt-is.md#the-prompt-and-its-host)), is done by the host while only the calling chain waits. Model requests, tool calls, `input.ask()` requests, and store operations are all host work. While one chain waits for its answer, other chains keep running. For example, `store.write('notes.md', 'kept')` issues one piece of host work, and its chain waits for the answer before its next line runs. `input.ask()` asks the operator for text ([Asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)), `store.write` saves a file in the run's store ([What the store is](09-the-store.md#what-the-store-is)), and a script calls tools by alias ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)). Tasks, sections started to run beside the section that started them, are chains that keep running this way ([Starting a task](15-tasks.md#starting-a-task)).
 
 Runs are reproducible. Each run has a seed and a start instant, both supplied by the host; a prompt cannot set either one. Lua in a prompt has no clock or random source of its own, so the same prompt with the same seed, the same start instant, and the same model answers, as a replay has, produces byte-identical result text. It also produces the same `sys.when`, the run's start time as Lua sees it, and the same host work in the same order. The same holds for the run's events ([Reading a task's history](16-task-events.md#reading-a-tasks-history)) and for the random nonce inside each untrusted envelope ([Wrapping untrusted text](09-the-store.md#wrapping-untrusted-text)); a different seed gives a different nonce.
 
@@ -2674,7 +2673,7 @@ A task's record does not depend on how fast, or in what order, model answers arr
 
 # The Lua Environment
 
-Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `user_input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
+Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
 
 ## The sandbox and its globals
 
@@ -2719,13 +2718,13 @@ HELLO
 On top of the sandbox, the runtime installs host globals in every section VM, with nothing to import. These are always present:
 
 - `args`, `argv`, `sys`, `var`, and `prose`
-- `log` and `user_input`
+- `log`
 - `store` and `untrusted`
 - `models`, `tools`, `messages`, and `compactors`
 - `call`, `jump`, `fanout`, and `list_from_section`
 - `tasks`
 
-Three more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). And every declared model role label and every tool slot alias becomes a bare global of its own. This chapter teaches `var`, `sys`, `ui`, `log`, and `user_input`; each of the others is taught in its own chapter.
+Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
 
 ### Blocks, sections, and section VMs
 
@@ -2787,7 +2786,7 @@ A saved reference works the same way. A first block can run `saved_log = log` an
 
 ## Calls that wait and errors that raise
 
-Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `user_input`. You write each one as an ordinary Lua call in straight-line code:
+Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
 
 ````lua
 local reply = models.infer(prose)
@@ -2822,7 +2821,7 @@ The failure is a Lua runtime error whose text includes your message, here `the a
 
 ### Failed host calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `user_input`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
+A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
 Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
 
@@ -3348,15 +3347,17 @@ lua log cumulative byte budget exceeded
 
 `pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](17-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
 
-## Asking the operator with user_input
+## Asking the operator with input.ask
 
-The operator is the person the host puts in front of the run, answering its questions. `user_input()` asks the operator for text mid-run:
+The operator is the person the host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
 
 ````markdown
 ---
 name: ask-operator
 description: Asks the operator for a topic
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Ask Operator
@@ -3364,54 +3365,107 @@ promptforge: 0
 ## Ask
 
 ```lua
-local text, available = user_input()
-if available then
-  return 'Topic: ' .. text
-end
-return 'No operator, so the default topic it is.'
+local text = input.ask()
+return 'Topic: ' .. text
 ```
 ````
 
-`user_input` is a suspending call, installed as a global in every section VM. The block waits until the host answers, then gets two values: the text, and an `available` boolean that is `true` when the text is the operator's own input. If the operator types `lighthouses`, the run result is:
+`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the host has someone to ask. If the operator types `lighthouses`, the run result is:
 
 ````text
 Topic: lighthouses
 ````
 
-### Branch on available
+### Declaring the capability
 
-When the host has no input to give, `user_input()` returns this fixed sentence with `available` set to `false`:
+The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
+
+Asking needs an input broker: the part of the host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a host without one.
+
+A plain entry, as in the prompt above, declares the capability required. On a host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+
+````text
+the environment cannot satisfy this prompt:
+- promptforge/user-input needs an input broker, and this host provides none
+````
+
+An entry with `optional: true` always runs. On a host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
+
+````yaml
+capabilities:
+  - ref: promptforge/user-input
+    optional: true
+````
+
+### Checking for an operator
+
+`input.connected()` returns `true` when the host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the host for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
+
+````markdown
+---
+name: topic-or-default
+description: Asks for a topic when someone is there to answer
+promptforge: 0
+capabilities:
+  - ref: promptforge/user-input
+    optional: true
+---
+
+# Topic or Default
+
+## Ask
+
+```lua
+if not input.connected() then
+  return 'No operator, so the default topic it is.'
+end
+local text = input.ask()
+return 'Topic: ' .. text
+```
+````
+
+When nobody is there, `input.ask()` still asks the host, so the host sees every question, and it returns this fixed sentence with `available` set to `false`:
 
 ````text
 User input is unavailable in this host; continue without it.
 ````
 
-That is a normal return, not an error: the section keeps running, and no input is recorded. A host with no input handling at all gives the same answer.
+That is a normal return, not an error: the section keeps running. `available` is always the value `input.connected()` returns. Branch on the flag, never on the text: an operator who types that exact sentence still gets `available == true`, so the flag is the only reliable test.
 
-Always branch on `available`, never on the text. An operator who types that exact sentence still gets `available == true`, so the flag is the only reliable test.
+### What the answer holds
 
-### What the wait keeps
-
-- `user_input()` takes no arguments. Passing any raises an error value of kind `lua` with the message `user_input takes no arguments`.
-- The operator's reply arrives byte for byte as typed, with `available` set to `true`, and the run records that text as operator input. Any text is valid.
+- The operator's text arrives byte for byte as typed. Operator input is trusted, so it never arrives in the [untrusted envelope](09-the-store.md#wrapping-untrusted-text). A prompt that treats pasted text as data, such as a document the operator pastes to be summarized, wraps it with `untrusted(text)` before it reaches a model.
+- `input.ask()` takes no arguments. Passing any raises a Lua error with the message `input.ask takes no arguments`, so a prompt that tries to pass a question fails at once instead of silently losing it.
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
-- A task started with `tasks.spawn` that waits in `user_input()` stays live while other chains keep running, and it ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `user_input()` call reaches the host as one input request naming the run's execution and the section that asked. The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
-- Only Lua asks the operator. A `models.loop` conversation offers the model exactly the tools the prompt adds, and sends no tool list at all when there are none, so the model has no way of its own to reach the operator.
+- A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
-### When input fails or is cancelled
+### Letting the model ask
 
-When the host's input source fails, `user_input` raises at its call site an error value of kind `internal` with this message, where `{message}` is the host's failure text:
+Declaring the capability advertises nothing to the model. A `models.loop` conversation offers the model exactly the tools the prompt adds, so unless the prompt opts in, only Lua asks the operator. To let the model ask as well, bind the ask tool under an alias in `tools:` ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)):
 
-````text
-user input request was not answered: {message}
+````yaml
+capabilities:
+  - promptforge/user-input
+tools:
+  ask: promptforge/user-input/ask
 ````
 
-`pcall(user_input)` catches it:
+Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. On a host with no input broker it reads the fixed sentence instead.
+
+Choose any alias except `input`. A tool alias or model role label named `input` collides with the capability's `input` global, and the run fails before it does anything, with run error kind `Lua` and this message:
+
+````text
+capability `promptforge/user-input`: its prelude defines the global `input`, which the prompt's frontmatter binds as a tool or model alias
+````
+
+### When an ask fails or is cancelled
+
+When the host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
 
 ````lua
-local ok, text, available = pcall(user_input)
+local ok, text = pcall(input.ask)
 if not ok then
   log('no operator input this time')
   return 'Continuing without the operator.'
@@ -3419,9 +3473,9 @@ end
 return text
 ````
 
-Left uncaught, an input-source failure ends the run with run error kind `Input` and the same message ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
 
-When the host abandons a `user_input()` wait, the call raises a cancelled error; left uncaught, the run ends with the cancelled outcome, not as a failure. When the run is cancelled while a section waits in `user_input()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
+When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
 
 ## Error locations in the prompt file
 
@@ -3633,7 +3687,7 @@ Every section, the H1 pass, and every fanout arm gets its own fresh section VM (
 5. `jump` and `list_from_section`.
 6. The suspending calls.
 7. `models.loop`.
-8. `user_input`.
+8. The globals of each declared capability, such as `input`, in declaration order. Each capability supplies them as a prelude, a piece of Lua that only defines tables and functions.
 9. The shared library load.
 10. The store's suspending calls.
 11. The declared alias globals.
@@ -8316,7 +8370,7 @@ The caller, script or model, receives the handler's text exactly as returned, as
 
 ### What a handler can do
 
-Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `user_input`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
+Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `input.ask`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
 
 Inside a handler, `tools.call` is a script call. A failing bound tool raises there as kind `tool` instead of becoming text for the model, and a bound tool's untrusted output reaches the handler already wrapped and keeps its envelope if the handler returns it.
 
@@ -10559,8 +10613,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 `section` names the section the live task is in now, and `blocked` names what it is waiting on. Both are nil before the task starts and after it ends, and `blocked` is also nil while the task is running Lua. `blocked` is one of:
 
 - `chat`: a model round
-- `tool_call`: a tool call
-- `user_input`: an answer from the operator
+- `tool_call`: a tool call, a wait for the operator in `input.ask()` included
 - `store`: a store call
 - `tasks`: a wait on tasks, timed or not, or a history read
 - `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
@@ -10895,7 +10948,7 @@ While the allowlist is set, every model round in the section has the five task b
 
 The model's `task` built-in takes a required `target` string, the heading of the section to run, such as `## Research`, and an optional `input` string that replaces the task's argument string. It returns at once with the text `Task id={id} started`, such as `Task id=0.0 started`, as the tool record for that call, which holds the call's `tool_call_id`. The task runs beside the model, and its result reaches the model as a task notice when it ends.
 
-A task the model starts behaves like one the prompt starts with `tasks.spawn`. It starts the same way: the calling section keeps running first, and the new task first runs when the section parks. A `task` call with `target` `"## Child"` runs the `## Child` section, whose returned value is the task's result. The task's origin is `model`, and it is seeded with the calling section's current `var`, with no `item` and no `sys.index`. A failing model task never fails its owner: when the task's section raises, the owner section keeps running and returns normally. A task's section can even wait on [`user_input()`](05-lua-environment.md#asking-the-operator-with-user_input) while the owner's model loop keeps running rounds, and it resumes when its answer arrives and then returns its result.
+A task the model starts behaves like one the prompt starts with `tasks.spawn`. It starts the same way: the calling section keeps running first, and the new task first runs when the section parks. A `task` call with `target` `"## Child"` runs the `## Child` section, whose returned value is the task's result. The task's origin is `model`, and it is seeded with the calling section's current `var`, with no `item` and no `sys.index`. A failing model task never fails its owner: when the task's section raises, the owner section keeps running and returns normally. A task's section can even wait on [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) while the owner's model loop keeps running rounds, and it resumes when its answer arrives and then returns its result.
 
 The `task` built-in's description tells the model which targets it may use, so the model can copy one the engine accepts. After `tools.allow_tasks()` the description says the first sentence below, and after a list it says the second, naming exactly the listed headings:
 
@@ -11028,7 +11081,7 @@ Each bracketed part appears only when it applies: `, ok` or `, failed` when the 
 
 - `Task id=0.0 (## Child): done, ok` starts the line for a task whose section returned, naming the task, its target, and how it ended.
 - `Task id=0.0 (## Child): done, failed, turns 0` is the whole line for a task whose section raised: its round count, and none of the live parts.
-- `Task id=0.0 (## Child): running, in ## Child, waiting on user_input, turns 0, tasks 0.0.0, note: halfway` is a live task parked on `user_input()` that has also spawned `0.0.0` and run `tasks.note('halfway')`.
+- `Task id=0.0 (## Child): running, in ## Child, waiting on tool_call, turns 0, tasks 0.0.0, note: halfway` is a live task parked on `input.ask()` that has also spawned `0.0.0` and run `tasks.note('halfway')`.
 
 In the last line, `tasks 0.0.0` lists the live tasks the task started itself, each id extending the task's own id by one more segment, and `note: halfway` ends the line with the note set inside the task. A task held in a wait on its own tasks reads `waiting on tasks`.
 
@@ -11101,7 +11154,7 @@ A run reports everything it does as it goes: each section that starts and finish
 
 ## Reading a task's history
 
-An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, each wait for operator input, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
+An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
 
 ````markdown
 ---
@@ -11157,7 +11210,7 @@ Every event table holds the same four keys, followed by the fields of its own ki
 
 ### Event kinds
 
-A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 59, by area:
+A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 57, by area:
 
 | Area | Kinds | Covered in |
 |---|---|---|
@@ -11170,7 +11223,6 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Model | `model_turn_completed`, `model_turn_failed`, `model_turn_truncated`, `model_metadata_degraded`, `thinking`, `assistant_reply`, `assistant_tool_calls` | [Model round events](#model-round-events) |
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
 | Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
-| Operator input | `user_input_wait_started`, `user_input` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
 | Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
 
@@ -11568,18 +11620,18 @@ The read of a file that does not exist raised an error value, which `pcall` caug
 
 ### Operator input
 
-A section that calls [`user_input()`](05-lua-environment.md#asking-the-operator-with-user_input) reports `user_input_wait_started` when it starts waiting for the operator. It is a single boundary with no finished counterpart, and it is reported on every wait, even in a host with no operator. When the operator's text arrives, a separate `user_input` event follows under the same section, and its `text` field holds that text exactly as the operator supplied it, byte for byte. The unavailable fallback reports no `user_input`, so counting both kinds tells you how many waits got no text:
+Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
 
 ````lua
-local waits, answered = 0, 0
+local asks = 0
 for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'user_input_wait_started' then waits = waits + 1 end
-  if e.kind == 'user_input' then answered = answered + 1 end
+  if e.kind == 'tool_result' and e.alias == 'promptforge/user-input/ask' then
+    asks = asks + 1
+  end
 end
-local unanswered = waits - answered
 ````
 
-`user_input.text` is untrusted.
+A model that asks through an alias of its own, as [Letting the model ask](05-lua-environment.md#letting-the-model-ask) shows, reports under that alias and the model's call id, like any model tool call.
 
 ## Model round events
 
@@ -12018,7 +12070,6 @@ Treat the text inside events as untrusted:
 - `thinking.text` and `assistant_reply.text`
 - `assistant_tool_calls.calls`, names and arguments alike
 - `tool_result.content`, unless `trusted` is `true`
-- `user_input.text`
 - the seeds in `task_started`
 - the `request` and `response` bodies
 - `model_metadata_degraded.message`
@@ -12106,7 +12157,7 @@ Failures fall into four families, each with its own vocabulary:
 |---|---|---|
 | Parse failure | before anything runs | one of five parse error kinds |
 | Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
-| Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of thirteen run error kinds |
+| Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of twelve run error kinds |
 | Cancelled outcome | when the host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
@@ -12127,7 +12178,7 @@ return reply
 
 Here an `internal` failure, such as a model call the host could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
 
-A failed run reports one run error kind naming what failed, from a fixed set of thirteen: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Input`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
+A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
 
 A run the host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the host, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
 
@@ -12408,7 +12459,6 @@ The message text is what tells them apart. A failed `store` operation is not in 
 
 - a model call failure: an HTTP transport failure (a receive timeout included), a backend error status, a malformed reply (an oversized one included), a missing or invalid environment variable, invalid client configuration, or a disabled gateway
 - the missing-model error, raised when a model round has no model selected ([Choosing a section's model](10-models.md#choosing-a-sections-model))
-- a failure of the host's input source for `user_input` ([Asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input))
 - a fault in the engine or in the Lua runtime's own machinery
 
 An ordinary failed `store` call is kind `store`, not `internal`. Its message text says what failed, and its `reason` and fields let a prompt branch on the failure mode ([Store errors](09-the-store.md#store-errors)).
@@ -12424,7 +12474,7 @@ An error kind is what Lua sees at the call. A run error kind is what the host re
 | `err.kind` | Its own fields | Uncaught, ends the run as |
 |---|---|---|
 | `lua` | none | `Lua`, or `Quota` for a refused `log` call |
-| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Input` for a `user_input` failure, `Internal` for an engine fault |
+| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an engine fault |
 | `cancelled` | `task`, for a cancelled task | the cancelled outcome for a host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
 | `context_exhausted` | `reason` | `ContextExhausted` |
 | `empty_model_reply` | `finish_reason`, only when the backend gave one | `Completion` |
@@ -12457,7 +12507,7 @@ A value missing its kind's fields also ends the run as `Lua`, or as `Requirement
 
 ## How a failed run is classified
 
-A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are thirteen run error kinds. A host cancel is not among them, because a cancelled run has not failed.
+A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A host cancel is not among them, because a cancelled run has not failed.
 
 | Run error kind | The run failed because | Message |
 |---|---|---|
@@ -12471,7 +12521,6 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
 | `ContextExhausted` | the compactor ran out of the model's context window | `context exhausted: {reason}` |
-| `Input` | the host's input source failed a `user_input` request | `user input request was not answered: {message}` |
 | `Internal` | an engine invariant broke | `internal invariant violated: {message}` |
 | `RequirementsUnmet` | prepare refused the run, or the H1 pass failed its hard gate | the requirements notice, or the Lua error text |
 
@@ -12489,7 +12538,7 @@ Nothing reruns a failed run automatically. [Model call and environment failures]
 - `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, missing or invalid environment variables, invalid client configuration, and a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
 - `Tool`: a dispatched tool fails ([Tool failures](12-tools.md#tool-failures)), a tool call is out of the section's scope ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), a call names a tool not bound in the run ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)), or a `models.loop` call does not finish within the round cap ([The round cap](11-conversations.md#the-round-cap)), and the prompt does not catch it.
 - `ContextExhausted`: the selected compactor runs out of the model's context window and the prompt does not catch it ([Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion)).
-- `Input`: the host's input source fails a `user_input` request and the failure goes uncaught. Caught with `pcall`, the same failure is kind `internal`.
+- A failed operator ask is a tool failure: when the host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
 
 The four `Tool` messages are these, where `{name:?}` and the other `:?` placeholders show the value in double quotes with escapes:
 
@@ -12549,7 +12598,7 @@ In the H1 pass, these failures become `RequirementsUnmet`:
 Everything else keeps its own classification in the H1 pass:
 
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
-- Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, `ContextExhausted`, and `Input` keep their kinds.
+- Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, and `ContextExhausted` keep their kinds.
 - A failed store call stays `Store`, and a claims conflict stays `Determinism`.
 - A host cancel stays the cancelled outcome.
 - A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
@@ -12646,8 +12695,7 @@ Left uncaught, the interrupted error ends the run with the cancelled outcome.
 A cancel also reaches every call that is waiting on the host. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
 
 - `models.infer`, and each `models.loop` round
-- `tools.call`, and tool calls the model makes
-- `user_input()`
+- `tools.call`, `input.ask()` included, and tool calls the model makes
 - every `store` call
 - a `tasks.events` read ([Read options, results, and errors](16-task-events.md#read-options-results-and-errors)), with the model's `task_events` built-in failing the same way
 
@@ -12908,6 +12956,17 @@ For each tool and argument, Form is what the model sends and Returns is the text
 | `promptforge/web/search` `safesearch` | `"safesearch": "strict"`, optional | The SafeSearch level: `off`, `moderate`, or `strict` | [Web Fetch and Search](13-web-fetch-and-search.md#search-options) |
 | `promptforge/web/search` `search_lang` | `"search_lang": "en"`, optional | The search language; 1 to 128 characters, not blank | [Web Fetch and Search](13-web-fetch-and-search.md#search-options) |
 
+### Operator input
+
+The `promptforge/user-input` row is the capability line that defines the rest. The two `input` rows are Lua calls, and the ask tool row is what a model sends when the prompt lets it ask.
+
+| Name | Form | Returns | Taught in |
+|---|---|---|---|
+| `promptforge/user-input` | `capabilities: [promptforge/user-input]` | The `input` global and the tool path `promptforge/user-input/ask`; required, it refuses a host with nobody to ask | [The Lua Environment](05-lua-environment.md#declaring-the-capability) |
+| `input.ask` | `local text, available = input.ask()` in Lua | the operator's next message and `true`, or the fixed fallback sentence and `false` | [The Lua Environment](05-lua-environment.md#asking-the-operator-with-inputask) |
+| `input.connected` | `input.connected()` in Lua | `true` when the host has someone to ask; fixed for the whole run | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
+| `promptforge/user-input/ask` | `{}` | The operator's next message, trusted; offered to a model only through a `tools:` alias | [The Lua Environment](05-lua-environment.md#letting-the-model-ask) |
+
 ### Lua standard library
 
 Every section VM runs Lua 5.5 with these libraries and base functions.
@@ -12976,7 +13035,6 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `tostring(result)` and `table.concat(results)` | `tostring(r[i])`, `table.concat(r, sep)` | the result's text; the joined texts | [Fanout](14-fanout.md#the-fanout-call) |
 | `ui` | `ui()` | host-state snapshot table; present only when the host supplies one | [The Lua Environment](05-lua-environment.md#host-state-with-ui) |
 | `untrusted` | `untrusted(s)` | `s` inside an untrusted envelope | [The Store](09-the-store.md#wrapping-untrusted-text) |
-| `user_input` | `local text, available = user_input()` | the operator's text and `true`, or a fixed sentence and `false` | [The Lua Environment](05-lua-environment.md#asking-the-operator-with-user_input) |
 | `var` | `var.key = value` | your own values, carried along the walk | [The Lua Environment](05-lua-environment.md#keeping-values-in-var) |
 | `xpcall` | `xpcall(f, handler, ...)` | like `pcall`; `handler` receives the error value | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 
@@ -13020,7 +13078,7 @@ Set by names the frontmatter key that sets a value, or says whether the host set
 | Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | host | [Conversations](11-conversations.md#the-round-cap) |
 | Round cap from frontmatter | The host default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
 | Run limit defaults | Listed in the chapter | One set applies to the whole run | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
-| `user_input` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` | fixed | [The Lua Environment](05-lua-environment.md#asking-the-operator-with-user_input) |
+| `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 
 ## Error kinds
 
@@ -13045,7 +13103,6 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Input` | The host's input source fails a `user_input` request and the failure goes uncaught | The host's failure text, in `user input request was not answered: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Internal` | An engine invariant breaks, a fault in the engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
@@ -13063,7 +13120,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `cancelled` | A host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The reply's detail phrase, or plain `empty model reply`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A host-side failure the prompt cannot fix: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, a failed `user_input` source, or an engine fault | The backend status, the variable name, the section, or the host's input failure text, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A host-side failure the prompt cannot fix: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `lua` | A runtime error, a host call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |

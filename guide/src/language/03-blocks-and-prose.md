@@ -661,13 +661,13 @@ A prompt that needs no shared code leaves the `lua shared` fence out. Every sect
 
 ### What top-level library code can use
 
-The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
+The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
 
 | In the library's top-level code | What happens |
 |---|---|
 | Reading `args`, `var`, and `sys` | Works |
 | `store` calls, `log`, and `tools.add` | Work directly |
-| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
+| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
 | `jump` | Fails with `jump is not available during shared library load` |
 | No `return`, or a `return` of a string, number, boolean, or nil | The value is discarded |
 | A `return` of any other value | Fails with ``cannot return a {type} as a result`` |

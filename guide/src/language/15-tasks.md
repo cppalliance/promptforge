@@ -567,8 +567,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 `section` names the section the live task is in now, and `blocked` names what it is waiting on. Both are nil before the task starts and after it ends, and `blocked` is also nil while the task is running Lua. `blocked` is one of:
 
 - `chat`: a model round
-- `tool_call`: a tool call
-- `user_input`: an answer from the operator
+- `tool_call`: a tool call, a wait for the operator in `input.ask()` included
 - `store`: a store call
 - `tasks`: a wait on tasks, timed or not, or a history read
 - `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
@@ -903,7 +902,7 @@ While the allowlist is set, every model round in the section has the five task b
 
 The model's `task` built-in takes a required `target` string, the heading of the section to run, such as `## Research`, and an optional `input` string that replaces the task's argument string. It returns at once with the text `Task id={id} started`, such as `Task id=0.0 started`, as the tool record for that call, which holds the call's `tool_call_id`. The task runs beside the model, and its result reaches the model as a task notice when it ends.
 
-A task the model starts behaves like one the prompt starts with `tasks.spawn`. It starts the same way: the calling section keeps running first, and the new task first runs when the section parks. A `task` call with `target` `"## Child"` runs the `## Child` section, whose returned value is the task's result. The task's origin is `model`, and it is seeded with the calling section's current `var`, with no `item` and no `sys.index`. A failing model task never fails its owner: when the task's section raises, the owner section keeps running and returns normally. A task's section can even wait on [`user_input()`](05-lua-environment.md#asking-the-operator-with-user_input) while the owner's model loop keeps running rounds, and it resumes when its answer arrives and then returns its result.
+A task the model starts behaves like one the prompt starts with `tasks.spawn`. It starts the same way: the calling section keeps running first, and the new task first runs when the section parks. A `task` call with `target` `"## Child"` runs the `## Child` section, whose returned value is the task's result. The task's origin is `model`, and it is seeded with the calling section's current `var`, with no `item` and no `sys.index`. A failing model task never fails its owner: when the task's section raises, the owner section keeps running and returns normally. A task's section can even wait on [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) while the owner's model loop keeps running rounds, and it resumes when its answer arrives and then returns its result.
 
 The `task` built-in's description tells the model which targets it may use, so the model can copy one the engine accepts. After `tools.allow_tasks()` the description says the first sentence below, and after a list it says the second, naming exactly the listed headings:
 
@@ -1036,7 +1035,7 @@ Each bracketed part appears only when it applies: `, ok` or `, failed` when the 
 
 - `Task id=0.0 (## Child): done, ok` starts the line for a task whose section returned, naming the task, its target, and how it ended.
 - `Task id=0.0 (## Child): done, failed, turns 0` is the whole line for a task whose section raised: its round count, and none of the live parts.
-- `Task id=0.0 (## Child): running, in ## Child, waiting on user_input, turns 0, tasks 0.0.0, note: halfway` is a live task parked on `user_input()` that has also spawned `0.0.0` and run `tasks.note('halfway')`.
+- `Task id=0.0 (## Child): running, in ## Child, waiting on tool_call, turns 0, tasks 0.0.0, note: halfway` is a live task parked on `input.ask()` that has also spawned `0.0.0` and run `tasks.note('halfway')`.
 
 In the last line, `tasks 0.0.0` lists the live tasks the task started itself, each id extending the task's own id by one more segment, and `note: halfway` ends the line with the note set inside the task. A task held in a wait on its own tasks reads `waiting on tasks`.
 

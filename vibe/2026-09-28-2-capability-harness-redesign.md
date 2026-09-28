@@ -873,7 +873,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-12>
 
-### Step 12: Move prompts, tests, and the guide to `input.ask()`
+### Step 12: Move prompts, tests, and the guide to `input.ask()` [completed]
 
 - Component: Engine user-input removal
 - Piece: The removal change (second of three steps)
@@ -889,6 +889,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 - Verify: the component test pattern for `harness-sessions`; the workshop suites; both clippy runs; `cargo fmt --all --check`; the docs gates and `cargo xtask site --books-only`; the combined guide shows no diff after `cargo run --locked -q -p build-user-guide`.
 - Commit: one commit, the second of the removal change.
 - Done when: the sessions and Workshop suites and the docs builds pass.
+- Ad-hoc fix during the run: the commit-message pass found chapter 16 did not yet say what `tasks.status` reports while an ask waits (chapter 16 never mentioned `blocked` before; it documented the removed `user_input` events). One sentence in its Operator input subsection now says the asking task's `blocked` reads `tool_call`, linking chapter 15's Status fields, and the combined guide was regenerated.
 
 </step-12>
 

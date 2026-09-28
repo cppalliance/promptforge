@@ -34,12 +34,14 @@ use crate::common::{
 };
 
 /// The echo agent: a Markdown prompt on the unified runtime that loops
-/// on `user_input`, runs one chat round per input against the fixture's
+/// on `input.ask()`, runs one chat round per input against the fixture's
 /// `test-model`, and returns on `quit`.
 const ECHO_MD: &str = r"---
 name: echo
 description: The echo test agent on the unified runtime.
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Echo
@@ -49,10 +51,7 @@ promptforge: 0
 ```lua
 local history = messages.new()
 while true do
-    local text, available = user_input()
-    if not available then
-        return
-    end
+    local text = input.ask()
     if text == 'quit' then
         return
     end

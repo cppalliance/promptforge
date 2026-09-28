@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use harness_capabilities::USER_INPUT_ASK_TOOL;
 use harness_log::RunOutcome;
 use harness_sessions::environment::{CatalogBinding, GatewayBinding};
 use harness_sessions::input::{WaitError, WaitFrame};
@@ -29,8 +30,9 @@ mod close;
 mod infer;
 
 /// A prompt that parks on operator input and returns it.
-const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge: 0\n---\n\n\
-    # Asks\n\n## Only\n\n```lua\nreturn user_input()\n```\n";
+const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge: 0\n\
+    capabilities:\n  - promptforge/user-input\n---\n\n\
+    # Asks\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
 
 /// How long a test waits for the supervisor to act.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -263,10 +265,14 @@ async fn an_answer_resumes_the_parked_wait_and_the_run_completes_with_it() {
     );
     assert!(
         matches!(&session.transcript(0).await, Ok(events) if events.iter().any(|event| {
-            event.event.get("kind").and_then(serde_json::Value::as_str) == Some("user_input")
-                && event.event.get("text").and_then(serde_json::Value::as_str) == Some("forty-two")
+            let field = |name: &str| event.event.get(name);
+            field("kind").and_then(serde_json::Value::as_str) == Some("tool_result")
+                && field("alias").and_then(serde_json::Value::as_str) == Some(USER_INPUT_ASK_TOOL)
+                && field("tool_call_id").and_then(serde_json::Value::as_str) == Some("")
+                && field("content").and_then(serde_json::Value::as_str) == Some("forty-two")
+                && field("trusted").and_then(serde_json::Value::as_bool) == Some(true)
         })),
-        "the answer is recorded in the transcript"
+        "the answer is recorded in the transcript as the ask tool's trusted result"
     );
 }
 

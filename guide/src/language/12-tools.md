@@ -692,7 +692,7 @@ The caller, script or model, receives the handler's text exactly as returned, as
 
 ### What a handler can do
 
-Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `user_input`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
+Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `input.ask`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
 
 Inside a handler, `tools.call` is a script call. A failing bound tool raises there as kind `tool` instead of becoming text for the model, and a bound tool's untrusted output reaches the handler already wrapped and keeps its envelope if the handler returns it.
 

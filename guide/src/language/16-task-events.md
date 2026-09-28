@@ -4,7 +4,7 @@ A run reports everything it does as it goes: each section that starts and finish
 
 ## Reading a task's history
 
-An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, each wait for operator input, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
+An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
 
 ````markdown
 ---
@@ -60,7 +60,7 @@ Every event table holds the same four keys, followed by the fields of its own ki
 
 ### Event kinds
 
-A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 59, by area:
+A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 57, by area:
 
 | Area | Kinds | Covered in |
 |---|---|---|
@@ -73,7 +73,6 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Model | `model_turn_completed`, `model_turn_failed`, `model_turn_truncated`, `model_metadata_degraded`, `thinking`, `assistant_reply`, `assistant_tool_calls` | [Model round events](#model-round-events) |
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
 | Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
-| Operator input | `user_input_wait_started`, `user_input` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
 | Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
 
@@ -471,18 +470,18 @@ The read of a file that does not exist raised an error value, which `pcall` caug
 
 ### Operator input
 
-A section that calls [`user_input()`](05-lua-environment.md#asking-the-operator-with-user_input) reports `user_input_wait_started` when it starts waiting for the operator. It is a single boundary with no finished counterpart, and it is reported on every wait, even in a host with no operator. When the operator's text arrives, a separate `user_input` event follows under the same section, and its `text` field holds that text exactly as the operator supplied it, byte for byte. The unavailable fallback reports no `user_input`, so counting both kinds tells you how many waits got no text:
+Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
 
 ````lua
-local waits, answered = 0, 0
+local asks = 0
 for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'user_input_wait_started' then waits = waits + 1 end
-  if e.kind == 'user_input' then answered = answered + 1 end
+  if e.kind == 'tool_result' and e.alias == 'promptforge/user-input/ask' then
+    asks = asks + 1
+  end
 end
-local unanswered = waits - answered
 ````
 
-`user_input.text` is untrusted.
+A model that asks through an alias of its own, as [Letting the model ask](05-lua-environment.md#letting-the-model-ask) shows, reports under that alias and the model's call id, like any model tool call.
 
 ## Model round events
 
@@ -921,7 +920,6 @@ Treat the text inside events as untrusted:
 - `thinking.text` and `assistant_reply.text`
 - `assistant_tool_calls.calls`, names and arguments alike
 - `tool_result.content`, unless `trusted` is `true`
-- `user_input.text`
 - the seeds in `task_started`
 - the `request` and `response` bodies
 - `model_metadata_degraded.message`

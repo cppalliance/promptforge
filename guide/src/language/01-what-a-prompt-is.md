@@ -523,11 +523,10 @@ Lua only ever selects labels that are already bound:
 
 The model calls a bound tool by its alias from `tools:`, such as `search`, never by its tool path, such as `promptforge/web/search`.
 
-The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly six kinds of host work:
+The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly five kinds of host work:
 
 - A model round: `models.infer` sends one round with its prompt text and no tools, and `models.loop` runs rounds ([running a round with models.infer](10-models.md#running-a-round-with-modelsinfer)).
-- A bound tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)).
-- A wait for operator input ([asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input)).
+- A tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)), a wait for operator input included, because `input.ask()` calls a tool ([asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)).
 - A store operation, one for each store call ([what the store is](09-the-store.md#what-the-store-is)).
 - The timer behind a timed wait on tasks ([time limits on waits](15-tasks.md#time-limits-on-waits)).
 - A read of a task's event history ([reading a task's history](16-task-events.md#reading-a-tasks-history)).

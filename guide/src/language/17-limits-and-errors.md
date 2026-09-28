@@ -49,7 +49,7 @@ Failures fall into four families, each with its own vocabulary:
 |---|---|---|
 | Parse failure | before anything runs | one of five parse error kinds |
 | Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
-| Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of thirteen run error kinds |
+| Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of twelve run error kinds |
 | Cancelled outcome | when the host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
@@ -70,7 +70,7 @@ return reply
 
 Here an `internal` failure, such as a model call the host could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
 
-A failed run reports one run error kind naming what failed, from a fixed set of thirteen: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Input`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
+A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
 
 A run the host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the host, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
 
@@ -351,7 +351,6 @@ The message text is what tells them apart. A failed `store` operation is not in 
 
 - a model call failure: an HTTP transport failure (a receive timeout included), a backend error status, a malformed reply (an oversized one included), a missing or invalid environment variable, invalid client configuration, or a disabled gateway
 - the missing-model error, raised when a model round has no model selected ([Choosing a section's model](10-models.md#choosing-a-sections-model))
-- a failure of the host's input source for `user_input` ([Asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input))
 - a fault in the engine or in the Lua runtime's own machinery
 
 An ordinary failed `store` call is kind `store`, not `internal`. Its message text says what failed, and its `reason` and fields let a prompt branch on the failure mode ([Store errors](09-the-store.md#store-errors)).
@@ -367,7 +366,7 @@ An error kind is what Lua sees at the call. A run error kind is what the host re
 | `err.kind` | Its own fields | Uncaught, ends the run as |
 |---|---|---|
 | `lua` | none | `Lua`, or `Quota` for a refused `log` call |
-| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Input` for a `user_input` failure, `Internal` for an engine fault |
+| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an engine fault |
 | `cancelled` | `task`, for a cancelled task | the cancelled outcome for a host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
 | `context_exhausted` | `reason` | `ContextExhausted` |
 | `empty_model_reply` | `finish_reason`, only when the backend gave one | `Completion` |
@@ -400,7 +399,7 @@ A value missing its kind's fields also ends the run as `Lua`, or as `Requirement
 
 ## How a failed run is classified
 
-A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are thirteen run error kinds. A host cancel is not among them, because a cancelled run has not failed.
+A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A host cancel is not among them, because a cancelled run has not failed.
 
 | Run error kind | The run failed because | Message |
 |---|---|---|
@@ -414,7 +413,6 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
 | `ContextExhausted` | the compactor ran out of the model's context window | `context exhausted: {reason}` |
-| `Input` | the host's input source failed a `user_input` request | `user input request was not answered: {message}` |
 | `Internal` | an engine invariant broke | `internal invariant violated: {message}` |
 | `RequirementsUnmet` | prepare refused the run, or the H1 pass failed its hard gate | the requirements notice, or the Lua error text |
 
@@ -432,7 +430,7 @@ Nothing reruns a failed run automatically. [Model call and environment failures]
 - `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, missing or invalid environment variables, invalid client configuration, and a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
 - `Tool`: a dispatched tool fails ([Tool failures](12-tools.md#tool-failures)), a tool call is out of the section's scope ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), a call names a tool not bound in the run ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)), or a `models.loop` call does not finish within the round cap ([The round cap](11-conversations.md#the-round-cap)), and the prompt does not catch it.
 - `ContextExhausted`: the selected compactor runs out of the model's context window and the prompt does not catch it ([Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion)).
-- `Input`: the host's input source fails a `user_input` request and the failure goes uncaught. Caught with `pcall`, the same failure is kind `internal`.
+- A failed operator ask is a tool failure: when the host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
 
 The four `Tool` messages are these, where `{name:?}` and the other `:?` placeholders show the value in double quotes with escapes:
 
@@ -492,7 +490,7 @@ In the H1 pass, these failures become `RequirementsUnmet`:
 Everything else keeps its own classification in the H1 pass:
 
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
-- Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, `ContextExhausted`, and `Input` keep their kinds.
+- Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, and `ContextExhausted` keep their kinds.
 - A failed store call stays `Store`, and a claims conflict stays `Determinism`.
 - A host cancel stays the cancelled outcome.
 - A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
@@ -589,8 +587,7 @@ Left uncaught, the interrupted error ends the run with the cancelled outcome.
 A cancel also reaches every call that is waiting on the host. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
 
 - `models.infer`, and each `models.loop` round
-- `tools.call`, and tool calls the model makes
-- `user_input()`
+- `tools.call`, `input.ask()` included, and tool calls the model makes
 - every `store` call
 - a `tasks.events` read ([Read options, results, and errors](16-task-events.md#read-options-results-and-errors)), with the model's `task_events` built-in failing the same way
 
