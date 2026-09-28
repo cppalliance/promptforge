@@ -287,7 +287,7 @@ Three components, built in dependency order. Each is useful on its own and resem
 
 <step-3>
 
-### Step 3: Keep focus in the tab strip after a keyboard close
+### Step 3: Keep focus in the tab strip after a keyboard close [completed]
 
 - Component: Generic tab close parity
 - Piece: keyboard close (D1-3). Sequential after step 2 in the same file, and after step 1 because it acts on `closeActiveEditor`'s boolean result.

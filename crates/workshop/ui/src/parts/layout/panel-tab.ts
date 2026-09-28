@@ -6,7 +6,8 @@
 // MenuId.EditorTitleContext at the pointer, whose rows run against the
 // clicked tab and read activeEditor as its type; a `closable: false` type
 // gets neither. Delete and Backspace on the focused tab make the same
-// call, and do nothing on a `closable: false` type.
+// call, then focus the neighbouring tab once the panel closes, and do
+// nothing on a `closable: false` type.
 //
 // The loading shimmer: while its panel is loading, the title span takes
 // @workshop/look's .ws-shimmer-text; the negative animation-delay against
@@ -23,7 +24,8 @@ import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
 import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { MenuId } from "@workshop/platform/menu-registry";
-import { panelTypeEntry } from "@workshop/platform/panel-registry";
+import { DOCK, panelTypeEntry } from "@workshop/platform/panel-registry";
+import { getService } from "@workshop/platform/service-registry";
 // The widget module, never the parts/menu barrel: the barrel imports the
 // contribution surface, and lazy panels import this module for
 // setTabLoading.
@@ -35,6 +37,30 @@ function closePanel(panelId: string): void {
   void closeActiveEditor({ panelId }).catch((error: unknown) => {
     reportCommandFailure("workbench.action.closeActiveEditor", error);
   });
+}
+
+/**
+ * Closes one panel as closePanel does, then keeps keyboard focus in its
+ * tab strip, as dockview-core 8.3.1's Tabs._closeTab does for its own
+ * Delete: the header tab of the panel now at the closed one's index, else
+ * the one before it. A refused close, or a group left empty, moves nothing.
+ */
+function closeAndRefocus(panelId: string): void {
+  const group = getService(DOCK).getPanel(panelId)?.group;
+  const index = group?.panels.findIndex((panel) => panel.id === panelId) ?? -1;
+  void closeActiveEditor({ panelId })
+    .then((closed) => {
+      if (!closed || group === undefined || index < 0) {
+        return;
+      }
+      const neighbour = group.panels[index] ?? group.panels[index - 1];
+      if (neighbour !== undefined) {
+        tabs.get(neighbour.id)?.element.parentElement?.focus();
+      }
+    })
+    .catch((error: unknown) => {
+      reportCommandFailure("workbench.action.closeActiveEditor", error);
+    });
 }
 
 /** The shimmer period, matching the 2s loop in @workshop/look/shimmer.css. */
@@ -133,7 +159,9 @@ export class PanelTab extends Disposable implements ITabRenderer {
    * this renderer is appended into, which Dockview replaces when the
    * panel moves groups and never hands to the renderer, so the keys are
    * caught in the document's capture phase and only while that wrapper
-   * is the target, and call the layout core's close path directly.
+   * is the target, and call the layout core's close path directly. A
+   * close that goes through moves focus to the neighbouring tab, as
+   * Dockview's own handler does, so the next key stays in the strip.
    */
   private interceptCloseKeys(panelId: string, closable: boolean): void {
     const onKeydown = (event: KeyboardEvent): void => {
@@ -144,7 +172,7 @@ export class PanelTab extends Disposable implements ITabRenderer {
       event.preventDefault();
       event.stopPropagation();
       if (closable) {
-        closePanel(panelId);
+        closeAndRefocus(panelId);
       }
     };
     document.addEventListener("keydown", onKeydown, true);

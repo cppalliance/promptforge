@@ -22,7 +22,8 @@
 // the X on another group's background tab closes it without activating
 // it or its group, and every X is out of the tab order;
 // Delete and Backspace on a focused tab leave a non-closable tab open,
-// prompt on an unsaved editor (Cancel keeps it), and close a clean tab.
+// prompt on an unsaved editor (Cancel keeps it), and close a clean tab,
+// moving focus to the tab now at its index so a second Delete closes that.
 // Run: node --test test/tab-menu.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -537,6 +538,33 @@ for (const key of ["Delete", "Backspace"]) {
   await flush();
   check(`${key} on a focused clean closable tab closes it`, !isOpen(clean));
 }
+
+const left = await open("probe", { instance: "left" });
+const middle = await open("probe", { instance: "middle" });
+const right = await open("probe", { instance: "right" });
+const middleIndex = middle.group.panels.indexOf(middle);
+check(
+  "three clean tabs sit side by side in one group",
+  [left, right].every((panel) => panel.group === middle.group) &&
+    left.group.panels.indexOf(left) === middleIndex - 1 &&
+    right.group.panels.indexOf(right) === middleIndex + 1,
+);
+pressOnTab(middle, "Delete");
+await flush();
+check("Delete on the middle tab closes it", !isOpen(middle));
+check(
+  "Delete moves focus to the wrapper of the tab now at the closed tab's index",
+  right.group.panels[middleIndex] === right && window.document.activeElement === tabOf(right).parentElement,
+);
+window.document.activeElement?.dispatchEvent(
+  new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }),
+);
+await flush();
+check("a second Delete closes the tab focus moved to", !isOpen(right) && isOpen(left));
+check(
+  "Delete on the last tab moves focus to the wrapper of the tab before it",
+  window.document.activeElement === tabOf(left).parentElement,
+);
 
 if (failures.length > 0) {
   console.error(`tab-menu: ${failures.length} failure(s)`);
