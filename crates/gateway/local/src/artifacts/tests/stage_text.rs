@@ -1,5 +1,7 @@
 //! Stage text tests for model, blob, and runtime provisioning, and percent republishing.
 
+use gateway_config::WhisperBackend;
+
 use super::super::assets::{ArchiveKind, LLAMA_RELEASE, server_asset, whisper_asset};
 use super::*;
 
@@ -194,50 +196,60 @@ fn provision_server_writes_no_stage_text_on_a_warm_cache() {
 
 #[test]
 fn provision_whisper_library_reuses_a_verified_install() {
-    let asset =
-        whisper_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host whisper asset");
-    let temp = TempDir::new().expect("tempdir");
-    let store = ArtifactStore::new(temp.path()).expect("store");
+    // Explicit backends keep the host's GPU probe out of the test; on a
+    // platform with both builds each one reuses its own install.
+    for backend in [WhisperBackend::Cpu, WhisperBackend::Cuda] {
+        let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH, backend, None)
+            .expect("host whisper asset");
+        let temp = TempDir::new().expect("tempdir");
+        let store = ArtifactStore::new(temp.path()).expect("store");
 
-    let archive = temp
-        .path()
-        .join("downloads")
-        .join(asset.archive.archive_name);
-    std::fs::create_dir_all(archive.parent().expect("downloads parent")).expect("mkdir downloads");
-    std::fs::write(&archive, b"mock-archive-bytes").expect("write archive");
-    write_marker(&blob_marker_path(&archive), &archive, asset.archive.sha256)
-        .expect("write marker");
+        let archive = temp
+            .path()
+            .join("downloads")
+            .join(asset.archive.archive_name);
+        std::fs::create_dir_all(archive.parent().expect("downloads parent"))
+            .expect("mkdir downloads");
+        std::fs::write(&archive, b"mock-archive-bytes").expect("write archive");
+        write_marker(&blob_marker_path(&archive), &archive, asset.archive.sha256)
+            .expect("write marker");
 
-    let install = temp
-        .path()
-        .join("whisper.cpp")
-        .join(format!("{WHISPER_RELEASE}-{}", asset.platform));
-    std::fs::create_dir_all(&install).expect("mkdir install");
-    std::fs::write(install.join(asset.library_name), b"mock-library").expect("write library");
-    let tree_digest = super::super::digest::tree_digest(&install).expect("tree digest");
-    std::fs::write(
-        install.join(INSTALL_MARKER),
-        format!("{}\n{tree_digest}\n", asset.archive.sha256),
-    )
-    .expect("write install marker");
+        let install = temp
+            .path()
+            .join("whisper.cpp")
+            .join(format!("{WHISPER_RELEASE}-{}", asset.platform));
+        std::fs::create_dir_all(&install).expect("mkdir install");
+        std::fs::write(install.join(asset.library_name), b"mock-library").expect("write library");
+        let tree_digest = super::super::digest::tree_digest(&install).expect("tree digest");
+        std::fs::write(
+            install.join(INSTALL_MARKER),
+            format!("{}\n{tree_digest}\n", asset.archive.sha256),
+        )
+        .expect("write install marker");
 
-    let hub = ProgressHub::new();
-    let whisper = hub.begin("whisper-library");
-    let provisioned = store
-        .provision_whisper_library(Some(&whisper))
-        .expect("warm-cache provision");
-    assert_eq!(provisioned, install.join(asset.library_name));
-    assert_eq!(
-        hub.current().text,
-        "whisper-library",
-        "a verified whisper install runs no stage and names none"
-    );
+        let hub = ProgressHub::new();
+        let whisper = hub.begin("whisper-library");
+        let provisioned = store
+            .provision_whisper_library(backend, Some(&whisper))
+            .expect("warm-cache provision");
+        assert_eq!(provisioned, install.join(asset.library_name), "{backend:?}");
+        assert_eq!(
+            hub.current().text,
+            "whisper-library",
+            "a verified whisper install runs no stage and names none: {backend:?}"
+        );
+    }
 }
 
 #[test]
 fn whisper_installs_never_fall_back_to_an_older_abi() {
-    let asset =
-        whisper_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host whisper asset");
+    let asset = whisper_asset(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        WhisperBackend::Cpu,
+        None,
+    )
+    .expect("host whisper asset");
     let archives = [asset.archive];
     let install = whisper_install_asset(asset, &archives);
     assert!(

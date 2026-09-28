@@ -1,9 +1,18 @@
 //! Pinned `llama-server` release assets and the platform->asset selection table.
 
-use gateway_config::LlamaBackend;
+use gateway_config::{LlamaBackend, WhisperBackend};
 
 use super::Result;
 use crate::error::LocalError;
+
+mod whisper_auto;
+mod whisper_rows;
+
+#[cfg(test)]
+mod tests;
+
+use whisper_auto::{auto_whisper_backend, whisper_backend_applies};
+use whisper_rows::WHISPER_ASSETS;
 
 /// The `llama.cpp` release tag every managed `llama-server` build is pinned to.
 pub(super) const LLAMA_RELEASE: &str = "b10082";
@@ -50,77 +59,18 @@ pub(super) struct ServerAsset<'a> {
 }
 
 /// A pinned whisper.cpp runtime archive and its loadable library.
+/// `backend` is `Some` only on the Windows x86-64 and Linux x86-64 rows,
+/// the two platforms with both a CPU and a CUDA build; the macOS and
+/// linux-aarch64 rows are each their platform's one build and carry `None`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     arch: &'a str,
+    pub(super) backend: Option<WhisperBackend>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
 }
-
-const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
-    WhisperAsset {
-        os: "windows",
-        arch: "x86_64",
-        platform: "windows-x86_64-cuda",
-        archive: ArchiveRef {
-            archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
-            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip",
-            sha256: "f1bc54d7288e21ee826ccb5767249836b780fc316bec4a0374873e73163dae12",
-            archive_kind: ArchiveKind::Zip,
-        },
-        library_name: "whisper.dll",
-    },
-    WhisperAsset {
-        os: "macos",
-        arch: "aarch64",
-        platform: "macos-aarch64-metal",
-        archive: ArchiveRef {
-            archive_name: "whisper-b4938-macos-aarch64-metal.zip",
-            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-macos-aarch64-metal.zip",
-            sha256: "2315c758f1a7a0a8a98e887d1b49b2418c1e95e75e12dd063472d855bfbe2f78",
-            archive_kind: ArchiveKind::Zip,
-        },
-        library_name: "libwhisper.dylib",
-    },
-    WhisperAsset {
-        os: "macos",
-        arch: "x86_64",
-        platform: "macos-x86_64",
-        archive: ArchiveRef {
-            archive_name: "whisper-b4938-macos-x86_64.zip",
-            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-macos-x86_64.zip",
-            sha256: "425664a05f844683bc1c9c26c52311cfc6546b9f72f3ce8fd4f096c5e93df22b",
-            archive_kind: ArchiveKind::Zip,
-        },
-        library_name: "libwhisper.dylib",
-    },
-    WhisperAsset {
-        os: "linux",
-        arch: "x86_64",
-        platform: "linux-x86_64",
-        archive: ArchiveRef {
-            archive_name: "whisper-b4938-linux-x86_64.zip",
-            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64.zip",
-            sha256: "0dc1a6adc29bfaecb6c2c8c8fc9ec2f903b25e6bfadd67bbdb239521f9101155",
-            archive_kind: ArchiveKind::Zip,
-        },
-        library_name: "libwhisper.so",
-    },
-    WhisperAsset {
-        os: "linux",
-        arch: "aarch64",
-        platform: "linux-aarch64",
-        archive: ArchiveRef {
-            archive_name: "whisper-b4938-linux-aarch64.zip",
-            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-aarch64.zip",
-            sha256: "1400ed00171e15596838ce839e5e90fab176f8653ead5b940dfda36bc5e68fc3",
-            archive_kind: ArchiveKind::Zip,
-        },
-        library_name: "libwhisper.so",
-    },
-];
 
 const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
     os: "windows",
@@ -276,17 +226,56 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 
 /// Selects the pinned whisper.cpp runtime for `(os, arch)`.
 ///
+/// `backend` (the `[stt] whisper_backend` setting) and `gpus` (the probed
+/// NVIDIA compute capabilities, when a probe was needed and worked) are
+/// consulted only on Windows x86-64 and Linux x86-64, the two platforms
+/// with a choice; every other platform has exactly one row.
+///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the platform.
-pub(super) fn whisper_asset(os: &str, arch: &str) -> Result<WhisperAsset<'static>> {
+pub(super) fn whisper_asset(
+    os: &str,
+    arch: &str,
+    backend: WhisperBackend,
+    gpus: Option<&[(u64, u64)]>,
+) -> Result<WhisperAsset<'static>> {
+    let wanted = if whisper_backend_applies(os, arch) {
+        Some(match backend {
+            WhisperBackend::Auto => auto_whisper_backend(gpus),
+            explicit => explicit,
+        })
+    } else {
+        None
+    };
     WHISPER_ASSETS
         .iter()
         .copied()
-        .find(|asset| asset.os == os && asset.arch == arch)
+        .find(|asset| asset.os == os && asset.arch == arch && asset.backend == wanted)
         .ok_or_else(|| LocalError::UnsupportedPlatform {
             os: os.to_owned(),
             arch: arch.to_owned(),
         })
+}
+
+/// [`whisper_asset`] with the GPU evidence gathered on demand: `probe`
+/// (the host's `nvidia-smi` query in production) runs only for `auto` on a
+/// platform with both builds, because every explicit backend and every
+/// other platform already knows its row.
+///
+/// # Errors
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+pub(super) fn whisper_asset_with_probe(
+    os: &str,
+    arch: &str,
+    backend: WhisperBackend,
+    probe: impl FnOnce() -> Option<Vec<(u64, u64)>>,
+) -> Result<WhisperAsset<'static>> {
+    let gpus = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
+        probe()
+    } else {
+        None
+    };
+    whisper_asset(os, arch, backend, gpus.as_deref())
 }
 
 /// Selects the pinned GPU-capable `llama-server` asset for `(os, arch)`.
@@ -320,88 +309,4 @@ pub(super) fn server_asset(
             os: os.to_owned(),
             arch: arch.to_owned(),
         })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn blackwell_gpus_select_the_blackwell_build() {
-        let asset = server_asset("windows", "x86_64", LlamaBackend::Auto, Some(&[(12, 0)]))
-            .expect("blackwell asset");
-        assert_eq!(asset.platform, "windows-x86_64-cuda-blackwell");
-    }
-
-    #[test]
-    fn older_nvidia_gpus_select_the_upstream_cuda_build() {
-        let asset = server_asset("windows", "x86_64", LlamaBackend::Auto, Some(&[(8, 9)]))
-            .expect("cuda asset");
-        assert_eq!(asset.platform, "windows-x86_64-cuda");
-        assert_eq!(asset.archives.len(), 2);
-    }
-
-    #[test]
-    fn no_nvidia_gpu_selects_vulkan() {
-        for gpus in [None, Some(&[][..])] {
-            let asset =
-                server_asset("windows", "x86_64", LlamaBackend::Auto, gpus).expect("vulkan asset");
-            assert_eq!(asset.platform, "windows-x86_64-vulkan");
-        }
-    }
-
-    #[test]
-    fn an_explicit_backend_needs_no_gpu_evidence() {
-        let asset = server_asset("windows", "x86_64", LlamaBackend::CudaBlackwell, None)
-            .expect("explicit blackwell asset");
-        assert_eq!(asset.platform, "windows-x86_64-cuda-blackwell");
-        let asset = server_asset("windows", "x86_64", LlamaBackend::Vulkan, Some(&[(12, 0)]))
-            .expect("explicit vulkan asset");
-        assert_eq!(asset.platform, "windows-x86_64-vulkan");
-    }
-
-    #[test]
-    fn non_windows_platforms_ignore_the_backend() {
-        let asset = server_asset("linux", "x86_64", LlamaBackend::CudaBlackwell, None)
-            .expect("linux asset");
-        assert_eq!(asset.platform, "linux-x86_64-vulkan");
-        let asset =
-            server_asset("macos", "aarch64", LlamaBackend::Auto, None).expect("macos asset");
-        assert_eq!(asset.platform, "macos-aarch64");
-    }
-
-    #[test]
-    fn unsupported_platforms_are_an_error() {
-        assert!(server_asset("freebsd", "x86_64", LlamaBackend::Auto, None).is_err());
-    }
-
-    #[test]
-    fn whisper_assets_cover_the_five_release_platforms() {
-        for (os, arch, library) in [
-            ("windows", "x86_64", "whisper.dll"),
-            ("macos", "aarch64", "libwhisper.dylib"),
-            ("macos", "x86_64", "libwhisper.dylib"),
-            ("linux", "x86_64", "libwhisper.so"),
-            ("linux", "aarch64", "libwhisper.so"),
-        ] {
-            let asset = whisper_asset(os, arch).expect("supported whisper platform");
-            assert_eq!(asset.library_name, library);
-            assert_eq!(asset.archive.archive_kind, ArchiveKind::Zip);
-            assert_eq!(asset.archive.sha256.len(), 64);
-            assert!(
-                asset
-                    .archive
-                    .sha256
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit())
-            );
-            assert!(
-                asset
-                    .archive
-                    .url
-                    .contains("/releases/download/whisper-lib-b4938/")
-            );
-        }
-        assert!(whisper_asset("freebsd", "x86_64").is_err());
-    }
 }

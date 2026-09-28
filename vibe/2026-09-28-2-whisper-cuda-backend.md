@@ -378,7 +378,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `schema.rs`: `canonical_stt_section_parses_into_the_runtime_shape` asserts `auto`.
   - `serialize.rs`: the `FULL` fixture's `[stt]` carries `whisper_backend = "cuda"`, `enums_round_trip_with_their_toml_spellings` checks the three spellings, and `canonical_stt_input_round_trips_as_canonical_stt` asserts the key is absent under `auto`.
 
-### Step 5: Select and provision the whisper build by backend
+### Step 5: Select and provision the whisper build by backend [completed]
 
 - In `crates/gateway/local/src/artifacts/assets.rs`:
   - `WhisperAsset` gains `backend: Option<WhisperBackend>`, documented like `ServerAsset`'s: `Some(Cuda)` on `windows-x86_64-cuda`, `Some(Cpu)` on `linux-x86_64`, and `None` on the macOS and linux-aarch64 rows.

@@ -27,6 +27,10 @@ open_browser = false
 window_seconds = 15
 interval_ms = 500
 vocabulary = ["PromptForge", "WG21", "GGUF"]
+# Which whisper runtime build to download on Windows x86-64 and Linux x86-64:
+# "auto" (the default) picks CUDA when an NVIDIA GPU is found and CPU
+# otherwise; "cpu" and "cuda" force the build.
+# whisper_backend = "auto"
 
 # Optional artifact cache root. The default is ~/.promptforge, or
 # %USERPROFILE%\.promptforge on Windows.

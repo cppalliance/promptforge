@@ -5,13 +5,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use gateway_config::LlamaBackend;
+use gateway_config::{LlamaBackend, WhisperBackend};
 use gateway_progress::Activity;
 use tokio_util::sync::CancellationToken;
 
 use super::archive::{extract_archive_with_progress, find_executable, require_executable};
 use super::assets::{
-    self, ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset, whisper_asset,
+    self, ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset,
+    whisper_asset_with_probe,
 };
 use super::confine::validate_tree_path;
 use super::digest::tree_digest;
@@ -42,7 +43,8 @@ fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
 
 /// Queries the machine's NVIDIA compute capabilities through `nvidia-smi`.
 /// Returns `None` when the driver or the tool is absent or fails; the
-/// caller falls back to the Vulkan build.
+/// `llama-server` pick then falls back to the Vulkan build and the whisper
+/// pick to the CPU build.
 fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
     let mut command = std::process::Command::new("nvidia-smi");
     command.args(["--query-gpu=compute_cap", "--format=csv,noheader"]);
@@ -128,6 +130,9 @@ impl ArtifactStore {
     /// Provisions the pinned whisper.cpp runtime for this machine and returns
     /// the shared library path.
     ///
+    /// `backend` (the `[stt] whisper_backend` setting) chooses between the
+    /// CPU and CUDA builds on Windows x86-64 and Linux x86-64, where `auto`
+    /// probes the host's NVIDIA GPUs; every other platform has one build.
     /// The archive is downloaded, digest-verified, and extracted under the
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
@@ -135,8 +140,17 @@ impl ArtifactStore {
     /// # Errors
     /// Returns a [`LocalError`] when the platform is unsupported or download,
     /// verification, extraction, or cache publication fails.
-    pub fn provision_whisper_library(&self, activity: Option<&Activity>) -> Result<PathBuf> {
-        let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+    pub fn provision_whisper_library(
+        &self,
+        backend: WhisperBackend,
+        activity: Option<&Activity>,
+    ) -> Result<PathBuf> {
+        let asset = whisper_asset_with_probe(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            backend,
+            nvidia_compute_caps,
+        )?;
         let archives = [asset.archive];
         self.provision_install(whisper_install_asset(asset, &archives), activity, None)
     }
