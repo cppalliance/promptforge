@@ -58,6 +58,12 @@ impl Requirements {
     /// could not satisfy into what prepare could not, so one refusal names
     /// every gap. A capability already reported missing, or a service
     /// already reported missing for the same capability, is not repeated.
+    ///
+    /// A capability that lacks a service is not also reported missing.
+    /// Such a `missing_required` entry can come only from prepare's tool
+    /// fill, which sees an exact slot whose capability contributed nothing
+    /// because activation skipped it for the missing service, and the
+    /// service entry already names the real cause.
     pub fn merge(&mut self, other: Requirements) {
         for id in other.missing_required {
             if !self.missing_required.contains(&id) {
@@ -69,6 +75,12 @@ impl Requirements {
                 self.missing_services.push(missing);
             }
         }
+        self.missing_required.retain(|id| {
+            !self
+                .missing_services
+                .iter()
+                .any(|missing| missing.capability == *id)
+        });
         self.conflicts.extend(other.conflicts);
         self.unmet_requirements.extend(other.unmet_requirements);
     }

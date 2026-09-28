@@ -47,6 +47,42 @@ fn merge_folds_in_missing_services_without_repeating_one() {
 }
 
 #[test]
+fn merge_drops_an_incoming_missing_capability_already_named_as_lacking_a_service() {
+    let mut requirements = Requirements::default();
+    requirements
+        .missing_services
+        .push(missing_input("promptforge/user-input"));
+    let mut other = Requirements::default();
+    other.missing_required.push(id("promptforge/user-input"));
+    other.missing_required.push(id("acme/other"));
+    requirements.merge(other);
+    assert_eq!(requirements.missing_required, [id("acme/other")]);
+    assert_eq!(
+        requirements.missing_services,
+        [missing_input("promptforge/user-input")]
+    );
+}
+
+#[test]
+fn merge_drops_a_missing_capability_the_incoming_report_names_as_lacking_a_service() {
+    let mut requirements = Requirements::default();
+    requirements
+        .missing_required
+        .push(id("promptforge/user-input"));
+    requirements.missing_required.push(id("acme/other"));
+    let mut activation = Requirements::default();
+    activation
+        .missing_services
+        .push(missing_input("promptforge/user-input"));
+    requirements.merge(activation);
+    assert_eq!(requirements.missing_required, [id("acme/other")]);
+    assert_eq!(
+        requirements.missing_services,
+        [missing_input("promptforge/user-input")]
+    );
+}
+
+#[test]
 fn the_notice_names_the_capability_and_the_service_it_lacks() {
     let mut requirements = Requirements::default();
     requirements

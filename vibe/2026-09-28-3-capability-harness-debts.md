@@ -209,7 +209,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Stop naming a registered capability as missing
+### Step 2: Stop naming a registered capability as missing [completed]
 
 - Component: Refusal notice dedupe
 - Piece: `Requirements::merge`, one step.

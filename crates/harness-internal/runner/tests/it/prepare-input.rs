@@ -195,6 +195,35 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
 }
 
 #[tokio::test]
+async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_broker_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = log().await;
+    let declaration = format!("{REQUIRED}tools:\n  ask: promptforge/user-input/ask\n");
+    let error = prepare_run(
+        &prompt_file(dir.path(), &user_input_prompt(&declaration, ASKS_ONCE)),
+        "",
+        user_input_services(&log, None),
+    )
+    .await
+    .expect_err("a required capability without its service refuses the run");
+    let PrepareError::Refused { error, .. } = error else {
+        panic!("the refusal is a requirements refusal: {error}");
+    };
+    assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
+    let notice = error.to_string();
+    assert!(
+        notice.contains(
+            "- promptforge/user-input needs an input broker, and this host provides none"
+        ),
+        "the notice names the capability and the missing service: {notice}"
+    );
+    assert!(
+        !notice.contains("missing required capability: promptforge/user-input"),
+        "the notice does not call the registered capability missing: {notice}"
+    );
+}
+
+#[tokio::test]
 async fn an_optional_user_input_declaration_without_a_broker_runs_on_the_fallback() {
     let dir = tempfile::tempdir().unwrap();
     let log = log().await;
