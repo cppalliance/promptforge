@@ -45,8 +45,14 @@
 
 use std::fmt;
 
+use sha2::{Digest as _, Sha256};
+
 #[path = "untrusted-inventory.rs"]
 mod inventory;
+
+/// The domain tag hashed ahead of the seed, so the nonce never equals a
+/// SHA-256 of the same seed bytes taken for any other purpose.
+const NONCE_DOMAIN: &[u8] = b"promptforge.guard-nonce.v1";
 
 /// A run's guard-tag nonce.
 ///
@@ -62,19 +68,27 @@ pub struct GuardNonce(String);
 impl GuardNonce {
     /// Derives the run nonce from the run's `seed`: the same seed always
     /// yields the same nonce, which is what lets a replayed run reproduce
-    /// its envelopes byte for byte.
+    /// its envelopes byte for byte. A run has one nonce, shared by every
+    /// envelope the run wraps.
     ///
-    /// The seed is expanded to 128 bits by two rounds of SplitMix64, a
-    /// fixed std-only mixer, so the derivation is part of the run's
-    /// replay contract and never changes silently. The nonce's
+    /// The nonce is the first 16 bytes of SHA-256 over the ASCII tag
+    /// `promptforge.guard-nonce.v1` followed by the seed's 8 bytes in
+    /// little-endian order, rendered as 32 lowercase hex digits. The
+    /// derivation is part of the run's replay contract and never changes
+    /// silently. It is one-way: the nonce appears in every envelope the
+    /// model sees, but it does not give back the seed, and finding the
+    /// seed from a nonce means searching all 2^64 seeds. The nonce's
     /// unpredictability is the seed's: a host draws it from a CSPRNG (64
     /// bits, still far beyond any guessing margin fetched content has).
     #[must_use]
     pub fn from_seed(seed: u64) -> GuardNonce {
-        let mut state = seed;
-        let high = splitmix64(&mut state);
-        let low = splitmix64(&mut state);
-        GuardNonce(format!("{high:016x}{low:016x}"))
+        let digest = Sha256::new()
+            .chain_update(NONCE_DOMAIN)
+            .chain_update(seed.to_le_bytes())
+            .finalize();
+        let mut first = [0u8; 16];
+        first.copy_from_slice(&digest[..16]);
+        GuardNonce(format!("{:032x}", u128::from_be_bytes(first)))
     }
 
     /// The nonce's hex digits.
@@ -102,18 +116,6 @@ impl GuardNonce {
         let escaped = encode(content, self);
         format!("{}\n{open}\n{escaped}\n{close}", preface(self))
     }
-}
-
-/// One SplitMix64 step: advances `state` by the golden-ratio increment and
-/// returns its mixed output. The constants are Steele, Lea, and Flood's
-/// (JDK `SplittableRandom`); the mixer is a bijection on `u64`, so distinct
-/// states never collide within a round.
-fn splitmix64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
 }
 
 /// Renders the nonce's 32 lowercase hex digits.

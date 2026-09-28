@@ -61,6 +61,18 @@ fn a_seeded_nonce_is_a_function_of_its_seed_alone() {
 }
 
 #[test]
+fn a_seeded_nonce_matches_the_documented_sha256_derivation() {
+    // The derivation is part of the replay contract, so one known answer
+    // pins it: SHA-256 over `promptforge.guard-nonce.v1` and the seed's
+    // little-endian bytes, first 16 bytes as lowercase hex, computed once
+    // outside this crate.
+    assert_eq!(
+        GuardNonce::from_seed(7).to_string(),
+        "ab22feddfa5ea06b226ac2d588efa9eb"
+    );
+}
+
+#[test]
 fn preface_names_tag_without_angle_brackets() {
     let out = fresh().wrap("hello");
     let (nonce, _) = parts(&out);

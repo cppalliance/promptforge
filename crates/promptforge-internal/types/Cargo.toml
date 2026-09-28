@@ -15,6 +15,8 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# The guard nonce's one-way derivation from the run seed.
+sha2.workspace = true
 thiserror.workspace = true
 workspace-hack.workspace = true
 
