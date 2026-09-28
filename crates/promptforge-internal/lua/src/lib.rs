@@ -111,6 +111,7 @@ mod tools;
 pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
 mod handles;
 mod messages;
+mod prelude;
 mod program;
 mod projection;
 mod prose;
@@ -134,6 +135,7 @@ pub use dispatch::{
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
 pub use host::{run_store_op, store_error_message};
 pub use models::ModelRuntime;
+pub use prelude::install_preludes;
 pub use projection::project_messages;
 pub use prose::ProseState;
 pub use protocol::{

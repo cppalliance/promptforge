@@ -1,0 +1,463 @@
+//! Tests for capability prelude install: the restricted environment, the
+//! collision checks, the top-level seal, and load failures.
+
+use std::num::NonZeroU32;
+use std::sync::Arc;
+
+use mlua::{FromLuaMulti, Value};
+use promptforge_types::capabilities::{CapabilityId, Prelude};
+use promptforge_types::untrusted::GuardNonce;
+use serde_json::json;
+
+use super::install_preludes;
+use crate::tests::recording::null_emitter;
+use crate::{
+    Argv, CoroStep, LuaProgram, Request, SectionVm, YieldParse, install_section_loop_shim,
+    install_section_user_input_shim, install_ui,
+};
+
+const SECTION: &str = "Prelude";
+
+/// A fresh default handle's access capability for a test VM.
+fn fresh_access() -> Arc<crate::Access> {
+    Arc::new(
+        promptforge_vfs::VfsRef::default()
+            .acquire(promptforge_vfs::Origin::new("prelude test fixture"))
+            .expect("the stock backend acquires"),
+    )
+}
+
+/// Builds a section VM through section setup up to where preludes
+/// install: host injection with a bound `argv`, the host APIs, the control
+/// globals, and every coroutine yield shim. `var` seeds the guarded `var`.
+fn section_vm_with_var(var: Option<&serde_json::Value>) -> SectionVm {
+    let emitter = null_emitter();
+    let mut vm =
+        SectionVm::new(&GuardNonce::from_seed(7), &emitter, SECTION).expect("the VM builds");
+    let argv = json!({ "mode": "argv" });
+    vm.inject_host_with_var(
+        "",
+        &json!({ "id": 1 }),
+        &fresh_access(),
+        var,
+        Argv::Frozen(Some(&argv)),
+    )
+    .expect("host values inject");
+    vm.install_host_apis(&emitter, SECTION)
+        .expect("the host APIs install");
+    vm.install_scheduler_control_globals(|_| {
+        Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
+    })
+    .expect("the control globals install");
+    vm.install_coro_shims(1)
+        .expect("the coroutine shims install");
+    install_section_loop_shim(vm.lua()).expect("the loop shim installs");
+    install_section_user_input_shim(vm.lua()).expect("the user_input shim installs");
+    vm
+}
+
+fn section_vm() -> SectionVm {
+    section_vm_with_var(None)
+}
+
+fn prelude(capability: &str, source: &str) -> Prelude {
+    Prelude::new(
+        CapabilityId::parse(capability).expect("a valid capability id"),
+        source,
+    )
+}
+
+/// Installs `preludes` with no frontmatter aliases and returns the
+/// failure's message.
+fn install_failure(vm: &SectionVm, preludes: &[Prelude]) -> String {
+    install_preludes(vm.lua(), preludes, &[])
+        .expect_err("the install must fail")
+        .to_string()
+}
+
+/// Runs author code on the VM's main state and returns its values.
+fn eval<T: FromLuaMulti>(vm: &SectionVm, source: &str) -> T {
+    vm.lua().load(source).eval().expect("the author chunk runs")
+}
+
+/// Every name bound in the VM's `_G`, sorted.
+fn global_names(vm: &SectionVm) -> Vec<String> {
+    let mut names: Vec<String> = vm
+        .lua()
+        .globals()
+        .pairs::<Value, Value>()
+        .map(|pair| {
+            let (key, _) = pair.expect("the globals walk");
+            match key {
+                Value::String(name) => name.to_string_lossy(),
+                other => format!("{other:?}"),
+            }
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// The part of a failure message after `stack traceback:`.
+fn traceback(message: &str) -> &str {
+    message
+        .split_once("stack traceback:")
+        .map_or("", |(_, traceback)| traceback)
+}
+
+#[test]
+fn a_table_global_is_sealed_at_its_top_level() {
+    let vm = section_vm();
+    install_preludes(
+        vm.lua(),
+        &[prelude(
+            "acme/kit",
+            "kit = {}\nfunction kit.greet(name) return 'hi ' .. name end",
+        )],
+        &[],
+    )
+    .expect("the prelude installs");
+
+    let greeting: String = eval(&vm, "return kit.greet('ada')");
+    assert_eq!(
+        greeting, "hi ada",
+        "the sealed table still reads its fields"
+    );
+    let (ok, message): (bool, String) = eval(
+        &vm,
+        "local ok, err = pcall(function() kit.extra = 1 end)\nreturn ok, tostring(err)",
+    );
+    assert!(!ok, "assigning a field of a sealed table raises");
+    assert!(
+        message.contains("kit is read-only")
+            && message.contains("capability `acme/kit`")
+            && message.contains("'extra'"),
+        "the refusal names the global, its capability, and the field: {message}"
+    );
+    let seal: String = eval(&vm, "return getmetatable(kit)");
+    assert_eq!(seal, "kit is sealed");
+    let seen: i64 = eval(
+        &vm,
+        "local n = 0\nfor _ in pairs(kit) do n = n + 1 end\nreturn n",
+    );
+    assert_eq!(seen, 0, "pairs over the sealed proxy sees nothing");
+}
+
+#[test]
+fn a_non_table_global_installs_as_it_is() {
+    let vm = section_vm();
+    install_preludes(
+        vm.lua(),
+        &[prelude(
+            "acme/kit",
+            "answer = 42\nlabel = 'kit'\nfunction shout(text) return string.upper(text) end",
+        )],
+        &[],
+    )
+    .expect("the prelude installs");
+
+    let (answer, label, kind, shouted): (i64, String, String, String) =
+        eval(&vm, "return answer, label, type(shout), shout('hey')");
+    assert_eq!(
+        (answer, label.as_str(), kind.as_str(), shouted.as_str()),
+        (42, "kit", "function", "HEY")
+    );
+}
+
+#[test]
+fn a_prelude_that_assigns_no_global_installs_nothing() {
+    let vm = section_vm();
+    let before = global_names(&vm);
+    install_preludes(
+        vm.lua(),
+        &[prelude(
+            "acme/quiet",
+            "local helper = 1\nlocal function unused() return helper end",
+        )],
+        &[],
+    )
+    .expect("the prelude installs");
+    assert_eq!(global_names(&vm), before);
+}
+
+#[test]
+fn a_global_that_collides_with_a_host_global_fails_naming_both_sides() {
+    let vm = section_vm();
+    let message = install_failure(&vm, &[prelude("acme/kit", "store = {}")]);
+    assert!(
+        message.contains("capability `acme/kit`")
+            && message.contains("`store`")
+            && message.contains("host global"),
+        "the collision names the capability, the global, and the host global: {message}"
+    );
+}
+
+#[test]
+fn ui_and_item_collide_on_a_vm_that_binds_neither() {
+    for name in ["ui", "item"] {
+        let vm = section_vm();
+        let bound: bool = eval(&vm, &format!("return {name} ~= nil"));
+        assert!(!bound, "the fixture VM binds no `{name}`");
+        let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = 1"))]);
+        assert!(
+            message.contains("capability `acme/kit`")
+                && message.contains(&format!("`{name}`"))
+                && message.contains("reserved"),
+            "the collision names the capability and the reserved global: {message}"
+        );
+    }
+}
+
+#[test]
+fn argv_and_prose_collide_though_the_g_metatable_serves_them() {
+    let vm = section_vm();
+    vm.install_lazy_prose(|_| Ok("the block's prose".to_owned()))
+        .expect("the prose guard installs");
+    for name in ["argv", "prose"] {
+        let raw: Value = vm.lua().globals().raw_get(name).expect("a raw read");
+        assert!(
+            raw.is_nil(),
+            "`{name}` is not a raw global on the fixture VM"
+        );
+        let served: bool = eval(&vm, &format!("return {name} ~= nil"));
+        assert!(served, "the `_G` metatable serves `{name}` to author code");
+        let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = 1"))]);
+        assert!(
+            message.contains("capability `acme/kit`")
+                && message.contains(&format!("`{name}`"))
+                && message.contains("reserved"),
+            "the collision names the capability and the reserved global: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_global_that_collides_with_a_frontmatter_alias_fails_naming_the_alias() {
+    let vm = section_vm();
+    let message = install_preludes(vm.lua(), &[prelude("acme/kit", "search = {}")], &["search"])
+        .expect_err("the alias collision must fail")
+        .to_string();
+    assert!(
+        message.contains("capability `acme/kit`")
+            && message.contains("`search`")
+            && message.contains("frontmatter"),
+        "the collision names the capability, the global, and the alias: {message}"
+    );
+}
+
+#[test]
+fn two_preludes_defining_one_global_fail_naming_both_capabilities() {
+    let vm = section_vm();
+    let message = install_failure(
+        &vm,
+        &[
+            prelude("acme/one", "shared = 1"),
+            prelude("acme/two", "shared = 2"),
+        ],
+    );
+    assert!(
+        message.contains("capability `acme/two`")
+            && message.contains("`shared`")
+            && message.contains("capability `acme/one`"),
+        "the collision names the global and both capabilities: {message}"
+    );
+}
+
+#[test]
+fn a_global_whose_name_is_not_a_utf8_string_fails_naming_the_key() {
+    for (source, key) in [
+        ("_ENV[1] = true", "a key of type integer"),
+        (
+            "_ENV['\\xff'] = true",
+            "a string key that is not valid UTF-8",
+        ),
+    ] {
+        let vm = section_vm();
+        let message = install_failure(&vm, &[prelude("acme/kit", source)]);
+        assert!(
+            message.contains("capability `acme/kit`")
+                && message.contains(key)
+                && message.contains("must be a UTF-8 string"),
+            "the refusal names the capability and the key: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_prelude_that_raises_while_loading_fails_naming_its_capability() {
+    let vm = section_vm();
+    let message = install_failure(&vm, &[prelude("acme/boom", "local x = 1\nerror('boom')")]);
+    assert!(
+        message.starts_with("capability `acme/boom`: its prelude failed to load: ")
+            && message.contains("boom.")
+            && message.contains(
+                "A prelude only defines functions; it must not call tools while loading."
+            ),
+        "the failure names the capability and gives the rule: {message}"
+    );
+    assert!(
+        traceback(&message).contains("capability:acme/boom:2:"),
+        "the traceback names the prelude chunk and line: {message}"
+    );
+}
+
+#[test]
+fn a_prelude_that_calls_a_tool_while_loading_fails_naming_its_capability() {
+    let vm = section_vm();
+    let message = install_failure(
+        &vm,
+        &[prelude("acme/eager", "tools.call('acme/eager/run')")],
+    );
+    assert!(
+        message.starts_with("capability `acme/eager`: its prelude failed to load: ")
+            && message.contains("yield")
+            && message.contains("it must not call tools while loading."),
+        "the failure names the capability and gives the rule: {message}"
+    );
+    assert!(
+        traceback(&message).contains("capability:acme/eager:1:"),
+        "the traceback names the prelude chunk and line: {message}"
+    );
+}
+
+#[test]
+fn a_prelude_sees_only_its_restricted_environment() {
+    let vm = section_vm_with_var(Some(&json!({ "mode": "fast" })));
+    install_ui(vm.lua(), Arc::new(json!({}))).expect("the ui global installs");
+    let probe = "\
+function probe_hidden()
+  return type(ui) .. ',' .. type(argv) .. ',' .. type(sys) .. ',' .. type(models)
+    .. ',' .. type(first_global)
+end
+function probe_visible()
+  return type(tools.call) .. ',' .. type(store) .. ',' .. type(untrusted) .. ','
+    .. type(string.format)
+end
+function probe_var()
+  local ok, err = pcall(function() var.mode = 'slow' end)
+  return var.mode, ok, type(err), tostring(err)
+end
+function probe_pcall()
+  return pcall
+end";
+    install_preludes(
+        vm.lua(),
+        &[
+            prelude("acme/first", "first_global = 1"),
+            prelude("acme/probe", probe),
+        ],
+        &[],
+    )
+    .expect("the preludes install");
+
+    let author_view: String = eval(
+        &vm,
+        "return type(ui) .. ',' .. type(argv) .. ',' .. type(sys) .. ',' .. type(models) \
+         .. ',' .. type(first_global)",
+    );
+    assert!(
+        !author_view.contains("nil"),
+        "author code sees every probed global: {author_view}"
+    );
+    let hidden: String = eval(&vm, "return probe_hidden()");
+    assert_eq!(hidden, "nil,nil,nil,nil,nil");
+    let visible: String = eval(&vm, "return probe_visible()");
+    assert_eq!(visible, "function,table,function,function");
+    let (mode, ok, kind, message): (String, bool, String, String) = eval(&vm, "return probe_var()");
+    assert_eq!(mode, "fast", "var reads through the view");
+    assert!(!ok, "a write to var raises");
+    assert_eq!(
+        kind, "table",
+        "the normalized pcall turns the refusal into an error table"
+    );
+    assert!(
+        message.contains("var is read-only") && message.contains("'mode'"),
+        "the refusal names var and the field: {message}"
+    );
+    let author_mode: String = eval(&vm, "return var.mode");
+    assert_eq!(author_mode, "fast", "the refused write left var unchanged");
+    let same_pcall: bool = eval(&vm, "return probe_pcall() == pcall");
+    assert!(same_pcall, "the prelude's pcall is the normalized global");
+}
+
+#[test]
+fn the_var_view_is_read_only_at_every_depth() {
+    let vm = section_vm_with_var(Some(&json!({
+        "cfg": { "mode": "fast", "list": [{ "n": 1 }] }
+    })));
+    let probe = "\
+function probe_meta()
+  return getmetatable(var), getmetatable(var.cfg)
+end
+function probe_write(path)
+  local ok, err = pcall(function()
+    if path == 'cfg' then var.cfg.mode = 'slow' else var.cfg.list[1].n = 2 end
+  end)
+  return ok, tostring(err)
+end";
+    install_preludes(vm.lua(), &[prelude("acme/probe", probe)], &[]).expect("the prelude installs");
+
+    let (root, nested): (String, String) = eval(&vm, "return probe_meta()");
+    assert_eq!(
+        (root.as_str(), nested.as_str()),
+        ("var is read-only", "var is read-only"),
+        "getmetatable returns only the label, never the guarded var"
+    );
+    for (path, refusal, field) in [
+        ("cfg", "var.cfg is read-only", "'mode'"),
+        ("deep", "var.cfg.list[1] is read-only", "'n'"),
+    ] {
+        let (ok, message): (bool, String) = eval(&vm, &format!("return probe_write('{path}')"));
+        assert!(!ok, "a nested write through the view raises");
+        assert!(
+            message.contains(refusal) && message.contains(field),
+            "the refusal names the nested path and the field: {message}"
+        );
+    }
+    let (mode, n): (String, i64) = eval(&vm, "return var.cfg.mode, var.cfg.list[1].n");
+    assert_eq!(
+        (mode.as_str(), n),
+        ("fast", 1),
+        "the refused writes left var unchanged"
+    );
+}
+
+#[test]
+fn a_prelude_function_called_from_a_block_yields_its_tool_call() {
+    let vm = section_vm();
+    install_preludes(
+        vm.lua(),
+        &[prelude(
+            "acme/kit",
+            "kit = {}\nfunction kit.run(script)\n  return tools.call('acme/kit/run', { script = script })\nend",
+        )],
+        &[],
+    )
+    .expect("the prelude installs");
+    let block = LuaProgram::compile(
+        "return kit.run('ls')",
+        "prelude test block",
+        NonZeroU32::new(1).expect("a non-zero line"),
+        &null_emitter(),
+        SECTION,
+    )
+    .expect("the block compiles");
+
+    let CoroStep::Yielded(_, values) = vm.start_block_coro(&block).expect("the block starts")
+    else {
+        panic!("the block must suspend on the tool call");
+    };
+    match vm.request_from_yield(&values) {
+        YieldParse::Request(Request::ToolCall {
+            alias,
+            args,
+            call_id,
+            ..
+        }) => {
+            assert_eq!(alias, "acme/kit/run");
+            assert_eq!(args, json!({ "script": "ls" }));
+            assert_eq!(call_id, None, "a prelude's call is a script call");
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}

@@ -1,5 +1,6 @@
 //! The capability identity vocabulary: [`CapabilityId`] and its parse
-//! error.
+//! error, plus [`Prelude`], the Lua source an activated capability hands
+//! the engine.
 //!
 //! A capability is the activation unit: code that runs at run setup and
 //! makes services available to the run. Capabilities are delivered in packs
@@ -210,5 +211,43 @@ impl CapabilityIdError {
             ),
         };
         CapabilityIdError { kind, reason }
+    }
+}
+
+/// The Lua source one activated capability contributes to every section VM
+/// of a run.
+///
+/// A prelude defines tables and functions, such as `sh.run(script)`, that
+/// reach the capability's own tools through `tools.call`. The engine runs
+/// it as data: it never learns what the capability is, only its id, which
+/// names the prelude in tracebacks and error messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prelude {
+    /// The capability that contributed the source.
+    capability: CapabilityId,
+    /// The Lua source, compiled from text in every section VM.
+    source: String,
+}
+
+impl Prelude {
+    /// Pairs a capability's id with the prelude source it contributes.
+    #[must_use]
+    pub fn new(capability: CapabilityId, source: impl Into<String>) -> Prelude {
+        Prelude {
+            capability,
+            source: source.into(),
+        }
+    }
+
+    /// Returns the id of the capability that contributed this prelude.
+    #[must_use]
+    pub fn capability(&self) -> &CapabilityId {
+        &self.capability
+    }
+
+    /// Returns the prelude's Lua source.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
     }
 }

@@ -740,7 +740,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-6>
 
-### Step 6: Install capability preludes in a Lua VM
+### Step 6: Install capability preludes in a Lua VM [completed]
 
 - Component: Capability contract
 - Piece: Prelude contribution (first of three steps)
