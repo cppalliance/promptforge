@@ -118,7 +118,7 @@ addAction({
   id: "workbench.action.files.saveAs",
   title: "Save As...",
   f1: true,
-  precondition: "!isWeb && activeEditor",
+  precondition: "!isWeb && activeEditor == 'editor'",
   keybinding: { keybinding: "ctrlcmd+shift+s", weight: KeybindingWeight.WorkbenchContrib },
   menu: [{ id: MenuId.MenubarFileMenu, group: "4_save", order: 2 }],
   run: runFileAction((actions) => actions.saveActiveEditorAs),
@@ -137,7 +137,7 @@ addAction({
   id: "workbench.action.files.revert",
   title: "Revert File",
   f1: true,
-  precondition: "activeEditor",
+  precondition: "activeEditor == 'editor'",
   menu: [{ id: MenuId.MenubarFileMenu, group: "6_close", order: 1 }],
   run: runFileAction((actions) => actions.revertActiveEditor),
 });

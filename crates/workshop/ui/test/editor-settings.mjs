@@ -386,8 +386,8 @@ function serviceOver(initial, contextKeys = null) {
     KeybindingsRegistry.lookupKeybinding("editor.action.toggleRenderWhitespace") === undefined,
   );
   check(
-    "Column Selection Mode keeps the activeEditor precondition",
-    Commands.lookup("editor.action.toggleColumnSelection")?.precondition === "activeEditor",
+    "Column Selection Mode keeps the editor-only precondition",
+    Commands.lookup("editor.action.toggleColumnSelection")?.precondition === "activeEditor == 'editor'",
   );
   check(
     "Word Wrap has no precondition - it toggles without an active editor",

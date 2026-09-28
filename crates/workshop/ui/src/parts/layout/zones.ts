@@ -47,6 +47,7 @@ import "./zones.css";
 import type { Direction, DockviewApi, IDockviewGroupPanel, IDockviewPanel } from "dockview";
 
 import { DisposableStore, type IDisposable } from "@workshop/platform/lifecycle";
+import { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
 import {
   DOCK,
   ZONE_NAMES,
@@ -254,6 +255,24 @@ export function initZones(dockview: DockviewApi): IDisposable {
       }
     }),
   );
+  return store;
+}
+
+/**
+ * Binds the activeEditor context key to the dock: the active panel's
+ * type id, unset while no panel is active. The id is the panel's
+ * dockview component, which openInZone sets to the entry type at
+ * addPanel, so the key is right before a lazy chunk loads and nothing
+ * the chunk does can change it.
+ */
+export function bindActiveEditorKey(dockview: DockviewApi): IDisposable {
+  const activeEditor = getService(CONTEXT_KEY_SERVICE).createKey<string | undefined>("activeEditor", undefined);
+  const update = (): void => {
+    activeEditor.set(dockview.activePanel?.api.component);
+  };
+  const store = new DisposableStore();
+  store.add(dockview.onDidActivePanelChange(update));
+  update();
   return store;
 }
 

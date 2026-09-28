@@ -46,7 +46,7 @@ import { persistZoom, restoreZoom } from "./parts/chrome/zoom";
 import { applyLayoutOrDefault } from "./parts/layout/layout-boot";
 import { startLayoutPersistence } from "./parts/layout/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./parts/layout/panel-types";
-import { initZones, openInZone } from "./parts/layout/zones";
+import { bindActiveEditorKey, initZones, openInZone } from "./parts/layout/zones";
 
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
@@ -245,6 +245,7 @@ const dock = createDockview(dockEl, {
 disposables.add(dock);
 disposables.add(speechCapture);
 disposables.add(initZones(dock));
+disposables.add(bindActiveEditorKey(dock));
 // Dockview first sizes itself from a resize callback that lands after this
 // module runs, and the default layout's pixel widths hold only against a
 // sized dock, so the dock takes its element's size before the boot apply.

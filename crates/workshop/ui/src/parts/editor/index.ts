@@ -11,7 +11,7 @@ import { EditorPanel } from "./editor-panel";
 /**
  * The editor directory's activation: installs the editor panel factory
  * and the chunk-sourced lifecycle - the closed-editor stack and the
- * activeEditor/editorLangId context keys, both following the dock. The
+ * editorLangId context key, both following the dock. The
  * editor's actions and keybindings register eagerly from
  * editor.contribution.ts. Called once by the panel registry when the
  * directory's chunk first loads; the returned disposable is held for

@@ -49,7 +49,7 @@ const bundle = await esbuild.build({
       export { CONTEXT_KEY_SERVICE } from "@workshop/platform/context-key-service";
       export { RECENT_FILES_STORE } from "./src/services/recent-files-store.ts";
       export { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
-      export { initZones } from "./src/parts/layout/zones.ts";
+      export { bindActiveEditorKey, initZones } from "./src/parts/layout/zones.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -152,6 +152,7 @@ const {
   CONTEXT_KEY_SERVICE,
   RECENT_FILES_STORE,
   TEXT_CONTROL_SERVICE,
+  bindActiveEditorKey,
   initZones,
 } = await import(pathToFileURL(bundlePath).href);
 console.error = realConsoleError;
@@ -536,7 +537,7 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "every catalog row reaches the palette",
     palette.length === EXPECTED_IDS.length + 4 && EXPECTED_IDS.every((id) => palette.includes(id)),
   );
-  check("find declares the activeEditor precondition", Commands.lookup("actions.find")?.precondition === "activeEditor");
+  check("find declares the editor-only precondition", Commands.lookup("actions.find")?.precondition === "activeEditor == 'editor'");
   check("commentLine keeps its catalog title", Commands.lookup("editor.action.commentLine")?.title === "Toggle Line Comment");
 
   const selectionMenu = Menus.getMenuItems(MenuId.MenubarSelectionMenu).map((row) => row.command);
@@ -575,7 +576,10 @@ const selJson = (view) => JSON.stringify(view.state.selection.ranges.map((r) => 
     "Open Recent lists Reopen Closed Editor",
     recentMenu.length === 1 && recentMenu.includes("workbench.action.reopenClosedEditor"),
   );
-  check("Go to Line declares the activeEditor precondition", Commands.lookup("workbench.action.gotoLine")?.precondition === "activeEditor");
+  check(
+    "Go to Line declares the editor-only precondition",
+    Commands.lookup("workbench.action.gotoLine")?.precondition === "activeEditor == 'editor'",
+  );
   check("New Text File has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.files.newUntitledFile") !== undefined);
   check("Reopen Closed Editor has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.reopenClosedEditor") !== undefined);
   check("Go to Line has a keybinding label", KeybindingsRegistry.lookupKeybinding("workbench.action.gotoLine") !== undefined);
@@ -846,8 +850,10 @@ initZones(dock);
 }
 
 {
-  // The editor-sourced context keys follow the dock's active panel.
+  // The editor-sourced editorLangId and the layout's activeEditor follow
+  // the dock's active panel.
   const binding = editorLifecycle.bindEditorContextKeys(dock);
+  const activeEditorBinding = bindActiveEditorKey(dock);
   const context = getService(CONTEXT_KEY_SERVICE);
 
   const markdownStub = createStubSurface();
@@ -862,19 +868,21 @@ initZones(dock);
     getService(RECENT_FILES_STORE).list.includes("C:\\p\\notes.md"),
   );
 
-  const markdownDockPanel = { id: "editor:C:\\p\\notes.md", view: { content: markdownPanel } };
+  const markdownDockPanel = {
+    id: "editor:C:\\p\\notes.md",
+    api: { component: "editor" },
+    view: { content: markdownPanel },
+  };
   dock.activePanel = markdownDockPanel;
   for (const listener of listeners.active) listener({ panel: markdownDockPanel });
-  check(
-    "activeEditor is the active editor panel's id",
-    context.getValue("activeEditor") === "editor:C:\\p\\notes.md",
-  );
+  check("activeEditor is the active editor panel's type id", context.getValue("activeEditor") === "editor");
   check("editorLangId comes from the active editor's language", context.getValue("editorLangId") === "markdown");
 
-  dock.activePanel = { id: "tree", view: { content: {} } };
+  dock.activePanel = { id: "tree", api: { component: "tree" }, view: { content: {} } };
   for (const listener of listeners.active) listener({ panel: dock.activePanel });
-  check("a non-editor active panel clears activeEditor", context.getValue("activeEditor") === undefined);
+  check("a non-editor active panel sets activeEditor to its type id", context.getValue("activeEditor") === "tree");
   check("a non-editor active panel clears editorLangId", context.getValue("editorLangId") === undefined);
+  activeEditorBinding.dispose();
   binding.dispose();
   markdownPanel.dispose();
 }

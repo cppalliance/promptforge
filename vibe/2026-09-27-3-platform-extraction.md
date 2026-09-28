@@ -298,6 +298,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
     - vocabulary: `platform` added, `contribution` and `zone` updated, and the window frame no longer called `shell`.
   - **No change to Cargo or `build-xtask`.** They inspect only Rust, and `crates/workshop` is a manifestless container whose Rust members are listed explicitly (root `Cargo.toml` lines 3 and 13).
   - **A targeted prior-art check, not a broad field survey.** The fields were surveyed earlier in the month, and the design was already settled. User: chose "Targeted check".
+  - **Straightforward bugs found during the run are fixed in it, in a final step.** User, mid-run: "fix all discovered pre-existing bugs ... if they are reasonably straightforward". This brings in the Delete and Backspace keyboard close, first deferred as pre-existing, and the step 3 tab-title fallback regression. Keyboard close goes through the same confirm-then-close path as the X, because Dockview's handler closes unsaved editors with no prompt.
 - Rejected alternatives:
   - **Putting the mechanics in `look`.** `look` is the visual layer, and registries are behavior. Revisit: never.
   - **A convention-only boundary**, where features export plain data and each host writes adapters. Family products share the same mechanics, so shared contracts beat per-host adapters. Revisit if a non-family shell must host a feature.
@@ -334,7 +335,6 @@ The design rests on four decisions. Browser-side mechanics become a family packa
 ### Deferred and Out of Scope
 
 - Deferred:
-  - Enforcing `closable: false` against Dockview's Delete and Backspace keys (`dockview-core` `tabsContainer._onKeyDown` closes the focused tab without a check). This is pre-existing. Revisit when the tree must be strictly non-closable.
   - Moving the tree's focus and toggle helpers behind a lazy import, so `workshop-panel.ts` leaves the entry bundle (`workspace.contribution.ts` line 38 imports it statically). Pre-existing. Revisit with a startup-bundle size pass.
   - A `common/` and `browser/` split inside `platform`, with a separate entry point for the Dockview-aware part base and panel registry. Revisit when a second consumer needs the DOM-free subset.
   - Per-tab context keys (`activeEditorIsDirty`, `activeEditorIsPinned`, first and last in group). Revisit when the stubbed tab rows go live.
@@ -416,16 +416,17 @@ The design rests on four decisions. Browser-side mechanics become a family packa
 
 ## Execution Instructions
 
-Four components, built in dependency order. Each is useful on its own and resembles a shippable package.
+Five components, built in dependency order. The first four are each useful on their own and resemble a shippable package; the fifth fixes bugs found along the way.
 
 - Component order:
   1. **`platform` package** - first, because every other component imports from `@workshop/platform`.
   2. **Open panel registry** - second, because the generic tab reads each entry's `closable`, title and type, and the layout policy reads `defaultZone`.
   3. **Generic tab and tab menu** - third, because it consumes the open registry's entries and must land its tab and menu together.
   4. **Status bar indicators** - last. It depends only on `platform` and could run beside components 2 and 3, but it matches the plan's todo order, and landing last puts the recording rewire on the final `main.ts` instead of under the registry and tab edits.
+  5. **Run bug fixes** - added during the run at the operator's request: "fix all discovered pre-existing bugs ... if they are reasonably straightforward". Last, because the keyboard fix lives in the generic tab.
 - Verification:
   - Every step runs its focused tests with `node --test test/<name>.mjs` from the owning package (`crates/workshop/platform`, `crates/workshop/ui` or `crates/workshop/look`).
-  - The last step of each component (steps 2, 4, 7 and 9) names the component gate in its Tests line: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`. Verification runs the gate; coding and fix rounds run only focused tests.
+  - The last step of each component (steps 2, 4, 7, 9 and 10) names the component gate in its Tests line: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`. Verification runs the gate; coding and fix rounds run only focused tests.
 - Standing rules for every step:
   - Each documentation edit lands in the step whose code it describes.
   - If a file or line reference doesn't match, re-locate it by content before editing (see Base drift in the decision record).
@@ -579,7 +580,7 @@ Four components, built in dependency order. Each is useful on its own and resemb
 
 <step-6>
 
-### Step 6: Make `activeEditor` hold the active panel's type id
+### Step 6: Make `activeEditor` hold the active panel's type id [completed]
 
 - Component: generic tab and tab menu
 - Piece: context semantics. Sequential after step 5, so the Close command this step enables on every panel type already acts correctly, and before step 7, whose overlay sets the same key per tab.
@@ -686,10 +687,26 @@ Four components, built in dependency order. Each is useful on its own and resemb
   - New cases in `agent-stt-boot.mjs`: a booted workbench whose restored layout includes an agent panel still lights the LED, proving `STT_STATUS` registers before the layout mounts panels, and the LED still lights with two agent panels open.
   - Unchanged and passing: `agent-stt.mjs`, `stt-stream.mjs` and `agent-session-view.mjs`, which use fake `SttStatus` objects, and `status-frames.mjs`. The take registry's `recording: false` paths (user stop, discard when the wait dies, socket drop, overload, failure) are untouched.
   - Component gate: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`.
-- Plan exit, after the plan closes. The orchestrating session does this, never a coding, fix or verification round:
-  - Move `C:\Users\Vinnie\.promptforge\workspaces\test.pfwork` and the `C:\Users\Vinnie\.promptforge\last-workspace` pointer aside, recoverably, so the app starts from the default layout.
-  - The operator checks: the default layout, the tree tab, the run shimmer, multiple agents, and relaunch-restore of a layout saved after the change; the tab menu on editor, run and agent tabs, and none on the tree; the X on an unsaved editor prompts; the mic lights and dims the red LED, including with two agent panels open and after a restored layout mounts an agent panel; dictation errors still show on the status bar; the activity LED pulses green and holds amber.
 
 </step-9>
+
+<step-10>
+
+### Step 10: Fix the tab-title fallback and keyboard tab closing
+
+- Component: run bug fixes
+- Piece: bug fixes. Sequential after step 7, because the keyboard fix lives in the generic tab and uses the step 5 close path.
+- Changes:
+  - Tab-title fallback, a regression from step 3: the `editor` and `run` title functions (`parts/editor/editor.contribution.ts`, `parts/run/run.contribution.ts`) use `baseName`, so an editor opened with no path and no untitled number (panel id `editor:`), or an editor or Run panel with an empty or root path, gets an empty name. Restore the fallback titles the pre-step-3 `titleFor` used; read them from `git show cdba40c9:crates/workshop/ui/src/parts/layout/zones.ts`.
+  - Keyboard tab closing, pre-existing: `dockview-core`'s tab container closes the focused tab on Delete and Backspace (`tabsContainer._onKeyDown`) without checking `closable` and without the confirm path, so the tree closes from the keyboard and an unsaved editor closes with no prompt. Confirm the handler in the installed `dockview-core` source first. The generic tab (`parts/layout/panel-tab.ts`) intercepts those keys before Dockview's handler runs, using the narrowest interception the installed source allows: a `closable: false` tab does nothing, and a closable tab executes `workbench.action.closeActiveEditor` with `{ panelId }`, the same confirm-then-close path as its X. The workaround comment cites the upstream `dockview` issue URL when one exists, otherwise the `dockview-core` source location and version.
+- Tests:
+  - Extend `tab-menu.mjs` or `close-commands.mjs`: Delete and Backspace on a focused `closable: false` tab leave it open; on a focused unsaved editor tab they prompt, and Cancel keeps the tab; on a focused clean closable tab they close it.
+  - Extend `layout-open-registry.mjs` or the editor and run tests: an editor with no path and no untitled number, and a Run panel with an empty path, show the restored fallback titles.
+  - Component gate: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`.
+- Plan exit, after the plan closes. The orchestrating session does this, never a coding, fix or verification round:
+  - Move `C:\Users\Vinnie\.promptforge\workspaces\test.pfwork` and the `C:\Users\Vinnie\.promptforge\last-workspace` pointer aside, recoverably, so the app starts from the default layout.
+  - The operator checks: the default layout, the tree tab, the run shimmer, multiple agents, and relaunch-restore of a layout saved after the change; the tab menu on editor, run and agent tabs, and none on the tree; the X on an unsaved editor prompts; Delete on a focused tree tab does nothing and on an unsaved editor tab prompts; the mic lights and dims the red LED, including with two agent panels open and after a restored layout mounts an agent panel; dictation errors still show on the status bar; the activity LED pulses green and holds amber.
+
+</step-10>
 
 </execution-plan>

@@ -272,9 +272,9 @@ check("the contribution registers without a malformed descriptor", consoleErrors
     ["workbench.action.files.openFile", "Open File...", "2_open", "!isWeb", "Ctrl+O"],
     ["workbench.action.files.openFolder", "Open Folder...", "2_open", undefined, "Ctrl+M Ctrl+O"],
     ["workbench.action.addRootFolder", "Add Folder to Workspace...", "3_workspace", undefined, undefined],
-    ["workbench.action.files.saveAs", "Save As...", "4_save", "!isWeb && activeEditor", "Ctrl+Shift+S"],
+    ["workbench.action.files.saveAs", "Save As...", "4_save", "!isWeb && activeEditor == 'editor'", "Ctrl+Shift+S"],
     ["workbench.action.files.saveAll", "Save All", "4_save", undefined, "Ctrl+M S"],
-    ["workbench.action.files.revert", "Revert File", "6_close", "activeEditor", undefined],
+    ["workbench.action.files.revert", "Revert File", "6_close", "activeEditor == 'editor'", undefined],
   ];
   for (const [id, title, group, precondition, label] of expected) {
     const command = Commands.lookup(id);

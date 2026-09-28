@@ -1,8 +1,9 @@
 // The editor lifecycle: untitled-buffer allocation, the closed-editor
 // tracking behind Reopen Closed Editor, and the editor-sourced context
-// keys (activeEditor, editorLangId) that menus and keybindings evaluate.
+// key (editorLangId) that menus and keybindings evaluate. activeEditor
+// is the layout's: zones.ts binds it to the active panel's type id.
 //
-// The tracking and the keys follow the dock; the directory's register()
+// The tracking and the key follow the dock; the directory's register()
 // installs both when the editor chunk loads. The tracking records at
 // onDidRemovePanel, where the panel's content is still resolved
 // (dockview fires the event before disposing the renderer), onto the
@@ -69,20 +70,16 @@ export function reopenClosedEditor(): void {
 }
 
 /**
- * Binds the editor-sourced context keys to the dock: activeEditor is
- * the active panel's id while an editor is active (unset otherwise) and
- * editorLangId is its language. Dock events cover activation changes;
- * the panel-init hook covers the lazy chunk swap, which fires no dock
- * event.
+ * Binds the editor-sourced context key to the dock: editorLangId is the
+ * active editor's language, unset while no editor is active. Dock events
+ * cover activation changes; the panel-init hook covers the lazy chunk
+ * swap, which fires no dock event.
  */
 export function bindEditorContextKeys(dock: DockviewApi): IDisposable {
   const context = getService(CONTEXT_KEY_SERVICE);
-  const activeEditor = context.createKey<string | undefined>("activeEditor", undefined);
   const editorLangId = context.createKey<string | undefined>("editorLangId", undefined);
   const update = (): void => {
-    const active: IDockviewPanel | undefined = dock.activePanel;
-    const editor = asEditor(active);
-    activeEditor.set(editor === null || active === undefined ? undefined : active.id);
+    const editor = asEditor(dock.activePanel);
     editorLangId.set(editor === null ? undefined : editor.languageId());
   };
   const store = new DisposableStore();

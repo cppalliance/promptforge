@@ -6,11 +6,11 @@
 //
 // Placements follow the catalog: ctrl-based chords bind ctrlcmd so
 // macOS gets Cmd, every keybinding rule sets when: "editorTextFocus"
-// with the menu precondition "activeEditor" ANDed in by the action
-// registry, and editor actions register at EditorContrib so workbench
-// chords outrank them. Rows the catalog shows without a keybinding
-// (Duplicate Selection, Add Previous Occurrence, Select All Occurrences)
-// register none.
+// with the menu precondition "activeEditor == 'editor'" ANDed in by the
+// action registry, and editor actions register at EditorContrib so
+// workbench chords outrank them. Rows the catalog shows without a
+// keybinding (Duplicate Selection, Add Previous Occurrence, Select All
+// Occurrences) register none.
 //
 // The editor's panel type registers here too: editors key by path, and
 // untitled buffers by their allocated serial, so each new buffer is its
@@ -115,7 +115,7 @@ for (const row of editorActions) {
     id: row.id,
     title: row.title,
     f1: true,
-    precondition: "activeEditor",
+    precondition: "activeEditor == 'editor'",
     keybinding:
       row.keybinding === undefined
         ? undefined
@@ -145,9 +145,9 @@ interface EditorToggleRow {
 // submenu id the menubar contribution declares; MenuId is a plain
 // string, so the literal is the id. Word Wrap and the render toggles
 // skip the precondition (they toggle global state, no editor needed);
-// Column Selection Mode keeps the editor default, activeEditor.
+// Column Selection Mode keeps the editor default, activeEditor == 'editor'.
 const editorToggles = [
-  { id: "editor.action.toggleColumnSelection", title: "Column Selection Mode", menu: MenuId.MenubarSelectionMenu, group: "4_config", order: 2, setting: "columnSelection", precondition: "activeEditor" },
+  { id: "editor.action.toggleColumnSelection", title: "Column Selection Mode", menu: MenuId.MenubarSelectionMenu, group: "4_config", order: 2, setting: "columnSelection", precondition: "activeEditor == 'editor'" },
   { id: "editor.action.toggleWordWrap", title: "Word Wrap", menu: MenuId.MenubarViewMenu, group: "5_editor", order: 1, setting: "wordWrap", keybinding: "alt+z" },
   { id: "editor.action.toggleRenderWhitespace", title: "Render Whitespace", menu: "menubar/view/appearance", group: "4_editor", order: 4, setting: "renderWhitespace" },
   { id: "editor.action.toggleRenderControlCharacter", title: "Render Control Characters", menu: "menubar/view/appearance", group: "4_editor", order: 5, setting: "renderControlCharacters" },
@@ -174,9 +174,9 @@ for (const row of editorToggles) {
 // The lifecycle rows. New Text File and Reopen Closed
 // Editor bind no `when`: both must work with no editor open. Go to
 // Line keeps the editor-owned default - keybinding when
-// editorTextFocus, menu precondition activeEditor - and opens quick
-// input at the ":" prefix. The run bodies lazy-import the lifecycle
-// module, so this file stays out of the editor chunk's graph.
+// editorTextFocus, menu precondition activeEditor == 'editor' - and
+// opens quick input at the ":" prefix. The run bodies lazy-import the
+// lifecycle module, so this file stays out of the editor chunk's graph.
 addAction({
   id: "workbench.action.files.newUntitledFile",
   title: "New Text File",
@@ -199,7 +199,7 @@ addAction({
   id: "workbench.action.gotoLine",
   title: "Go to Line/Column...",
   f1: true,
-  precondition: "activeEditor",
+  precondition: "activeEditor == 'editor'",
   keybinding: { keybinding: "ctrlcmd+g", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
   menu: [{ id: MenuId.MenubarGoMenu, group: "5_infile_nav", order: 1 }],
   run: () => {
@@ -210,18 +210,20 @@ addAction({
 // The workbench-level editor rows: Save, Close Editor,
 // the four directional splits, and editor cycling. The menu-spec test
 // assembles the full tree, so these register here with the rest of the
-// editor's rows. Save, Close, and the splits follow the editor-owned
-// default - keybinding when editorTextFocus, menu precondition
-// activeEditor - while Next/Previous Editor bind no when (the catalog's
-// "-" cell): Ctrl+Tab cycles from anywhere, as in VS Code. The splits
-// move the active panel into a fresh dockview group in the direction.
+// editor's rows. Save and the splits follow the editor-owned default -
+// keybinding when editorTextFocus, menu precondition
+// activeEditor == 'editor' - and Close keeps the bare activeEditor, so
+// it acts on every panel type, while Next/Previous Editor bind no when
+// (the catalog's "-" cell): Ctrl+Tab cycles from anywhere, as in VS
+// Code. The splits move the active panel into a fresh dockview group in
+// the direction.
 // Close and Close Others take an optional { panelId } argument naming
 // the panel to act on, else the active one.
 addAction({
   id: "workbench.action.files.save",
   title: "Save",
   f1: true,
-  precondition: "activeEditor",
+  precondition: "activeEditor == 'editor'",
   keybinding: { keybinding: "ctrlcmd+s", when: "editorTextFocus", weight: KeybindingWeight.WorkbenchContrib },
   menu: [{ id: MenuId.MenubarFileMenu, group: "4_save", order: 1 }],
   run: runEditorTask((commands) => commands.saveActiveEditor),
@@ -264,7 +266,7 @@ for (const row of splitRows) {
     id: row.id,
     title: row.title,
     f1: true,
-    precondition: "activeEditor",
+    precondition: "activeEditor == 'editor'",
     keybinding:
       row.keybinding === undefined
         ? undefined
