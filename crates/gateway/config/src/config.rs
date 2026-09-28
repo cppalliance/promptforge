@@ -26,6 +26,7 @@ pub use gateway_api_types::{Capabilities, ModelKind, ThinkingMode};
 use stt::RawSttPipelineConfig;
 pub use stt::{
     RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,
+    WhisperBackend,
 };
 pub use workshop::WorkshopConfig;
 

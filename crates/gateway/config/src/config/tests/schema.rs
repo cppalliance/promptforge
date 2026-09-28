@@ -102,6 +102,7 @@ fn canonical_stt_section_parses_into_the_runtime_shape() {
     assert_eq!(stt.window_seconds(), 8);
     assert_eq!(stt.interval_ms(), 250);
     assert_eq!(stt.vocabulary(), ["WG21"]);
+    assert_eq!(stt.whisper_backend(), WhisperBackend::Auto);
 }
 
 #[test]

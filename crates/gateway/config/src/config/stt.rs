@@ -36,6 +36,9 @@ pub struct SttPipelineConfig {
     interval_ms: u64,
     /// Domain terms whisper is biased toward. Empty disables biasing.
     vocabulary: Vec<String>,
+    /// Which whisper runtime build to download. Defaults to `auto`.
+    #[serde(default, skip_serializing_if = "WhisperBackend::is_auto")]
+    whisper_backend: WhisperBackend,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +47,8 @@ pub(crate) struct RawSttPipelineConfig {
     window_seconds: u64,
     interval_ms: u64,
     vocabulary: Vec<String>,
+    #[serde(default, skip_serializing_if = "WhisperBackend::is_auto")]
+    whisper_backend: WhisperBackend,
 }
 
 impl Default for RawSttPipelineConfig {
@@ -52,6 +57,7 @@ impl Default for RawSttPipelineConfig {
             window_seconds: DEFAULT_STT_WINDOW_SECONDS,
             interval_ms: DEFAULT_STT_INTERVAL_MS,
             vocabulary: Vec::new(),
+            whisper_backend: WhisperBackend::Auto,
         }
     }
 }
@@ -62,6 +68,7 @@ impl Default for SttPipelineConfig {
             window_seconds: DEFAULT_STT_WINDOW_SECONDS,
             interval_ms: DEFAULT_STT_INTERVAL_MS,
             vocabulary: Vec::new(),
+            whisper_backend: WhisperBackend::Auto,
         }
     }
 }
@@ -85,6 +92,7 @@ impl TryFrom<RawSttPipelineConfig> for SttPipelineConfig {
             window_seconds: raw.window_seconds,
             interval_ms: raw.interval_ms,
             vocabulary: raw.vocabulary,
+            whisper_backend: raw.whisper_backend,
         })
     }
 }
@@ -95,6 +103,7 @@ impl From<&SttPipelineConfig> for RawSttPipelineConfig {
             window_seconds: config.window_seconds,
             interval_ms: config.interval_ms,
             vocabulary: config.vocabulary.clone(),
+            whisper_backend: config.whisper_backend,
         }
     }
 }
@@ -126,6 +135,53 @@ impl SttPipelineConfig {
     #[must_use]
     pub fn vocabulary(&self) -> &[String] {
         &self.vocabulary
+    }
+
+    /// Returns the configured whisper runtime build selection
+    /// (`whisper_backend`, default `auto`). Consulted only on Windows x86-64
+    /// and Linux x86-64.
+    #[must_use]
+    pub fn whisper_backend(&self) -> WhisperBackend {
+        self.whisper_backend
+    }
+}
+
+/// The whisper runtime build the gateway downloads for speech-to-text on
+/// Windows x86-64 and Linux x86-64. Every other platform has at most one
+/// build, so this setting is consulted on those two only.
+///
+/// # Examples
+/// ```
+/// use gateway_config::{Config, WhisperBackend};
+///
+/// let config = Config::from_toml_str(
+///     "config-version = 0\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///      [stt]\nwhisper_backend = \"cpu\"\n",
+/// )?;
+/// assert_eq!(
+///     config.stt().map(|stt| stt.whisper_backend()),
+///     Some(WhisperBackend::Cpu)
+/// );
+/// # Ok::<(), gateway_config::ConfigError>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum WhisperBackend {
+    /// Lets the gateway choose the build for the host.
+    #[default]
+    Auto,
+    /// The CPU-only whisper.cpp build.
+    Cpu,
+    /// The whisper.cpp CUDA build, which needs an NVIDIA GPU.
+    Cuda,
+}
+
+impl WhisperBackend {
+    /// True for the default (`auto`), so serialization can omit it.
+    #[must_use]
+    pub fn is_auto(&self) -> bool {
+        *self == WhisperBackend::Auto
     }
 }
 
@@ -439,6 +495,28 @@ mod tests {
         assert_eq!(config.window_seconds(), DEFAULT_STT_WINDOW_SECONDS);
         assert_eq!(config.interval_ms(), DEFAULT_STT_INTERVAL_MS);
         assert!(config.vocabulary().is_empty());
+        assert_eq!(config.whisper_backend(), WhisperBackend::Auto);
+        assert_eq!(
+            config,
+            SttPipelineConfig::default(),
+            "an absent [stt] section falls back to the same defaults"
+        );
+
+        let json = serde_json::to_value(&config).expect("STT pipeline serializes");
+        assert!(
+            json.get("whisper_backend").is_none(),
+            "the default `auto` backend is omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn public_serialization_writes_a_non_default_whisper_backend() {
+        let config: SttPipelineConfig = serde_json::from_str(r#"{"whisper_backend":"cuda"}"#)
+            .expect("a CUDA whisper backend is valid");
+        assert_eq!(config.whisper_backend(), WhisperBackend::Cuda);
+
+        let json = serde_json::to_value(&config).expect("STT pipeline serializes");
+        assert_eq!(json["whisper_backend"], "cuda", "{json}");
     }
 
     #[test]
