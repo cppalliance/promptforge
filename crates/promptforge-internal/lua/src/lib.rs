@@ -115,6 +115,7 @@ mod prelude;
 mod program;
 mod projection;
 mod prose;
+mod proxy;
 mod scope;
 mod vm;
 pub(crate) use handles::resolve_section_target;

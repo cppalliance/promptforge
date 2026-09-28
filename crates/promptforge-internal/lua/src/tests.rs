@@ -2086,6 +2086,22 @@ fn writing_sys_field_is_a_lua_error() {
 }
 
 #[test]
+fn a_sys_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
+    for (target, refusal) in [
+        ("sys.extra", "sys is read-only; cannot set 'extra'"),
+        ("sys[1]", "sys is read-only; cannot set 'Integer(1)'"),
+    ] {
+        let source =
+            format!("local ok, err = pcall(function() {target} = 1 end)\nreturn tostring(err)");
+        let out = run(&source, "").expect("the pcall catches the refusal");
+        let caught = out.returned.expect("the chunk returns the caught error");
+        assert_eq!(refusal_line(&caught), Some(refusal), "writing {target}");
+    }
+    let label = run("return getmetatable(sys)", "").unwrap();
+    assert_eq!(label.returned.as_deref(), Some("sys is sealed"));
+}
+
+#[test]
 fn var_is_read_back() {
     let out = run("var.greeting = 'hi ' .. args", "bob").unwrap();
     assert_eq!(
@@ -3408,6 +3424,31 @@ fn frozen_argv_rejects_writes_at_any_depth() {
 }
 
 #[test]
+fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
+    let argv = json!({ "query": "papers" });
+    let vm = argv_vm(Some(&argv), false);
+    for (target, refusal) in [
+        (
+            "argv.query",
+            "argv is frozen outside H1: cannot set field 'query'",
+        ),
+        (
+            "argv[1]",
+            "argv is frozen outside H1: cannot set field Integer(1)",
+        ),
+    ] {
+        let source =
+            format!("local ok, err = pcall(function() {target} = 1 end)\nreturn tostring(err)");
+        let out = run_argv(&vm, &source).expect("the pcall catches the refusal");
+        let caught = out.expect("the chunk returns the caught error");
+        assert_eq!(refusal_line(&caught), Some(refusal), "writing {target}");
+    }
+    let label = run_argv(&vm, "return getmetatable(argv)").expect("getmetatable reads");
+    assert_eq!(label.as_deref(), Some("argv is frozen"));
+    vm.teardown(&null_emitter(), "Argv");
+}
+
+#[test]
 fn frozen_nil_argv_reads_nil_and_rejects_assignment() {
     let vm = argv_vm(None, false);
     let out = run_argv(&vm, "assert(argv == nil, 'no argv reads nil') return 'ok'")
@@ -3541,4 +3582,10 @@ pub(crate) fn assert_chunk_name_resolves(constant: &str, chunk_name: &str, embed
         first_differing_line(&on_disk, embedded),
         path.display()
     );
+}
+
+/// The refusal a `pcall` caught, from the caught error's `tostring`: its
+/// first line without the `runtime error: ` prefix mlua renders.
+pub(crate) fn refusal_line(caught: &str) -> Option<&str> {
+    caught.strip_prefix("runtime error: ")?.lines().next()
 }

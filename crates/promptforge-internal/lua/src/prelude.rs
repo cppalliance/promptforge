@@ -24,6 +24,7 @@ use mlua::chunk::ChunkMode;
 use promptforge_types::capabilities::{CapabilityId, Prelude};
 
 use super::{BTreeMap, Error, Lua, Result, Value};
+use crate::proxy::read_only_proxy;
 
 /// The `_G` names a prelude's environment reads, as bound when it installs.
 const VISIBLE_GLOBALS: [&str; 19] = [
@@ -147,7 +148,12 @@ fn read_only_var(lua: &Lua, target: Table, path: String) -> mlua::Result<Table> 
             other => Ok(other),
         }
     })?;
-    read_only_proxy(lua, Value::Function(index), refusal, "var is read-only")
+    read_only_proxy(
+        lua,
+        Value::Function(index),
+        move |key| format!("{refusal} '{}'", field_name(key)),
+        "var is read-only",
+    )
 }
 
 /// Renders the path of a field read through a `var` view, for its refusal.
@@ -218,35 +224,14 @@ fn check_collision(
 /// `__index` reads the hidden table, whose `__newindex` raises, and whose
 /// `__metatable` is set, so `pairs` over it sees nothing.
 fn seal(lua: &Lua, capability: &CapabilityId, name: &str, hidden: Table) -> Result<Table> {
+    let refusal = format!("{name} is read-only: capability `{capability}` defines it; cannot set");
     read_only_proxy(
         lua,
         Value::Table(hidden),
-        format!("{name} is read-only: capability `{capability}` defines it; cannot set"),
+        move |key| format!("{refusal} '{}'", field_name(key)),
         &format!("{name} is sealed"),
     )
     .map_err(Error::lua)
-}
-
-/// Builds an empty proxy whose `__index` is `index`, whose `__newindex`
-/// raises `refusal` followed by the refused field, and whose `__metatable`
-/// is `label`, so `pairs` over it sees nothing and `getmetatable` returns
-/// only the label.
-fn read_only_proxy(lua: &Lua, index: Value, refusal: String, label: &str) -> mlua::Result<Table> {
-    let newindex = lua.create_function(
-        move |_lua, (_proxy, key, _value): (Value, Value, Value)| -> mlua::Result<()> {
-            Err(mlua::Error::runtime(format!(
-                "{refusal} '{}'",
-                field_name(&key)
-            )))
-        },
-    )?;
-    let metatable = lua.create_table()?;
-    metatable.raw_set("__index", index)?;
-    metatable.raw_set("__newindex", newindex)?;
-    metatable.raw_set("__metatable", label)?;
-    let proxy = lua.create_table()?;
-    proxy.set_metatable(Some(metatable))?;
-    Ok(proxy)
 }
 
 /// Renders a refused field's key for an error message.

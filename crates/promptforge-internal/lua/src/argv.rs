@@ -16,6 +16,7 @@
 //! tables whose `__newindex` rejects every write.
 
 use super::{Error, Json, Lua, LuaSerdeExt, MultiValue, Result, Value};
+use crate::proxy::read_only_proxy;
 
 /// How a section VM installs the `argv` global at host injection. `None`
 /// installs nil either way, so `if argv then` is the idiomatic malformed
@@ -178,28 +179,17 @@ fn frozen_json_value(lua: &Lua, value: Option<&Json>) -> Result<Value> {
 /// to the data (whose nested tables are already frozen proxies, and whose
 /// absent keys read nil), and every write raises the freeze error.
 fn freeze_table(lua: &Lua, data: mlua::Table) -> Result<mlua::Table> {
-    let proxy = lua.create_table().map_err(Error::lua)?;
-    let metatable = lua.create_table().map_err(Error::lua)?;
-    metatable.raw_set("__index", data).map_err(Error::lua)?;
-    let newindex = lua
-        .create_function(
-            |_, (_proxy, key, _value): (Value, Value, Value)| -> mlua::Result<()> {
-                let field = match &key {
-                    Value::String(name) => format!("'{}'", name.to_string_lossy()),
-                    other => format!("{other:?}"),
-                };
-                Err(mlua::Error::runtime(format!(
-                    "argv is frozen outside H1: cannot set field {field}"
-                )))
-            },
-        )
-        .map_err(Error::lua)?;
-    metatable
-        .raw_set("__newindex", newindex)
-        .map_err(Error::lua)?;
-    metatable
-        .raw_set("__metatable", "argv is frozen")
-        .map_err(Error::lua)?;
-    proxy.set_metatable(Some(metatable)).map_err(Error::lua)?;
-    Ok(proxy)
+    read_only_proxy(
+        lua,
+        Value::Table(data),
+        |key| {
+            let field = match key {
+                Value::String(name) => format!("'{}'", name.to_string_lossy()),
+                other => format!("{other:?}"),
+            };
+            format!("argv is frozen outside H1: cannot set field {field}")
+        },
+        "argv is frozen",
+    )
+    .map_err(Error::lua)
 }

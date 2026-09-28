@@ -1,6 +1,7 @@
 //! The sealed `sys` table and the guarded `var` proxy that sandboxed author code reads and writes.
 
 use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
+use crate::proxy::read_only_proxy;
 
 /// The registry key holding the `var` proxy's hidden data table.
 ///
@@ -148,9 +149,6 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
         }
     };
 
-    let proxy = lua.create_table().map_err(Error::lua)?;
-    let metatable = lua.create_table().map_err(Error::lua)?;
-
     let index = lua
         .create_function(move |lua, (_table, key): (Value, Value)| {
             let Value::String(name) = key else {
@@ -166,28 +164,20 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
             }
         })
         .map_err(Error::lua)?;
-    metatable.set("__index", index).map_err(Error::lua)?;
 
-    let newindex = lua
-        .create_function(
-            move |_lua, (_table, key, _value): (Value, Value, Value)| -> mlua::Result<()> {
-                let field = match key {
-                    Value::String(name) => name.to_string_lossy(),
-                    other => format!("{other:?}"),
-                };
-                Err(mlua::Error::runtime(format!(
-                    "sys is read-only; cannot set '{field}'"
-                )))
-            },
-        )
-        .map_err(Error::lua)?;
-    metatable.set("__newindex", newindex).map_err(Error::lua)?;
-    metatable
-        .set("__metatable", "sys is sealed")
-        .map_err(Error::lua)?;
-
-    proxy.set_metatable(Some(metatable)).map_err(Error::lua)?;
-    Ok(proxy)
+    read_only_proxy(
+        lua,
+        Value::Function(index),
+        |key| {
+            let field = match key {
+                Value::String(name) => name.to_string_lossy(),
+                other => format!("{other:?}"),
+            };
+            format!("sys is read-only; cannot set '{field}'")
+        },
+        "sys is sealed",
+    )
+    .map_err(Error::lua)
 }
 
 /// Builds the guarded `var` global: an empty proxy table over a hidden data

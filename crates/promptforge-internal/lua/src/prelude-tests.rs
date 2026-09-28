@@ -11,6 +11,7 @@ use serde_json::json;
 
 use super::install_preludes;
 use crate::tests::recording::null_emitter;
+use crate::tests::refusal_line;
 use crate::{
     Argv, CoroStep, LuaProgram, Request, SectionVm, YieldParse, install_section_loop_shim,
     install_ui,
@@ -140,6 +141,29 @@ fn a_table_global_is_sealed_at_its_top_level() {
         "local n = 0\nfor _ in pairs(kit) do n = n + 1 end\nreturn n",
     );
     assert_eq!(seen, 0, "pairs over the sealed proxy sees nothing");
+}
+
+#[test]
+fn a_sealed_global_raises_the_whole_refusal_for_a_string_or_integer_key() {
+    let vm = section_vm();
+    install_preludes(vm.lua(), &[prelude("acme/kit", "kit = {}")], &[])
+        .expect("the prelude installs");
+    for (target, refusal) in [
+        (
+            "kit.extra",
+            "kit is read-only: capability `acme/kit` defines it; cannot set 'extra'",
+        ),
+        (
+            "kit[1]",
+            "kit is read-only: capability `acme/kit` defines it; cannot set 'Integer(1)'",
+        ),
+    ] {
+        let message: String = eval(
+            &vm,
+            &format!("local ok, err = pcall(function() {target} = 1 end)\nreturn tostring(err)"),
+        );
+        assert_eq!(refusal_line(&message), Some(refusal), "writing {target}");
+    }
 }
 
 #[test]
@@ -419,6 +443,30 @@ end";
         ("fast", 1),
         "the refused writes left var unchanged"
     );
+}
+
+#[test]
+fn the_var_view_raises_the_whole_refusal_for_a_string_or_integer_key() {
+    let vm = section_vm_with_var(Some(&json!({ "mode": "fast" })));
+    let probe = "\
+function probe_set(key)
+  local ok, err = pcall(function() var[key] = 1 end)
+  return tostring(err)
+end";
+    install_preludes(vm.lua(), &[prelude("acme/probe", probe)], &[]).expect("the prelude installs");
+    for (key, refusal) in [
+        (
+            "'mode'",
+            "var is read-only inside a capability prelude; cannot set 'mode'",
+        ),
+        (
+            "1",
+            "var is read-only inside a capability prelude; cannot set 'Integer(1)'",
+        ),
+    ] {
+        let message: String = eval(&vm, &format!("return probe_set({key})"));
+        assert_eq!(refusal_line(&message), Some(refusal), "writing var[{key}]");
+    }
 }
 
 #[test]
