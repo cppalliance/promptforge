@@ -23,12 +23,15 @@ import type { Result } from "../../services/error-catalog";
 import { MenuId } from "@workshop/platform/menu-registry";
 import { DOCK, registerPanelType } from "@workshop/platform/panel-registry";
 import { getService } from "@workshop/platform/service-registry";
-import { baseName } from "../../base/paths";
+import { lastSegment } from "../../base/paths";
 import { openInZone } from "../layout/zones";
 
 registerPanelType({
   type: "run",
-  title: (params) => (typeof params.path === "string" ? `Run: ${baseName(params.path)}` : "Run"),
+  title: (params) => {
+    const name = typeof params.path === "string" ? lastSegment(params.path) : undefined;
+    return name === undefined ? "Run" : `Run: ${name}`;
+  },
   defaultZone: "main",
   load: () => import("./index"),
 });

@@ -532,7 +532,7 @@ function pressCloseChord() {
 }
 
 const focused = await openDoc("focused.txt");
-activeEditorKey.set(focused.id);
+activeEditorKey.set("editor");
 textFocusKey.set(false);
 pressCloseChord();
 await flush();

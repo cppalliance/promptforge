@@ -692,16 +692,21 @@ Five components, built in dependency order. The first four are each useful on th
 
 <step-10>
 
-### Step 10: Fix the tab-title fallback and keyboard tab closing
+### Step 10: Fix the tab-title fallback, keyboard tab closing and run leftovers [completed]
 
 - Component: run bug fixes
 - Piece: bug fixes. Sequential after step 7, because the keyboard fix lives in the generic tab and uses the step 5 close path.
 - Changes:
   - Tab-title fallback, a regression from step 3: the `editor` and `run` title functions (`parts/editor/editor.contribution.ts`, `parts/run/run.contribution.ts`) use `baseName`, so an editor opened with no path and no untitled number (panel id `editor:`), or an editor or Run panel with an empty or root path, gets an empty name. Restore the fallback titles the pre-step-3 `titleFor` used; read them from `git show cdba40c9:crates/workshop/ui/src/parts/layout/zones.ts`.
   - Keyboard tab closing, pre-existing: `dockview-core`'s tab container closes the focused tab on Delete and Backspace (`tabsContainer._onKeyDown`) without checking `closable` and without the confirm path, so the tree closes from the keyboard and an unsaved editor closes with no prompt. Confirm the handler in the installed `dockview-core` source first. The generic tab (`parts/layout/panel-tab.ts`) intercepts those keys before Dockview's handler runs, using the narrowest interception the installed source allows: a `closable: false` tab does nothing, and a closable tab executes `workbench.action.closeActiveEditor` with `{ panelId }`, the same confirm-then-close path as its X. The workaround comment cites the upstream `dockview` issue URL when one exists, otherwise the `dockview-core` source location and version.
+  - Run leftovers, added after the operator reviewed the run ledger:
+    - `crates/workshop/ui/test/close-commands.mjs` sets `activeEditor` to a panel id by hand, the pre-step-6 meaning. Set it to the type id `'editor'`.
+    - `platform/panel-registry.ts` still exports an unused `panelFactory`. Remove it after confirming that no source file or test references it.
+    - The tab menu's Move row shows the command title "Move Editor into New Window". Check the `workbench.action.moveEditorToNewWindow` row in VS Code's `MenuId.EditorTitleContext` at the pinned commit `6ed05a17ea68d096e122f0866e8ee3aec612f2c5`. When that row uses a shorter title, give the tab-menu row the same title and leave the menubar row unchanged, but only when the menu registry already supports a per-row title. When it doesn't, or the VS Code source can't be read, keep the current title and say so in the return.
 - Tests:
   - Extend `tab-menu.mjs` or `close-commands.mjs`: Delete and Backspace on a focused `closable: false` tab leave it open; on a focused unsaved editor tab they prompt, and Cancel keeps the tab; on a focused clean closable tab they close it.
   - Extend `layout-open-registry.mjs` or the editor and run tests: an editor with no path and no untitled number, and a Run panel with an empty path, show the restored fallback titles.
+  - `close-commands.mjs` passes with the type id. When the Move row's title changes, `tab-menu.mjs` and `menu-spec.mjs` pin the new tab-menu title and the unchanged menubar title.
   - Component gate: at `crates/workshop`, `npm ci`, `npm run typecheck --workspaces --if-present`, `npm run build --workspace ui` and `npm test --workspaces --if-present`; then `cargo build -p workshop-server`; then a clean `git status`.
 - Plan exit, after the plan closes. The orchestrating session does this, never a coding, fix or verification round:
   - Move `C:\Users\Vinnie\.promptforge\workspaces\test.pfwork` and the `C:\Users\Vinnie\.promptforge\last-workspace` pointer aside, recoverably, so the app starts from the default layout.

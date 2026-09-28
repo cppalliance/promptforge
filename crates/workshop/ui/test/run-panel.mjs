@@ -4,7 +4,8 @@
 // workshop-panel.ts, and the drop-target dispatch in workspace-drops.ts).
 // Bundles the modules with esbuild, mounts a real Dockview dock in jsdom,
 // and scripts fetch for /workspace/tree, /workspace/file, /prompts/contract,
-// and /workspace/grant. Covers: the empty open; a pre-filled open reaching
+// and /workspace/grant. Covers: the empty open, and the Run tab title for
+// an empty path; a pre-filled open reaching
 // ready with one row per contract item; the shimmer class on the tab title
 // in loading and its absence in ready and error, including after the
 // overflow list inits a second tab for the panel; tree dragstart setting
@@ -309,6 +310,14 @@ check("the panel root is the file-drop target", emptyEl?.hasAttribute("data-ws-f
 check("the empty window shows the empty-state hint", !!emptyEl?.querySelector(".ws-run-panel__hint"));
 check("the Run button is disabled before ready", emptyEl?.querySelector(".ws-run-panel__run")?.disabled === true);
 check("an empty open fetches nothing", calls.filter((c) => c.url.startsWith("/workspace/file")).length === 0);
+
+const blankRun = openInZone("run", { instance: "blank", path: "" });
+await flush();
+check(
+  "a Run window opened with an empty path shows the Run tab title",
+  blankRun.title === "Run" &&
+    blankRun.view.tab.element.querySelector(".dv-default-tab-content")?.textContent === "Run",
+);
 
 // --- Pre-filled open: loading shimmers, then one row per contract item ------
 

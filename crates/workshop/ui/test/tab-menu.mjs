@@ -11,12 +11,15 @@
 // activeEditor, while the global activeEditor key stays empty.
 // Covers: the menu opens at the pointer with the registry rows in order;
 // the Close row is enabled through the overlay and shows Ctrl+F4; the stub
-// rows render disabled under their final names and shortcuts; a row gated
+// rows render disabled under their final names and shortcuts, the Move row
+// under VS Code's tab-menu title while the menubar keeps its own; a row gated
 // on activeEditor == 'agent' shows only on agent tabs, and the overlay
 // also drives toggled rows, keybinding labels and a submenu's flyout;
 // Close acts on the clicked tab rather than the active one, and Close
 // Others on the clicked tab's group; a non-closable tab has no X and opens
-// no menu; the X on an unsaved editor prompts, and Cancel keeps the tab.
+// no menu; the X on an unsaved editor prompts, and Cancel keeps the tab;
+// Delete and Backspace on a focused tab leave a non-closable tab open,
+// prompt on an unsaved editor (Cancel keeps it), and close a clean tab.
 // Run: node --test test/tab-menu.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -340,7 +343,7 @@ const STUBS = [
   ["workbench.action.reopenWithEditor", "Reopen Editor With...", undefined],
   ["workbench.action.keepEditor", "Keep Open", "ctrlcmd+m enter"],
   ["workbench.action.pinEditor", "Pin", "ctrlcmd+m shift+enter"],
-  ["workbench.action.moveEditorToNewWindow", "Move Editor into New Window", undefined],
+  ["workbench.action.moveEditorToNewWindow", "Move into New Window", undefined],
 ];
 
 // --- The menu opens at the pointer with the registry rows ----------------------
@@ -385,6 +388,13 @@ for (const [id, title, chord] of STUBS) {
     shortcutOf(row) === (chord === undefined ? undefined : chordLabel(chord)),
   );
 }
+const menubarMove = Menus.getMenuItems("menubar/view/editorLayout").find(
+  (row) => row.command === "workbench.action.moveEditorToNewWindow",
+);
+check(
+  "the menubar's Move row keeps the command title",
+  (menubarMove?.title ?? Commands.lookup(menubarMove?.command ?? "")?.title) === "Move Editor into New Window",
+);
 
 // --- The overlay: when, toggled, keybinding labels, and submenus ---------------
 
@@ -466,6 +476,41 @@ check("Cancel keeps the unsaved editor's tab", isOpen(unsaved) && partOf(unsaved
 closeButton(probeB)?.click();
 await flush();
 check("the X closes a clean panel", !isOpen(probeB));
+
+// --- Delete and Backspace on a focused tab: the X's path ------------------------
+
+/** Presses `key` on the panel's focused tab: the Dockview wrapper its tab strip's own key handler matches. */
+function pressOnTab(panel, key) {
+  const wrapper = tabOf(panel).parentElement;
+  wrapper?.focus();
+  wrapper?.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+function cancelPrompt() {
+  [...partOf(unsaved).element.querySelectorAll(".ws-editor-close__button")]
+    .find((candidate) => candidate.textContent === "Cancel")
+    ?.click();
+}
+
+for (const key of ["Delete", "Backspace"]) {
+  pressOnTab(pinned, key);
+  await flush();
+  check(`${key} on a focused non-closable tab leaves it open`, isOpen(pinned));
+
+  pressOnTab(unsaved, key);
+  await flush();
+  check(`${key} on a focused unsaved editor tab prompts instead of closing`, isOpen(unsaved) && prompts() === 1);
+  cancelPrompt();
+  await flush();
+  check(
+    `Cancel after ${key} keeps the unsaved editor's tab`,
+    isOpen(unsaved) && prompts() === 0 && partOf(unsaved).isDirty() === true,
+  );
+
+  const clean = await open("probe", { instance: key });
+  pressOnTab(clean, key);
+  await flush();
+  check(`${key} on a focused clean closable tab closes it`, !isOpen(clean));
+}
 
 if (failures.length > 0) {
   console.error(`tab-menu: ${failures.length} failure(s)`);

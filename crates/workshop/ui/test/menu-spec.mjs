@@ -5,7 +5,7 @@
 // 13-19. Covers: the eight top-level menus in order; every spec row in
 // its menu and group, in spec render order within each menu, the editor
 // tab menu and the second placement of Move Editor into New Window
-// included; every
+// (titled Move into New Window there) included; every
 // wired row listed in the command palette (f1); every stub row
 // registered with precondition "false" (always disabled) and absent
 // from the palette; the constant toggled expressions on the checkable
@@ -389,7 +389,7 @@ const SPEC = {
     ["workbench.action.reopenWithEditor", "1_open", "stub", "Reopen Editor With..."],
     ["workbench.action.keepEditor", "3_preview", "stub", "Keep Open"],
     ["workbench.action.pinEditor", "3_preview", "stub", "Pin"],
-    ["workbench.action.moveEditorToNewWindow", "7_new_window", "stub", "Move Editor into New Window"],
+    ["workbench.action.moveEditorToNewWindow", "7_new_window", "stub", "Move into New Window"],
   ],
 };
 

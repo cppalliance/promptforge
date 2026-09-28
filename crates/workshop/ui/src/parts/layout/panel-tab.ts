@@ -4,7 +4,8 @@
 // Close with the tab's { panelId } so the part confirms first, and a
 // right-click menu over MenuId.EditorTitleContext at the pointer, whose
 // rows run against the clicked tab and read activeEditor as its type; a
-// `closable: false` type gets neither.
+// `closable: false` type gets neither. Delete and Backspace on the focused
+// tab run the same Close, and do nothing on a `closable: false` type.
 //
 // The loading shimmer: while its panel is loading, the title span takes
 // @workshop/look's .ws-shimmer-text; the negative animation-delay against
@@ -20,7 +21,7 @@
 import type { ITabRenderer, TabPartInitParameters } from "dockview";
 
 import { Commands } from "@workshop/platform/command-registry";
-import { Disposable } from "@workshop/platform/lifecycle";
+import { Disposable, toDisposable } from "@workshop/platform/lifecycle";
 import { MenuId } from "@workshop/platform/menu-registry";
 import { panelTypeEntry } from "@workshop/platform/panel-registry";
 // The widget module, never the parts/menu barrel: the barrel imports the
@@ -30,6 +31,13 @@ import { Menu, reportCommandFailure } from "../menu/menu";
 
 /** The command the X runs; the tab menu's Close row runs it too. */
 const CLOSE_COMMAND = "workbench.action.closeActiveEditor";
+
+/** Runs Close on one panel, so its part confirms before it goes. */
+function closePanel(panelId: string): void {
+  void Commands.execute(CLOSE_COMMAND, { panelId }).catch((error: unknown) => {
+    reportCommandFailure(CLOSE_COMMAND, error);
+  });
+}
 
 /** The shimmer period, matching the 2s loop in @workshop/look/shimmer.css. */
 const SHIMMER_PERIOD_MS = 2000;
@@ -70,9 +78,11 @@ export class PanelTab extends Disposable implements ITabRenderer {
 
   public init(parameters: TabPartInitParameters): void {
     const { api } = parameters;
+    const closable = panelTypeEntry(api.component)?.closable !== false;
     if (parameters.tabLocation === "header") {
       this.panelId = api.id;
       tabs.set(api.id, this);
+      this.interceptCloseKeys(api.id, closable);
     }
     // The panel may have entered loading before the tab mounted.
     this.loading = loadingByPanel.get(api.id) ?? false;
@@ -83,7 +93,7 @@ export class PanelTab extends Disposable implements ITabRenderer {
       }),
     );
     this.applyLoading();
-    if (panelTypeEntry(api.component)?.closable === false) {
+    if (!closable) {
       return;
     }
     const close = document.createElement("button");
@@ -93,9 +103,7 @@ export class PanelTab extends Disposable implements ITabRenderer {
     close.textContent = "×";
     close.addEventListener("click", (event) => {
       event.stopPropagation();
-      void Commands.execute(CLOSE_COMMAND, { panelId: api.id }).catch((error: unknown) => {
-        reportCommandFailure(CLOSE_COMMAND, error);
-      });
+      closePanel(api.id);
     });
     this.element.appendChild(close);
     this.element.addEventListener("contextmenu", (event) => {
@@ -109,6 +117,33 @@ export class PanelTab extends Disposable implements ITabRenderer {
         { activeEditor: api.component },
       );
     });
+  }
+
+  /**
+   * Takes Delete and Backspace on the focused tab away from Dockview.
+   * dockview-core 8.3.1's tab strip (Tabs._onKeyDown in
+   * dist/package/main.esm.mjs) closes the focused tab on either key
+   * through panel.api.close(), without checking `closable` and without
+   * the part's confirmClose. The focused element is the Dockview wrapper
+   * this renderer is appended into, which Dockview replaces when the
+   * panel moves groups and never hands to the renderer, so the keys are
+   * caught in the document's capture phase and only while that wrapper
+   * is the target.
+   */
+  private interceptCloseKeys(panelId: string, closable: boolean): void {
+    const onKeydown = (event: KeyboardEvent): void => {
+      const wrapper = this.element.parentElement;
+      if ((event.key !== "Delete" && event.key !== "Backspace") || wrapper === null || event.target !== wrapper) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (closable) {
+        closePanel(panelId);
+      }
+    };
+    document.addEventListener("keydown", onKeydown, true);
+    this._register(toDisposable(() => document.removeEventListener("keydown", onKeydown, true)));
   }
 
   /** Toggles the shimmer on the title span. */

@@ -27,40 +27,23 @@ import type { ParseError } from "@workshop/platform/context-key-expr";
 import type { Result } from "../../services/error-catalog";
 import { appendMenuItem, MenuId } from "@workshop/platform/menu-registry";
 
-/** One menu placement of a stub row. */
-interface StubPlacement {
-  /** The menu the row lands in. */
-  readonly id: MenuId;
-  /** The sort group, so separators fall where the spec has them. */
-  readonly group: string;
-  /** The position within the group, matching the spec's row order. */
-  readonly order: number;
-}
-
-/** One stub row: a disabled command with its menu placements and shortcut label. */
-type StubRow = {
+/** One stub row: a disabled command with its menu placement and shortcut label. */
+interface StubRow {
   /** The command id, VS Code's where one is public. */
   readonly id: string;
   /** The row label. */
   readonly title: string;
+  /** The menu the row lands in. */
+  readonly menu: MenuId;
+  /** The sort group, so separators fall where the spec has them. */
+  readonly group: string;
+  /** The position within the group, matching the spec's row order. */
+  readonly order: number;
   /** The spec's chord, bound so the disabled row renders its label. */
   readonly keybinding?: string;
   /** The constant toggled expression on checkable rows. */
   readonly toggled?: string;
-} & (
-  | {
-      /** The menu the row lands in. */
-      readonly menu: MenuId;
-      /** The sort group, so separators fall where the spec has them. */
-      readonly group: string;
-      /** The position within the group, matching the spec's row order. */
-      readonly order: number;
-    }
-  | {
-      /** Every placement of a row that lands in several menus. */
-      readonly menu: readonly StubPlacement[];
-    }
-);
+}
 
 const stubRows = [
   // File
@@ -126,15 +109,8 @@ const stubRows = [
   { id: "workbench.action.editorActionsPositionTabBar", title: "Tab Bar", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 1, toggled: "true" },
   { id: "workbench.action.editorActionsPositionTitleBar", title: "Title Bar", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 2, toggled: "false" },
   { id: "workbench.action.editorActionsPositionHidden", title: "Hidden", menu: "menubar/view/appearance/editorActionsPosition", group: "1_position", order: 3, toggled: "false" },
-  // View > Editor Layout (Move Editor into New Window is in the editor tab menu too)
-  {
-    id: "workbench.action.moveEditorToNewWindow",
-    title: "Move Editor into New Window",
-    menu: [
-      { id: "menubar/view/editorLayout", group: "2_new_window", order: 1 },
-      { id: MenuId.EditorTitleContext, group: "7_new_window", order: 1 },
-    ],
-  },
+  // View > Editor Layout (Move Editor into New Window is in the editor tab menu too, as a second placement below)
+  { id: "workbench.action.moveEditorToNewWindow", title: "Move Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 1 },
   { id: "workbench.action.copyEditorToNewWindow", title: "Copy Editor into New Window", menu: "menubar/view/editorLayout", group: "2_new_window", order: 2, keybinding: "ctrlcmd+m o" },
   { id: "workbench.action.editorLayoutSingle", title: "Single", menu: "menubar/view/editorLayout", group: "3_layout", order: 1 },
   { id: "workbench.action.editorLayoutTwoColumns", title: "Two Columns", menu: "menubar/view/editorLayout", group: "3_layout", order: 2 },
@@ -237,7 +213,7 @@ for (const row of stubRows) {
     precondition: "false",
     toggled: row.toggled,
     keybinding: row.keybinding === undefined ? undefined : { keybinding: row.keybinding },
-    menu: typeof row.menu === "string" ? [{ id: row.menu, group: row.group, order: row.order }] : row.menu,
+    menu: [{ id: row.menu, group: row.group, order: row.order }],
     run: () => {},
   });
   if (!result.ok) {
@@ -247,9 +223,10 @@ for (const row of stubRows) {
 
 // Second placements: one command, two menus. Appended directly so each
 // row keeps its own label - the action registry's menu entries omit the
-// title, and the two placements' labels differ (Tasks) or the row sorts
-// under another menu's group (Extensions). Same pattern as the
-// quickinput contribution's Show All Commands row.
+// title, and the two placements' labels differ (Tasks, and Move into New
+// Window, VS Code's tab-menu label) or the row sorts under another menu's
+// group (Extensions). Same pattern as the quickinput contribution's Show
+// All Commands row.
 appendMenuItem("menubar/file/preferences", {
   command: "workbench.view.extensions",
   title: "Extensions",
@@ -261,4 +238,10 @@ appendMenuItem("menubar/file/preferences", {
   title: "Tasks",
   group: "1_settings",
   order: 6,
+});
+appendMenuItem(MenuId.EditorTitleContext, {
+  command: "workbench.action.moveEditorToNewWindow",
+  title: "Move into New Window",
+  group: "7_new_window",
+  order: 1,
 });

@@ -150,11 +150,6 @@ export function panelTypeEntry(name: string): PanelTypeEntry | undefined {
   return entries.get(name);
 }
 
-/** The installed factory for a panel kind, once its chunk has loaded. */
-export function panelFactory(type: string): (() => IContentRenderer) | undefined {
-  return factories.get(type);
-}
-
 /**
  * Loads a panel kind's feature chunk, running the directory's register()
  * the first time, and answers the installed factory. Concurrent loads of

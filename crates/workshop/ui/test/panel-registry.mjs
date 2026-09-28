@@ -8,7 +8,8 @@
 // against jsdom with a synthetic lazy feature
 // (test/helpers/lazy-feature.mjs). Covers: the feature panel types'
 // metadata as their contribution modules register it (zone affinity,
-// title, closability), isPanelType narrowing, the unknown-name placeholder, lazy
+// title and its fallback for a missing, empty or root path, closability),
+// isPanelType narrowing, the unknown-name placeholder, lazy
 // mount with init params forwarded, register-once semantics, disposal
 // reaching the real panel, and the registration outliving the panel.
 // Run: node test/panel-registry.mjs
@@ -118,6 +119,14 @@ check(
     editorTitle({ untitled: 1 }) === "Editor",
 );
 check(
+  "an editor with no path, an empty path, or a root path is titled Editor",
+  typeof editorTitle === "function" &&
+    editorTitle({}) === "Editor" &&
+    editorTitle({ path: "" }) === "Editor" &&
+    editorTitle({ path: "/" }) === "Editor" &&
+    editorTitle({ path: "\\" }) === "Editor",
+);
+check(
   "the editor keys by path, then untitled serial, then the bare prefix",
   typeof editorPanelId === "function" &&
     editorPanelId({ path: "C:\\project\\a.txt" }) === "editor:C:\\project\\a.txt" &&
@@ -141,6 +150,10 @@ check(
     typeof runTitle === "function" &&
     runTitle({ path: "C:\\project\\p.md" }) === "Run: p.md" &&
     runTitle({}) === "Run",
+);
+check(
+  "a Run window with an empty or root path is titled Run",
+  typeof runTitle === "function" && runTitle({ path: "" }) === "Run" && runTitle({ path: "/" }) === "Run",
 );
 check("isPanelType narrows registered names", isPanelType("editor") && !isPanelType("nope"));
 

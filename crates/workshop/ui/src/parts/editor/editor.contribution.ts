@@ -25,14 +25,14 @@ import { MenuId, Menus } from "@workshop/platform/menu-registry";
 import { registerPanelType } from "@workshop/platform/panel-registry";
 import { QuickAccessRegistry } from "@workshop/platform/quick-access-registry";
 import { getService } from "@workshop/platform/service-registry";
-import { baseName } from "../../base/paths";
+import { lastSegment } from "../../base/paths";
 import { QUICK_INPUT_SERVICE } from "../../services/quick-input-service";
 import { EDITOR_SETTINGS_SERVICE, type EditorSettingName } from "../../services/editor-settings-service";
 import { createGotoLineProvider } from "./goto-line";
 
 registerPanelType({
   type: "editor",
-  title: (params) => (typeof params.path === "string" ? baseName(params.path) : "Editor"),
+  title: (params) => (typeof params.path === "string" ? lastSegment(params.path) : undefined) ?? "Editor",
   defaultZone: "main",
   panelId: (params) => {
     if (typeof params.path === "string") {
