@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
-use gateway_config::{Config, SttRole};
+use gateway_config::{Config, SttRole, WhisperBackend};
 use gateway_local::artifacts::ArtifactStore;
 use gateway_progress::Activity;
 
@@ -40,6 +40,21 @@ pub(crate) fn prepare(
     config: &Config,
     progress: Option<&Arc<Activity>>,
 ) -> Result<PreparedSpeech, SpeechError> {
+    prepare_impl(config, progress, ArtifactStore::provision_whisper_library)
+}
+
+/// Body of [`prepare`] with the whisper library provision injectable, so a
+/// test can observe the backend `[stt]` hands it without probing the host's
+/// GPUs or downloading a runtime.
+fn prepare_impl(
+    config: &Config,
+    progress: Option<&Arc<Activity>>,
+    provision_library: impl FnOnce(
+        &ArtifactStore,
+        WhisperBackend,
+        Option<&Activity>,
+    ) -> Result<PathBuf, gateway_local::LocalError>,
+) -> Result<PreparedSpeech, SpeechError> {
     if config.stt_models().is_empty() {
         return Ok(PreparedSpeech { generation: None });
     }
@@ -60,14 +75,15 @@ pub(crate) fn prepare(
     if let Some(activity) = activity {
         activity.set_text("Provisioning whisper library");
     }
-    let library = store
-        .provision_whisper_library(activity)
+    // An absent `[stt]` section yields the defaults, whose backend is `auto`.
+    let capture = config.stt().cloned().unwrap_or_default();
+    let library = provision_library(&store, capture.whisper_backend(), activity)
         .map_err(SpeechError::WhisperLibrary)?;
+    tracing::info!(path = %library.display(), "provisioned whisper library");
     let models = provision_models(config, &store, activity)?;
     let Some((interim_name, interim_model)) = models.interim else {
         return Err(SpeechError::MissingInterim);
     };
-    let capture = config.stt().cloned().unwrap_or_default();
     let (final_name, final_model) = models
         .final_model
         .map_or((None, None), |(name, path)| (Some(name), Some(path)));
@@ -260,12 +276,15 @@ mod tests {
 
     use super::*;
 
-    fn selected(source: &str, sha256: Option<&str>) -> Config {
+    /// A selected profile whose one interim model is `source`. `sections`
+    /// holds whole top-level tables, such as `[local]` or `[stt]`.
+    fn selected(source: &str, sha256: Option<&str>, sections: &str) -> Config {
         let pin = sha256.map_or_else(String::new, |pin| format!("sha256 = \"{pin}\"\n"));
         let catalog = Config::from_toml_str(&format!(
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
              [workshop]\n\
+             {sections}\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\n\
              {pin}vram_gb = 1.0\n\
              [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n"
@@ -283,7 +302,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let model = dir.path().join("model.bin");
         std::fs::write(&model, b"model bytes").expect("fixture writes");
-        let config = selected(&model.display().to_string(), Some(&"0".repeat(64)));
+        let config = selected(&model.display().to_string(), Some(&"0".repeat(64)), "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
         let error = provision_models(&config, &store, None).expect_err("bad pin must fail");
         assert!(matches!(error, SpeechError::Artifact { .. }));
@@ -294,7 +313,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let model = dir.path().join("model.bin");
         std::fs::write(&model, b"model bytes").expect("fixture writes");
-        let config = selected(&model.display().to_string(), None);
+        let config = selected(&model.display().to_string(), None, "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
         let provisioned = provision_models(&config, &store, None).expect("unpinned path works");
         assert_eq!(
@@ -312,12 +331,38 @@ mod tests {
         for byte in Sha256::digest(b"model bytes") {
             write!(&mut pin, "{byte:02x}").expect("writing to String is infallible");
         }
-        let config = selected(&model.display().to_string(), Some(&pin));
+        let config = selected(&model.display().to_string(), Some(&pin), "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
         let provisioned = provision_models(&config, &store, None).expect("matching pin works");
         assert_eq!(
             provisioned.interim.as_ref().map(|(_, path)| path),
             Some(&model)
         );
+    }
+
+    #[test]
+    fn prepare_passes_the_stt_whisper_backend_to_the_library_provision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"model bytes").expect("fixture writes");
+        let cache = dir.path().join("cache").display().to_string();
+        let library = dir.path().join("whisper-library");
+        for (stt, expected) in [
+            ("", WhisperBackend::Auto),
+            ("[stt]\nwhisper_backend = \"cpu\"\n", WhisperBackend::Cpu),
+            ("[stt]\nwhisper_backend = \"cuda\"\n", WhisperBackend::Cuda),
+        ] {
+            let sections = format!("[local]\ncache_dir = {cache:?}\n{stt}");
+            let config = selected(&model.display().to_string(), None, &sections);
+            let mut received = None;
+            let prepared = prepare_impl(&config, None, |_store, backend, _activity| {
+                received = Some(backend);
+                Ok(library.clone())
+            })
+            .expect("speech prepares");
+            assert_eq!(received, Some(expected), "{stt:?}");
+            let generation = prepared.generation.expect("a speech model prepares");
+            assert_eq!(generation.library, library, "{stt:?}");
+        }
     }
 }

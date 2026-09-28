@@ -1,6 +1,6 @@
 //! Pinned `llama-server` release assets and the host->asset selection table.
 
-use gateway_config::LlamaBackend;
+use gateway_config::{LlamaBackend, WhisperBackend};
 
 use super::Result;
 use crate::error::LocalError;
@@ -50,10 +50,14 @@ pub(super) struct ServerAsset<'a> {
 }
 
 /// A pinned whisper.cpp runtime archive and its loadable library.
+/// `backend` is `Some` only on the Windows x86-64 and Linux x86-64 rows,
+/// the two platforms with both a CPU and a CUDA build; the macOS and
+/// linux-aarch64 rows are each their platform's one build and carry `None`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     pub(super) arch: &'a str,
+    pub(super) backend: Option<WhisperBackend>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
@@ -63,6 +67,20 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
     WhisperAsset {
         os: "windows",
         arch: "x86_64",
+        backend: Some(WhisperBackend::Cpu),
+        platform: "windows-x86_64",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-windows-x86_64.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64.zip",
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "whisper.dll",
+    },
+    WhisperAsset {
+        os: "windows",
+        arch: "x86_64",
+        backend: Some(WhisperBackend::Cuda),
         platform: "windows-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
@@ -75,6 +93,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
     WhisperAsset {
         os: "macos",
         arch: "aarch64",
+        backend: None,
         platform: "macos-aarch64-metal",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
@@ -87,6 +106,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
     WhisperAsset {
         os: "macos",
         arch: "x86_64",
+        backend: None,
         platform: "macos-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
@@ -99,6 +119,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
     WhisperAsset {
         os: "linux",
         arch: "x86_64",
+        backend: Some(WhisperBackend::Cpu),
         platform: "linux-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
@@ -110,7 +131,21 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
     },
     WhisperAsset {
         os: "linux",
+        arch: "x86_64",
+        backend: Some(WhisperBackend::Cuda),
+        platform: "linux-x86_64-cuda",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64-cuda.zip",
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "libwhisper.so",
+    },
+    WhisperAsset {
+        os: "linux",
         arch: "aarch64",
+        backend: None,
         platform: "linux-aarch64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",
@@ -274,19 +309,77 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
     }
 }
 
+/// The whisper `auto` pick on a platform with both builds: any NVIDIA GPU
+/// gets the CUDA build, and anything else - including a failed probe - gets
+/// the CPU build.
+fn auto_whisper_backend(gpus: Option<&[(u64, u64)]>) -> WhisperBackend {
+    match gpus {
+        Some(caps) if !caps.is_empty() => WhisperBackend::Cuda,
+        _ => WhisperBackend::Cpu,
+    }
+}
+
+/// Whether `(os, arch)` has both a CPU and a CUDA whisper build (Windows
+/// x86-64 and Linux x86-64), so the `[stt] whisper_backend` setting and the
+/// GPU probe apply there.
+fn whisper_backend_applies(os: &str, arch: &str) -> bool {
+    WHISPER_ASSETS
+        .iter()
+        .any(|asset| asset.os == os && asset.arch == arch && asset.backend.is_some())
+}
+
 /// Selects the pinned whisper.cpp runtime for `(os, arch)`.
+///
+/// `backend` (the `[stt] whisper_backend` setting) and `gpus` (the probed
+/// NVIDIA compute capabilities, when a probe was needed and worked) are
+/// consulted only on Windows x86-64 and Linux x86-64, the two platforms
+/// with a choice; every other platform has exactly one row.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
-pub(super) fn whisper_asset(os: &str, arch: &str) -> Result<WhisperAsset<'static>> {
+pub(super) fn whisper_asset(
+    os: &str,
+    arch: &str,
+    backend: WhisperBackend,
+    gpus: Option<&[(u64, u64)]>,
+) -> Result<WhisperAsset<'static>> {
+    let wanted = if whisper_backend_applies(os, arch) {
+        Some(match backend {
+            WhisperBackend::Auto => auto_whisper_backend(gpus),
+            explicit => explicit,
+        })
+    } else {
+        None
+    };
     WHISPER_ASSETS
         .iter()
         .copied()
-        .find(|asset| asset.os == os && asset.arch == arch)
+        .find(|asset| asset.os == os && asset.arch == arch && asset.backend == wanted)
         .ok_or_else(|| LocalError::UnsupportedPlatform {
             os: os.to_owned(),
             arch: arch.to_owned(),
         })
+}
+
+/// [`whisper_asset`] with the GPU evidence gathered on demand: `probe`
+/// (the host's `nvidia-smi` query in production) runs only for `auto` on a
+/// platform with both builds, because every explicit backend and every
+/// other platform already knows its row.
+///
+/// # Errors
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+pub(super) fn whisper_asset_with_probe(
+    os: &str,
+    arch: &str,
+    backend: WhisperBackend,
+    probe: impl FnOnce() -> Option<Vec<(u64, u64)>>,
+) -> Result<WhisperAsset<'static>> {
+    let gpus = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
+        probe()
+    } else {
+        None
+    };
+    whisper_asset(os, arch, backend, gpus.as_deref())
 }
 
 /// Selects the pinned GPU-capable `llama-server` asset for `(os, arch)`.
@@ -375,33 +468,208 @@ mod tests {
         assert!(server_asset("freebsd", "x86_64", LlamaBackend::Auto, None).is_err());
     }
 
+    /// Every `[stt] whisper_backend` value.
+    const WHISPER_BACKENDS: [WhisperBackend; 3] = [
+        WhisperBackend::Auto,
+        WhisperBackend::Cpu,
+        WhisperBackend::Cuda,
+    ];
+
     #[test]
-    fn whisper_assets_cover_the_five_release_platforms() {
-        for (os, arch, library) in [
-            ("windows", "x86_64", "whisper.dll"),
-            ("macos", "aarch64", "libwhisper.dylib"),
-            ("macos", "x86_64", "libwhisper.dylib"),
-            ("linux", "x86_64", "libwhisper.so"),
-            ("linux", "aarch64", "libwhisper.so"),
+    fn an_nvidia_gpu_selects_the_cuda_whisper_build() {
+        for (os, platform) in [
+            ("windows", "windows-x86_64-cuda"),
+            ("linux", "linux-x86_64-cuda"),
         ] {
-            let asset = whisper_asset(os, arch).expect("supported whisper platform");
-            assert_eq!(asset.library_name, library);
-            assert_eq!(asset.archive.archive_kind, ArchiveKind::Zip);
-            assert_eq!(asset.archive.sha256.len(), 64);
+            for caps in [&[(8, 6)][..], &[(12, 0)][..]] {
+                let asset = whisper_asset(os, "x86_64", WhisperBackend::Auto, Some(caps))
+                    .expect("cuda whisper asset");
+                assert_eq!(asset.platform, platform, "{caps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_nvidia_gpu_selects_the_cpu_whisper_build() {
+        for (os, platform) in [("windows", "windows-x86_64"), ("linux", "linux-x86_64")] {
+            for gpus in [None, Some(&[][..])] {
+                let asset = whisper_asset(os, "x86_64", WhisperBackend::Auto, gpus)
+                    .expect("cpu whisper asset");
+                assert_eq!(asset.platform, platform, "{gpus:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_explicit_whisper_backend_ignores_the_probe() {
+        for os in ["windows", "linux"] {
+            for gpus in [None, Some(&[][..]), Some(&[(8, 6)][..])] {
+                let cpu = whisper_asset(os, "x86_64", WhisperBackend::Cpu, gpus)
+                    .expect("explicit cpu whisper asset");
+                assert_eq!(cpu.platform, format!("{os}-x86_64"), "{gpus:?}");
+                let cuda = whisper_asset(os, "x86_64", WhisperBackend::Cuda, gpus)
+                    .expect("explicit cuda whisper asset");
+                assert_eq!(cuda.platform, format!("{os}-x86_64-cuda"), "{gpus:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn single_build_whisper_platforms_ignore_the_backend() {
+        for (os, arch, platform) in [
+            ("macos", "aarch64", "macos-aarch64-metal"),
+            ("macos", "x86_64", "macos-x86_64"),
+            ("linux", "aarch64", "linux-aarch64"),
+        ] {
+            for backend in WHISPER_BACKENDS {
+                for gpus in [None, Some(&[(8, 6)][..])] {
+                    let asset =
+                        whisper_asset(os, arch, backend, gpus).expect("single whisper build");
+                    assert_eq!(asset.platform, platform, "{backend:?} with {gpus:?}");
+                }
+            }
+        }
+    }
+
+    /// A probe answer that reports one NVIDIA GPU.
+    const NVIDIA: [(u64, u64); 1] = [(8, 6)];
+
+    /// Runs [`whisper_asset_with_probe`] with a probe that reports `answer`,
+    /// returning the pick and how many times the probe ran.
+    fn pick_with_probe(
+        os: &str,
+        arch: &str,
+        backend: WhisperBackend,
+        answer: Option<Vec<(u64, u64)>>,
+    ) -> (Result<WhisperAsset<'static>>, usize) {
+        let mut probes = 0;
+        let pick = whisper_asset_with_probe(os, arch, backend, || {
+            probes += 1;
+            answer
+        });
+        (pick, probes)
+    }
+
+    #[test]
+    fn auto_probes_where_both_whisper_builds_exist_and_follows_the_answer() {
+        for os in ["windows", "linux"] {
+            for (answer, platform) in [
+                (Some(NVIDIA.to_vec()), format!("{os}-x86_64-cuda")),
+                (Some(Vec::new()), format!("{os}-x86_64")),
+                (None, format!("{os}-x86_64")),
+            ] {
+                let label = format!("{os} with {answer:?}");
+                let (pick, probes) = pick_with_probe(os, "x86_64", WhisperBackend::Auto, answer);
+                assert_eq!(probes, 1, "{label}");
+                assert_eq!(
+                    pick.expect("auto whisper asset").platform,
+                    platform,
+                    "{label}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_whisper_probe_runs_only_for_auto_where_both_builds_exist() {
+        for os in ["windows", "linux"] {
+            for (backend, platform) in [
+                (WhisperBackend::Cpu, format!("{os}-x86_64")),
+                (WhisperBackend::Cuda, format!("{os}-x86_64-cuda")),
+            ] {
+                let (pick, probes) = pick_with_probe(os, "x86_64", backend, Some(NVIDIA.to_vec()));
+                assert_eq!(probes, 0, "{os} with {backend:?}");
+                assert_eq!(
+                    pick.expect("explicit whisper asset").platform,
+                    platform,
+                    "{os} with {backend:?}"
+                );
+            }
+        }
+        for (os, arch) in [
+            ("macos", "aarch64"),
+            ("macos", "x86_64"),
+            ("linux", "aarch64"),
+            ("freebsd", "x86_64"),
+            ("windows", "aarch64"),
+        ] {
+            for backend in WHISPER_BACKENDS {
+                let (pick, probes) = pick_with_probe(os, arch, backend, Some(NVIDIA.to_vec()));
+                assert_eq!(probes, 0, "{os}-{arch} with {backend:?}");
+                assert_eq!(
+                    pick.ok(),
+                    whisper_asset(os, arch, backend, None).ok(),
+                    "{os}-{arch} with {backend:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_whisper_platforms_are_an_error() {
+        for (os, arch) in [("freebsd", "x86_64"), ("windows", "aarch64")] {
+            for backend in WHISPER_BACKENDS {
+                assert!(
+                    matches!(
+                        whisper_asset(os, arch, backend, None),
+                        Err(LocalError::UnsupportedPlatform { .. })
+                    ),
+                    "{os}-{arch} with {backend:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn whisper_assets_cover_the_seven_release_builds() {
+        use WhisperBackend::{Cpu, Cuda};
+
+        let builds = [
+            ("windows", "x86_64", Some(Cpu), "windows-x86_64"),
+            ("windows", "x86_64", Some(Cuda), "windows-x86_64-cuda"),
+            ("macos", "aarch64", None, "macos-aarch64-metal"),
+            ("macos", "x86_64", None, "macos-x86_64"),
+            ("linux", "x86_64", Some(Cpu), "linux-x86_64"),
+            ("linux", "x86_64", Some(Cuda), "linux-x86_64-cuda"),
+            ("linux", "aarch64", None, "linux-aarch64"),
+        ];
+        assert_eq!(WHISPER_ASSETS.len(), builds.len(), "one row per build");
+        for (os, arch, backend, platform) in builds {
+            let library = match os {
+                "windows" => "whisper.dll",
+                "macos" => "libwhisper.dylib",
+                _ => "libwhisper.so",
+            };
+            let asset = whisper_asset(os, arch, backend.unwrap_or_default(), None)
+                .expect("supported whisper build");
+            assert_eq!(asset.platform, platform);
+            assert_eq!(asset.backend, backend, "{platform}");
+            assert_eq!(asset.library_name, library, "{platform}");
+            assert_eq!(
+                asset.archive.archive_name,
+                format!("whisper-{WHISPER_RELEASE}-{platform}.zip")
+            );
+            assert_eq!(asset.archive.archive_kind, ArchiveKind::Zip, "{platform}");
+            assert_eq!(asset.archive.sha256.len(), 64, "{platform}");
             assert!(
                 asset
                     .archive
                     .sha256
                     .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit())
+                    .all(|byte| byte.is_ascii_hexdigit()),
+                "{platform}"
             );
             assert!(
                 asset
                     .archive
                     .url
-                    .contains("/releases/download/whisper-lib-b4938/")
+                    .contains("/releases/download/whisper-lib-b4938/"),
+                "{platform}"
+            );
+            assert!(
+                asset.archive.url.ends_with(asset.archive.archive_name),
+                "{platform}"
             );
         }
-        assert!(whisper_asset("freebsd", "x86_64").is_err());
     }
 }

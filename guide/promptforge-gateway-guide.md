@@ -317,7 +317,7 @@ Set `[local].cache_dir` for GGUF files and the pinned llama-server install:
 cache_dir = "~/.promptforge"
 ````
 
-The default is `~/.promptforge`, or `%USERPROFILE%\.promptforge` on Windows, where the location inherits the per-user ACL. Models land in `<cache_dir>/models`, keyed by a hash of the full source URL, so two distinct URLs that share a filename never collide. The llama.cpp runtime installs in `<cache_dir>/llama.cpp`.
+The default is `~/.promptforge`, or `%USERPROFILE%\.promptforge` on Windows, where the location inherits the per-user ACL. Models land in `<cache_dir>/models`, keyed by a hash of the full source URL, so two distinct URLs that share a filename never collide. The llama.cpp runtime installs in `<cache_dir>/llama.cpp`. The whisper.cpp speech runtime installs in `<cache_dir>/whisper.cpp`, with one directory per pinned build, such as `b4938-windows-x86_64` or `b4938-linux-x86_64-cuda`.
 
 On Windows x86-64 you can pick the llama-server build with `[local].llama_backend`: `auto`, `cuda-blackwell`, `cuda`, or `vulkan`. The `auto` setting picks from the host's GPUs. You can also force an explicit llama-server executable with `[local].llama_server_path`; it wins over the `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed download.
 
@@ -435,6 +435,8 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 ## The runtime
 
 Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. The gateway serves first and loads speech second: after the listener is bound, the queued boot command downloads and verifies the model artifacts and the runtime into the configured cache directory, with progress on the status and progress endpoints. Each model file is prewarmed and then loaded, with progress per model. Speech routes answer as unavailable until the load completes, and the model catalog advertises speech models only once the engine is ready.
+
+Windows x86-64 and Linux x86-64 each have two builds of the runtime, one for the CPU and one for CUDA. The `[stt].whisper_backend` setting chooses between them: `auto`, `cpu`, or `cuda`. The default `auto` downloads the CUDA build when `nvidia-smi` reports an NVIDIA GPU, and the CPU build when it reports none or cannot run. The `cpu` and `cuda` settings download their own build without probing. Every other platform has one build and ignores the setting.
 
 STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
 
