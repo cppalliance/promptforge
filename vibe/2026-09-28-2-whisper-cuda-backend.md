@@ -330,7 +330,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Against a throwaway release on the fork, the first run created the release, and the second left the held archives byte-identical, uploaded the new archive, and kept `SHA256SUMS`'s old lines verbatim with the new line appended. A re-run uploaded nothing, and the throwaway release and its tag were deleted.
   - The script also refuses a release whose archives and `SHA256SUMS` lines disagree. `whisper-lib-b4938`'s five archives and its five `SHA256SUMS` lines agree.
 
-### Step 2: Build a Windows x86-64 CPU runtime
+### Step 2: Build a Windows x86-64 CPU runtime [completed]
 
 - The `build` job's matrix gains `platform: windows-x86_64` on `windows-2022`, the hosted image `.github/workflows/llama-cuda-blackwell.yml` builds on. It builds on push like the other rows.
 - A new `Configure Windows CPU` step uses the `Configure Windows CUDA` flags without `-DGGML_CUDA=ON`.
@@ -338,6 +338,11 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - Checks:
   - Before the commit, the row's configure, package, and smoke-load steps run under the ignored `vibe/scratch/` on a Windows host. The zip holds `whisper.dll`, the `ggml*.dll` libraries, `whisper.h`, and `LICENSE`, and no CUDA DLL, and the smoke-load succeeds.
   - The first push run on `master` after Steps 1 to 3 land builds the row, and no other row changes.
+- Dry run, 2026-09-28, on the operator's Windows host with Visual Studio 18's CMake and MSVC 19.51 (the hosted runner has Visual Studio 2022):
+  - The row's configure, build, package, and smoke-load steps all ran, and the smoke-load printed CPU-only system information (AVX2, OpenMP).
+  - The zip holds `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`, `parakeet.dll`, `whisper.h`, and `LICENSE`, with no CUDA DLL although the host has `CUDA_PATH` set, and its `.sha256` line matches.
+  - A replay of the CUDA row's package step against a stub toolkit bundles exactly what it did before the change.
+  - Tag `b4938` (the same commit as `v1.9.3`) also builds a `parakeet.dll` that `whisper.dll` does not import. The shared Windows `*.dll` packaging bundles it into both Windows archives, as the published CUDA archive already holds it, and the Unix filter leaves it out.
 
 ### Step 3: Build a Linux x86-64 CUDA runtime on release dispatch only
 
