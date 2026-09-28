@@ -1,6 +1,7 @@
 //! harness-capabilities - the harness's capability layer: the registry,
-//! activation with co-activation conflict checking, and the [`Capability`]
-//! and [`Tool`] traits the first-party capability crates implement.
+//! activation with co-activation conflict checking, the [`Capability`]
+//! and [`Tool`] traits the first-party capability crates implement, and
+//! one core capability of its own, [`UserInput`] (`promptforge/user-input`).
 //!
 //! The engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
@@ -20,7 +21,9 @@
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.
 //! - This crate depends on no capability provider: the provider crates
-//!   depend on it for the traits, never the reverse.
+//!   depend on it for the traits, never the reverse. The one capability
+//!   it holds itself, `promptforge/user-input`, needs nothing beyond this
+//!   crate's traits and the broker it receives through [`RunServices`].
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Nothing in this crate spawns a tokio task directly; the harness
@@ -32,6 +35,7 @@ mod capability;
 mod input;
 mod registry;
 mod tool;
+mod user_input;
 
 pub use activation::{Activation, ServiceGap, ToolTable, activate};
 pub use capability::{
@@ -40,6 +44,7 @@ pub use capability::{
 pub use input::{InputBroker, InputError};
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use tool::Tool;
+pub use user_input::{USER_INPUT_ASK_TOOL, UserInput};
 
 /// The capability identity vocabulary, re-exported from the engine's types
 /// so a provider names one crate for the whole contract.

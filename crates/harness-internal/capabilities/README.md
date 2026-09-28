@@ -4,4 +4,6 @@ The harness's capability layer: the `CapabilityRegistry` of installed capabiliti
 
 It also defines `InputBroker`, the host service through which a capability waits for the operator's next message. A host with a person at the other end puts one in the run's `RunServices`; a host without one, such as a batch or eval host, leaves it out, and a capability reads that absence as having nobody to ask.
 
+It holds one core capability of its own, `UserInput` (`promptforge/user-input`), because its code needs nothing beyond this crate's traits and the broker. A prompt that declares it gets an `input` table whose `input.ask()` calls the ask tool, `promptforge/user-input/ask`, by its full id; the tool waits on the run's broker, or answers a fixed fallback sentence when the run has none. A required declaration on a host without a broker is refused.
+
 It depends on no provider; `harness-web`, `harness-webfetch`, and `harness-web-search` depend on it for the traits, and the harness's session runtime depends on all of them to register the first-party set. Private to the harness family in `crates/harness-internal/`; clients reach it through the `harness` facade. Like every harness crate, it may depend only on `promptforge` and its container siblings.

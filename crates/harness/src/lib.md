@@ -16,6 +16,8 @@ The session vocabulary clients speak and render is ids, launch requests, durable
 
 A session announces its input waits with [`WaitFrame`] values, and a refused answer returns a [`WaitError`]. A session's failure reports include a [`FailureKind`] a client matches on beside the display message; the sentence is never the classifier.
 
+A prompt asks its operator through the `promptforge/user-input` capability, whose `input.ask()` calls the ask tool by its full id, [`USER_INPUT_ASK_TOOL`]. The operator's answer comes back as that tool's result, so a client that shows a transcript recognizes a script's ask by the result's alias being this id.
+
 # Errors
 
 A harness error's `Display` holds only its own message. A client that shows one to a person renders the cause chain through [`display_chain`].

@@ -327,12 +327,7 @@ impl Supervisor {
                 "the replacement Gateway credentials cannot make a model client",
             );
         };
-        let Some(registry) = gateway.registry().cloned() else {
-            return self.failed_relaunch(
-                relaunch.run,
-                "the Gateway settings cannot build the promptforge/web capability",
-            );
-        };
+        let registry = Arc::clone(gateway.registry());
         match relaunch.history {
             HistoryEffect::Preserve => {}
         }
@@ -342,7 +337,7 @@ impl Supervisor {
             run: relaunch.run,
             gateway,
             client,
-            registry: Some(registry),
+            registry,
             catalog: Some(catalog),
             host: self.bindings.host(),
         };

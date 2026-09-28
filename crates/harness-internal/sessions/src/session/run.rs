@@ -56,9 +56,8 @@ pub(crate) struct RunInputs {
     pub(crate) gateway: Arc<GatewayResources>,
     /// The model client built for that generation.
     pub(crate) client: GatewayClient,
-    /// The capability registry built for that generation, when the
-    /// binding could build one.
-    pub(crate) registry: Option<Arc<CapabilityRegistry>>,
+    /// The capability registry built for that generation.
+    pub(crate) registry: Arc<CapabilityRegistry>,
     /// The catalog generation the run is frozen to.
     pub(crate) catalog: Option<CatalogBinding>,
     /// The host snapshot read at launch.
@@ -86,7 +85,7 @@ pub(crate) async fn run_once(
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
     let services = Services {
-        registry,
+        registry: Some(registry),
         vfs: promptforge::vfs::VfsRef::default(),
         cancel: cancel.clone(),
         log: Arc::clone(&core.log),

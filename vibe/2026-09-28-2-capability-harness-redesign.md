@@ -806,7 +806,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-9>
 
-### Step 9: Build and always register the user-input capability
+### Step 9: Build and always register the user-input capability [completed]
 
 - Component: User-input capability
 - Piece: `promptforge/user-input` (first of two steps)

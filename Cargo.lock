@@ -2594,6 +2594,7 @@ dependencies = [
 name = "harness"
 version = "0.3.0"
 dependencies = [
+ "harness-capabilities",
  "harness-log",
  "harness-runner",
  "harness-sessions",

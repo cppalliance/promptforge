@@ -17,13 +17,12 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use harness_capabilities::CapabilityRegistry;
+use harness_capabilities::{CapabilityRegistry, UserInput};
 use harness_models::{
     CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
 };
 use harness_web::Web;
 use promptforge::model::{ModelDescriptor, ModelId};
-use promptforge::tools::ToolError;
 use tokio::sync::watch;
 
 /// One generation of the gateway a client has bound the harness to.
@@ -103,22 +102,32 @@ impl HostSnapshot {
 }
 
 /// Builds a registry holding the first-party capabilities for one gateway
-/// generation: today `promptforge/web`, built from the gateway's API root
-/// (`root`, the OpenAI-compatible `/v1` base) and bearer `token`. The
-/// registry is rebuilt when the gateway generation changes, so a
-/// replacement gateway's root and key reach the contributed tools.
-///
-/// # Errors
-/// Returns the web capability's own [`ToolError`] when `root` is not a
-/// valid gateway API root or `token` is empty.
-pub fn first_party_registry(root: &str, token: &str) -> Result<CapabilityRegistry, ToolError> {
-    let web = Web::new(root, token)?;
+/// generation: `promptforge/user-input` always, and `promptforge/web`,
+/// built from the gateway's API root (`root`, the OpenAI-compatible `/v1`
+/// base) and bearer `token`, when those build it. A web failure is logged
+/// and costs only web, so activation still finds user input and a prompt
+/// that needs only user input still prepares. A session launch also needs
+/// the model client, which [`gateway_client`] builds from the same root
+/// and token. The registry is rebuilt when the gateway generation changes,
+/// so a replacement gateway's root and key reach the contributed tools.
+#[must_use]
+pub fn first_party_registry(root: &str, token: &str) -> CapabilityRegistry {
     let mut registry = CapabilityRegistry::new();
-    // A single registration cannot collide; the registry's error is
-    // unreachable on this path, and dropping it keeps the signature to the
-    // one failure a caller can act on.
-    let _ = registry.register(Arc::new(web));
-    Ok(registry)
+    // The ids are distinct literals, so neither registration can collide;
+    // the registry's error is unreachable on this path.
+    let _ = registry.register(Arc::new(UserInput::new()));
+    match Web::new(root, token) {
+        Ok(web) => {
+            let _ = registry.register(Arc::new(web));
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "agent sessions degraded: the gateway cannot build promptforge/web"
+            );
+        }
+    }
+    registry
 }
 
 /// Builds the model client for one gateway binding, or `None` - reported
@@ -149,7 +158,7 @@ pub fn gateway_client(binding: &GatewayBinding) -> Option<GatewayClient> {
 #[derive(Clone)]
 pub struct GatewayResources {
     binding: GatewayBinding,
-    registry: Option<Arc<CapabilityRegistry>>,
+    registry: Arc<CapabilityRegistry>,
     client: Option<GatewayClient>,
 }
 
@@ -158,28 +167,21 @@ impl fmt::Debug for GatewayResources {
         formatter
             .debug_struct("GatewayResources")
             .field("binding", &self.binding)
-            .field("registry", &self.registry.is_some())
+            .field("registry", &self.registry)
             .field("client", &self.client.is_some())
             .finish()
     }
 }
 
 impl GatewayResources {
-    /// Builds the resources for `binding`. A binding whose root or key
-    /// cannot build a capability or a client leaves that resource `None`;
-    /// a launch under it is refused with the reason.
+    /// Builds the resources for `binding`. The registry always holds the
+    /// capabilities that need no gateway; a binding whose root or key
+    /// cannot build web leaves web out of it, and one that cannot build a
+    /// client leaves the client `None`, so a launch under it is refused
+    /// with the reason.
     #[must_use]
     pub fn build(binding: GatewayBinding) -> Self {
-        let registry = match first_party_registry(&binding.api_root(), &binding.key) {
-            Ok(registry) => Some(Arc::new(registry)),
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "agent sessions degraded: the gateway cannot build promptforge/web"
-                );
-                None
-            }
-        };
+        let registry = Arc::new(first_party_registry(&binding.api_root(), &binding.key));
         let client = gateway_client(&binding);
         Self {
             binding,
@@ -200,11 +202,10 @@ impl GatewayResources {
         self.binding.generation
     }
 
-    /// The registry of first-party capabilities, when the binding could
-    /// build it.
+    /// The registry of first-party capabilities this binding could build.
     #[must_use]
-    pub fn registry(&self) -> Option<&Arc<CapabilityRegistry>> {
-        self.registry.as_ref()
+    pub fn registry(&self) -> &Arc<CapabilityRegistry> {
+        &self.registry
     }
 
     /// The model client, when the binding could build it.

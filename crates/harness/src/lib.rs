@@ -1,5 +1,6 @@
 #![doc = include_str!("lib.md")]
 
+pub use harness_capabilities::USER_INPUT_ASK_TOOL;
 pub use harness_runner::display_chain;
 pub use harness_sessions::environment::CatalogBinding;
 pub use harness_sessions::environment::GatewayBinding;
