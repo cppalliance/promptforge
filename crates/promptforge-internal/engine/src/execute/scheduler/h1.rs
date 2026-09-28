@@ -61,6 +61,7 @@ impl Scheduler {
             frame: None,
             slice: SlicePath::root(),
             index: 0,
+            entered: SlicePath::root().first_name(self.ctx.prompt()).to_owned(),
             positions: Vec::new(),
             block: 0,
             coroutine: None,

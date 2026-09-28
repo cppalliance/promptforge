@@ -1,4 +1,4 @@
-//! The chain-stack scheduler: the coroutine protocol's state machine.
+//! The chain scheduler: the coroutine protocol's state machine.
 //!
 //! One [`Scheduler`] per run, owned by the [`Run`](super::run::Run) that
 //! the host steps: no `Arc`, no `Mutex`, no sharing. One caller at a time
@@ -31,8 +31,8 @@
 //!
 //! This file holds the scheduler core: the chain record and arena, the
 //! ready queue, the admission queues (spawned tasks wait there until
-//! the run's concurrency limits admit them), the pending table, the call
-//! stack, the task arena, and
+//! the run's concurrency limits admit them), the pending table, the task
+//! arena, and
 //! the one `issue` path every leaf arm hands its effect through. The
 //! submodules hold the rest: `pending` the pending table's entry (the
 //! `Continuation` an answer is applied by), `drive` the run-level step
@@ -131,6 +131,14 @@ impl SlicePath {
             slice = slice.get(index).map_or(&[], Section::children);
         }
         slice
+    }
+
+    /// The name of the slice's first section, or the prompt's title when
+    /// the slice is empty: a chain's section name before its first entry.
+    fn first_name<'p>(&self, prompt: &'p Prompt) -> &'p str {
+        self.resolve(prompt)
+            .first()
+            .map_or(prompt.title(), Section::name)
     }
 }
 
@@ -284,6 +292,12 @@ struct Chain {
     /// The section of `slice` the chain is running, or the next entry
     /// candidate while the chain is between sections.
     index: usize,
+    /// The name of the section the chain most recently entered: the name
+    /// its reports carry on the walk, including between sections and after
+    /// the walk runs off its slice, where `index` names no running section.
+    /// Before the first entry, the slice's first section's name, or the
+    /// prompt's title for an empty slice.
+    entered: String,
     /// The suspended parent positions of the chain's jump-started child
     /// walks: the parent slice plus the jumper's index in it. A jump to a
     /// child pushes the current position and descends; when the child
@@ -311,9 +325,7 @@ struct Chain {
     var: serde_json::Value,
     /// The chain's call nesting depth: each call child and each spawned
     /// task runs one level deeper. The recursion cap checks this field,
-    /// never the chain-stack length - task chains sit on the ready queue,
-    /// not the stack, so only the field keeps the accounting across a
-    /// spawn boundary.
+    /// which carries the depth across a spawn boundary as well as a call.
     call_depth: usize,
     /// The chain's effective admission limit: the most tasks this chain
     /// may have admitted at once. The root's is the run's ceiling
@@ -394,13 +406,14 @@ impl Chain {
     }
 
     /// The chain's current section name for observations and errors: the
-    /// prompt's title for the live H1 pass, the section's name on the walk.
+    /// prompt's title for the live H1 pass, else the name of the section
+    /// the chain most recently entered - so a chain between sections, or
+    /// past its slice's last section, reports the section it just left.
     fn section_name(&self) -> &str {
-        let prompt = self.ctx.prompt();
         if self.h1 {
-            prompt.title()
+            self.ctx.prompt().title()
         } else {
-            self.section(prompt).name()
+            &self.entered
         }
     }
 }
@@ -426,9 +439,6 @@ pub(crate) struct Scheduler {
     ctx: RunState,
     /// The chain arena: append-only, indexed by [`ChainIndex`].
     chains: Vec<Chain>,
-    /// The call-nesting chain stack (LIFO): a call dispatch pushes
-    /// the child, the child's finish pops it.
-    stack: Vec<ChainIndex>,
     /// Chains eligible to resume (FIFO); the driver drains it before
     /// awaiting anything.
     ready: VecDeque<ChainIndex>,
@@ -496,7 +506,6 @@ impl Scheduler {
         Self {
             ctx,
             chains: Vec::new(),
-            stack: Vec::new(),
             ready: VecDeque::new(),
             resuming: VecDeque::new(),
             spawned: VecDeque::new(),

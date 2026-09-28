@@ -2,13 +2,14 @@
 //! limit and reads the effective limit back, a queued task reads
 //! `blocked == 'queued'` until its start event fires at admission, a
 //! resumed task is admitted ahead of fresh starts, a nested fanout
-//! does not deadlock under a ceiling of one, and a queue that can never
-//! be admitted is reported as a stall.
+//! does not deadlock under a ceiling of one, two tasks' `call` children
+//! finish in any order, and a queue that can never be admitted is
+//! reported as a stall.
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use super::super::serial_driver::perform_locally;
+use super::super::serial_driver::{Batching, drive_batched, perform_locally};
 use super::*;
 use crate::execute::RunResult;
 use crate::execute::run::{Run, Step};
@@ -421,6 +422,50 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         out.expect("the nested fanout completes"),
         "a:x1+y2+z3,b:x1+y2+z3,c:x1+y2+z3"
     );
+}
+
+#[test]
+fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
+    // Both tasks are admitted together and each calls `Leaf`, whose round
+    // is issued in call order: A's child first, then B's. Answered in
+    // issue order, A's child finishes while B's is still running; answered
+    // in reverse, B's finishes first. Every order completes both calls.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Calls\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        var.who = 'a'\n\
+        local a = tasks.spawn('### Caller')\n\
+        var.who = 'b'\n\
+        local b = tasks.spawn('### Caller')\n\
+        local results = tasks.join({ a, b })\n\
+        return results[1].result .. '|' .. results[2].result\n\
+        ```\n\n\
+        ### Caller\n\n\
+        ```lua\nreturn call('#### Leaf')\n```\n\n\
+        #### Leaf\n\n\
+        ```lua\nreturn models.infer(var.who)\n```\n";
+    let prompt = parse(md);
+    for batching in [
+        Batching::OnePerStep,
+        Batching::AllAtOnce,
+        Batching::Reversed,
+    ] {
+        let (state, _host) = limited_context(
+            &prompt,
+            &TestStore::new(),
+            ceiling(2),
+            Arc::new(NullObserver::default()),
+        );
+        let outcome = drive_batched(Run::from_state(state), batching);
+        let RunResult::Ok(text) = &outcome.result else {
+            panic!(
+                "both calls complete under {batching:?}: {:?}",
+                outcome.result
+            );
+        };
+        assert_eq!(text, "r(a)|r(b)", "under {batching:?}");
+    }
 }
 
 #[test]

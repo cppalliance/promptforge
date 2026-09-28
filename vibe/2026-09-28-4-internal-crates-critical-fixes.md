@@ -315,7 +315,7 @@ The critical fixes are the smallest changes that close each failure path at its 
 
 <step-3>
 
-### Step 3: Keep chain reports off the walk position and drop the call stack
+### Step 3: Keep chain reports off the walk position and drop the call stack [completed]
 
 - Component: Engine scheduler
 - Piece: the recorded section label and the scheduler cleanup, built jointly in one commit. Both edit `scheduler.rs`, `scheduler/chain.rs`, and `scheduler/tasks.rs`, and three engine tests form one set covering both: two notice tests pin the label, and the concurrent-call test pins the stack deletion. The `const` wrap in `config-limits.rs` rides along as the component's one remaining mechanical fix.

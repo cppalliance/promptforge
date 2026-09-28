@@ -88,10 +88,10 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_depth_cap_reads_the_chain_field() {
-    // Two sections calling each other ping-pong down the chain stack; the
-    // cap must fire from the requesting chain's call-depth field. The
-    // typed error then round-trips through every parent's answer envelope
-    // without flattening.
+    // Two sections calling each other ping-pong through nested call
+    // chains; the cap must fire from the requesting chain's call-depth
+    // field. The typed error then round-trips through every parent's
+    // answer envelope without flattening.
     let md = "---\nname: depth\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\

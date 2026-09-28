@@ -588,7 +588,7 @@ impl Scheduler {
                 chain.slots_used > 0,
                 "a chain holding a slot cannot release below zero"
             );
-            chain.slots_used -= 1;
+            chain.slots_used = chain.slots_used.saturating_sub(1);
             at = chain.owner.or(chain.parent);
         }
     }

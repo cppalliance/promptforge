@@ -25,7 +25,7 @@
 //!   `resume`, and `cancel`, the `Step` it returns, and the effect vocabulary
 //!   (the `Effect` a leaf arm issues, its serializable `EffectRecord`, and the
 //!   `EffectAnswer` a host returns).
-//! - `scheduler` - the chain-stack scheduler driving the coroutine protocol:
+//! - `scheduler` - the chain scheduler driving the coroutine protocol:
 //!   the live H1 pass, the walk, call chains, fanout, and the `chat` and
 //!   `tool_call` rounds the section-visible `models.loop` shim yields.
 //! - `scope` - tool-scope validation and schema/dispatch preparation.

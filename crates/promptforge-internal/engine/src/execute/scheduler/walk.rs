@@ -166,6 +166,7 @@ impl Scheduler {
             seed,
         )?;
         chain.frame = Some(frame);
+        slice[index].name().clone_into(&mut chain.entered);
         chain.block = 0;
         Ok(true)
     }

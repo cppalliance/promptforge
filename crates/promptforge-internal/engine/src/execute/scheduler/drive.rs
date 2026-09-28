@@ -196,7 +196,6 @@ impl Scheduler {
         self.ready.clear();
         self.resuming.clear();
         self.spawned.clear();
-        self.stack.clear();
         for (index, chain) in self.chains.iter().enumerate() {
             let Some(access) = chain.access.as_ref() else {
                 continue;

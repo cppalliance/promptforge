@@ -612,7 +612,7 @@ async fn fanout_worker_that_is_a_list_section_errors() {
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_depth_cap_reads_the_chain_field() {
     // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong calls
-    // down the chain stack, and the chain that lands at depth 8 calls
+    // through nested call chains, and the chain that lands at depth 8 calls
     // fanout - each arm would run one level deeper, so the cap fires from
     // the requesting chain's call-depth field. The arm's spawn sets the
     // fanout mark, so the spawn arm names the cap after `fanout` in the

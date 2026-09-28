@@ -296,9 +296,9 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Dispatches a `call` request: constructs the child chain, pushes
-    /// it on the chain stack, and enqueues it; the parent blocks until the
-    /// child's finish delivers its final text as the answer. Every dispatch
+    /// Dispatches a `call` request: constructs the child chain and
+    /// enqueues it; the parent blocks until the child's finish delivers
+    /// its final text as the answer. Every dispatch
     /// failure - the depth cap, target resolution, child construction - is
     /// the call's answer, resumed into the caller so an author `pcall` can
     /// catch it.
@@ -310,10 +310,7 @@ impl Scheduler {
         var: &serde_json::Value,
     ) {
         match self.prepare_call(id, target, input, var) {
-            Ok(child) => {
-                self.stack.push(child);
-                self.ready.push_back(child);
-            }
+            Ok(child) => self.ready.push_back(child),
             Err(error) => {
                 self.answer_inline(id, Answer::Call(Err(error)));
             }

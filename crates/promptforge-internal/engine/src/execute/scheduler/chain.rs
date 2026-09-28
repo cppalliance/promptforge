@@ -74,6 +74,7 @@ impl Scheduler {
             || TaskId::from(ChainId::root()),
             |parent| self.chains[parent.index()].task.clone(),
         );
+        let entered = slice.first_name(ctx.prompt()).to_owned();
         self.chains.push(Chain {
             lineage,
             counters,
@@ -90,6 +91,7 @@ impl Scheduler {
             frame: None,
             slice,
             index,
+            entered,
             positions: Vec::new(),
             block: 0,
             coroutine: None,
@@ -204,14 +206,7 @@ impl Scheduler {
         }
         match parent {
             None => *root_result = Some(outcome),
-            Some(parent_id) => {
-                debug_assert_eq!(
-                    self.stack.pop(),
-                    Some(id),
-                    "a finishing child chain is the call stack's top"
-                );
-                self.answer_inline(parent_id, Answer::Call(outcome));
-            }
+            Some(parent_id) => self.answer_inline(parent_id, Answer::Call(outcome)),
         }
     }
 
@@ -250,11 +245,6 @@ impl Scheduler {
             .find_map(|(effect, pending)| (pending.chain == id).then_some(*effect));
         if let Some(effect) = effect {
             self.abort_effect(effect);
-        }
-        // A chain on the call stack is the top here: only its own
-        // descendants sit above it, and the recursion already removed them.
-        if self.stack.last() == Some(&id) {
-            self.stack.pop();
         }
         let access = {
             let chain = &mut self.chains[id.index()];
