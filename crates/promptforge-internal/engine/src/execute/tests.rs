@@ -192,7 +192,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
 }
 
 /// A tool whose call never completes, so the test can prove the tool-call
-/// loop honors cancellation mid-call rather than waiting the call out.
+/// loop honors cancellation mid-call rather than waiting the call out, and
+/// a task parked on it stays live until its owner ends or cancels it.
 struct SlowTool;
 
 #[async_trait::async_trait]

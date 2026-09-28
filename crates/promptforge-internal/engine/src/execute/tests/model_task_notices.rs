@@ -16,29 +16,48 @@ use std::time::Duration;
 
 use promptforge_types::ids::TaskId;
 
-use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
+use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::input::{InputError, InputOutcome};
-use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// A broker that answers each `user_input` in call order after the next
-/// scripted delay, so a parked child's release is timed by the test.
-pub(super) struct DelayedBroker(Mutex<VecDeque<Duration>>);
+/// A tool that answers each call in call order after the next scripted
+/// delay, so the release of a child parked on it is timed by the test. A
+/// child calls it by its full id, `tests/tools/delayed`.
+pub(super) struct DelayedTool(Mutex<VecDeque<Duration>>);
 
-impl DelayedBroker {
+impl DelayedTool {
     pub(super) fn new(delays: &[Duration]) -> Arc<Self> {
         Arc::new(Self(Mutex::new(delays.iter().copied().collect())))
     }
 }
 
 #[async_trait::async_trait]
-impl TestBroker for DelayedBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
+impl TestTool for DelayedTool {
+    fn id(&self) -> ToolId {
+        ToolId::parse("tests/tools/delayed").expect("valid delayed tool id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn wire_name(&self) -> &str {
+        "delayed"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "Answer after the test's next scripted delay."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
         let delay = self
             .0
             .lock()
@@ -46,7 +65,7 @@ impl TestBroker for DelayedBroker {
             .pop_front()
             .unwrap_or_default();
         tokio::time::sleep(delay).await;
-        Ok(InputOutcome::Text("typed".to_owned()))
+        Ok(ToolOutput::trusted("typed"))
     }
 }
 
@@ -148,7 +167,7 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -197,14 +216,14 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content"),
-        "user_input()\nreturn 'child result'",
+        "tools.call('tests/tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[Duration::from_millis(300)]),
+        DelayedTool::new(&[Duration::from_millis(300)]),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -248,7 +267,7 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -276,7 +295,7 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -291,8 +310,8 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
-    // The author's `Sibling` task parks on input answered at 300ms; the
-    // model's `Child` on input answered at 900ms. The model parks in
+    // The author's `Sibling` task parks on a tool call answered at 300ms;
+    // the model's `Child` on one answered at 900ms. The model parks in
     // `await_tasks` within a few ms, so the sibling's log lands after the
     // round that answered `await_tasks` and before the child's end.
     let gateway = ScriptedGateway::start(vec![
@@ -314,15 +333,15 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
               return results[1].result .. '|' .. msgs[5].content\n\
               ```\n\n\
               ## Child\n\n\
-              ```lua\nuser_input()\nreturn 'child result'\n```\n\n\
+              ```lua\ntools.call('tests/tools/delayed')\nreturn 'child result'\n```\n\n\
               ## Sibling\n\n\
-              ```lua\nuser_input()\nlog('sibling ran')\nreturn 'sib'\n```\n";
+              ```lua\ntools.call('tests/tools/delayed')\nlog('sibling ran')\nreturn 'sib'\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(NoticeRecorder::default());
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
+        DelayedTool::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
     );
     let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -361,7 +380,7 @@ async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId,
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()
@@ -423,7 +442,7 @@ async fn a_model_issued_cancel_queues_no_notice() {
     let (ctx, host) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
         .drive()

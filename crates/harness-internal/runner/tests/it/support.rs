@@ -19,14 +19,32 @@ use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolError, ToolId, ToolOutput};
+use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
 use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
-use promptforge::{Prompt, Run, RunContext};
-use serde_json::Value;
+use promptforge::{Environment, Prompt, Run, RunContext};
+use serde_json::{Value, json};
 
 /// The run's execution identifier.
 pub(crate) const EXECUTION: &str = "runner-test";
+
+/// A section body that calls the fixture wait tool by its full id and
+/// returns its answer: the section parks until the test's tool performer
+/// answers.
+pub(crate) const WAITS: &str = "return tools.call('tests/runner/wait')";
+
+/// The catalog every fixture run is prepared against: the one wait tool
+/// [`WAITS`] calls, so a section reaches it by full id without binding an
+/// alias.
+fn catalog() -> ToolCatalog {
+    let wait = ToolDescriptor::new(
+        ToolId::parse("tests/runner/wait").expect("the wait tool id is valid"),
+        "wait",
+        "Wait until the test's tool performer answers.",
+        json!({ "type": "object", "properties": {} }),
+    );
+    ToolCatalog::new(&[wait]).expect("the one-tool catalog is valid")
+}
 
 /// A prompt whose one section runs `lua` as its only block.
 pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
@@ -38,10 +56,21 @@ pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
     Arc::new(prompt.expect("the fixture prompt parses"))
 }
 
+/// A capability-free run over `prompt` with a fixed seed and start,
+/// prepared against the fixture [`catalog`].
+fn prepared(prompt: Arc<Prompt>) -> Run {
+    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
+    let (ctx, requirements) = Environment::new().tools(catalog()).prepare(&prompt, ctx);
+    assert!(
+        requirements.is_satisfied(),
+        "the runner fixture prompt declares nothing the host must supply: {requirements:?}"
+    );
+    Run::new(prompt, "", ctx)
+}
+
 /// A capability-free run over `lua` with a fixed seed and start.
 pub(crate) fn run(lua: &str) -> Run {
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
-    Run::new(prompt(lua), "", ctx)
+    prepared(prompt(lua))
 }
 
 /// A capability-free run over two sections: `## Main` runs `main`, and
@@ -53,12 +82,11 @@ pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     );
     let (prompt, _parse_events) = Prompt::parse(&source, EXECUTION);
     let prompt = Arc::new(prompt.expect("the two-section fixture prompt parses"));
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
-    Run::new(prompt, "", ctx)
+    prepared(prompt)
 }
 
 /// A main section that parks on a 30-second timer beside its child: the
-/// child's own wait and the timer are two effects out at once.
+/// child's own tool call and the timer are two effects out at once.
 pub(crate) const TIMED_MAIN: &str = "local t = tasks.spawn('## Child')\n\
      local _first, _ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
      return result";
@@ -87,7 +115,7 @@ impl ToolPerformer for Unused {
         _alias: String,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
-        unreachable!("no test issues a ToolCall effect")
+        unreachable!("this test issues no ToolCall effect")
     }
 }
 
@@ -133,46 +161,49 @@ pub(crate) fn unused() -> Performers {
     }
 }
 
-/// Answers every input wait with the same operator text.
-pub(crate) struct TextInput(pub(crate) &'static str);
+/// Answers every tool call with the same trusted text.
+pub(crate) struct TextTool(pub(crate) &'static str);
 
-impl InputPerformer for TextInput {
-    fn wait(
+impl ToolPerformer for TextTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        let text = self.0.to_owned();
-        Box::pin(async move { Ok(InputOutcome::Text(text)) })
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
+        let text = self.0;
+        Box::pin(async move { Ok(ToolOutput::trusted(text)) })
     }
 }
 
-/// Stays pending forever: the wait an operator never returns from.
-pub(crate) struct PendingInput;
+/// Stays pending forever: the tool call that never returns.
+pub(crate) struct PendingTool;
 
-impl InputPerformer for PendingInput {
-    fn wait(
+impl ToolPerformer for PendingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::pending())
     }
 }
 
 /// Panics instead of answering: a performer the host lost to a bug. The
-/// wait panics on its first poll.
-pub(crate) struct PanickingInput;
+/// call panics on its first poll.
+pub(crate) struct PanickingTool;
 
-impl InputPerformer for PanickingInput {
-    fn wait(
+impl ToolPerformer for PanickingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::poll_fn(
-            |_cx| -> Poll<Result<InputOutcome, InputError>> {
-                panic!("the input performer panics instead of answering")
+            |_cx| -> Poll<Result<ToolOutput, ToolError>> {
+                panic!("the tool performer panics instead of answering")
             },
         ))
     }
@@ -180,17 +211,18 @@ impl InputPerformer for PanickingInput {
 
 /// Closes the run's row in the log before answering, so the loop's next
 /// write is refused: the log failing under a live run.
-pub(crate) struct ClosingInput {
+pub(crate) struct ClosingTool {
     pub(crate) log: SharedLog,
     pub(crate) run_id: RunId,
 }
 
-impl InputPerformer for ClosingInput {
-    fn wait(
+impl ToolPerformer for ClosingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let log = Arc::clone(&self.log);
         let run_id = self.run_id;
         Box::pin(async move {
@@ -199,7 +231,7 @@ impl InputPerformer for ClosingInput {
                 .end_run(run_id, RunOutcome::Cancelled)
                 .await
                 .expect("the open row closes");
-            Ok(InputOutcome::Text("late".to_owned()))
+            Ok(ToolOutput::trusted("late"))
         })
     }
 }

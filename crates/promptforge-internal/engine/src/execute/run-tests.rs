@@ -283,13 +283,13 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
 
 #[test]
 fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
-    let mut run = run_of("return user_input()", run_context());
+    let mut run = run_of("return store.exists('x')", run_context());
     let (id, effect) = only_effect(run.step());
-    assert!(matches!(effect, Effect::UserInput { .. }));
+    assert!(matches!(effect, Effect::Store { .. }));
     run.resume(id, EffectAnswer::Dropped);
     let step = run.step();
     let Step::Done { result, .. } = step else {
-        panic!("the dropped wait ends the run, got {step:?}");
+        panic!("the dropped store operation ends the run, got {step:?}");
     };
     assert!(
         matches!(result, RunResult::Cancelled),
@@ -326,7 +326,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
 
 #[test]
 fn an_answer_for_an_unissued_effect_is_an_internal_error() {
-    let mut run = run_of("return user_input()", run_context());
+    let mut run = run_of("return store.exists('x')", run_context());
     let (id, _) = only_effect(run.step());
     run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
     // The unknown id ended the run; the real effect is now an orphan whose
@@ -351,7 +351,7 @@ fn an_answer_for_an_unissued_effect_is_an_internal_error() {
 
 #[test]
 fn an_answer_of_the_wrong_kind_for_a_pending_effect_fails_loudly() {
-    let mut run = run_of("return user_input()", run_context());
+    let mut run = run_of("return store.exists('x')", run_context());
     let (id, _) = only_effect(run.step());
     run.resume(id, EffectAnswer::Timer);
     let Step::Done { result, .. } = run.step() else {

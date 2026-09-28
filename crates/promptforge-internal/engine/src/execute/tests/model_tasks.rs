@@ -14,28 +14,11 @@ use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
-use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
-use crate::test_support::TestBroker;
 
-/// A broker that never answers, so a child parked on `user_input()` stays
-/// live until its owner ends or cancels it.
-pub(super) struct NeverBroker;
-
-#[async_trait::async_trait]
-impl TestBroker for NeverBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        std::future::pending().await
-    }
-}
-
-/// A child body that parks on operator input the never-answering broker
-/// never gives, so the task stays live until something ends it.
-pub(super) const PARKED_CHILD: &str = "user_input()\nreturn 'never'";
+/// A child body that parks on a call to the never-completing tool, by its
+/// full id, so the task stays live until something ends it.
+pub(super) const PARKED_CHILD: &str = "tools.call('test/tools/slow')\nreturn 'never'";
 
 pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
@@ -43,7 +26,8 @@ pub(super) fn task(id: &str) -> TaskId {
 
 /// The run context and host for a model-task test: the parsed prompt, the
 /// shared model set pre-filled, no bound tools, the recorder as observer,
-/// and the never-answering broker so a parked child stays parked.
+/// and the never-completing tool in the catalog so a parked child stays
+/// parked.
 pub(super) fn model_task_context(
     prompt: &Prompt,
     recorder: &Arc<TaskRecorder>,
@@ -51,25 +35,34 @@ pub(super) fn model_task_context(
     model_task_context_with(
         prompt,
         Arc::clone(recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     )
 }
 
-/// [`model_task_context`] under a caller-chosen observer and input broker,
-/// for the suites that time a parked child's release or record content
-/// reports.
+/// [`model_task_context`] under a caller-chosen observer and the tool a
+/// child parks on, for the suites that time a parked child's release or
+/// record content reports. The tool is the run's whole catalog, so a
+/// section calls it by its full id without binding an alias.
 pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
-    broker: Arc<dyn TestBroker>,
+    park: Arc<dyn TestTool>,
 ) -> (RunState, RunHost) {
-    let host = RunHost::new().observer(observer).input_broker(broker);
+    let (catalog, table) = fixture_tools(&[park]);
+    let (prepared, requirements) = Environment::new()
+        .tools(catalog)
+        .prepare(prompt, test_context(EXECUTION));
+    assert!(
+        requirements.is_satisfied(),
+        "the model-task prompt declares nothing the host must supply: {requirements:?}"
+    );
+    let host = RunHost::new().observer(observer).tools(table);
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &test_context(EXECUTION),
+        &prepared,
     );
     *ctx.model_set()
         .lock()

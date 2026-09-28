@@ -7,7 +7,7 @@
 
 use promptforge_types::event::Event;
 
-use super::model_tasks::{NeverBroker, model_task_context_with};
+use super::model_tasks::model_task_context_with;
 use super::serial_driver::{perform_locally, text_reply, tool_call_reply};
 use super::*;
 use crate::execute::run::Run;
@@ -204,7 +204,7 @@ pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult,
     let (state, _host) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let mut rounds = rounds.into_iter();
     drive(Run::from_state(state), |_, effect| {

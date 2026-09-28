@@ -19,8 +19,8 @@ use promptforge::event::Event;
 use serde_json::json;
 
 use crate::support::{
-    ClosingInput, PanickingInput, PendingInput, PendingTimer, SlowStore, TIMED_MAIN, TextInput,
-    UnitStore, run, run_with_child, unused,
+    ClosingTool, PanickingTool, PendingTimer, PendingTool, SlowStore, TIMED_MAIN, TextTool,
+    UnitStore, WAITS, run, run_with_child, unused,
 };
 
 /// A run's opening row; the loop closes it.
@@ -101,12 +101,12 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     let (log, run_id) = begun_log().await;
     let mut performers = unused();
     performers.store = Arc::new(UnitStore);
-    performers.input = Arc::new(TextInput("hi"));
+    performers.tool = Arc::new(TextTool("hi"));
     let seen: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
 
     let outcome = drive_run(
-        run("store.write('notes.md', 'kept')\nreturn user_input()"),
+        run(&format!("store.write('notes.md', 'kept')\n{WAITS}")),
         performers,
         Arc::clone(&log),
         run_id,
@@ -133,11 +133,7 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         .filter(|(_, kind)| **kind == RecordKind::Effect)
         .map(|(position, _)| position)
         .collect();
-    assert_eq!(
-        effect_positions.len(),
-        2,
-        "one store effect, one input effect"
-    );
+    assert_eq!(effect_positions.len(), 2, "one store effect, one tool call");
     for position in &effect_positions {
         assert_eq!(
             kinds[position + 1],
@@ -163,11 +159,16 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     );
     assert_eq!(
         payload(effect_positions[1]),
-        json!({ "UserInput": { "execution": "runner-test", "section": "Only" } })
+        json!({ "ToolCall": {
+            "tool": "tests/runner/wait",
+            "alias": "tests/runner/wait",
+            "args": {},
+            "origin": { "execution": "runner-test", "section": "Only", "caller": "script" }
+        } })
     );
     assert_eq!(
         payload(effect_positions[1] + 1),
-        json!({ "UserInput": { "Ok": { "Text": "hi" } } })
+        json!({ "ToolCall": { "Ok": { "text": "hi", "trusted": true } } })
     );
 
     // Every logged event reached the sink, in order, and the row closed.
@@ -214,7 +215,7 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
     let (log, run_id) = begun_log().await;
     let timer_dropped = Arc::new(AtomicBool::new(false));
     let mut performers = unused();
-    performers.input = Arc::new(PendingInput);
+    performers.tool = Arc::new(PendingTool);
     performers.timer = Arc::new(PendingTimer {
         dropped: Arc::clone(&timer_dropped),
     });
@@ -222,9 +223,9 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
     cancel_after(&cancel, Duration::from_millis(50));
 
     // Two effects are out when the cancel lands: the main section's
-    // timeout timer and its child's input wait.
+    // timeout timer and its child's tool call.
     let outcome = drive_run(
-        run_with_child(TIMED_MAIN, "return user_input()"),
+        run_with_child(TIMED_MAIN, WAITS),
         performers,
         Arc::clone(&log),
         run_id,
@@ -246,9 +247,14 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
         effects,
         vec![
             json!({ "Timer": { "seconds": 30.0 } }),
-            json!({ "UserInput": { "execution": "runner-test", "section": "Child" } }),
+            json!({ "ToolCall": {
+                "tool": "tests/runner/wait",
+                "alias": "tests/runner/wait",
+                "args": {},
+                "origin": { "execution": "runner-test", "section": "Child", "caller": "script" }
+            } }),
         ],
-        "the timer and the child's wait are the two effects out"
+        "the timer and the child's tool call are the two effects out"
     );
     let answers = answers(&records);
     assert_eq!(answers.len(), 2, "one drop per outstanding effect");
@@ -271,14 +277,14 @@ async fn a_cancel_writes_one_dropped_answer_per_outstanding_effect() {
 async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
     let (log, run_id) = begun_log().await;
     let mut performers = unused();
-    performers.input = Arc::new(PanickingInput);
+    performers.tool = Arc::new(PanickingTool);
 
     // No cancel fires: only the lost performer's own drop can end the
     // wait, so a loop that never hears from it hangs here.
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
         drive_run(
-            run("return user_input()"),
+            run(WAITS),
             performers,
             Arc::clone(&log),
             run_id,
@@ -298,7 +304,7 @@ async fn a_panicking_performer_drops_its_effect_instead_of_stranding_the_run() {
     let records = records(&log, run_id).await;
     assert_one_answer_per_effect(&records);
     let answers = answers(&records);
-    assert_eq!(answers.len(), 1, "the one panicked input wait");
+    assert_eq!(answers.len(), 1, "the one panicked tool call");
     assert_eq!(answers[0].record.payload, json!("Dropped"));
     let row = log.lock().await.run(run_id).await.unwrap();
     assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
@@ -309,7 +315,7 @@ async fn a_refused_log_write_returns_the_log_error_and_aborts_the_parked_perform
     let (log, run_id) = begun_log().await;
     let timer_dropped = Arc::new(AtomicBool::new(false));
     let mut performers = unused();
-    performers.input = Arc::new(ClosingInput {
+    performers.tool = Arc::new(ClosingTool {
         log: Arc::clone(&log),
         run_id,
     });
@@ -317,11 +323,11 @@ async fn a_refused_log_write_returns_the_log_error_and_aborts_the_parked_perform
         dropped: Arc::clone(&timer_dropped),
     });
 
-    // The child's input performer closes the run's row before it
+    // The child's tool performer closes the run's row before it
     // answers, so recording its answer is the loop's first refused
     // write; the main section's timer is still parked at that moment.
     let error = drive_run(
-        run_with_child(TIMED_MAIN, "return user_input()"),
+        run_with_child(TIMED_MAIN, WAITS),
         performers,
         Arc::clone(&log),
         run_id,
@@ -364,12 +370,12 @@ async fn a_closed_run_refuses_the_first_write_before_any_performer_starts() {
         .await
         .unwrap();
     let mut performers = unused();
-    performers.input = Arc::new(PendingInput);
+    performers.tool = Arc::new(PendingTool);
 
     // The run's opening events are the first write; nothing is issued
     // after a refused write, so the unused performers are never reached.
     let error = drive_run(
-        run("return user_input()"),
+        run(WAITS),
         performers,
         Arc::clone(&log),
         run_id,

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, Provenance, TaskId};
 
-use super::model_tasks::{NeverBroker, model_task_context_with};
+use super::model_tasks::model_task_context_with;
 use super::scheduler::scheduler_context_from;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
@@ -378,7 +378,7 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
     let (state, _host) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let mut rounds = 0;
     let (result, events) = drive(Run::from_state(state), |_, effect| {

@@ -853,7 +853,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-11>
 
-### Step 11: Park engine and runner tests on fixture tools
+### Step 11: Park engine and runner tests on fixture tools [completed]
 
 - Component: Engine user-input removal
 - Piece: The removal change, one change in three commits (first of three steps)
