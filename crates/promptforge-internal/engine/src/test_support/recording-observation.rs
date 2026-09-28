@@ -1,7 +1,8 @@
 //! The suites' observation vocabulary: [`Observation`], the payload-free
 //! view of a lifecycle [`Event`](promptforge_types::event::Event), the
-//! named constants in [`detail`] the suites' expected sequences spell, and
-//! the stable trace rendering a recorder stores.
+//! named constants in the test-only `detail` module that the suites'
+//! expected sequences spell, and the stable trace rendering a recorder
+//! stores.
 //!
 //! Kept beside the recorder rather than in it so each file stays inside
 //! the repository's line ceiling; the recorder re-exports this module's

@@ -25,7 +25,7 @@
 //! suspended tears down promptly. Running Lua observes the run's own flag
 //! from its instruction hook.
 //!
-//! Under a test shuffle seed ([`TokioDriver::set_shuffle_for_test`]) the
+//! Under a test shuffle seed (the test-only `set_shuffle_for_test`) the
 //! loop instead holds each wave of answers until every outstanding effect
 //! has posted one, then delivers the wave in the seed's permutation: one
 //! seed is one deterministic completion interleaving, which the

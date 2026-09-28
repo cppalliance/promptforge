@@ -13,7 +13,7 @@
 //! while it, or a `call` chain it is blocked on, is parked on a task
 //! wait, which gives the slot back so its descendants can run - and a
 //! chain admits at most its effective limit at once. The root's limit is the run's
-//! [`RunLimits::max_concurrency`](super::config_limits::RunLimits::max_concurrency)
+//! [`RunLimits::max_concurrency`](crate::execute::RunLimits::max_concurrency)
 //! ceiling; a spawned task and a call chain start with their parent's,
 //! and `tasks.concurrency` lowers it, clamped to the parent's. Queue
 //! order is spawn order, with resumptions first. The task's start event

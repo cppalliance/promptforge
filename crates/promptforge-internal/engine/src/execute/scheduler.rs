@@ -317,7 +317,7 @@ struct Chain {
     call_depth: usize,
     /// The chain's effective admission limit: the most tasks this chain
     /// may have admitted at once. The root's is the run's ceiling
-    /// ([`RunLimits::max_concurrency`](super::config_limits::RunLimits));
+    /// ([`RunLimits::max_concurrency`](super::RunLimits::max_concurrency));
     /// a spawned task and a call chain start with their parent's, and
     /// `tasks.concurrency` lowers it, clamped to the parent's.
     concurrency: usize,

@@ -6,7 +6,7 @@
 //! The engine reports as values and never through a callback. The suites,
 //! though, assert on sequences of `(execution, section, observation)`
 //! records and on the `on_*` content hooks, so this module keeps that
-//! vocabulary as a test fixture. [`forward`] replays a returned batch onto
+//! vocabulary as a test fixture. [`forward()`] replays a returned batch onto
 //! an observer, in order, so the suites hold without rewriting their
 //! assertions. The remaining seams - the raw-body capture, the null
 //! observer, the detail constants - are crate-internal plumbing. None of

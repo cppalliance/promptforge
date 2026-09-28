@@ -117,7 +117,7 @@ impl SectionContext {
     /// before its drop: the read goes through the live VM.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) if the VM's `var` cannot be
+    /// Returns [`Error::Lua`] if the VM's `var` cannot be
     /// converted back to JSON (the write guard keeps this conversion from
     /// failing in practice).
     pub(crate) fn read_var(&mut self) -> Result<serde_json::Value> {
@@ -135,7 +135,7 @@ impl SectionContext {
     /// repair. `None` reads as nil.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) when H1 left `argv` as
+    /// Returns [`Error::Lua`] when H1 left `argv` as
     /// non-JSON data, or [`Error::Internal`] if the VM is gone.
     pub(crate) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
         self.vm()?.argv_json().map_err(Error::from)
@@ -211,7 +211,7 @@ impl SectionContext {
     /// driver thread.
     ///
     /// # Errors
-    /// Returns the [`Error`](crate::Error) of the scope install or the
+    /// Returns the [`Error`] of the scope install or the
     /// alias seeding.
     pub(crate) fn script_call_counts(
         &mut self,

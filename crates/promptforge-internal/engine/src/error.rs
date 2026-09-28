@@ -205,11 +205,12 @@ pub(crate) enum Error {
     /// retaining the originating `mlua` error as the private `#[source]` cause
     /// (F4) alongside the mapped prompt-location message.
     ///
-    /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
-    /// from a concrete `mlua::Error` (see [`Error::lua`] and
-    /// [`crate::lua::LuaProgram::map_runtime_error`]), so the failure chain
-    /// survives through the public wrappers' `source()` instead of being
-    /// flattened to a string.
+    /// This is the source-bearing counterpart to [`Error::Lua`]: the Lua
+    /// crate builds it from a concrete `mlua::Error` (see
+    /// [`crate::lua::LuaProgram::map_runtime_error`]) and the conversion from
+    /// that crate's error keeps it intact, so the failure chain survives
+    /// through the public wrappers' `source()` instead of being flattened to
+    /// a string.
     #[error("{message}")]
     #[non_exhaustive]
     LuaRuntime {
@@ -668,9 +669,9 @@ fn raised_field<'a>(raised: &'a promptforge_lua::Raised, name: &str) -> Option<&
 /// Rebuilds the structured [`promptforge_vfs::VfsError`] a raised store
 /// error table stands in for, from its `reason`, its fields, and its
 /// message. The table was built from the same variant by this crate's own
-/// [`ErrorValue`] rendering, so the reconstruction is exact where the
-/// fields round-trip; a malformed table degrades to the closest variant
-/// rather than panicking.
+/// [`ErrorValue`](promptforge_lua::ErrorValue) rendering, so the
+/// reconstruction is exact where the fields round-trip; a malformed table
+/// degrades to the closest variant rather than panicking.
 fn raised_store_error(raised: &promptforge_lua::Raised) -> promptforge_vfs::VfsError {
     use promptforge_vfs::{PathReason, VfsError};
     let path = raised_field(raised, "path").unwrap_or_default().to_owned();

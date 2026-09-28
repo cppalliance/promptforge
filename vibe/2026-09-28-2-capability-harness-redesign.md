@@ -918,4 +918,22 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 </step-13>
 
+<step-14>
+
+### Step 14: Repair the engine's broken private doc links [completed]
+
+- Component: Run follow-ups
+- Piece: Engine private docs, one step
+- Todo: none. This is an ad-hoc fix added during the run: the operator allowed defects recorded in the run's ledger to be fixed when the fix is confident and tightly scoped, with each such fix recorded in this plan.
+- Why here: found while Step 13 was being reviewed, and unrelated to the capability work, so it lands after the ready work as its own commit.
+- Depends on: nothing
+- Read: Build rules; Project Survey.
+- Build: `cargo doc --locked -p promptforge-engine --no-deps --all-features --document-private-items`, run with `RUSTDOCFLAGS` set to `-D warnings`, fails on seven unresolved intra-doc links (`Error::lua`, `ErrorValue`, `super::config_limits::RunLimits`, `super::config_limits::RunLimits::max_concurrency`, `detail`, and `TokioDriver::set_shuffle_for_test`) and three redundant explicit link targets. They sit in `crates/promptforge-internal/engine/src/error.rs`, `execute/scheduler.rs`, `execute/scheduler/tasks.rs`, `execute/section_context.rs`, `test_support/recording.rs`, `test_support/recording-observation.rs`, and `test_support/tokio_driver.rs`, and all of them predate this run. Point each unresolved link at the item it means by a path that resolves; where the item it names no longer exists, rewrite the sentence to name what exists now; drop each redundant explicit target. Change doc comments only.
+- Tests: no new tests. The doc build above is the check, and a doc-only change has no failing-test-first shape.
+- Verify: that doc build with `-D warnings`; the gated docs builds (the workspace docs and both facades); `cargo fmt --all --check`.
+- Commit: one commit with the doc comment repairs.
+- Done when: that doc build exits 0 with `-D warnings` and the gated docs builds still pass.
+
+</step-14>
+
 </execution-plan>
