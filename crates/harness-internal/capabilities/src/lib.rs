@@ -32,8 +32,10 @@ mod input;
 mod registry;
 mod tool;
 
-pub use activation::{Activation, ToolTable, activate};
-pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+pub use activation::{Activation, ServiceGap, ToolTable, activate};
+pub use capability::{
+    Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices, Service,
+};
 pub use input::{InputBroker, InputError};
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use tool::Tool;

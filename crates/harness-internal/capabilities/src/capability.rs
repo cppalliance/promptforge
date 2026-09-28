@@ -95,6 +95,20 @@ pub trait Capability: Send + Sync {
         &[]
     }
 
+    /// Returns the host services this capability needs from
+    /// [`RunServices`].
+    ///
+    /// Activation checks these against [`RunServices::provides`] before
+    /// any capability code runs. When a required capability needs a
+    /// service the host does not provide, activation does not call
+    /// [`create`](Capability::create) and refuses the run naming both.
+    /// When the capability is optional, activation calls `create` anyway
+    /// and the capability decides how to work without the service. The
+    /// default is no needs.
+    fn needs(&self) -> &[Service] {
+        &[]
+    }
+
     /// Activates the capability for one run.
     ///
     /// Called once per run before prepare with the run's services. A
@@ -103,8 +117,41 @@ pub trait Capability: Send + Sync {
     ///
     /// # Errors
     /// Returns a [`CapabilityError`] if the capability cannot activate (a
-    /// missing host service, a failed backend handshake, cancellation).
+    /// failed backend handshake, cancellation).
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
+}
+
+/// A host service a capability can need: the closed set of optional
+/// services the harness supplies through [`RunServices`].
+///
+/// A capability names what it needs through [`Capability::needs`], and
+/// activation checks each one with [`RunServices::provides`]. The run's
+/// filesystem and cancel signal are always present, so they are not
+/// listed here. Adding a service is a harness change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Service {
+    /// The operator's input broker, [`RunServices::input`].
+    Input,
+}
+
+impl Service {
+    /// Returns the service's name as a model reads it in a refusal, such
+    /// as "an input broker".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use harness_capabilities::Service;
+    ///
+    /// assert_eq!(Service::Input.description(), "an input broker");
+    /// ```
+    #[must_use]
+    pub fn description(self) -> &'static str {
+        match self {
+            Service::Input => "an input broker",
+        }
+    }
 }
 
 /// What a capability is given at activation.
@@ -178,6 +225,25 @@ impl RunServices {
     pub fn with_input(mut self, broker: Arc<dyn InputBroker>) -> RunServices {
         self.input = Some(broker);
         self
+    }
+
+    /// Returns whether this run has `service`: for [`Service::Input`],
+    /// whether the host supplied an input broker.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use harness_capabilities::{RunServices, Service};
+    /// use promptforge::cancel::CancelHandle;
+    ///
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    /// assert!(!services.provides(Service::Input));
+    /// ```
+    #[must_use]
+    pub fn provides(&self, service: Service) -> bool {
+        match service {
+            Service::Input => self.input.is_some(),
+        }
     }
 }
 

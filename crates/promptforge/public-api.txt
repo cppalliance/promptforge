@@ -33,6 +33,7 @@
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::InvalidWireName { .. }
 #[non_exhaustive] pub struct promptforge::CapabilityConflict { .. }
 #[non_exhaustive] pub struct promptforge::Environment { /* private fields */ }
+#[non_exhaustive] pub struct promptforge::MissingService { .. }
 #[non_exhaustive] pub struct promptforge::ParseError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::Prompt { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::Requirements { .. }
@@ -81,6 +82,7 @@
 #[non_exhaustive] pub struct promptforge::vfs::Stat { .. }
 auto promptforge::CapabilityConflict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Environment: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::MissingService: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::Prompt: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -207,6 +209,7 @@ auto promptforge::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !Unwin
 auto promptforge::vfs::VfsRefBuilder: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 derives promptforge::CapabilityConflict: Clone, Debug, Eq, PartialEq
 derives promptforge::Environment: Clone, Debug, Default
+derives promptforge::MissingService: Clone, Debug, Eq, PartialEq
 derives promptforge::ParseError: Debug
 derives promptforge::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::Prompt: Clone, Debug, Eq, PartialEq
@@ -427,6 +430,7 @@ pub fn promptforge::Environment::max_depth(self, max_depth: u32) -> promptforge:
 pub fn promptforge::Environment::new() -> promptforge::Environment
 pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
 pub fn promptforge::Environment::tools(self, tools: promptforge::tools::ToolCatalog) -> promptforge::Environment
+pub fn promptforge::MissingService::new(capability: promptforge::capabilities::CapabilityId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
 pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
 pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
 pub fn promptforge::ParseError::line(&self) -> core::option::Option<u32>
@@ -725,6 +729,8 @@ pub mod promptforge::transport
 pub mod promptforge::vfs
 pub promptforge::CapabilityConflict::first: promptforge::capabilities::CapabilityId
 pub promptforge::CapabilityConflict::second: promptforge::capabilities::CapabilityId
+pub promptforge::MissingService::capability: promptforge::capabilities::CapabilityId
+pub promptforge::MissingService::service: alloc::string::String
 pub promptforge::ParseErrorKind::Fence
 pub promptforge::ParseErrorKind::Frontmatter
 pub promptforge::ParseErrorKind::List
@@ -734,6 +740,7 @@ pub promptforge::RequirementCheck::ContextMinimum
 pub promptforge::RequirementCheck::HardKeyword
 pub promptforge::Requirements::conflicts: alloc::vec::Vec<promptforge::CapabilityConflict>
 pub promptforge::Requirements::missing_required: alloc::vec::Vec<promptforge::capabilities::CapabilityId>
+pub promptforge::Requirements::missing_services: alloc::vec::Vec<promptforge::MissingService>
 pub promptforge::Requirements::unmet_requirements: alloc::vec::Vec<promptforge::UnmetRequirement>
 pub promptforge::RunErrorKind::Binding
 pub promptforge::RunErrorKind::Cancelled

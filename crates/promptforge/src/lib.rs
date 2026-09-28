@@ -2,6 +2,7 @@
 
 pub use promptforge_engine::CapabilityConflict;
 pub use promptforge_engine::Environment;
+pub use promptforge_engine::MissingService;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;
 pub use promptforge_engine::Run;

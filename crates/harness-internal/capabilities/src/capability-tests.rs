@@ -5,7 +5,7 @@ use std::sync::Arc;
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 
-use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices, Service};
 use crate::{InputBroker, InputError};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
@@ -56,6 +56,17 @@ const fn _assert_capability_trait_object_is_shareable() {
 fn a_capability_declares_no_conflicts_by_default() {
     let capability = StubCapability::web();
     assert!(capability.conflicts().is_empty());
+}
+
+#[test]
+fn a_capability_needs_no_host_service_by_default() {
+    let capability = StubCapability::web();
+    assert!(capability.needs().is_empty());
+}
+
+#[test]
+fn the_input_service_is_named_for_a_model_reader() {
+    assert_eq!(Service::Input.description(), "an input broker");
 }
 
 #[test]
@@ -121,6 +132,14 @@ async fn new_services_have_no_input_broker_and_with_input_supplies_one() {
         format!("{services:?}").contains("input: true"),
         "Debug says whether a broker is present: {services:?}"
     );
+}
+
+#[test]
+fn the_input_service_is_provided_exactly_when_a_broker_is_present() {
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    assert!(!services.provides(Service::Input));
+    let services = services.with_input(Arc::new(Scripted("typed")));
+    assert!(services.provides(Service::Input));
 }
 
 #[test]

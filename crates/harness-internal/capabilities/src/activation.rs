@@ -20,9 +20,9 @@ use std::sync::Arc;
 use promptforge::Prompt;
 use promptforge::capabilities::CapabilityId;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::{CapabilityConflict, Requirements};
+use promptforge::{CapabilityConflict, MissingService, Requirements};
 
-use crate::capability::{Capability, Contribution, RunServices};
+use crate::capability::{Capability, Contribution, RunServices, Service};
 use crate::registry::CapabilityRegistry;
 use crate::tool::Tool;
 
@@ -81,10 +81,27 @@ pub struct Activation {
     /// performer resolves against.
     pub tools: ToolTable,
     /// What activation could not satisfy: the required capabilities that
-    /// are absent or failed to activate, and the co-activation conflicts.
-    /// Merged into the prepare report through
+    /// are absent or failed to activate, the required capabilities that
+    /// need a host service this host does not provide, and the
+    /// co-activation conflicts. Merged into the prepare report through
     /// [`Requirements::merge`] so one refusal names every gap.
     pub requirements: Requirements,
+    /// The optional capabilities that activated without a host service
+    /// they need, in declaration order: one entry per capability and
+    /// missing service. These do not refuse the run; each capability
+    /// decides how to work without the service.
+    pub service_gaps: Vec<ServiceGap>,
+}
+
+/// One optional capability that activated without a host service it
+/// needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ServiceGap {
+    /// The optional capability that activated without the service.
+    pub capability: CapabilityId,
+    /// The service it needs and this host does not provide.
+    pub service: Service,
 }
 
 /// Resolves and activates the capabilities `prompt` declares against
@@ -97,11 +114,19 @@ pub struct Activation {
 /// co-activation conflicts (bashkit vs terminal: two filesystem realities,
 /// and a context gets one or the other, never both); a conflicting pair
 /// activates neither member and lands in [`Requirements::conflicts`]
-/// naming both. Each remaining capability is activated with `services`
-/// (the run's VFS and cancellation handle); an activation failure is logged
-/// and the capability contributes nothing - and when the failed capability
-/// is required, it also lands in [`Requirements::missing_required`], since
-/// the run cannot have what the prompt declared.
+/// naming both. Each remaining capability's [`needs`](Capability::needs)
+/// are checked against [`RunServices::provides`] before any capability
+/// code runs: a required capability that needs a service `services` does
+/// not provide is not activated and lands in
+/// [`Requirements::missing_services`], once per missing service; an
+/// optional one activates anyway, and each missing service becomes a
+/// [`ServiceGap`] in [`Activation::service_gaps`] and a warning. Each
+/// remaining capability is activated with `services` (the run's VFS,
+/// cancellation handle, and input broker when the host has one); an
+/// activation failure is logged and the capability contributes nothing -
+/// and when the failed capability is required, it also lands in
+/// [`Requirements::missing_required`], since the run cannot have what the
+/// prompt declared.
 ///
 /// The activated contributions are assembled into the catalog in
 /// declaration order, with tool prefix-containment enforced at assembly: a
@@ -163,15 +188,46 @@ pub fn activate(
         }
     }
     let mut activated: Vec<(CapabilityId, Vec<CapabilityId>, Contribution)> = Vec::new();
+    let mut service_gaps = Vec::new();
     for ((id, capability, optional), is_conflicted) in
         present.iter().zip(conflicted.iter().copied())
     {
         if is_conflicted {
             continue;
         }
+        let unprovided: Vec<Service> = capability
+            .needs()
+            .iter()
+            .copied()
+            .filter(|service| !services.provides(*service))
+            .collect();
+        if !*optional && !unprovided.is_empty() {
+            for service in unprovided {
+                tracing::warn!(
+                    capability = %id,
+                    service = service.description(),
+                    "required capability needs a service this host does not provide; it does not activate"
+                );
+                requirements
+                    .missing_services
+                    .push(MissingService::new(id.clone(), service.description()));
+            }
+            continue;
+        }
         match capability.create(services) {
             Ok(contribution) => {
                 tracing::info!(capability = %id, "capability activated");
+                for service in unprovided {
+                    tracing::warn!(
+                        capability = %id,
+                        service = service.description(),
+                        "optional capability activated without a service it needs"
+                    );
+                    service_gaps.push(ServiceGap {
+                        capability: id.clone(),
+                        service,
+                    });
+                }
                 activated.push((id.clone(), capability.conflicts().to_vec(), contribution));
             }
             Err(error) => {
@@ -194,6 +250,7 @@ pub fn activate(
         catalog,
         tools,
         requirements,
+        service_gaps,
     }
 }
 

@@ -58,7 +58,9 @@ pub use bindings::{ModelBindings, ToolBindings};
 pub use config::{RunContext, RunLimits};
 pub use environment::Environment;
 pub use error::{RunError, RunErrorKind, SourceLocation};
-pub use requirements::{CapabilityConflict, RequirementCheck, Requirements, UnmetRequirement};
+pub use requirements::{
+    CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement,
+};
 pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
     InputAnswerRecord, Run, Step, ToolAnswerRecord, ToolCallOrigin, ToolCaller,

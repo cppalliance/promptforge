@@ -407,18 +407,19 @@ The returned context is enriched. Its filesystem handle is kept as given - the r
 
 ## Requirements
 
-[`Requirements`] is the preflight report of what the deployment still cannot satisfy for a prompt. [`Environment::prepare`] returns one. A host that builds its own capability-activation report starts from [`Requirements::default`], which has three empty lists, and pushes into the public fields. The struct is `#[non_exhaustive]`, so it cannot be built with a struct literal.
+[`Requirements`] is the preflight report of what the deployment still cannot satisfy for a prompt. [`Environment::prepare`] returns one. A host that builds its own capability-activation report starts from [`Requirements::default`], which has four empty lists, and pushes into the public fields. The struct is `#[non_exhaustive]`, so it cannot be built with a struct literal.
 
 - [`Requirements::unmet_requirements`], a [`Vec`] of [`UnmetRequirement`], lists the model requirements that the bound model does not satisfy. Only [`Environment::prepare`] fills it, and it stays empty when no current model was set.
 - [`Requirements::missing_required`], a [`Vec`] of [`CapabilityId`](crate::capabilities::CapabilityId), lists the required capabilities that the run cannot have. The host's activation adds a capability that is absent or failed to activate, and [`Environment::prepare`] adds the capability of an exact tool slot that contributed nothing to the catalog.
+- [`Requirements::missing_services`], a [`Vec`] of [`MissingService`], lists the required capabilities that are present but need a host service the host does not provide, one entry per capability and missing service. The host's activation does not activate such a capability. Only the host's activation reports these.
 - [`Requirements::conflicts`], a [`Vec`] of [`CapabilityConflict`], lists pairs of present capabilities that cannot activate in one run. Neither member of a pair activates. Only the host's activation reports these.
 
 The methods read and combine reports.
 
-- [`Requirements::is_satisfied`] returns `true` when all three lists are empty.
-- [`Requirements::merge`] takes `&mut self` and another [`Requirements`] by value, and folds it in. A host merges its activation report into the report from prepare, so a single refusal names every gap. A capability already in [`Requirements::missing_required`] is not repeated. Conflicts and unmet requirements are appended as they are.
+- [`Requirements::is_satisfied`] returns `true` when all four lists are empty.
+- [`Requirements::merge`] takes `&mut self` and another [`Requirements`] by value, and folds it in. A host merges its activation report into the report from prepare, so a single refusal names every gap. A capability already in [`Requirements::missing_required`], or an entry equal to one already in [`Requirements::missing_services`], is not repeated. Conflicts and unmet requirements are appended as they are.
 - [`Requirements::refusal`] returns [`None`] when the report is satisfied. Otherwise it returns a [`RunError`] of kind [`RunErrorKind::RequirementsUnmet`], whose [`Display`](std::fmt::Display) text is exactly [`Requirements::notice`]. [`Run::new`] does not check requirements, so the host checks this before building the run and fails the run with the error instead. The error has no location, and it is neither cancelled nor retryable.
-- [`Requirements::notice`] returns a [`String`] written for a model to read. It starts with `the environment cannot satisfy this prompt:` and adds one line per gap, each after a newline and `- `. Missing capabilities come first as `missing required capability: {id}`. Conflicts follow as `conflicting capabilities: {first} and {second} cannot be activated together; declare one or the other`. Unmet requirements come last, as `role '{role}': requires a context of at least {required} tokens; the current model provides {actual}` or `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`. A satisfied report gives only the first line.
+- [`Requirements::notice`] returns a [`String`] written for a model to read. It starts with `the environment cannot satisfy this prompt:` and adds one line per gap, each after a newline and `- `. Missing capabilities come first as `missing required capability: {id}`. Missing services follow as `{capability} needs {service}, and this host provides none`. Conflicts come next as `conflicting capabilities: {first} and {second} cannot be activated together; declare one or the other`. Unmet requirements come last, as `role '{role}': requires a context of at least {required} tokens; the current model provides {actual}` or `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`. A satisfied report gives only the first line.
 
 This prompt binds a tool slot, but the environment's catalog is empty:
 
@@ -494,6 +495,32 @@ assert_eq!(refusal.to_string(), requirements.notice());
 - [`CapabilityConflict::second`], a [`CapabilityId`](crate::capabilities::CapabilityId), is the later-declared capability.
 
 [`Requirements::notice`] renders both with their [`Display`](std::fmt::Display) form.
+
+## MissingService
+
+[`MissingService`] records one host service that a present, required capability needs and the host does not provide, such as a capability that asks the operator, on a batch host with nobody to ask. The host's activation builds these and pushes them into [`Requirements::missing_services`]. The struct is `#[non_exhaustive]`, so the host builds one with [`MissingService::new`].
+
+[`MissingService::new`] takes a [`CapabilityId`](crate::capabilities::CapabilityId) and the service's name as anything that converts into a [`String`], and cannot fail. The host owns its service vocabulary, so the name is the one the host gives the service, written for a model to read, such as `"an input broker"`.
+
+- [`MissingService::capability`], a [`CapabilityId`](crate::capabilities::CapabilityId), is the capability that needs the service.
+- [`MissingService::service`], a [`String`], is the service's name.
+
+````
+use promptforge::capabilities::CapabilityId;
+use promptforge::{MissingService, Requirements};
+
+let mut activation = Requirements::default();
+activation.missing_services.push(MissingService::new(
+    CapabilityId::parse("acme/asker")?,
+    "an input broker",
+));
+assert!(!activation.is_satisfied());
+assert_eq!(
+    activation.notice(),
+    "the environment cannot satisfy this prompt:\n- acme/asker needs an input broker, and this host provides none",
+);
+# Ok::<(), Box<dyn std::error::Error>>(())
+````
 
 ## RunLimits
 

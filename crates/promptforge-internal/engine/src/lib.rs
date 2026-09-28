@@ -22,10 +22,10 @@ pub(crate) use crate::error::{Error, Result};
 // `promptforge_engine::X`, not a module path.
 pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
-    EffectRecord, Environment, InputAnswerRecord, ModelBindings, RequirementCheck, Requirements,
-    Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step, StoreOp,
-    StoreOutcome, ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement,
-    perform_store_op,
+    EffectRecord, Environment, InputAnswerRecord, MissingService, ModelBindings, RequirementCheck,
+    Requirements, Run, RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation,
+    Step, StoreOp, StoreOutcome, ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller,
+    UnmetRequirement, perform_store_op,
 };
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

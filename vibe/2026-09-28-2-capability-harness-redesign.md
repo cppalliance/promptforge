@@ -719,7 +719,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-5>
 
-### Step 5: Check declared service needs at activation
+### Step 5: Check declared service needs at activation [completed]
 
 - Component: Capability contract
 - Piece: Input broker and declared needs (second of two steps)

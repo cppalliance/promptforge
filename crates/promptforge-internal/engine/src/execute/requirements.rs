@@ -2,6 +2,10 @@
 
 use promptforge_types::capabilities::CapabilityId;
 
+#[cfg(test)]
+#[path = "requirements-tests.rs"]
+mod tests;
+
 /// The preflight report: what the caller must still satisfy before the
 /// prompt can run.
 ///
@@ -23,6 +27,12 @@ pub struct Requirements {
     /// capability that contributed nothing to the catalog. The run fails
     /// until every one is satisfied.
     pub missing_required: Vec<CapabilityId>,
+    /// The required capabilities that are present but need a host
+    /// service this host does not provide: one entry per capability and
+    /// missing service. Reported by activation, which does not activate
+    /// such a capability; the run fails until the host provides the
+    /// service or the prompt declares the capability optional.
+    pub missing_services: Vec<MissingService>,
     /// The declared co-activation conflicts: pairs of present
     /// capabilities that cannot activate in one run (bashkit vs
     /// terminal - two filesystem realities, and a context gets one or
@@ -34,22 +44,29 @@ pub struct Requirements {
 
 impl Requirements {
     /// Returns whether the report is satisfied: every model requirement
-    /// is met, every required capability is present, and no pair of
-    /// capabilities conflicts.
+    /// is met, every required capability is present and has the host
+    /// services it needs, and no pair of capabilities conflicts.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
         self.unmet_requirements.is_empty()
             && self.missing_required.is_empty()
+            && self.missing_services.is_empty()
             && self.conflicts.is_empty()
     }
 
     /// Folds `other` into this report: the host merges what activation
     /// could not satisfy into what prepare could not, so one refusal names
-    /// every gap. A capability already reported missing is not repeated.
+    /// every gap. A capability already reported missing, or a service
+    /// already reported missing for the same capability, is not repeated.
     pub fn merge(&mut self, other: Requirements) {
         for id in other.missing_required {
             if !self.missing_required.contains(&id) {
                 self.missing_required.push(id);
+            }
+        }
+        for missing in other.missing_services {
+            if !self.missing_services.contains(&missing) {
+                self.missing_services.push(missing);
             }
         }
         self.conflicts.extend(other.conflicts);
@@ -87,6 +104,13 @@ impl Requirements {
         let mut notice = String::from("the environment cannot satisfy this prompt:");
         for id in &self.missing_required {
             let _ = write!(notice, "\n- missing required capability: {id}");
+        }
+        for missing in &self.missing_services {
+            let _ = write!(
+                notice,
+                "\n- {} needs {}, and this host provides none",
+                missing.capability, missing.service
+            );
         }
         for conflict in &self.conflicts {
             let _ = write!(
@@ -133,6 +157,33 @@ impl CapabilityConflict {
     #[must_use]
     pub fn new(first: CapabilityId, second: CapabilityId) -> CapabilityConflict {
         CapabilityConflict { first, second }
+    }
+}
+
+/// One host service a required capability needs and the host does not
+/// provide, such as a capability that asks the operator on a batch host
+/// with nobody to ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MissingService {
+    /// The present, required capability that needs the service.
+    pub capability: CapabilityId,
+    /// The service's model-readable name, such as "an input broker". The
+    /// host owns its service vocabulary, so the report carries the name
+    /// the host gave it.
+    pub service: String,
+}
+
+impl MissingService {
+    /// Records that `capability` needs the host service named `service`
+    /// and the host does not provide it. The host's activation reports
+    /// these; the engine's prepare never does.
+    #[must_use]
+    pub fn new(capability: CapabilityId, service: impl Into<String>) -> MissingService {
+        MissingService {
+            capability,
+            service: service.into(),
+        }
     }
 }
 
