@@ -5,7 +5,8 @@
 //! written to `runs`; and the prepared tool performer resolves a
 //! `ToolCall` effect's id in the activated table. The host's optional
 //! input broker - handed to every activated capability and answering
-//! `user_input()` - sits in the `input` child module.
+//! `user_input()` - sits in the `input` child module, and a capability's
+//! prelude reaching the prepared run sits in the `prelude` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,6 +28,8 @@ use crate::support::Unused;
 
 #[path = "prepare-input.rs"]
 mod input;
+#[path = "prepare-prelude.rs"]
+mod prelude;
 
 /// A prompt declaring `promptforge/web` as a required capability that no
 /// registry here provides.
@@ -133,6 +136,7 @@ impl Capability for Tools {
             tools: vec![Arc::new(Echo {
                 id: ToolId::parse("tests/tools/echo").unwrap(),
             })],
+            prelude: None,
         })
     }
 }

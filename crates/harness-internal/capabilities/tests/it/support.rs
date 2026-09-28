@@ -270,6 +270,7 @@ impl Capability for ToolFixture {
         let _ = services;
         Ok(Contribution {
             tools: self.tools.clone(),
+            prelude: None,
         })
     }
 }

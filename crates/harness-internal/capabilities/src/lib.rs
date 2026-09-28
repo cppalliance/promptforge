@@ -7,9 +7,10 @@
 //! call as an effect naming an id; the implementations behind those ids
 //! are defined here, in the harness. A host builds one
 //! [`CapabilityRegistry`] of installed capabilities, calls [`activate`]
-//! per run to turn a prompt's declarations into the run's catalog and its
-//! [`ToolTable`] of implementations, hands the catalog to the engine's
-//! `Environment`, and resolves each `ToolCall` effect in the table.
+//! per run to turn a prompt's declarations into the run's catalog, its
+//! preludes, and its [`ToolTable`] of implementations, hands the catalog
+//! and the preludes to the engine's `Environment`, and resolves each
+//! `ToolCall` effect in the table.
 //!
 //! ## Invariants
 //!

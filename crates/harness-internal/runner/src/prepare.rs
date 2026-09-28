@@ -10,8 +10,9 @@
 //! filesystem, host roots and the declared store, to the capabilities'
 //! services and to the context as given; activate the prompt's declared
 //! capabilities against the caller's registry, which assembles the
-//! catalog and the implementation table; install the catalog and prepare
-//! the context; merge activation's report into prepare's and refuse an
+//! catalog, the preludes, and the implementation table; install the
+//! catalog and the preludes and prepare the context; merge activation's
+//! report into prepare's and refuse an
 //! unsatisfiable prompt with the engine's model-readable notice; and
 //! build the `Run` beside its performers.
 //!
@@ -275,8 +276,9 @@ pub async fn prepare_source(
     // host's whole - host roots and the declared store - handed to the
     // capabilities' services and to the context as given, so the
     // capabilities and the run share one filesystem; the activated
-    // catalog is what prepare fills slots against, and the
-    // implementations stay here for the tool performer.
+    // catalog is what prepare fills slots against, its preludes go to
+    // every section VM, and the implementations stay here for the tool
+    // performer.
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
     let mut run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
@@ -284,7 +286,7 @@ pub async fn prepare_source(
         run_services = run_services.with_input(Arc::clone(broker));
     }
     let activation = activate(registry.as_deref(), &prompt, &run_services);
-    let env = env.tools(activation.catalog);
+    let env = env.tools(activation.catalog).preludes(activation.preludes);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);
     requirements.merge(activation.requirements);
     if let Some(error) = requirements.refusal() {

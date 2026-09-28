@@ -128,6 +128,7 @@ impl Capability for Web {
         }
         Ok(Contribution {
             tools: vec![Arc::new(self.fetch.clone()), Arc::new(self.search.clone())],
+            prelude: None,
         })
     }
 }

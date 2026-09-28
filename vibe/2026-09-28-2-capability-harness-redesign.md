@@ -785,7 +785,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-8>
 
-### Step 8: Let capabilities contribute a prelude
+### Step 8: Let capabilities contribute a prelude [completed]
 
 - Component: Capability contract
 - Piece: Prelude contribution (third of three steps)

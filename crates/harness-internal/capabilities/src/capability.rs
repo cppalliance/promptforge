@@ -7,10 +7,11 @@
 //! `namespace/pack` and every tool it contributes sits under
 //! `namespace/pack/name`. Before a run is prepared, the harness activates
 //! each declared capability by calling [`Capability::create`] with the
-//! run's [`RunServices`]; the returned [`Contribution`] is v1 tools-only
-//! and grows without redesign. An activation failure is a
-//! [`CapabilityError`]: a stable kind for code plus a message written to be
-//! read by a model, mirroring [`ToolError`](promptforge::tools::ToolError).
+//! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
+//! optional Lua prelude, and grows without redesign. An activation failure
+//! is a [`CapabilityError`]: a stable kind for code plus a message written
+//! to be read by a model, mirroring
+//! [`ToolError`](promptforge::tools::ToolError).
 
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ mod tests;
 /// [`id`](Capability::id). Before a run is prepared, the harness calls
 /// [`create`](Capability::create) once per declared capability, in
 /// declaration order, and assembles the returned [`Contribution`] into the
-/// run's tool catalog.
+/// run's tool catalog and its preludes.
 ///
 /// # Implementing
 ///
@@ -258,11 +259,11 @@ impl std::fmt::Debug for RunServices {
     }
 }
 
-/// What a capability contributes to a run.
+/// What a capability contributes to a run: its tools and, optionally, a
+/// prelude of Lua source.
 ///
-/// v1 is tools-only: mounts, prompt fragments, and Lua surface are deferred
-/// until the capabilities that need them land. The struct is
-/// [`Default`] and grows without redesign.
+/// Mounts and prompt fragments are deferred until the capabilities that
+/// need them land. The struct is [`Default`] and grows without redesign.
 ///
 /// # Examples
 ///
@@ -271,12 +272,19 @@ impl std::fmt::Debug for RunServices {
 ///
 /// let contribution = Contribution::default();
 /// assert!(contribution.tools.is_empty());
+/// assert!(contribution.prelude.is_none());
 /// ```
 #[derive(Default)]
 pub struct Contribution {
     /// The contributed tools, each identified under the capability's own
     /// full id (`namespace/pack/name` for a `namespace/pack` capability).
     pub tools: Vec<Arc<dyn Tool>>,
+    /// Lua source that every section VM of the run installs, built by
+    /// [`Capability::create`] for this run so it can embed facts fixed at
+    /// activation. A prelude defines tables and functions that reach the
+    /// capability's tools through `tools.call` by full id; it must not
+    /// call a tool or the store while it loads.
+    pub prelude: Option<String>,
 }
 
 impl std::fmt::Debug for Contribution {
@@ -287,6 +295,7 @@ impl std::fmt::Debug for Contribution {
                 "tools",
                 &self.tools.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
             )
+            .field("prelude", &self.prelude.is_some())
             .finish()
     }
 }

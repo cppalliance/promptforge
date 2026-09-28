@@ -5,11 +5,11 @@
 //! Before a run is prepared, the host resolves the prompt's declarations
 //! against its [`CapabilityRegistry`], checks the present capabilities for
 //! co-activation conflicts, activates each survivor with the run's
-//! [`RunServices`], and assembles the contributions into two things: the
+//! [`RunServices`], and assembles the contributions into three things: the
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
-//! against, and the [`ToolTable`] of implementations the host's tool
-//! performer resolves a `ToolCall` effect's id in. The engine sees only the
-//! first.
+//! against, the [`Prelude`]s every section VM installs, and the
+//! [`ToolTable`] of implementations the host's tool performer resolves a
+//! `ToolCall` effect's id in. The engine sees only the first two.
 //!
 //! [`Environment::prepare`]: promptforge::Environment::prepare
 
@@ -18,7 +18,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use promptforge::Prompt;
-use promptforge::capabilities::CapabilityId;
+use promptforge::capabilities::{CapabilityId, Prelude};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::{CapabilityConflict, MissingService, Requirements};
 
@@ -80,6 +80,11 @@ pub struct Activation {
     /// The implementations behind the catalog: what the host's tool
     /// performer resolves against.
     pub tools: ToolTable,
+    /// The activated capabilities' preludes, in declaration order: what
+    /// the host hands to
+    /// [`Environment::preludes`](promptforge::Environment::preludes). A
+    /// capability that does not activate contributes none.
+    pub preludes: Vec<Prelude>,
     /// What activation could not satisfy: the required capabilities that
     /// are absent or failed to activate, the required capabilities that
     /// need a host service this host does not provide, and the
@@ -133,7 +138,9 @@ pub struct ServiceGap {
 /// contributed tool whose id escapes its capability's id, repeats an
 /// earlier contribution, or has a transport-illegal wire name is
 /// rejected - logged and never admitted. Every admitted descriptor
-/// includes its capability's declared conflicts for the record.
+/// includes its capability's declared conflicts for the record. Each
+/// activated capability's prelude, when its contribution has one, lands in
+/// [`Activation::preludes`] in the same declaration order.
 ///
 /// # Panics
 /// Panics only if `prompt` declares a capability id that is not a valid
@@ -166,27 +173,7 @@ pub fn activate(
         };
         present.push((id, Arc::clone(capability), declaration.is_optional()));
     }
-    // Co-activation conflicts are declared by the capabilities themselves;
-    // the check is symmetric, so only one member of a pair needs to name
-    // the other. A conflicting pair activates neither member and fails
-    // preparation naming both.
-    let mut conflicted = vec![false; present.len()];
-    for (i, (first_id, first, _)) in present.iter().enumerate() {
-        for (j, (second_id, second, _)) in present.iter().enumerate().skip(i + 1) {
-            if first.conflicts().contains(second_id) || second.conflicts().contains(first_id) {
-                tracing::warn!(
-                    first = %first_id,
-                    second = %second_id,
-                    "conflicting capabilities declared; neither activates"
-                );
-                requirements
-                    .conflicts
-                    .push(CapabilityConflict::new(first_id.clone(), second_id.clone()));
-                conflicted[i] = true;
-                conflicted[j] = true;
-            }
-        }
-    }
+    let conflicted = mark_conflicts(&present, &mut requirements);
     let mut activated: Vec<(CapabilityId, Vec<CapabilityId>, Contribution)> = Vec::new();
     let mut service_gaps = Vec::new();
     for ((id, capability, optional), is_conflicted) in
@@ -246,12 +233,51 @@ pub fn activate(
         }
     }
     let (catalog, tools) = assemble(&activated);
+    let preludes = activated
+        .into_iter()
+        .filter_map(|(id, _conflicts, contribution)| {
+            contribution.prelude.map(|source| Prelude::new(id, source))
+        })
+        .collect();
     Activation {
         catalog,
         tools,
+        preludes,
         requirements,
         service_gaps,
     }
+}
+
+/// Checks the present capabilities for co-activation conflicts, recording
+/// each conflicting pair in `requirements` and returning one flag per
+/// present capability, set when it belongs to a conflicting pair.
+///
+/// Conflicts are declared by the capabilities themselves; the check is
+/// symmetric, so only one member of a pair needs to name the other. A
+/// conflicting pair activates neither member and fails preparation naming
+/// both.
+fn mark_conflicts(
+    present: &[(CapabilityId, Arc<dyn Capability>, bool)],
+    requirements: &mut Requirements,
+) -> Vec<bool> {
+    let mut conflicted = vec![false; present.len()];
+    for (i, (first_id, first, _)) in present.iter().enumerate() {
+        for (j, (second_id, second, _)) in present.iter().enumerate().skip(i + 1) {
+            if first.conflicts().contains(second_id) || second.conflicts().contains(first_id) {
+                tracing::warn!(
+                    first = %first_id,
+                    second = %second_id,
+                    "conflicting capabilities declared; neither activates"
+                );
+                requirements
+                    .conflicts
+                    .push(CapabilityConflict::new(first_id.clone(), second_id.clone()));
+                conflicted[i] = true;
+                conflicted[j] = true;
+            }
+        }
+    }
+    conflicted
 }
 
 /// Assembles the run's catalog and implementation table from the activated

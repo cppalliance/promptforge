@@ -77,9 +77,32 @@ fn a_capability_is_object_safe_and_exposes_its_identity() {
 }
 
 #[test]
-fn a_default_contribution_has_no_tools() {
+fn a_default_contribution_has_no_tools_and_no_prelude() {
     let contribution = Contribution::default();
     assert!(contribution.tools.is_empty());
+    assert!(contribution.prelude.is_none());
+}
+
+#[test]
+fn contribution_debug_says_whether_a_prelude_is_present_without_showing_it() {
+    let absent = Contribution::default();
+    assert!(
+        format!("{absent:?}").contains("prelude: false"),
+        "Debug says no prelude is present: {absent:?}"
+    );
+    let present = Contribution {
+        tools: Vec::new(),
+        prelude: Some("secret_table = {}".to_owned()),
+    };
+    let shown = format!("{present:?}");
+    assert!(
+        shown.contains("prelude: true"),
+        "Debug says a prelude is present: {shown}"
+    );
+    assert!(
+        !shown.contains("secret_table"),
+        "Debug leaves the prelude's source out: {shown}"
+    );
 }
 
 #[test]
