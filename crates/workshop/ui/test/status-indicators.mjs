@@ -3,8 +3,9 @@
 // with stable elements, `set` shows exactly one color and null clears
 // it, a tooltip updates the title and the accessible label, a decorative
 // indicator is hidden from assistive tech, `dispose` removes the element,
-// and a duplicate id throws. A synthetic "probe" indicator runs through
-// every color and back to off.
+// and a duplicate id throws. The bar owns no LED and no recording port:
+// every indicator belongs to the feature that registers it. A synthetic
+// "probe" indicator runs through every color and back to off.
 // Bundles the TS modules with esbuild and drives them against jsdom built
 // from the real index.html.
 // Run: node --test test/status-indicators.mjs
@@ -65,18 +66,19 @@ const byId = (id) => window.document.querySelector(`.status-bar__led[data-indica
 check("the platform exports the STATUS_INDICATORS token", typeof STATUS_INDICATORS?.id === "string");
 
 const bar = new StatusBar();
-check("the host registers its own recording slot", ids().join(",") === "recording");
+check(`the host registers no indicator of its own (got ${ids().join(",")})`, ids().length === 0);
+check("the host exposes no recording port", !("setRecording" in bar));
 
 // Ordering: registration order differs from `order`; the DOM follows `order`.
 const late = bar.register({ id: "late", name: "Late indicator", order: 5 });
 const early = bar.register({ id: "early", name: "Early indicator", order: 1 });
 const middle = bar.register({ id: "middle", name: "Middle indicator", order: 3 });
-check(`indicators render in ascending order (got ${ids().join(",")})`, ids().join(",") === "recording,early,middle,late");
+check(`indicators render in ascending order (got ${ids().join(",")})`, ids().join(",") === "early,middle,late");
 const middleEl = byId("middle");
 middle.set("green");
 early.set("amber");
 check("set keeps the indicator's element stable", byId("middle") === middleEl);
-check("indicators keep their order after set", ids().join(",") === "recording,early,middle,late");
+check("indicators keep their order after set", ids().join(",") === "early,middle,late");
 
 // Exactly one color, and null clears it.
 middle.set("amber");
@@ -115,7 +117,7 @@ try {
   threw = true;
 }
 check("a duplicate id throws", threw);
-check("a rejected duplicate leaves the original in place", byId("middle") === middleEl && ids().length === 5);
+check("a rejected duplicate leaves the original in place", byId("middle") === middleEl && ids().length === 4);
 
 // dispose removes the element; the id is free again afterward.
 late.dispose();
@@ -133,7 +135,7 @@ deco.dispose();
 const five = bar.register({ id: "five", name: "Five", order: 5 });
 const three = bar.register({ id: "three", name: "Three", order: 3 });
 const one = bar.register({ id: "one", name: "One", order: 1 });
-check(`descending registration renders in ascending order (got ${ids().join(",")})`, ids().join(",") === "recording,one,three,five");
+check(`descending registration renders in ascending order (got ${ids().join(",")})`, ids().join(",") === "one,three,five");
 five.dispose();
 three.dispose();
 one.dispose();
@@ -149,15 +151,11 @@ probe.set(null);
 check("the probe returns to off", litColors(probeEl).length === 0);
 probe.dispose();
 
-// The transitional recording port lights the host's own slot red.
-bar.setRecording(true);
-check("setRecording(true) lights the recording slot red", litColors(byId("recording")).join(",") === "red");
-bar.setRecording(false);
-check("setRecording(false) returns the recording slot to off", litColors(byId("recording")).length === 0);
-
 // render never touches indicators: no color on any LED from a frame.
+const watched = bar.register({ id: "watched", name: "Watched", order: 0 });
 bar.render({ type: "status", label: "x", description: "", severity: "info", activity: "generating", busy: false });
-check("render no longer lights an indicator", litColors(byId("recording")).length === 0);
+check("render no longer lights an indicator", litColors(byId("watched")).length === 0);
+watched.dispose();
 
 bar.dispose();
 

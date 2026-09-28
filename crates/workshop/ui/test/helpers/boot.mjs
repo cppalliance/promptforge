@@ -10,8 +10,9 @@
 // buckets the app preloads (see `uiStateOptions`) and the #dock element's
 // client size (`dockSize`); every fetch the app
 // makes, and every service resolution (method RESOLVE), lands in
-// ctx.fetchLog in order, and ctx.resolveService(id) reads any registry
-// service the boot bound. Run after `npm run build`.
+// ctx.fetchLog in order, ctx.resolveService(id) reads any registry
+// service the boot bound, and ctx.registeredServiceIds() lists the bound
+// token ids in registration order. Run after `npm run build`.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
 import { readFile } from "node:fs/promises";
@@ -357,6 +358,12 @@ export async function bootWorkbench(name, run, options = {}) {
     throw new Error(`no service registered for ${id}`);
   }
 
+  // The bound token ids in registration order (a re-registered token keeps
+  // its first position), so a test can assert what boot bound before what.
+  function registeredServiceIds() {
+    return [...registrySeam.__serviceRegistrations().keys()].map((token) => token.id);
+  }
+
   const statusBar = window.document.querySelector(".status-bar");
   const statusText = window.document.querySelector(".status-bar__text");
   const statusSlot = window.document.querySelector(".status-bar__slot");
@@ -487,6 +494,7 @@ export async function bootWorkbench(name, run, options = {}) {
     emitWorkbench,
     fetchLog,
     resolveService,
+    registeredServiceIds,
     sleep,
     failures,
   };

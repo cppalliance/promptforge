@@ -670,7 +670,7 @@ Five components, built in dependency order. The first four are each useful on th
 
 <step-9>
 
-### Step 9: Contribute the recording LED through `STT_STATUS`
+### Step 9: Contribute the recording LED through `STT_STATUS` [completed]
 
 - Component: status bar indicators
 - Piece: the recording LED. Built last, sequentially, in its own commit, so the recording rewire can be reviewed and reverted alone. Only the far end of `setRecording` moves, from the status bar to an indicator handle; the recording call sites and timing are unchanged.

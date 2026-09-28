@@ -32,17 +32,14 @@ import type {
 import type { ModelService } from "../../services/model-service";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { SpeechCaptureService } from "../../services/speech-capture";
+import type { SttStatus } from "../../services/stt-status";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
 import { ChatBox } from "../chatbox/chat-box";
 import type { ChatBoxEvent, ChatBoxProps } from "../chatbox/types";
 import { ToolCallCard } from "./tool-call-card";
-import {
-  setupStt,
-  type SttHandle,
-  type SttStatus,
-} from "../stt/stt";
+import { setupStt, type SttHandle } from "../stt/stt";
 
 /** One painted feed row, kept for the identity diff. */
 interface RenderedRow {

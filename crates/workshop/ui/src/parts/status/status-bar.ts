@@ -32,7 +32,6 @@ interface Slot {
 export class StatusBar extends Disposable implements StatusBarContract, StatusIndicators {
   private readonly view: StatusBarView;
   private readonly slots = new Map<string, Slot>();
-  private readonly recording: StatusIndicatorHandle;
   // The bar's own visibility key: the Appearance menu's Status Bar row
   // reads it for its checkbox. Bound here because the bar owns the
   // element; visible by default, matching the boot layout.
@@ -42,9 +41,6 @@ export class StatusBar extends Disposable implements StatusBarContract, StatusIn
     super();
     this.visibleKey = getService(CONTEXT_KEY_SERVICE).createKey("statusBarVisible", true);
     this.view = createStatusBarView();
-    this.recording = this._register(
-      this.register({ id: "recording", name: "Recording indicator", order: 0 }),
-    );
     this.view.setText("Ready");
     // The bar is the body's full-width footer, below the desk.
     document.body.append(this.view.element);
@@ -128,11 +124,6 @@ export class StatusBar extends Disposable implements StatusBarContract, StatusIn
   setVisible(visible: boolean): void {
     this.view.element.hidden = !visible;
     this.visibleKey.set(visible);
-  }
-
-  /** Lights or dims the recording LED with the mic's recording state. */
-  setRecording(on: boolean): void {
-    this.recording.set(on ? "red" : null);
   }
 
   /**

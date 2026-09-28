@@ -14,16 +14,13 @@ export interface StatusBar {
   readonly isVisible: boolean;
   /** Shows or hides the bar. */
   setVisible(visible: boolean): void;
-  /** Lights or dims the recording LED with the mic's recording state. */
-  setRecording(on: boolean): void;
 }
 
 /**
  * The registry token for the composition root's StatusBar, resolved by
  * panels that paint action outcomes onto it (the Workshop tree's grant
- * flows, the agent session's dictation reports). Registered by the
- * composition root at boot; unregistered in tests that drive panels
- * standalone, where the panels stay silent.
+ * flows). Registered by the composition root at boot; unregistered in
+ * tests that drive panels standalone, where the panels stay silent.
  */
 export const STATUS_BAR: ServiceToken<StatusBar> =
   createServiceToken<StatusBar>("workshop.statusBar");

@@ -9,11 +9,11 @@ import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
 import type { ModelService } from "../../services/model-service";
 import type { SpeechCaptureService } from "../../services/speech-capture";
+import type { SttStatus } from "../../services/stt-status";
 import { AgentSessionView } from "./agent-session-view";
-import type { SttStatus } from "../stt/stt";
 
 // Where the session view's dictation reports when the panel is built without
-// the composition root's status bar (the registry tests): messages and
+// the composition root's status port (the registry tests): messages and
 // the recording LED have nowhere to land, so they land nowhere.
 const SILENT_STATUS: SttStatus = {
   showLocal: () => undefined,

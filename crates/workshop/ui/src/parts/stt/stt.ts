@@ -68,16 +68,6 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
 }
 
 /**
- * The status-bar slice dictation paints: local messages (blockers, capture
- * failures, an empty take) and the recording LED. `StatusBar` satisfies it
- * structurally; tests hand in a recording fake.
- */
-export interface SttStatus {
-  showLocal(label: string, severity: "info" | "error"): void;
-  setRecording(on: boolean): void;
-}
-
-/**
  * What blocks starting a take right now, as a user-readable reason, or
  * null when a take may start. Consulted on every mic press: the mic stays
  * visible and clickable even when blocked, so the press can name the

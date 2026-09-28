@@ -6,12 +6,12 @@ import {
   type SpeechCaptureFailure,
   type SpeechCaptureOutcome,
 } from "../../services/speech-capture";
+import type { SttStatus } from "../../services/stt-status";
 import type {
   SttBlocker,
   SttElements,
   SttHandle,
   SttMicState,
-  SttStatus,
 } from "./stt";
 import {
   createTakeRegistry,

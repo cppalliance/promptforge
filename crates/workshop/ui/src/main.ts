@@ -22,6 +22,7 @@ import { STATUS_INDICATORS } from "@workshop/platform/status-indicators";
 import { RECENT_FILES_STORE, RecentFilesStore } from "./services/recent-files-store";
 import { getService, registerService } from "@workshop/platform/service-registry";
 import { SpeechCaptureService, SPEECH_CAPTURE } from "./services/speech-capture";
+import { STT_STATUS, type SttStatus } from "./services/stt-status";
 import { TEXT_CONTROL_SERVICE } from "@workshop/platform/text-control-service";
 import { TREE_STATE, TreeStateService } from "./services/tree-state-service";
 import { createUiStorage, UI_STORAGE } from "./services/ui-storage";
@@ -177,6 +178,18 @@ const speechCapture = new SpeechCaptureService();
 // createComponent seam.
 registerService(STATUS_BAR, () => statusBar);
 registerService(STATUS_INDICATORS, () => statusBar);
+// The recording LED is the product's indicator, and dictation reaches it
+// and the bar's text through one port. Both register here, before the
+// layout restores: a restored agent panel resolving no port would fall
+// back to a silent one and the LED would die without an error.
+const recording = disposables.add(
+  statusBar.register({ id: "recording", name: "Recording indicator", order: 0 }),
+);
+const sttStatus: SttStatus = {
+  showLocal: (label, severity) => statusBar.showLocal(label, severity),
+  setRecording: (on) => recording.set(on ? "red" : null),
+};
+registerService(STT_STATUS, () => sttStatus);
 registerService(MODEL_SERVICE, () => modelService);
 registerService(SPEECH_CAPTURE, () => speechCapture);
 

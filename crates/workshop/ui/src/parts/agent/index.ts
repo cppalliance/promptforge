@@ -7,7 +7,7 @@ import { MODEL_SERVICE } from "../../services/model-service";
 import { getServiceOrNull } from "@workshop/platform/service-registry";
 import { SPEECH_CAPTURE } from "../../services/speech-capture";
 import type { IDisposable } from "@workshop/platform/lifecycle";
-import { STATUS_BAR } from "@workshop/platform/status-bar";
+import { STT_STATUS } from "../../services/stt-status";
 import { AgentPanel } from "./agent-panel";
 import { markdownReady } from "./markdown-render";
 
@@ -37,7 +37,7 @@ export async function register(): Promise<IDisposable> {
     "agent",
     () =>
       new AgentPanel(
-        getServiceOrNull(STATUS_BAR) ?? undefined,
+        getServiceOrNull(STT_STATUS) ?? undefined,
         getServiceOrNull(MODEL_SERVICE) ?? undefined,
         getServiceOrNull(SPEECH_CAPTURE) ?? undefined,
       ),
