@@ -651,7 +651,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-2>
 
-### Step 2: Resolve script tool calls by full id
+### Step 2: Resolve script tool calls by full id [completed]
 
 - Component: Tool-call addressing and attribution
 - Piece: Full-id resolution, one step

@@ -6,6 +6,7 @@
 //! parameter. Per-call data (a section, a `var` snapshot) stays
 //! in parameters or on the per-section frame.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
@@ -19,7 +20,7 @@ use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::cancel::CancelHandle;
-use crate::lua::{LuaProgram, ToolSet, ToolView};
+use crate::lua::{LuaProgram, ToolBinding, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
 use crate::untrusted::GuardNonce;
@@ -28,7 +29,7 @@ use promptforge_vfs::{Access, VfsRef};
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
-use bound::{bound_model_set, bound_tool_set, derive_argv};
+use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv};
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -94,6 +95,11 @@ pub(crate) struct RunState {
     /// The concrete handle behind `tools`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
+    /// Every tool in the prepared catalog, bound under its full id: the
+    /// fallback a script `tools.call` resolves when no frontmatter alias
+    /// matches. Kept apart from `tool_set`, the set section VMs install
+    /// globals and scopes from, so a full id never becomes either.
+    catalog_bindings: Arc<BTreeMap<String, ToolBinding>>,
     /// The run's model set as a read-only view: built from the prepared
     /// bindings at construction. The only writer is `models.default` (a
     /// prompt-wide fact) through the concrete handle the section VMs
@@ -122,7 +128,8 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free); the nonce derives from `ctx`'s seed and `when`
+    /// capability-free) - and the full-id bindings of `ctx`'s catalog;
+    /// the nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
@@ -164,6 +171,7 @@ impl RunState {
             shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
+            catalog_bindings: Arc::new(catalog_bindings(ctx)),
             models: model_set.clone(),
             model_set,
             when: Arc::from(ctx.started_at.to_rfc3339()),
@@ -282,6 +290,13 @@ impl RunState {
             self.tools.bindings()?,
             self.tools.always()?,
         ))
+    }
+
+    /// The binding for the catalog tool whose full id is `id`, the
+    /// fallback a script `tools.call` resolves when no frontmatter alias
+    /// matches.
+    pub(crate) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
+        self.catalog_bindings.get(id)
     }
 
     /// The run's model set, read-only.
@@ -416,6 +431,10 @@ impl fmt::Debug for RunState {
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
+            .field(
+                "catalog_bindings",
+                &self.catalog_bindings.keys().collect::<Vec<_>>(),
+            )
             .field("models", &"<dyn ModelView>")
             .field("model_set", &self.model_set)
             .field("when", &self.when)

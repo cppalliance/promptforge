@@ -192,6 +192,8 @@ Three more Lua calls work with tools.
 - `tools['add_local'](name, description, params, fn)` defines a local tool backed by a Lua function. The engine answers a local tool itself, so it never becomes an [`Effect::ToolCall`](crate::effect::Effect::ToolCall).
 - `tools.calls[alias]` reads the section's call count for an alias. Counts are taken at dispatch, before the host runs the tool.
 
+A script can also call any tool in the run's catalog by its full id, as in `tools.call('example/tools/echo', { value = 'hi' })`, whether or not the prompt's `tools:` frontmatter binds an alias to it. A frontmatter alias always wins, and it can never collide with a full id because an alias cannot contain `/`. Calling by full id binds no Lua global and advertises nothing to a model, and the effect's [`Effect::ToolCall::alias`](crate::effect::Effect#variant.ToolCall.field.alias) holds the full id. `tools.add` and `tools.always` still take only aliases, so a model sees a tool only after the prompt binds it under an alias and advertises it, and a tool call a model makes never resolves a full id.
+
 # Trusted and untrusted output
 
 Every successful answer is a [`ToolOutput`], and the host must mark it as trusted or untrusted when it builds one. [`ToolOutput`] has exactly two constructors, so the marking cannot be forgotten.

@@ -12,7 +12,8 @@
 //! own module (issued as a `TaskEvents` effect the host answers from its
 //! log), and a script call to any of them answers as unbound; a local Lua
 //! tool is answered with its handler; a bound tool resolves against the
-//! run's full bound catalog, its attempt is counted, and the call is
+//! run's full bound catalog (a script call may also name any catalog tool
+//! by its full id), its attempt is counted, and the call is
 //! issued as a `ToolCall` effect whose answer the driver applies through
 //! the shared dispatch body. `call_id: Some` always resumes a bound tool
 //! with content - a tool's own failure becomes untrusted failure text -
@@ -114,7 +115,9 @@ impl Scheduler {
     /// run's full bound tool catalog (the section's effective scope shapes
     /// what the model is offered, and the author's own script is not the
     /// model, so the scope does not gate it; the model-advertised set stays
-    /// section-scoped), the attempt counted, and the issued effect. The
+    /// section-scoped) or, for a script call that names no frontmatter
+    /// alias, against the catalog by full id, the full id then standing as
+    /// the alias; then the attempt counted, and the issued effect. The
     /// answer's rules - the model-issued body under a `call_id`, else the
     /// script body classified by the binding's declared output kind - are
     /// the continuation's, applied when the answer lands.
@@ -172,7 +175,13 @@ impl Scheduler {
                 },
             ))));
         }
-        let Some(binding) = tool_set.binding(alias).cloned() else {
+        // A model reaches only the tools a round advertised, so only a
+        // script call falls back to a catalog tool's full id.
+        let binding = tool_set
+            .binding(alias)
+            .or_else(|| ctx.catalog_binding(alias).filter(|_| call_id.is_none()))
+            .cloned();
+        let Some(binding) = binding else {
             return Err(unbound_tool_call(&tool_set, alias));
         };
         // The counts seed from the section's effective scope; a bound alias

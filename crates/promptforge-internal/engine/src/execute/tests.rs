@@ -394,6 +394,7 @@ mod effects;
 mod exec_flow;
 mod exit_rules;
 mod fanout_acceptance;
+mod full_id_calls;
 mod happens_before;
 mod input;
 mod live_infer;
