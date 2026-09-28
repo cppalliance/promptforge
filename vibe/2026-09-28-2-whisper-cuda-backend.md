@@ -221,6 +221,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `cargo build --locked -p gateway`; plain `cargo build` builds the same `default-members` crate, `crates/gateway/app`. Default features are `local`, `web-search`, `config-ui`, `stt`; `config-ui` bundles `crates/gateway/config-ui/ui` with esbuild, so `npm ci --prefix crates/gateway/config-ui/ui` must have run (its `node_modules` is present on this host).
   - Headless shape: `cargo build --locked -p gateway --no-default-features`. Desktop app: `cargo workshop` (alias of `cargo run -p build-workshop --`) after `npm ci --prefix crates/workshop` (its `node_modules` is absent on this host).
   - Toolchain: stable per `rust-toolchain.toml` (cargo and rustc 1.98.0 here), edition 2024, resolver 3, no `rust-version` declared. Windows links with `rust-lld` and `+crt-static` (`.cargo/config.toml`).
+  - On this host every cargo command runs in WSL2 through `bash vibe/scratch/wsl-cargo.sh <cargo args>` (Ubuntu-24.04, cargo 1.98.1, target directory `~/promptforge-verify-target`, with `RUSTFLAGS` and `RUSTDOCFLAGS` passed through). `crates/gateway/config-ui/ui/node_modules` is a Linux install that the operator's WSL Talktron gateway build uses, so a Windows build of `gateway-config-ui` finds no `esbuild.cmd` and fails; the operator chose to keep it. `cargo xtask site --books-only` still runs on Windows, where mdBook 0.4.44 is installed.
 - Focused test command pattern:
   - CI form: `cargo nextest run --locked -p <package> --all-features [<filter>]`. cargo-nextest is not installed on this host (`cargo nextest` is "no such command"), so run `cargo test --locked -p <package> --all-features [--lib | --test it] [<module-path filter>]`.
   - This plan's areas: `cargo test --locked -p gateway-config --lib config::tests::` (submodules `validation::`, `schema::`, `serialize::`), `cargo test --locked -p gateway-local --lib artifacts::assets::tests::`, `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`.
@@ -344,7 +345,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - A replay of the CUDA row's package step against a stub toolkit bundles exactly what it did before the change.
   - Tag `b4938` (the same commit as `v1.9.3`) also builds a `parakeet.dll` that `whisper.dll` does not import. The shared Windows `*.dll` packaging bundles it into both Windows archives, as the published CUDA archive already holds it, and the Unix filter leaves it out.
 
-### Step 3: Build a Linux x86-64 CUDA runtime on release dispatch only
+### Step 3: Build a Linux x86-64 CUDA runtime on release dispatch only [completed]
 
 - A new `build-linux-cuda` job in `.github/workflows/whisper-lib.yml` runs only when `github.event_name == 'workflow_dispatch'`, on `ubuntu-22.04`, with `timeout-minutes: 240`, as the hosted Blackwell build has.
 - Its steps:
@@ -359,6 +360,12 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Before the commit, the job's shell steps run in a scratch directory outside the tracked tree on a Linux x86-64 host, publishing nothing; WSL2 is enough. The build succeeds, the stub smoke-load reports CUDA, and `ldd` resolves every package library inside the package. A container with no driver refuses the load on `libcuda.so.1`. The step's record in the plan's repository copy notes the host, the build time, and the architecture list ggml chose.
   - Optionally, a fork dispatch of the branch exercises both hosted jobs and is cancelled while the self-hosted Windows CUDA row waits, so nothing publishes.
   - The first push run on `master` skips the job.
+- Dry run, 2026-09-28, in WSL2 Ubuntu 24.04 on an i9-14900KF (32 threads, 31 GB), with gcc 13.3.0, CMake 3.28.3, and nvcc 12.8.93; tag `b4938` resolves to whisper.cpp `371b5a75` (ggml 0.20.2):
+  - Every `run:` block of the job exits 0. `cmake --build` takes about 470 s at `-j32` (12,244 CPU-seconds); a 4-vCPU hosted runner should take 50 minutes or more, which was not measured. The build passes `--parallel "$(nproc)"`, because a bare `--parallel` starts every nvcc compile at once.
+  - ggml chose `50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-real;89-real;90-virtual;120a-real`, its fixed list for CUDA 12.8 without a native GPU, so a GPU-less runner gets the same list. Against the stub driver, `whisper_print_system_info()` reports `CUDA : ARCHS = 500,610,700,750,800,860,890,900,1200`.
+  - `ldd` resolves every ggml library and `libcudart.so.12`, `libcublas.so.12`, and `libcublasLt.so.12` inside the package; only glibc, `libstdc++`, `libgcc_s`, `libgomp`, and the driver's `libcuda.so.1` come from the system. The archive is 743 MB, and it leaves out `libparakeet.so`, which `libwhisper` does not need, as the CPU archives' filter does.
+  - Deliberately broken packages fail the job's checks: a CPU-only build fails the CUDA check, and a missing CUDA runtime library or a stray system library fails the `ldd` check.
+  - In an `ubuntu:24.04` container with no GPU and no `libcuda`, the load fails with `libcuda.so.1: cannot open shared object file: No such file or directory`; the same container with the stub mounted loads the library and reports CUDA.
 
 ### Step 4: Add the `[stt] whisper_backend` setting
 
