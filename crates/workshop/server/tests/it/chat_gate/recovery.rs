@@ -92,7 +92,7 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
     );
 
     // The pcall'd failure never kills the program: the loop returns to
-    // user_input and the next turn is a normal one. The failed input stays
+    // input.ask() and the next turn is a normal one. The failed input stays
     // in the retained message list, so the projection joins the two
     // consecutive user utterances with a blank line.
     let fresh = next_wait_token(&mut socket).await;

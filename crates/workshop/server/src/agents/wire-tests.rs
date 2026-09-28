@@ -218,6 +218,59 @@ fn an_agent_event_frame_keeps_the_model_on_thinking_and_the_call_id_on_tool_resu
     );
 }
 
+/// A trusted tool result in the `chat` section on turn 2, answering
+/// `tool_call_id` (empty for a script's call) under `alias`.
+fn tool_result(tool_call_id: &str, alias: &str, content: &str) -> Event {
+    Event::ToolResult {
+        execution: "run".to_owned(),
+        section: "chat".to_owned(),
+        provenance: provenance(),
+        turn: 2,
+        tool_call_id: tool_call_id.to_owned(),
+        alias: alias.to_owned(),
+        content: content.to_owned(),
+        trusted: true,
+    }
+}
+
+#[test]
+fn a_script_side_ask_result_frames_as_the_operators_message() {
+    let ask = tool_result("", harness::USER_INPUT_ASK_TOOL, "two words");
+    let frame = wire(&AgentEventFrame::new(7, None, &ask).expect("a script-side ask frames"));
+    assert_eq!(
+        frame["event"],
+        serde_json::json!({
+            "kind": "user_message", "section": "chat", "turn": 0, "content": "two words",
+        }),
+        "a script's ask result is the operator's message, framed on turn 0 without a tool-call id"
+    );
+}
+
+#[test]
+fn a_model_issued_ask_result_stays_a_tool_call_update() {
+    let ask = tool_result("call_9", harness::USER_INPUT_ASK_TOOL, "two words");
+    let frame = wire(&AgentEventFrame::new(8, None, &ask).expect("a model-issued ask frames"));
+    assert_eq!(
+        frame["event"],
+        serde_json::json!({
+            "kind": "tool_call_update", "section": "chat", "turn": 2,
+            "content": "two words", "tool_call_id": "call_9",
+        }),
+        "a model's ask answers the model's own tool call, so it stays a tool call update"
+    );
+}
+
+#[test]
+fn a_scripts_call_to_another_tool_stays_a_tool_call_update() {
+    let fetch = tool_result("", "fetch", "the page");
+    let frame =
+        wire(&AgentEventFrame::new(9, None, &fetch).expect("a script's tool result frames"));
+    assert_eq!(
+        frame["event"]["kind"], "tool_call_update",
+        "only the ask tool's result is the operator's message"
+    );
+}
+
 #[test]
 fn an_agent_delta_frame_is_stamped_with_its_superseding_reply_id() {
     assert_eq!(

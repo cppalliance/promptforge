@@ -834,7 +834,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-10>
 
-### Step 10: Show asks as user messages in Workshop and move `chat.md` to `input.ask()`
+### Step 10: Show asks as user messages in Workshop and move `chat.md` to `input.ask()` [completed]
 
 - Component: User-input capability
 - Piece: `promptforge/user-input` (second of two steps)
