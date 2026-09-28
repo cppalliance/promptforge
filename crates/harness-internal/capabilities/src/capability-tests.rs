@@ -6,6 +6,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 
 use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+use crate::{InputBroker, InputError};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
@@ -86,6 +87,40 @@ fn create_receives_the_run_services() {
         .create(&services)
         .expect_err("a cancelled run fails activation");
     assert!(error.is_cancelled());
+}
+
+/// A broker whose operator always types the same text.
+struct Scripted(&'static str);
+
+#[async_trait::async_trait]
+impl InputBroker for Scripted {
+    async fn wait(&self) -> Result<String, InputError> {
+        Ok(self.0.to_owned())
+    }
+}
+
+#[tokio::test]
+async fn new_services_have_no_input_broker_and_with_input_supplies_one() {
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    assert!(
+        services.input.is_none(),
+        "a host that supplies no broker leaves the run without one"
+    );
+    assert!(
+        format!("{services:?}").contains("input: false"),
+        "Debug says whether a broker is present: {services:?}"
+    );
+
+    let services = services.with_input(Arc::new(Scripted("typed")));
+    let broker = services
+        .input
+        .as_ref()
+        .expect("with_input supplies the broker");
+    assert_eq!(broker.wait().await.expect("the broker answers"), "typed");
+    assert!(
+        format!("{services:?}").contains("input: true"),
+        "Debug says whether a broker is present: {services:?}"
+    );
 }
 
 #[test]

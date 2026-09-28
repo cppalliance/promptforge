@@ -28,11 +28,13 @@
 
 mod activation;
 mod capability;
+mod input;
 mod registry;
 mod tool;
 
 pub use activation::{Activation, ToolTable, activate};
 pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+pub use input::{InputBroker, InputError};
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use tool::Tool;
 

@@ -13,8 +13,11 @@ categories = ["development-tools", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
+# The `InputBroker` trait is an `async_trait` trait.
+async-trait.workspace = true
 # Per-run activation of the prompt's declared capabilities against the
-# registry rebuilt for each gateway generation.
+# registry rebuilt for each gateway generation, and the `InputBroker`
+# trait and error vocabulary the session's input broker implements.
 harness-capabilities.workspace = true
 # The run log every session run is recorded in and read back from for
 # transcripts and reconnect.
@@ -22,15 +25,14 @@ harness-log.workspace = true
 # The gateway model client and the chat performer over it, rebuilt with
 # the capability registry when the gateway generation changes.
 harness-models.workspace = true
-# The effect loop a session drives its runs through, the performer trait
-# the input broker implements, and the instrumented spawn wrapper.
+# The effect loop a session drives its runs through, run preparation,
+# and the instrumented spawn wrapper.
 harness-runner.workspace = true
 # The first-party `promptforge/web` capability (fetch and search): this
 # crate is the one place a provider crate is named, at registration.
 harness-web.workspace = true
-# The engine's public API: the input outcome and error vocabulary a `UserInput`
-# effect is answered with, the run context, the run limits, the events and
-# deltas a session forwards, and the run's VFS handle.
+# The engine's public API: the run context, the run limits, the events
+# and deltas a session forwards, and the run's VFS handle.
 promptforge.workspace = true
 # Wait tokens and session ids are 128 bits from the OS CSPRNG:
 # unguessable by anything that has not seen the announcing frame.

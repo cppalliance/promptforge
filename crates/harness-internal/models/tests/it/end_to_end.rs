@@ -19,13 +19,11 @@ use axum::routing::post;
 use harness_log::{RecordFilter, RecordKind, RunId, RunLog, RunOutcome, StoredRecord};
 use harness_models::{GatewayChatPerformer, GatewayClient, GatewayEndpoint, SecretString};
 use harness_runner::effect_loop::{SharedLog, drive_run};
-use harness_runner::performers::{BoxFuture, InputPerformer};
 use harness_runner::prepare::{Prepared, Services, prepare_run};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -121,19 +119,6 @@ async fn mock_gateway() -> (GatewayClient, Seen) {
         SecretString::new("tok").expect("non-empty test key"),
     );
     (client, seen)
-}
-
-/// The fixture issues no input wait; reaching this is the test's failure.
-struct NoInput;
-
-impl InputPerformer for NoInput {
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        unreachable!("the fixture issues no UserInput effect")
-    }
 }
 
 /// The host's current model: what every declared role binds to.
@@ -340,7 +325,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(GatewayChatPerformer::new(client, deltas)),
-        input: Arc::new(NoInput),
+        input: None,
         session_id: "session-e2e".to_owned(),
         agent: "end-to-end".to_owned(),
         model: Some(current_model()),

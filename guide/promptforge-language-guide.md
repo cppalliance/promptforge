@@ -7734,7 +7734,7 @@ The map form has three keys, and plain and map entries mix freely in one list:
 
 With `optional: true`, a capability the host lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a host without `io.github.corp/mcp` still runs the prompt.
 
-`config` accepts any YAML value without a shape check. A capability receives only the run's filesystem and cancel signal when it activates, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the host, never from the prompt.
+`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the host, never from the prompt.
 
 ### How declarations are matched
 

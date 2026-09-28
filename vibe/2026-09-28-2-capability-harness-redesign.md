@@ -695,7 +695,7 @@ Each work item lands with tests at the layer it changes; the user-input migratio
 
 <step-4>
 
-### Step 4: Supply user input through an optional per-run broker
+### Step 4: Supply user input through an optional per-run broker [completed]
 
 - Component: Capability contract
 - Piece: Input broker and declared needs (first of two steps)

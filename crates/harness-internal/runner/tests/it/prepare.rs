@@ -3,7 +3,9 @@
 //! failed; a prompt that does not parse fails the same way under the
 //! `Parse` kind; each preparation draws a fresh seed and start, both
 //! written to `runs`; and the prepared tool performer resolves a
-//! `ToolCall` effect's id in the activated table.
+//! `ToolCall` effect's id in the activated table. The host's optional
+//! input broker - handed to every activated capability and answering
+//! `user_input()` - sits in the `input` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,6 +24,9 @@ use promptforge::cancel::CancelHandle;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
 use crate::support::Unused;
+
+#[path = "prepare-input.rs"]
+mod input;
 
 /// A prompt declaring `promptforge/web` as a required capability that no
 /// registry here provides.
@@ -61,7 +66,7 @@ fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Servi
         cancel: CancelHandle::new(),
         log: Arc::clone(log),
         chat: Arc::new(Unused),
-        input: Arc::new(Unused),
+        input: None,
         session_id: "session-1".to_owned(),
         agent: "prepare-test".to_owned(),
         model: None,

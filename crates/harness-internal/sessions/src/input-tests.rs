@@ -4,7 +4,7 @@ use super::*;
 
 use std::sync::Arc;
 
-use harness_runner::performers::InputPerformer;
+use harness_capabilities::InputBroker;
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::effect::{Effect, EffectAnswer};
@@ -179,7 +179,7 @@ fn broker_fixture() -> (
 async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     assert_eq!(
         registry.unresolved(),
@@ -189,15 +189,11 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     registry
         .complete(&token, GNARLY.to_owned())
         .expect("the wait completes");
-    let outcome = call
+    let text = call
         .await
         .expect("the task joins")
         .expect("the broker answers");
-    assert_eq!(
-        outcome,
-        InputOutcome::Text(GNARLY.to_owned()),
-        "the operator's text returns byte-exact"
-    );
+    assert_eq!(text, GNARLY, "the operator's text returns byte-exact");
     assert!(
         matches!(
             socket.try_recv(),
@@ -211,7 +207,7 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
 async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     call.abort();
     let joined = call.await;
@@ -235,7 +231,7 @@ async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
 async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     registry.cancel(&token);
     let error = call
@@ -253,10 +249,10 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
 
 #[tokio::test]
 async fn a_user_input_effect_is_answered_when_the_registry_receives_the_text() {
-    // The performer against a real engine effect: a section parked on
-    // `user_input()` issues `Effect::UserInput`, the performer opens the
-    // wait for it, the registry completes with the operator's text, and
-    // the answer resumes the run to its result.
+    // The broker against a real engine effect: a section parked on
+    // `user_input()` issues `Effect::UserInput`, the broker opens the wait
+    // for it, the registry completes with the operator's text, and the
+    // answer resumes the run to its result.
     let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n---\n\n\
                   # Ask\n\n## Only\n\n```lua\nreturn user_input()\n```\n";
     let (prompt, _parse_events) = Prompt::parse(source, "ask");
@@ -271,20 +267,23 @@ async fn a_user_input_effect_is_answered_when_the_registry_receives_the_text() {
     };
     assert_eq!(effects.len(), 1, "one wait, one effect");
     let (id, _provenance, effect) = effects.remove(0);
-    let Effect::UserInput { execution, section } = effect else {
+    let Effect::UserInput { .. } = effect else {
         panic!("a parked user_input() issues a UserInput effect, got {effect:?}");
     };
 
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let wait = spawn_tagged(mock_tag(), broker.wait(execution, section));
+    let wait = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     registry
         .complete(&token, "typed by the operator".to_owned())
         .expect("the wait completes");
-    let answer = wait.await.expect("the wait task joins");
+    let text = wait
+        .await
+        .expect("the wait task joins")
+        .expect("the broker answers");
 
-    run.resume(id, EffectAnswer::UserInput(answer));
+    run.resume(id, EffectAnswer::UserInput(Ok(InputOutcome::Text(text))));
     let Step::Done { result, .. } = run.step() else {
         panic!("the answered wait finishes the run");
     };

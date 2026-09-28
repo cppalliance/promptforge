@@ -19,8 +19,9 @@
 //! [`VfsStore`], [`LogTaskEvents`], and [`ActivatedTools`] - because each
 //! is machinery it already holds: tokio's timer wheel, the engine's store
 //! operation, the run log, and the tool table run preparation activated.
-//! The chat and input performers live with what they reach: the gateway
-//! client and the session's input wait.
+//! The chat performer lives with what it reaches, the gateway client; run
+//! preparation builds the input performer over the host's optional input
+//! broker.
 
 use std::future::Future;
 use std::pin::Pin;

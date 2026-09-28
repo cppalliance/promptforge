@@ -1,11 +1,10 @@
-//! The session's input broker: the harness's [`InputPerformer`], which
-//! suspends an agent prompt's `UserInput` effect until its operator
-//! answers, guarded so a dying wait is an outcome, never silence.
+//! The session's input broker: the harness's [`InputBroker`], which
+//! suspends an agent prompt's wait for input until its operator answers,
+//! guarded so a dying wait is an outcome, never silence.
 
 use std::sync::Arc;
 
-use harness_runner::performers::{BoxFuture, InputPerformer};
-use promptforge::input::{InputError, InputOutcome};
+use harness_capabilities::{InputBroker, InputError};
 use tokio::sync::broadcast;
 
 use super::{WaitFrame, WaitRegistry};
@@ -45,11 +44,11 @@ impl Drop for WaitGuard {
     }
 }
 
-/// The session's wait registry behind the harness's input performer:
-/// what the engine's `UserInput` effect, issued for the script-side
+/// The session's wait registry behind the harness's input broker: what
+/// the engine's `UserInput` effect, issued for the script-side
 /// `user_input()`, suspends on.
 ///
-/// One broker per session: each [`wait`](InputPerformer::wait) opens a
+/// One broker per session: each [`wait`](InputBroker::wait) opens a
 /// wait in the session's [`WaitRegistry`], announces it with the durable
 /// [`WaitFrame::Required`], and suspends on the receiver until the
 /// session delivers the operator's answer or the wait dies. A dying wait
@@ -96,47 +95,40 @@ impl SessionInputBroker {
     }
 }
 
-impl InputPerformer for SessionInputBroker {
+#[async_trait::async_trait]
+impl InputBroker for SessionInputBroker {
     /// Opens a wait, announces it, and suspends until it resolves.
     ///
     /// On cancellation - the future dropped mid-await, or the wait
     /// cancelled out of the registry - the drop guard removes the wait and
     /// pushes [`WaitFrame::Cancelled`], so no path leaks a wait or a stale
     /// prompt. A wait cancelled out of the registry resolves here as the
-    /// broker's failure policy: an [`InputError`] the engine raises at the
+    /// broker's failure policy: an [`InputError`] the run raises at the
     /// Lua call site.
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        let registry = Arc::clone(&self.registry);
-        let frames = self.frames.clone();
-        Box::pin(async move {
-            let (token, receiver) = registry.create();
-            let mut guard = WaitGuard {
-                registry,
-                frames,
-                token,
-                armed: true,
-            };
-            // No receiver means no socket is attached right now. Not a
-            // failure: the registry retains the wait and the session
-            // resends it on reconnect, so the lost push is repaired.
-            let _ = guard.frames.send(WaitFrame::Required {
-                token: guard.token.clone(),
-            });
-            match receiver.await {
-                Ok(text) => {
-                    guard.armed = false;
-                    Ok(InputOutcome::Text(text))
-                }
-                // The sender died without a value: the wait was cancelled
-                // out of the registry. The still-armed guard pushes the
-                // cancelled frame on scope exit, so this path clears the
-                // client's prompt too.
-                Err(_) => Err(InputError::message("the user-input wait was cancelled")),
+    async fn wait(&self) -> Result<String, InputError> {
+        let (token, receiver) = self.registry.create();
+        let mut guard = WaitGuard {
+            registry: Arc::clone(&self.registry),
+            frames: self.frames.clone(),
+            token,
+            armed: true,
+        };
+        // No receiver means no socket is attached right now. Not a
+        // failure: the registry retains the wait and the session resends
+        // it on reconnect, so the lost push is repaired.
+        let _ = guard.frames.send(WaitFrame::Required {
+            token: guard.token.clone(),
+        });
+        match receiver.await {
+            Ok(text) => {
+                guard.armed = false;
+                Ok(text)
             }
-        })
+            // The sender died without a value: the wait was cancelled out
+            // of the registry. The still-armed guard pushes the cancelled
+            // frame on scope exit, so this path clears the client's prompt
+            // too.
+            Err(_) => Err(InputError::message("the user-input wait was cancelled")),
+        }
     }
 }

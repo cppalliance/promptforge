@@ -18,6 +18,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 use promptforge::vfs::VfsRef;
 
+use crate::input::InputBroker;
 use crate::tool::Tool;
 
 #[cfg(test)]
@@ -108,11 +109,11 @@ pub trait Capability: Send + Sync {
 
 /// What a capability is given at activation.
 ///
-/// Non-exhaustive so new fields (the input broker, the model client) can
-/// be added when a bridge capability needs them without breaking existing
-/// capability implementations. Host-supplied per-capability config arrives
-/// here, never via the prompt.
-#[derive(Clone, Debug)]
+/// Non-exhaustive so new fields (the model client) can be added when a
+/// bridge capability needs them without breaking existing capability
+/// implementations. Host-supplied per-capability config arrives here,
+/// never via the prompt.
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct RunServices {
     /// The run's whole filesystem: the host roots and the declared store,
@@ -121,10 +122,15 @@ pub struct RunServices {
     /// The run's cancellation flag: the same synchronous handle the engine
     /// polls, so a capability observes the host's cancel by polling too.
     pub cancel: CancelHandle,
+    /// The operator's input broker, when the host has someone to ask.
+    /// `None` is a legitimate answer: a batch or eval host has nobody at
+    /// the other end. Present or absent, it stays so for the whole run.
+    pub input: Option<Arc<dyn InputBroker>>,
 }
 
 impl RunServices {
-    /// Builds the services handed to [`Capability::create`] for one run.
+    /// Builds the services handed to [`Capability::create`] for one run,
+    /// with no input broker.
     ///
     /// # Examples
     ///
@@ -134,10 +140,55 @@ impl RunServices {
     ///
     /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     /// assert!(!services.cancel.is_cancelled());
+    /// assert!(services.input.is_none());
     /// ```
     #[must_use]
     pub fn new(vfs: VfsRef, cancel: CancelHandle) -> RunServices {
-        RunServices { vfs, cancel }
+        RunServices {
+            vfs,
+            cancel,
+            input: None,
+        }
+    }
+
+    /// Supplies the run's input broker, returning the updated services.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use harness_capabilities::{InputBroker, InputError, RunServices};
+    /// use promptforge::cancel::CancelHandle;
+    ///
+    /// struct Scripted;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl InputBroker for Scripted {
+    ///     async fn wait(&self) -> Result<String, InputError> {
+    ///         Ok("hello".to_owned())
+    ///     }
+    /// }
+    ///
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
+    ///     .with_input(Arc::new(Scripted));
+    /// assert!(services.input.is_some());
+    /// ```
+    #[must_use]
+    pub fn with_input(mut self, broker: Arc<dyn InputBroker>) -> RunServices {
+        self.input = Some(broker);
+        self
+    }
+}
+
+impl std::fmt::Debug for RunServices {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunServices")
+            .field("vfs", &self.vfs)
+            .field("cancel", &self.cancel)
+            .field("input", &self.input.is_some())
+            .finish()
     }
 }
 

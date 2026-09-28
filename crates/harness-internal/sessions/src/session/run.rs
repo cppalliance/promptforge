@@ -91,10 +91,10 @@ pub(crate) async fn run_once(
         cancel: cancel.clone(),
         log: Arc::clone(&core.log),
         chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),
-        input: Arc::new(SessionInputBroker::new(
+        input: Some(Arc::new(SessionInputBroker::new(
             Arc::clone(&core.waits),
             core.wait_frames.clone(),
-        )),
+        ))),
         session_id: core.id.as_str().to_owned(),
         agent: core.agent.clone(),
         model,

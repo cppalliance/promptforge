@@ -1,6 +1,6 @@
 //! The user-input wait: the [`WaitRegistry`] of single-use wait tokens,
 //! the session's input broker behind the script-side `user_input()` (the
-//! harness's `InputPerformer`), and the producer seam that completes a
+//! harness's `InputBroker`), and the producer seam that completes a
 //! wait with the operator's text.
 //!
 //! An agent prompt asks its operator for input through the session's
