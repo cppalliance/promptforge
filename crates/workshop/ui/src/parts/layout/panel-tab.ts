@@ -99,6 +99,13 @@ export class PanelTab extends Disposable implements ITabRenderer {
     close.className = "dv-default-tab-action";
     close.setAttribute("aria-label", "Close");
     close.textContent = "×";
+    close.tabIndex = -1;
+    // Dockview's tab wrapper activates the panel and its group on
+    // pointerdown unless the event is default-prevented, as its own
+    // DefaultTab action does.
+    close.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+    });
     close.addEventListener("click", (event) => {
       event.stopPropagation();
       closePanel(api.id);

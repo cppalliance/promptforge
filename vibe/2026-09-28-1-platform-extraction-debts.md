@@ -271,7 +271,7 @@ Three components, built in dependency order. Each is useful on its own and resem
 
 <step-2>
 
-### Step 2: Stop the close button from activating its tab
+### Step 2: Stop the close button from activating its tab [completed]
 
 - Component: Generic tab close parity
 - Piece: close button (D1-2). Built before the keyboard piece, sequentially: the two pieces share `panel-tab.ts` but not code, and this one is the smaller, self-contained change.

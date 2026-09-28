@@ -19,6 +19,8 @@
 // Close acts on the clicked tab rather than the active one, and Close
 // Others on the clicked tab's group; a non-closable tab has no X and opens
 // no menu; the X on an unsaved editor prompts, and Cancel keeps the tab;
+// the X on another group's background tab closes it without activating
+// it or its group, and every X is out of the tab order;
 // Delete and Backspace on a focused tab leave a non-closable tab open,
 // prompt on an unsaved editor (Cancel keeps it), and close a clean tab.
 // Run: node --test test/tab-menu.mjs
@@ -478,6 +480,28 @@ check("Cancel keeps the unsaved editor's tab", isOpen(unsaved) && partOf(unsaved
 closeButton(probeB)?.click();
 await flush();
 check("the X closes a clean panel", !isOpen(probeB));
+
+// --- The X never activates its tab ----------------------------------------------
+
+const sideFront = await open("side", { instance: "front" });
+check(
+  "the side zone holds a background tab behind its active one",
+  side.group === sideFront.group && side.group.activePanel === sideFront,
+);
+unsaved.api.setActive();
+await flush();
+const closeX = closeButton(side);
+closeX?.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+closeX?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+await flush();
+check("the X on another group's background tab closes it", !isOpen(side));
+check("the X on another group's tab leaves the active group active", dock.activeGroup === unsaved.group);
+check("the X on another group's tab leaves the active panel active", dock.activePanel === unsaved);
+const dockButtons = [...window.document.querySelectorAll(".ws-dock .dv-default-tab-action")];
+check(
+  "every close button in the dock is out of the tab order",
+  dockButtons.length > 0 && dockButtons.every((candidate) => candidate.tabIndex === -1),
+);
 
 // --- Delete and Backspace on a focused tab: the X's path ------------------------
 
