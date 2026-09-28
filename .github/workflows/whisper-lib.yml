@@ -234,16 +234,70 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Assemble SHA256SUMS
-        working-directory: dist
-        run: sha256sum *.zip > SHA256SUMS
+      # Released gateways pin each archive's sha256 and a rebuilt archive
+      # differs byte for byte, so a republish adds only the archives the
+      # release lacks and replaces SHA256SUMS after they land. It refuses a
+      # release whose archives and SHA256SUMS disagree, as a failed upload
+      # leaves one. The script reads only GH_TOKEN, GITHUB_REPOSITORY,
+      # WHISPER_TAG, and dist/, so it runs unchanged outside Actions.
+      - name: Publish the release add-only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?is empty; set it to a token with contents: write on GITHUB_REPOSITORY}"
+          : "${GITHUB_REPOSITORY:?is empty; set it to the owner/name that holds the release}"
+          : "${WHISPER_TAG:?is empty; set it to the whisper.cpp tag the dist/ archives were built from}"
+          export GH_REPO="$GITHUB_REPOSITORY" LC_ALL=C
+          release="whisper-lib-$WHISPER_TAG"
+          shopt -s nullglob
+          archives=()
+          for path in dist/*.zip; do archives+=("${path#dist/}"); done
+          if ((${#archives[@]} == 0)); then
+            echo "dist/ holds no .zip archive; the publish needs at least one" >&2
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          sums="$work/SHA256SUMS"
 
-      - name: Publish the release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: whisper-lib-${{ env.WHISPER_TAG }}
-          name: whisper-lib-${{ env.WHISPER_TAG }}
-          make_latest: false
-          files: |
-            dist/*.zip
-            dist/SHA256SUMS
+          if ! held="$(gh release view "$release" --json assets --jq '.assets[].name' 2>"$work/view.err")"; then
+            if ! grep -qx 'release not found' "$work/view.err"; then
+              cat "$work/view.err" >&2
+              exit 1
+            fi
+            (cd dist && sha256sum "${archives[@]}") | tee "$sums"
+            gh release create "$release" --title "$release" --notes "" --latest=false \
+              "${archives[@]/#/dist/}" "$sums"
+            echo "published $release with ${#archives[@]} archives"
+            exit 0
+          fi
+
+          if grep -qx SHA256SUMS <<<"$held"; then
+            gh release download "$release" --pattern SHA256SUMS --dir "$work"
+          else
+            : >"$sums"
+          fi
+          on_release="$(awk '/\.zip$/' <<<"$held" | sort)"
+          listed="$(sed -E '/^$/d; s/^[0-9a-f]{64} [ *]//' "$sums" | sort)"
+          if [[ "$on_release" != "$listed" ]]; then
+            unlisted="$(comm -23 <(echo "$on_release") <(echo "$listed") | sed '/^$/d' | paste -sd' ' -)"
+            unheld="$(comm -13 <(echo "$on_release") <(echo "$listed") | sed '/^$/d' | paste -sd' ' -)"
+            echo "$release is inconsistent: its .zip assets and SHA256SUMS lines must name the same archives." \
+              "Assets without a line: [$unlisted]. Lines without an asset: [$unheld]." >&2
+            exit 1
+          fi
+          new=()
+          for name in "${archives[@]}"; do
+            grep -qxF "$name" <<<"$on_release" || new+=("$name")
+          done
+          if ((${#new[@]} == 0)); then
+            echo "$release already holds every archive in dist/; nothing uploaded"
+            exit 0
+          fi
+          [[ -z "$(tail -c1 "$sums")" ]] || echo >>"$sums"
+          (cd dist && sha256sum "${new[@]}") | tee -a "$sums"
+          gh release upload "$release" "${new[@]/#/dist/}"
+          gh release upload "$release" "$sums" --clobber
+          echo "added ${#new[@]} archives to $release"
