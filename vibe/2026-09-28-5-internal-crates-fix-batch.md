@@ -614,7 +614,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-3>
 
-### Step 3: Keep cancellation ahead of `xpcall` handlers and refuse finalizers
+### Step 3: Keep cancellation ahead of `xpcall` handlers and refuse finalizers [completed]
 
 - Component: Lua sandbox
 - Piece: Lua cancellation, the first of the component's two pieces, built sequentially. The pieces share no file and have separate test sets, and cancellation goes first, as the plan orders.

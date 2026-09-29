@@ -22,9 +22,9 @@ local gsub = string.gsub
 -- for the author's metatable instead.
 local guard = { __metatable = "_G is guarded" }
 
--- The guard's own fields. Every other field of the author's metatable is
--- copied onto the guard when the author sets it, so `_G` keeps the
--- author's other metamethods.
+-- The guard's own fields. Every other field of the author's metatable
+-- except `__mode` is copied onto the guard when the author sets it, so
+-- `_G` keeps the author's other metamethods but never becomes weak.
 local own = { __index = true, __newindex = true, __metatable = true }
 
 -- `argv` and `prose` never reach the author: `argv` serves the frozen value
@@ -75,7 +75,7 @@ local function forward(author)
   end
   if author == nil then return end
   for key, value in next, author do
-    if not own[key] then guard[key] = value end
+    if not own[key] and key ~= "__mode" then guard[key] = value end
   end
 end
 
@@ -86,9 +86,14 @@ local function named(message, name)
 end
 
 -- Re-raising at level 2 puts the caller's position on the message, where
--- the base function's own error would have put it.
+-- the base function's own error would have put it. Lua marks a value for
+-- finalization only when its metatable already has `__gc` at this call, so
+-- refusing it here keeps finalizers out for good.
 local function replace_metatable(...)
   local target, metatable = ...
+  if type(metatable) == "table" and rawget(metatable, "__gc") ~= nil then
+    error("setmetatable: finalizers (__gc) are not available in the sandbox", 2)
+  end
   if not rawequal(target, globals) then
     local ok, result = pcall(base_setmetatable, ...)
     if not ok then error(named(result, "setmetatable"), 2) end
@@ -101,6 +106,9 @@ local function replace_metatable(...)
   local author = state.author
   if author ~= nil and rawget(author, "__metatable") ~= nil then
     error("cannot change a protected metatable", 2)
+  end
+  if metatable ~= nil and rawget(metatable, "__mode") ~= nil then
+    error("setmetatable: weak tables (__mode) are not available for _G", 2)
   end
   forward(metatable)
   state.author = metatable

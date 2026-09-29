@@ -83,7 +83,9 @@ end
 
 -- The message handler sees the normalized failure; a non-function handler
 -- is left to the raw xpcall so its own argument error is unchanged. Under
--- cancellation the handler's result is raised again instead of returned.
+-- cancellation the author's handler never runs and the raw failure is
+-- raised again: the hook's abort calls the message handler while hooks
+-- are off, so a looping handler could not be interrupted.
 local function xpcall_outcome(ok, ...)
   if not ok and cancel_requested() then error((...), 0) end
   return ok, ...
@@ -94,6 +96,7 @@ local function protected_xcall(f, handler, ...)
     return xpcall_outcome(raw_xpcall(f, handler, ...))
   end
   return xpcall_outcome(raw_xpcall(f, function(failure)
+    if cancel_requested() then return failure end
     return handler(normalize_failure(failure))
   end, ...))
 end

@@ -2304,6 +2304,59 @@ fn a_pcall_failure_without_a_cancel_flag_still_returns_false_and_the_error() {
 }
 
 #[test]
+fn a_cancelled_run_skips_a_looping_xpcall_message_handler() {
+    let outcome = start_cancelled_block(
+        "xpcall(function() while true do end end, function() while true do end end)",
+    );
+    assert!(
+        matches!(outcome, Err(Error::Interrupted)),
+        "a message handler must not run under cancellation, got {outcome:?}"
+    );
+}
+
+#[test]
+fn an_xpcall_message_handler_without_a_cancel_flag_still_receives_the_failure() {
+    let step = shim_vm(None)
+        .start_block_coro(&program(
+            "local ok, handled = xpcall(error, function(e) return 'handled ' .. tostring(e) end, 'boom')\n\
+             return tostring(ok) .. '|' .. tostring(handled)",
+        ))
+        .expect("a handled failure must not fail the block");
+    let CoroStep::Done(LuaBlockResult::Returned(returned)) = step else {
+        panic!("the block must return, got {step:?}");
+    };
+    assert_eq!(returned.as_deref(), Some("false|handled boom"));
+}
+
+#[test]
+fn setmetatable_refuses_finalizers_and_weak_globals_but_keeps_g_handlers() {
+    let step = shim_vm(None)
+        .start_block_coro(&program(
+            "local _, gc = pcall(function() setmetatable({}, { __gc = function() end }) end)\n\
+             local _, mode = pcall(function() setmetatable(_G, { __mode = 'v' }) end)\n\
+             setmetatable(_G, { __index = function(_, key) return 'fallback ' .. key end })\n\
+             return tostring(gc) .. '|' .. tostring(mode) .. '|' .. missing_name",
+        ))
+        .expect("the refusals are caught and the handler installs");
+    let CoroStep::Done(LuaBlockResult::Returned(Some(returned))) = step else {
+        panic!("the block must return a string, got {step:?}");
+    };
+    let parts: Vec<&str> = returned.split('|').collect();
+    let [gc, mode, fallback] = parts.as_slice() else {
+        panic!("expected three parts, got {returned}");
+    };
+    assert!(
+        gc.ends_with("setmetatable: finalizers (__gc) are not available in the sandbox"),
+        "a __gc metatable must be refused: {gc}"
+    );
+    assert!(
+        mode.ends_with("setmetatable: weak tables (__mode) are not available for _G"),
+        "a weak _G must be refused: {mode}"
+    );
+    assert_eq!(*fallback, "fallback missing_name");
+}
+
+#[test]
 fn add_without_declarations_fails_as_unbound_in_a_chunk() {
     let error = run("tools.add('web_search')", "").expect_err("an unbound alias must fail loudly");
     assert!(
