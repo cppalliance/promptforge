@@ -61,7 +61,7 @@ let result = loop {
                 let answer = match effect {
                     Effect::Chat { .. } => {
                         let reply = CompletionResult::Text("a canned reply".to_owned());
-                        EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "canned"))))
+                        EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "canned")?)))
                     }
                     Effect::ToolCall { .. } => {
                         EffectAnswer::ToolCall(Err(ToolError::message("this host has no tools")))
@@ -171,7 +171,7 @@ assert_eq!(record, EffectRecord::Timer { seconds: 0.5 });
 assert_eq!(serde_json::to_string(&record)?, r#"{"Timer":{"seconds":0.5}}"#);
 
 let reply = CompletionResult::Text("the reply".to_owned());
-let answer = EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "test-model"))));
+let answer = EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "test-model")?)));
 assert_eq!(
     answer.record(),
     AnswerRecord::Chat(Ok(ChatAnswerRecord {

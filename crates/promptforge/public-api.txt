@@ -22,6 +22,7 @@
 #[non_exhaustive] pub enum promptforge::tools::ToolCatalogErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolIdErrorKind
+#[non_exhaustive] pub enum promptforge::transport::ClientError
 #[non_exhaustive] pub enum promptforge::vfs::FileType
 #[non_exhaustive] pub enum promptforge::vfs::PathReason
 #[non_exhaustive] pub enum promptforge::vfs::StoreOp
@@ -411,7 +412,6 @@ pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
 pub enum promptforge::event::DebugMode
-pub enum promptforge::transport::ClientError
 pub enum promptforge::vfs::Mode
 pub enum promptforge::vfs::Op
 pub enum promptforge::vfs::StoreOutcome
@@ -510,7 +510,7 @@ pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option
 pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
 pub fn promptforge::model::Completion::client_timing(&self) -> core::option::Option<&promptforge::metrics::ClientTiming>
 pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
-pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::Completion, promptforge::transport::ClientError>
 pub fn promptforge::model::Completion::llama_timings(&self) -> core::option::Option<&promptforge::metrics::LlamaTimings>
 pub fn promptforge::model::Completion::model(&self) -> &str
 pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
@@ -568,7 +568,7 @@ pub fn promptforge::model::ToolArguments::is_empty(&self) -> bool
 pub fn promptforge::model::ToolArguments::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn promptforge::model::ToolArguments::to_json_string(&self) -> alloc::string::String
 pub fn promptforge::model::ToolCall::arguments(&self) -> promptforge::model::ToolArguments<'_>
-pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> promptforge::model::ToolCall
+pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> core::result::Result<promptforge::model::ToolCall, promptforge::transport::ClientError>
 pub fn promptforge::model::ToolCall::id(&self) -> &str
 pub fn promptforge::model::ToolCall::name(&self) -> &str
 pub fn promptforge::prompt::ArgDecl::default(&self) -> core::option::Option<&serde_yaml_ng::value::Value>

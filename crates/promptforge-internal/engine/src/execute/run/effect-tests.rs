@@ -89,10 +89,10 @@ fn a_chat_answer_with_tool_calls_records_their_names_in_call_order_and_no_reply(
 
 #[test]
 fn a_canned_chat_answer_records_no_finish_reason() {
-    let answer = EffectAnswer::Chat(Ok(Box::new(Completion::from_result(
-        CompletionResult::Text("canned".to_owned()),
-        "canned-model",
-    ))));
+    let completion =
+        Completion::from_result(CompletionResult::Text("canned".to_owned()), "canned-model")
+            .expect("a text result is accepted");
+    let answer = EffectAnswer::Chat(Ok(Box::new(completion)));
     assert_eq!(
         answer.record(),
         AnswerRecord::Chat(Ok(ChatAnswerRecord {

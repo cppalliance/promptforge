@@ -6,8 +6,9 @@
 //! preserve it as their source. It is public so a transport can build the
 //! [`CompletionError`](crate::model::CompletionError) it answers with, and
 //! so `promptforge-engine` can map every variant back onto its own
-//! internal type verbatim. It is not marked `#[non_exhaustive]`, so that
-//! mapping stays total.
+//! internal type verbatim. It is `#[non_exhaustive]`, so a variant can be
+//! added without breaking a transport; a `match` over it outside this
+//! crate ends in a wildcard arm.
 
 /// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -37,10 +38,11 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 ///   [`MalformedResponse`](Error::MalformedResponse) or
 ///   [`MalformedResponseSource`](Error::MalformedResponseSource)
 ///
-/// The read loop and the engine raise the rest. The engine maps every
-/// variant onto its own error type, so the enum is not
-/// `#[non_exhaustive]`.
+/// The read loop, the completion constructors, and the engine raise the
+/// rest. The enum is `#[non_exhaustive]`: a `match` over it outside this
+/// crate needs a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A required environment variable was missing.
     #[error("missing environment variable: {0}")]

@@ -540,8 +540,9 @@ impl From<crate::subst::SubstitutionError> for Error {
 /// Maps the gateway-client error type back onto this one variant for
 /// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
 /// classification are unchanged by the extraction. The client crate's
-/// error type is not `#[non_exhaustive]` (the two crates version together), so
-/// this match is total.
+/// error type is `#[non_exhaustive]`; a variant this match does not name
+/// becomes [`Error::Config`] with its display text and itself as the source,
+/// so it classifies as a completion failure that is not retryable.
 impl From<GatewayClientError> for Error {
     fn from(error: GatewayClientError) -> Error {
         match error {
@@ -567,6 +568,10 @@ impl From<GatewayClientError> for Error {
                 finish_reason,
             },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
+            other => Error::Config {
+                message: other.to_string(),
+                source: Box::new(other),
+            },
         }
     }
 }

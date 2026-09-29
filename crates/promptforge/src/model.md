@@ -78,7 +78,7 @@ let result = loop {
                         assert_eq!(messages[0].role(), "user");
                         assert_eq!(messages[0].content(), "ping");
                         let reply = CompletionResult::Text("pong".to_owned());
-                        let completion = Completion::from_result(reply, binding.id().name());
+                        let completion = Completion::from_result(reply, binding.id().name())?;
                         EffectAnswer::Chat(Ok(Box::new(completion)))
                     }
                     _ => EffectAnswer::Dropped,
@@ -319,7 +319,7 @@ assert_eq!(result.content(), "src/lib.rs, src/model.rs");
 
 A [`Completion`] is one finished model round. Its [`Completion::result`] is a [`CompletionResult`], which is either [`CompletionResult::Text`] for a final text reply or [`CompletionResult::ToolCalls`] for a batch of requested tool calls. Each [`ToolCall`] exposes its id, its tool name, and a typed [`ToolArguments`] view of its arguments, so the host never handles raw JSON. Beside the result, a completion carries the round's metadata: the serving model, the finish reason, the reasoning text, token usage, and timings.
 
-A host with a transport gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). A host without one, such as a test or a replay, builds it with [`Completion::from_result`], and builds scripted tool calls with [`ToolCall::from_parts`]. A completion built this way reports the model name it was given, and the rest of its metadata is absent.
+A host with a transport gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). A host without one, such as a test or a replay, builds it with [`Completion::from_result`], and builds scripted tool calls with [`ToolCall::from_parts`]. Both refuse, with a [`ClientError`](crate::transport::ClientError), a blank call id or name, arguments that are not a JSON object, an empty tool-call batch, and duplicate call ids. A completion built this way reports the model name it was given, and the rest of its metadata is absent.
 
 ````
 use promptforge::effect::EffectAnswer;
@@ -329,8 +329,8 @@ let call = ToolCall::from_parts(
     "call_1",
     "fetch",
     serde_json::json!({ "url": "https://example.com" }),
-);
-let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "house-model");
+)?;
+let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "house-model")?;
 assert_eq!(completion.model(), "house-model");
 assert_eq!(completion.finish_reason(), None);
 assert!(completion.usage().is_none());
@@ -350,6 +350,7 @@ assert_eq!(tool_result.role(), "tool");
 
 let answer = EffectAnswer::Chat(Ok(Box::new(completion)));
 assert!(matches!(answer, EffectAnswer::Chat(Ok(_))));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
 When a run receives [`CompletionResult::ToolCalls`], it issues one [`Effect::ToolCall`](crate::effect::Effect::ToolCall) per call. A call whose name is outside the tool scope advertised for that round fails as out of scope. [`CompletionResult`] is `#[non_exhaustive]`, and the run fails with an internal error on any variant it does not recognize, so a host answers only with [`CompletionResult::Text`] or [`CompletionResult::ToolCalls`].
@@ -566,7 +567,7 @@ There is no constructor for a `system` message or a multimodal message. Only the
 
 [`Completion`] is one finished model round: the text or tool-call outcome plus the round's metadata. The host answers an [`Effect::Chat`](crate::effect::Effect::Chat) with an [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat) holding `Ok(Box::new(completion))`. A host with a transport gets one from [`read_completion_stream`](crate::transport::read_completion_stream).
 
-[`Completion::from_result`] builds a completion without a transport, for a test or a replay. It takes two arguments and cannot fail.
+[`Completion::from_result`] builds a completion without a transport, for a test or a replay. It takes two arguments and returns a [`Result`]. It refuses a [`CompletionResult::ToolCalls`] batch that is empty, with [`ClientError::EmptyModelReply`](crate::transport::ClientError::EmptyModelReply), or that holds two calls with one id, with [`ClientError::MalformedResponse`](crate::transport::ClientError::MalformedResponse). A text result is accepted as given.
 
 - `result`, a [`CompletionResult`], is the round's outcome: [`CompletionResult::Text`] for a reply or [`CompletionResult::ToolCalls`] for a tool batch.
 - `model`, anything that converts [`Into`] a [`String`], is the model name that [`Completion::model`] reports. It is not validated.
@@ -596,13 +597,13 @@ The run fails with an internal error on any variant it does not recognize, so an
 
 ## ToolCall
 
-[`ToolCall`] is one requested tool call: its id, the tool's name, and its arguments. The host receives calls inside [`CompletionResult::ToolCalls`]. The model sends the arguments as a JSON-encoded string, and the call holds them parsed, or as a JSON string when they are not valid JSON.
+[`ToolCall`] is one requested tool call: its id, the tool's name, and its arguments. The host receives calls inside [`CompletionResult::ToolCalls`]. The model sends the arguments as a JSON-encoded string, and the call holds them parsed into a JSON object.
 
-[`ToolCall::from_parts`] builds a call for a scripted or replayed round. It takes three arguments and cannot fail.
+[`ToolCall::from_parts`] builds a call for a scripted or replayed round. It takes three arguments and returns a [`Result`]. It refuses a blank `id` or `name`, and `arguments` that are not a JSON object, with [`ClientError::MalformedResponse`](crate::transport::ClientError::MalformedResponse).
 
-- `id`, anything that converts [`Into`] a [`String`], is the id of the call, which the tool result echoes back through [`Message::tool`]. It is not validated.
+- `id`, anything that converts [`Into`] a [`String`], is the id of the call, which the tool result echoes back through [`Message::tool`]. It must not be blank.
 - `name`, anything that converts [`Into`] a [`String`], is the tool to invoke, named by its prompt-local alias as advertised to the model. The run fails the call as out of scope when the name is outside the round's advertised tool scope.
-- `arguments`, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), is the argument payload, normally a JSON object.
+- `arguments`, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), is the argument payload, which must be a JSON object.
 
 The accessors take `&self` and cannot fail.
 

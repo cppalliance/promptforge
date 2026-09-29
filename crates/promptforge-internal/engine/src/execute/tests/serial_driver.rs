@@ -25,19 +25,18 @@ use crate::test_support::drive;
 
 /// A canned text reply from the test model.
 pub(super) fn text_reply(text: &str) -> EffectAnswer {
-    EffectAnswer::Chat(Ok(Box::new(Completion::from_result(
-        CompletionResult::Text(text.to_owned()),
-        "test-model",
-    ))))
+    let completion = Completion::from_result(CompletionResult::Text(text.to_owned()), "test-model")
+        .expect("a text result is accepted");
+    EffectAnswer::Chat(Ok(Box::new(completion)))
 }
 
 /// A canned tool-call round from the test model: one call, `name` with
 /// `arguments`, under `call_id`.
 pub(super) fn tool_call_reply(call_id: &str, name: &str, arguments: Value) -> EffectAnswer {
-    EffectAnswer::Chat(Ok(Box::new(Completion::from_result(
-        CompletionResult::ToolCalls(vec![ToolCall::from_parts(call_id, name, arguments)]),
-        "test-model",
-    ))))
+    let call = ToolCall::from_parts(call_id, name, arguments).expect("a scripted call is whole");
+    let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "test-model")
+        .expect("a one-call batch is accepted");
+    EffectAnswer::Chat(Ok(Box::new(completion)))
 }
 
 /// The first user message of a `Chat` effect, read off its record: the

@@ -349,7 +349,7 @@ Put the [`ClientTimeout`] itself into [`ClientError::Http`] or [`ClientError::Ba
 
 ## ClientError
 
-[`ClientError`] says why a model round failed, as a transport builds it. A transport constructs a variant directly, then converts it into a [`CompletionError`](crate::model::CompletionError) through [`From`] or [`Into`]. [`CompletionError::kind`](crate::model::CompletionError::kind) then classifies it into a [`CompletionErrorKind`](crate::model::CompletionErrorKind), and [`CompletionError::is_retryable`](crate::model::CompletionError::is_retryable) gives its retry class. [`ClientError`] is not `#[non_exhaustive]`, so a `match` over it can be exhaustive.
+[`ClientError`] says why a model round failed, as a transport builds it. A transport constructs a variant directly, then converts it into a [`CompletionError`](crate::model::CompletionError) through [`From`] or [`Into`]. [`CompletionError::kind`](crate::model::CompletionError::kind) then classifies it into a [`CompletionErrorKind`](crate::model::CompletionErrorKind), and [`CompletionError::is_retryable`](crate::model::CompletionError::is_retryable) gives its retry class. [`ClientError`] is `#[non_exhaustive]`, so a `match` over it needs a wildcard arm.
 
 The codec functions raise [`ClientError::Http`] for a mid-stream error envelope, and they raise [`ClientError::MalformedResponse`], [`ClientError::MalformedResponseSource`], and [`ClientError::EmptyModelReply`], each already inside the returned [`CompletionError`](crate::model::CompletionError). The library raises [`ClientError::ModelSetLock`]. A transport builds the others, and it also builds the two malformed variants for a body it decodes itself.
 

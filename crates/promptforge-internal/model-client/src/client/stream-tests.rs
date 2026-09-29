@@ -37,6 +37,49 @@ fn scanner_splits_data_lines_and_skips_noise() {
 }
 
 #[test]
+fn a_data_line_read_one_byte_at_a_time_is_returned_whole_once_its_newline_arrives() {
+    let stream = b"data: {\"a\":1}\r\n: keep-alive\ndata: [DONE]\n";
+    let newlines: Vec<usize> = (0..stream.len())
+        .filter(|index| stream[*index] == b'\n')
+        .collect();
+    let mut scanner = SseScanner::new();
+    let mut returned = Vec::new();
+    for (index, byte) in stream.iter().enumerate() {
+        scanner.extend(std::slice::from_ref(byte));
+        while let Some(data) = scanner.next_data() {
+            returned.push((index, data));
+        }
+    }
+    assert_eq!(
+        returned,
+        [
+            (newlines[0], "{\"a\":1}".to_owned()),
+            (newlines[2], "[DONE]".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn a_chunk_with_a_null_error_parses_as_an_ordinary_chunk() {
+    let mut accumulator = StreamAccumulator::new();
+    let chunk = serde_json::json!({
+        "error": null,
+        "choices": [{ "index": 0, "delta": { "content": "hi" } }]
+    });
+    let applied = accumulator
+        .apply(&chunk.to_string(), &no_delta)
+        .expect("a null error is not an error envelope");
+    assert_eq!(applied, Applied::Chunk { delta: true });
+    assert_eq!(
+        accumulator
+            .into_body()
+            .pointer("/choices/0/message/content")
+            .and_then(Value::as_str),
+        Some("hi")
+    );
+}
+
+#[test]
 fn streamed_accumulation_matches_the_buffered_fixture_byte_for_byte() {
     // The buffered llama.cpp fixture from the normalize suite, split
     // into a streamed form: the reassembled body must normalize to the

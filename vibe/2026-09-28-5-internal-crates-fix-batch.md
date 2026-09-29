@@ -586,7 +586,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-2>
 
-### Step 2: Validate host-built completions, fix the SSE scan, and mark `ClientError` non-exhaustive
+### Step 2: Validate host-built completions, fix the SSE scan, and mark `ClientError` non-exhaustive [completed]
 
 - Component: Model client
 - Piece: the `promptforge-model-client` fixes, built jointly in one commit. The validating constructors must land with every caller they break, and `#[non_exhaustive]` with every wildcard arm it forces. One test set covers the whole item: the crate's unit tests with the engine tests and facade doctests that build completions.

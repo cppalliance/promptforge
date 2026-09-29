@@ -17,6 +17,8 @@
 //! completion: a malformed section degrades to `None` with a returned
 //! diagnostic naming it.
 
+use std::collections::HashSet;
+
 use promptforge_types::metrics::{LlamaTimings, Usage, VllmMetrics};
 use serde::Deserialize;
 use serde_json::Value;
@@ -186,7 +188,7 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
 /// rejected rather than coerced.
 pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
     let mut calls = Vec::with_capacity(raw_calls.len());
-    let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen_ids = HashSet::new();
     for raw in raw_calls {
         if !raw.is_object() {
             return Err(Error::MalformedResponse(
@@ -208,14 +210,8 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no string id".into()))?;
-        if id.trim().is_empty() {
-            return Err(Error::MalformedResponse("tool call id was blank".into()));
-        }
-        if !seen_ids.insert(id) {
-            return Err(Error::MalformedResponse(format!(
-                "duplicate tool call id {id:?} within one turn"
-            )));
-        }
+        check_call_id(id)?;
+        check_unique_call_id(&mut seen_ids, id)?;
         let function = raw
             .get("function")
             .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
@@ -228,9 +224,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
             .get("name")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no string name".into()))?;
-        if name.trim().is_empty() {
-            return Err(Error::MalformedResponse("tool call name was blank".into()));
-        }
+        check_call_name(name)?;
         // OpenAI encodes `function.arguments` as a JSON string. It must be
         // present, a string, and decode to a JSON object - the shape tools
         // accept. Missing, null, non-string, invalid-JSON, and non-object
@@ -242,11 +236,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
                         "tool call arguments were not valid JSON: {error}"
                     ))
                 })?;
-                if !decoded.is_object() {
-                    return Err(Error::MalformedResponse(
-                        "tool call arguments did not decode to a JSON object".into(),
-                    ));
-                }
+                check_call_arguments(&decoded)?;
                 decoded
             }
             None | Some(Value::Null) => {
@@ -267,6 +257,43 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
         });
     }
     Ok(calls)
+}
+
+/// Refuses a blank tool-call id.
+pub(crate) fn check_call_id(id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        return Err(Error::MalformedResponse("tool call id was blank".into()));
+    }
+    Ok(())
+}
+
+/// Refuses a blank tool-call name.
+pub(crate) fn check_call_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(Error::MalformedResponse("tool call name was blank".into()));
+    }
+    Ok(())
+}
+
+/// Refuses tool-call arguments that are not a JSON object, the shape tools
+/// accept.
+pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
+    if !arguments.is_object() {
+        return Err(Error::MalformedResponse(
+            "tool call arguments were not a JSON object".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Records `id` in `seen`, refusing an id another call in the turn has.
+pub(crate) fn check_unique_call_id<'a>(seen: &mut HashSet<&'a str>, id: &'a str) -> Result<()> {
+    if !seen.insert(id) {
+        return Err(Error::MalformedResponse(format!(
+            "duplicate tool call id {id:?} within one turn"
+        )));
+    }
+    Ok(())
 }
 
 /// First nonblank string among the known reasoning field synonyms.

@@ -41,13 +41,18 @@ use crate::{Error, Result};
 #[derive(Debug, Default)]
 pub struct SseScanner {
     buffer: Vec<u8>,
+    /// How much of `buffer` is already known to hold no `\n`.
+    scanned: usize,
 }
 
 impl SseScanner {
     /// A scanner with an empty buffer.
     #[must_use]
     pub fn new() -> SseScanner {
-        SseScanner { buffer: Vec::new() }
+        SseScanner {
+            buffer: Vec::new(),
+            scanned: 0,
+        }
     }
 
     /// Buffers freshly received bytes for line extraction.
@@ -59,7 +64,15 @@ impl SseScanner {
     /// fully buffered.
     pub fn next_data(&mut self) -> Option<String> {
         loop {
-            let end = self.buffer.iter().position(|byte| *byte == b'\n')?;
+            let Some(offset) = self.buffer[self.scanned..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+            else {
+                self.scanned = self.buffer.len();
+                return None;
+            };
+            let end = self.scanned + offset;
+            self.scanned = 0;
             let line: Vec<u8> = self.buffer.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line);
             let line = line.trim_end_matches(['\r', '\n']);
@@ -159,7 +172,7 @@ impl StreamAccumulator {
         // report a failure after the 200 has already been sent: the
         // completion died in flight, so it classifies as a transport
         // failure, with the bounded, control-escaped message as the cause.
-        if let Some(envelope) = chunk.get("error") {
+        if let Some(envelope) = chunk.get("error").filter(|error| !error.is_null()) {
             let message = envelope
                 .get("message")
                 .and_then(Value::as_str)
