@@ -918,7 +918,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-15>
 
-### Step 15: Split the rest of `promptforge-lua` to the ceiling and add its marker
+### Step 15: Split the rest of `promptforge-lua` to the ceiling and add its marker [completed]
 
 - Component: Lua ceiling
 - Piece: the remaining Lua files, the second piece, built after Step 14, with the marker.

@@ -36,6 +36,14 @@
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
 //! re-exports only the store protocol ([`StoreOp`], [`StoreOutcome`]).
+//!
+//! ## Invariants
+//!
+//! - May depend on: `promptforge-types`, `promptforge-model-client`, and
+//!   `promptforge-vfs`. Read the repository-root `AGENTS.md` before adding
+//!   an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 // These imports are re-exported `pub(crate)` so the child modules can pull
 // the full shared surface with a single `use super::*;`.
