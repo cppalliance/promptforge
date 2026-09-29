@@ -65,10 +65,9 @@ pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, Step,
     ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
-// The store vocabulary a `Store` effect holds and its answer returns:
-// named here so a host's store performer can be written against this one
-// crate without reaching behind it.
-pub use promptforge_lua::{StoreOp, StoreOutcome};
+// The store vocabulary a `Store` effect holds and its answer returns, for
+// the engine's own store handling; hosts name it from `promptforge_lua`.
+pub(crate) use promptforge_lua::{StoreOp, StoreOutcome};
 
 /// Performs one store operation through `access`: the work behind an
 /// [`Effect::Store`], for a host's store performer. `access` is the

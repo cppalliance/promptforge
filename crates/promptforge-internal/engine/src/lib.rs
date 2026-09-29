@@ -5,8 +5,8 @@ mod error;
 mod execute;
 pub(crate) mod fanout;
 pub(crate) mod lua;
-pub mod model;
-pub mod parser;
+pub(crate) mod model;
+pub(crate) mod parser;
 pub(crate) mod subst;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -22,9 +22,6 @@ pub(crate) use crate::error::{Error, Result};
 pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
     EffectRecord, Environment, MissingService, ModelBindings, RequirementCheck, Requirements, Run,
-    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step, StoreOp,
-    StoreOutcome, ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement,
-    perform_store_op,
+    RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
+    ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement, perform_store_op,
 };
-pub use crate::model::{CompletionError, CompletionErrorKind};
-pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

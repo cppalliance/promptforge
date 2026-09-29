@@ -17,13 +17,6 @@
 //! The parser turns bytes into a [`Prompt`] tree.
 //!
 //! The implementation sits in the `promptforge-parser` crate and is
-//! re-exported here unchanged, so existing `promptforge_engine::parser::*`
-//! paths keep working.
+//! re-exported here unchanged for the engine's own imports.
 
-pub use promptforge_parser::{
-    ArgDecl, ArgType, ArgsDecl, Block, CapabilityDecl, FileDecl, Frontmatter, MAX_TOOL_ITERATIONS,
-    MaxToolIterations, ModelKeyword, ModelRole, ModelRoles, ParseError, ParseErrorKind, Prompt,
-    Section, ToolSlot, ToolSlots, promptforge_version,
-};
-
-pub use promptforge_lua::LuaProgram;
+pub(crate) use promptforge_parser::{Block, ParseError, ParseErrorKind, Prompt, Section};

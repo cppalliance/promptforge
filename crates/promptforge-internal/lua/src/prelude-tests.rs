@@ -216,6 +216,27 @@ fn a_global_that_collides_with_a_host_global_fails_naming_both_sides() {
 }
 
 #[test]
+fn a_global_named_tools_store_or_models_is_refused_and_leaves_the_namespace_in_place() {
+    for name in ["tools", "store", "models"] {
+        let vm = section_vm();
+        let before: mlua::Table = vm.lua().globals().raw_get(name).expect("a raw read");
+        let message = install_failure(&vm, &[prelude("acme/kit", &format!("{name} = {{}}"))]);
+        assert!(
+            message.contains(&format!(
+                "capability `acme/kit`: its prelude defines the global `{name}`, \
+                 which is reserved as a host global"
+            )),
+            "the collision names the capability, the global, and the reservation: {message}"
+        );
+        let after: mlua::Table = vm.lua().globals().raw_get(name).expect("a raw read");
+        assert_eq!(
+            after, before,
+            "the refused prelude left `{name}` bound as it was"
+        );
+    }
+}
+
+#[test]
 fn ui_and_item_collide_on_a_vm_that_binds_neither() {
     for name in ["ui", "item"] {
         let vm = section_vm();

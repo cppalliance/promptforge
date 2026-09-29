@@ -2,7 +2,7 @@
 //!
 //! [`Error`] is a `pub(crate)` internal error type, never part of the public API.
 //! Every public boundary returns its own typed error ([`crate::RunError`],
-//! [`crate::ParseError`], [`crate::CompletionError`],
+//! [`ParseError`](promptforge_parser::ParseError), [`CompletionError`](promptforge_model_client::model::CompletionError),
 //! [`promptforge_types::tools::ToolError`]); those wrappers
 //! classify this internal type and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the error type.
@@ -41,7 +41,7 @@ pub(crate) enum Error {
     ///
     /// This retains the originating YAML decode failure (a
     /// `serde_yaml_ng::Error`) as the `#[source]` cause so
-    /// [`crate::ParseError`] can expose the frontmatter syntax location through
+    /// [`ParseError`](promptforge_parser::ParseError) can expose the frontmatter syntax location through
     /// [`std::error::Error::source`] instead of flattening it into the message.
     #[error("invalid frontmatter: {message}")]
     #[non_exhaustive]
@@ -59,7 +59,7 @@ pub(crate) enum Error {
     },
 
     /// A structurally-classified parse failure with a stable kind and an
-    /// optional source byte span, so [`crate::ParseError`] can expose the
+    /// optional source byte span, so [`ParseError`](promptforge_parser::ParseError) can expose the
     /// classification and location from stored fields instead of inferring them
     /// from message text.
     #[error("{message}")]
@@ -122,7 +122,7 @@ pub(crate) enum Error {
     /// The `Display` is deliberately body-free (F5): the bounded,
     /// control-escaped body is stored only in the private `body` field,
     /// reachable through the explicit
-    /// [`crate::CompletionError::backend_body`] opt-in, so a raw or hostile
+    /// [`CompletionError::backend_body`](promptforge_model_client::model::CompletionError::backend_body) opt-in, so a raw or hostile
     /// payload cannot forge log lines or leak into an error message.
     #[error("non-success backend status {status}")]
     Backend {
@@ -983,8 +983,9 @@ mod tests {
         // error type's `Config` variant with its concrete cause attached;
         // the cause survives both the public CompletionError::source and
         // the mapping onto this crate's error type, classified as Config.
-        use crate::model::{CompletionError, CompletionErrorKind};
+        use crate::model::CompletionError;
         use promptforge_model_client::Error as ClientError;
+        use promptforge_model_client::model::CompletionErrorKind;
 
         let cause = std::io::Error::other("gateway URL is not a valid URL");
         let completion = CompletionError::from(ClientError::Config {

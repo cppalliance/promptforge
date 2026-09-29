@@ -2607,7 +2607,8 @@ return item\n\
 fn a_captured_store_function_called_after_load_reaches_the_host_as_a_store_effect() {
     use super::super::context::{parse, test_context};
     use super::super::serial_driver::perform_locally;
-    use crate::{Effect, EffectRecord, Run, StoreOp};
+    use crate::{Effect, EffectRecord, Run};
+    use promptforge_lua::StoreOp;
 
     let md = [
         flow_prompt!(""),

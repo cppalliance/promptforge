@@ -17,6 +17,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use promptforge_types::event::Event;
+use promptforge_types::wire::StreamDelta;
 
 use super::recording::{self, DebugCapture, NullObserver, Observer};
 #[cfg(test)]
@@ -25,9 +26,7 @@ use super::tokio_driver::{BoxFuture, Performers, refuse_tool_call};
 use super::tools::TestToolTable;
 use crate::execute::RunLimits;
 use crate::execute::{Effect, EffectAnswer};
-use crate::model::{
-    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
-};
+use crate::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
 
 /// The live streaming-delta callback a chat round forwards its chunks to.
 pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;

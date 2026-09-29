@@ -109,7 +109,8 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// use std::sync::Arc;
 ///
 /// use promptforge_engine::test_support::drive;
-/// use promptforge_engine::{Prompt, Run, RunContext, RunResult};
+/// use promptforge_engine::{Run, RunContext, RunResult};
+/// use promptforge_parser::Prompt;
 /// use promptforge_types::event::Event;
 /// use promptforge_types::timestamp::Timestamp;
 ///

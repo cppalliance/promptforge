@@ -2,7 +2,7 @@
 
 use promptforge_types::capabilities::CapabilityId;
 
-use super::{MissingService, Requirements};
+use super::{CapabilityConflict, MissingService, RequirementCheck, Requirements, UnmetRequirement};
 
 fn id(text: &str) -> CapabilityId {
     CapabilityId::parse(text).expect("a static valid id")
@@ -107,5 +107,34 @@ fn the_notice_lists_missing_services_after_missing_capabilities() {
         "the environment cannot satisfy this prompt:\n\
          - missing required capability: promptforge/web\n\
          - promptforge/user-input needs an input broker, and this host provides none"
+    );
+}
+
+#[test]
+fn the_notice_lists_a_conflict_after_missing_services_and_before_unmet_requirements() {
+    let mut requirements = Requirements::default();
+    requirements.unmet_requirements.push(UnmetRequirement {
+        role: "writer".to_owned(),
+        check: RequirementCheck::ContextMinimum,
+        required: "200000".to_owned(),
+        actual: "32000".to_owned(),
+    });
+    requirements.conflicts.push(CapabilityConflict::new(
+        id("promptforge/bashkit"),
+        id("promptforge/terminal"),
+    ));
+    requirements
+        .missing_services
+        .push(missing_input("promptforge/user-input"));
+    requirements.missing_required.push(id("promptforge/web"));
+    assert_eq!(
+        requirements.notice(),
+        "the environment cannot satisfy this prompt:\n\
+         - missing required capability: promptforge/web\n\
+         - promptforge/user-input needs an input broker, and this host provides none\n\
+         - conflicting capabilities: promptforge/bashkit and promptforge/terminal cannot be \
+         activated together; declare one or the other\n\
+         - role 'writer': requires a context of at least 200000 tokens; \
+         the current model provides 32000"
     );
 }

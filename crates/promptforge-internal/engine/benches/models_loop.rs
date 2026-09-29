@@ -28,11 +28,11 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_engine::model::{
-    Completion, CompletionError, CompletionOptions, Message, ToolSchema,
-};
 use promptforge_engine::test_support::{BoxFuture, ChatClient, DeltaHook, RunHost, run_with_host};
-use promptforge_engine::{Environment, Prompt, RunContext, RunLimits, RunResult};
+use promptforge_engine::{Environment, RunContext, RunLimits, RunResult};
+use promptforge_model_client::client::{Completion, Message, ToolSchema};
+use promptforge_model_client::model::{CompletionError, CompletionOptions};
+use promptforge_parser::Prompt;
 use promptforge_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 
 // The suites' mock-gateway chat client, shared by path: the engine holds no

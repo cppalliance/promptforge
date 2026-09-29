@@ -5,13 +5,14 @@
 //! the host. The run's answer rules (a drop, an orphan, a wrong kind) are
 //! pinned beside `Run` itself.
 
+use promptforge_types::wire::StreamDelta;
+
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
 use crate::execute::protocol::StoreOp;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::lua::ToolSet;
-use crate::model::StreamDelta;
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// Serializes a record and reads it back: the round trip a run log and a

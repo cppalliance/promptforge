@@ -797,7 +797,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-10>
 
-### Step 10: Narrow the engine's unused public surface and fill two test gaps
+### Step 10: Narrow the engine's unused public surface and fill two test gaps [completed]
 
 - Component: Engine fixes
 - Piece: the surface narrowing with its test gaps, the first of two pieces built sequentially. Both pieces edit `src/lib.rs`, and their tests are separate.
