@@ -31,17 +31,23 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A CUDA build for linux-x86_64 and a CPU build for windows-x86_64, from the same whisper.cpp tag, `b4938`, built and published by the existing whisper build workflow and pinned by digest like every other runtime.
   - One setting, `[stt] whisper_backend`, chooses the build on Windows x86-64 and Linux x86-64 the way `[local] llama_backend` chooses llama-server: `auto` detects an NVIDIA GPU, and an explicit value forces a build.
   - The C ABI, the FFI crate, the model files, and decoding stay as they are.
+  - Under the default `auto`, a host the selection cannot serve gets the CPU build or a failed speech load, never an ended gateway process.
+  - The native speech fixtures name their build, so no test depends on the host's GPU.
 - Non-goals:
   - Replacing or rebuilding the five archives already in `whisper-lib-b4938`.
   - A CUDA build for linux-aarch64, a Vulkan whisper build, or runtime backend loading inside ggml.
   - An operator path override for the whisper library.
   - Any change to llama-server selection.
   - A config UI control for the setting.
+  - Running whisper out of process.
+  - Older debt this work touches but did not introduce: the Windows CUDA build's own driver floor, the MSVC runtime the Windows archives import without bundling it, `speech.gpu` reporting how a build was compiled, and the test-only eager gateway constructor.
 - Success criteria:
-  - A Linux x86-64 host with an NVIDIA GPU, on `auto`, downloads, verifies, and loads the CUDA build: the boot log's library path names it, and `/admin/status` reports `speech.gpu` true. The final `small.en` pass takes about 0.13 s.
-  - A Linux x86-64 host without an NVIDIA GPU behaves exactly as today: the CPU build.
-  - A Windows x86-64 host with an NVIDIA GPU keeps the CUDA build. One without an NVIDIA GPU loads the CPU build and transcribes.
+  - A Linux x86-64 host with an NVIDIA GPU and driver 570 or later, on `auto`, downloads, verifies, and loads the CUDA build: the boot log's library path names it, and `/admin/status` reports `speech.gpu` true. The final `small.en` pass takes about 0.13 s.
+  - A Linux x86-64 host with an older or unreadable driver, or without an NVIDIA GPU, gets the CPU build under `auto`, as today.
+  - A Windows x86-64 host with an NVIDIA GPU keeps the CUDA build. One without an NVIDIA GPU, whose CPU has the x86 baseline, loads the CPU build and transcribes.
+  - A host whose CPU lacks a baseline extension fails the speech load with an error naming the required and missing extensions, and the gateway keeps serving.
   - `cpu` and `cuda` force their build on both platforms.
+  - The native fixtures pass on a Linux host with an NVIDIA GPU without extra setup, and CI's native job still exercises the CUDA build.
   - A push-triggered run of the whisper build workflow does not compile the Linux CUDA build. A release dispatch compiles it and adds both new archives to `whisper-lib-b4938`, leaving every existing asset untouched.
   - Every exit gate in the Testing Plan passes.
 - Constraints:
@@ -52,6 +58,8 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - The workspace lints hold: no `unsafe` outside the FFI crates, clippy `all` and `pedantic` at deny, and `missing_docs`, which the `-D warnings` gates make an error.
   - Gateway configuration rejects unknown fields. A gateway built before this work refuses a file that sets `whisper_backend`.
   - A release dispatch builds every row, so the self-hosted Windows CUDA runner must be online for it, as it already must be.
+  - whisper runs in the gateway process, and ggml ends the process with `abort()` on a CUDA error, so `auto` must never select a CUDA build for a host whose driver cannot run it.
+  - Every x86 whisper build is compiled with ggml's fixed non-native baseline, which includes AVX2. Running one on a CPU without that baseline raises an illegal-instruction fault that ends the gateway process.
 - Open questions:
   - None that block. The glibc floor is 2.35, set by the hosted `ubuntu-22.04` runner, the same floor as the existing Linux archives.
 
@@ -59,10 +67,11 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 
 - Actors and workflows:
   - A gateway operator leaves `[stt] whisper_backend` at `auto`, or sets `cpu` or `cuda`, and restarts the gateway.
-  - A maintainer dispatches the whisper build workflow for the tag. The new rows' digests are then pinned from the release's `SHA256SUMS`.
+  - After review, a maintainer pushes the pull request's head to `cppalliance/promptforge` as a branch or tag and dispatches the whisper build workflow on it for the tag. The new rows' digests are then pinned from the release's `SHA256SUMS`.
 - Inputs and outputs:
   - Input: `[stt] whisper_backend` is `auto` (the default), `cpu`, or `cuda`. Serialization omits it when it is `auto`.
-  - Output: the whisper.cpp library speech loads, and one boot log line, `provisioned whisper library`, with its path.
+  - Host inputs to selection: the NVIDIA probe's answer, which is each GPU's compute capability and the driver version, and the host CPU's instruction-set extensions.
+  - Output: the whisper.cpp library speech loads, or a named selection error that fails the speech load, and one boot log line, `provisioned whisper library`, with the library's path.
     - The install directory in that path names the build, such as `b4938-linux-x86_64-cuda`. The path reaches stdout and so a service's journal, but `gateway.log` redacts local paths.
     - `GET /admin/status` reports `speech.gpu`, true when the loaded build has CUDA, whichever log is read.
   - Workflow output: `whisper-b4938-windows-x86_64.zip` and `whisper-b4938-linux-x86_64-cuda.zip` in the `whisper-lib-b4938` release, with their lines added to its `SHA256SUMS`.
@@ -75,12 +84,16 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     | `cpu` | The CPU build. | The CPU build. |
     | `cuda` | The CUDA build. | The CUDA build, which fails to load without a driver. |
 
+  - On Linux x86-64, `auto` also requires driver 570 or later, the Linux CUDA build's floor, and an older or unreadable driver gets the CPU build. Windows x86-64 has no floor.
+  - On an x86 host, every setting first requires the builds' shared CPU baseline, and a missing extension fails selection.
   - The probe runs only under `auto`, and only on those two platforms.
   - Every other platform has exactly one build, and every setting selects it. The setting is documented as consulted only on Windows x86-64 and Linux x86-64, as `[local] llama_backend` is documented as consulted only on Windows x86-64.
   - An unknown value is a configuration error that names the rejected value and the accepted ones.
 - Errors and recovery:
   - The chosen build downloads when missing and is verified against its pin. A download, verification, or load failure fails the speech load and names its stage, and the gateway never switches builds on its own.
-  - An NVIDIA GPU whose driver is too old for the CUDA build fails the speech load under `auto`, and `cpu` is the recovery, as with llama-server's `auto`.
+  - Under `auto` on Linux, a driver below the floor gets the CPU build, so it never reaches the CUDA runtime.
+  - An explicit `cuda` below the floor is honored, and on a GPU the build has no native code for it can end the gateway at the first transcription. The docs name the floor, with `auto` or `cpu` as the recovery.
+  - A CPU missing a baseline extension fails the speech load with an error naming the required and missing extensions. Speech stays unavailable and the gateway keeps serving; no setting recovers it, because every x86 build shares the baseline.
   - As today, a failed speech load never stops the gateway and is never retried in-process. A restart is the recovery.
 - Security and privacy behavior:
   - The new rows are fail-closed with all-zero digests until they are pinned from the release's `SHA256SUMS`.
@@ -93,8 +106,10 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 
 - Architecture:
   - `.github/workflows/whisper-lib.yml` gains the two builds and an add-only publish. No workflow is added.
-  - `gateway-config` owns the setting. `gateway-local` owns the GPU probe, row selection, and provisioning, reusing llama-server's probe. `gateway-stt`'s `prepare()` passes the setting through and logs the library.
+  - `gateway-config` owns the setting, and `gateway-stt`'s `prepare()` passes it through and logs the library.
+  - `gateway-local` owns the GPU probe, reused from llama-server, and row selection with its host-capability checks (the driver floor and the CPU baseline), and provisioning.
   - `gateway-whisper-ffi` and `gateway-stt-backend-whisper` do not change.
+  - The native speech fixtures and CI's native job name their backend explicitly.
 - Modules and interfaces:
   - The Windows CPU build is a `windows-x86_64` matrix row on a hosted Windows runner, and it builds on push like the other rows.
     - It configures like the Windows CUDA row without `-DGGML_CUDA=ON`, packages like it without the CUDA runtime DLLs, and smoke-loads the same way.
@@ -111,19 +126,24 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - `SttPipelineConfig` and its raw form carry `whisper_backend`, omitted from output when `auto`. The accessor is `SttPipelineConfig::whisper_backend()`.
   - `WhisperAsset.backend: Option<WhisperBackend>`, in `crates/gateway/local/src/artifacts/assets.rs`, is `Some` on the four rows of Windows x86-64 and Linux x86-64, and `None` elsewhere.
     - The new rows are `windows-x86_64` (`whisper.dll`) and `linux-x86_64-cuda` (`libwhisper.so`). Their URLs are under the existing `whisper-lib-b4938` release, and their digests are all zeros until the pin.
-  - Selection mirrors `server_asset`, as `whisper_asset(os, arch, backend, gpus)`.
-    - On the two platforms, `auto` becomes `Cuda` when `gpus` reports an NVIDIA GPU and `Cpu` otherwise, and an explicit value selects its own row.
+    - `WhisperAsset` also carries an optional minimum driver version: 570 on `linux-x86_64-cuda`, the CUDA 12.8 floor, and none on `windows-x86_64-cuda`, so Windows behavior is unchanged.
+  - Selection mirrors `server_asset`: `whisper_asset(os, arch, backend, gpus)` picks the row, and `whisper_asset_with_probe` runs the probe only for `auto` where both builds exist.
+    - On the two platforms, `auto` becomes `Cuda` when the probe reports an NVIDIA GPU that meets the row's driver floor, and `Cpu` otherwise, including when the driver version cannot be read. An explicit value selects its own row.
     - Every other platform matches its single row.
-  - `ArtifactStore::provision_whisper_library(backend, activity)`, in `crates/gateway/local/src/artifacts.rs`, still returns the library path.
-    - It runs the existing `nvidia_compute_caps()` probe only for `auto` on the two platforms, as llama-server's provisioning does on Windows x86-64, then goes through the existing verified install path.
-  - `prepare()`, in `crates/gateway/stt/api/src/artifacts.rs`, reads the setting from `[stt]`, passes it to provisioning, and logs `provisioned whisper library` with the path, as `crates/gateway/local/src/runtime.rs` logs `provisioned llama-server`.
+    - Before any x86 row is returned, under every setting, the host must support every extension the pinned `GGML_NATIVE=OFF` baseline enables. The list is read from whisper.cpp `371b5a75`'s `ggml/CMakeLists.txt`, the host's side comes from `std::arch::is_x86_feature_detected!`, and other architectures skip the check.
+    - A missing extension fails selection with a new `LocalError` variant naming the required and missing extensions. `LocalError` is `#[non_exhaustive]`, so the variant is additive.
+    - Both checks take their inputs (the probe's answer, the host's extensions) as arguments, so tests run on any host.
+  - The NVIDIA probe in `crates/gateway/local/src/artifacts.rs` reads each GPU's compute capability and the driver version in one `nvidia-smi --query-gpu=compute_cap,driver_version --format=csv,noheader` call. llama-server's selection keeps reading only the capabilities, so its behavior is unchanged.
+  - `ArtifactStore::provision_whisper_library(backend, activity)`, in `crates/gateway/local/src/artifacts.rs`, still returns the library path, and goes through the existing verified install path once a row is selected.
+  - `prepare()`, in `crates/gateway/stt/api/src/artifacts.rs`, reads the setting from `[stt]`, passes it to provisioning through `prepare_impl`, which takes the provisioning as an argument, and logs `provisioned whisper library` with the path, as `crates/gateway/local/src/runtime.rs` logs `provisioned llama-server`.
+  - The native fixture configs in `crates/gateway/stt/api/tests/common/mod.rs`, `crates/gateway/stt/api/src/batch-native-tests.rs`, and `crates/gateway/app/tests/it/realtime_stt.rs` set `whisper_backend` from a test-only `PROMPTFORGE_WHISPER_BACKEND`, defaulting to `cpu`. It sits beside the existing `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO`, and the `native-whisper` job in `.github/workflows/stt-miri.yml` sets it to `cuda`.
 - File and public API changes:
-  - Changed: `.github/workflows/whisper-lib.yml`.
-  - New public API: `gateway_config::WhisperBackend` and `SttPipelineConfig::whisper_backend`.
+  - Changed: `.github/workflows/whisper-lib.yml`, and `.github/workflows/stt-miri.yml`'s native job with the three native fixture files.
+  - New public API: `gateway_config::WhisperBackend`, `SttPipelineConfig::whisper_backend`, and the `LocalError` variant for an unsupported CPU.
   - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`.
   - Docs:
     - `gateway.local.example.toml`: a commented `whisper_backend` line with the three values.
-    - `guide/src/gateway/05-speech.md`: the two builds on Windows x86-64 and Linux x86-64, and how the setting chooses between them.
+    - `guide/src/gateway/05-speech.md`: the two builds on Windows x86-64 and Linux x86-64, how the setting chooses between them, the Linux CUDA build's driver floor with the `auto` fallback below it, and the x86 CPU baseline. The `[stt]` row in `crates/gateway/app/README.md` and the example config state the floor and the baseline too.
     - `guide/src/gateway/04-local-models.md`: the `whisper.cpp/` cache directory, with one directory per pinned build, such as `b4938-windows-x86_64` and `b4938-linux-x86_64-cuda`.
     - `guide/promptforge-gateway-guide.md`, the assembled guide, carries the same two changes.
     - `crates/gateway/app/README.md`: the `whisper_backend` row in the `[stt]` table, matching the `[local]` table's `llama_backend` row, and the speech-runtime sentence.
@@ -132,6 +152,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Cache layout: `<cache_dir>/whisper.cpp/<release>-<platform>/`, so a host's CPU and CUDA installs sit side by side.
   - The probe is one `nvidia-smi` run per speech boot, only under `auto` on the two platforms. On Windows it runs without a console window, as llama-server's probe does.
   - The setting persists only in `gateway.toml`, and it is never written when `auto`.
+  - Selection is the only guard against the runtime's process-ending failures, because whisper runs in-process and ggml aborts on a CUDA error. A selection failure reaches the existing provisioning-stage speech error, which leaves speech unavailable and the gateway serving.
 
 ## Testing Plan
 
@@ -146,8 +167,13 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - `cpu` and `cuda` select their rows whatever the probe reported;
     - every other platform returns its single row under every setting;
     - the platform coverage test covers all seven rows, each a zip with a 64-hex digest under `whisper-lib-b4938`.
+  - Host-capability checks, in `crates/gateway/local`, through injected inputs:
+    - under `auto` on Linux x86-64, driver 569 or an unreadable version selects the CPU row, and 570 or later selects the CUDA row, while Windows x86-64 is unchanged at any driver version;
+    - the probe parser reads `compute_cap, driver_version` lines, and llama-server's existing selection tests still pass;
+    - a host missing any baseline extension fails selection on every x86 row under every setting, with an error naming it; a complete set selects as before, and other architectures skip the check.
 - Integration and end-to-end:
-  - Tests that go through provisioning pass an explicit backend, so no test depends on the host's GPUs. The existing warm-cache reuse and no-older-ABI tests keep passing under the new signature.
+  - Tests that go through provisioning, the native fixtures included, pass an explicit backend, so no test depends on the host's GPUs. The existing warm-cache reuse and no-older-ABI tests keep passing under the new signature.
+  - On a Linux x86-64 host with `nvidia-smi` on PATH (WSL here), the ignored native suites pass without `PROMPTFORGE_WHISPER_BACKEND` and use the pinned CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and the gateway's realtime native test.
   - The Linux CUDA job's shell steps run in a scratch directory on a Linux x86-64 host before the workflow change lands, publishing nothing. WSL2 is enough.
     - Expect a successful build, a stub smoke-load that reports CUDA, and `ldd` resolving every library inside the package.
     - A container with no driver refuses the load on `libcuda.so.1`.
@@ -156,10 +182,11 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Optionally, a dispatch of the branch's workflow on a fork exercises both hosted jobs. The self-hosted Windows CUDA row stays queued there, so the publish never runs, and the run is cancelled.
   - Before landing, the add-only publish runs against a throwaway release on a fork, which needs the operator's go-ahead because it creates and deletes a public release. An archive the release already holds stays byte-identical, a new one is uploaded, `SHA256SUMS` keeps its old lines verbatim and gains the new one, and a re-run uploads nothing.
   - After the release dispatch, the pins equal the new lines in `SHA256SUMS`, and the five existing archives and their lines are unchanged.
-  - On real hosts, after the pin:
-    - a Linux GPU host on `auto` loads the CUDA build, the log path names `b4938-linux-x86_64-cuda`, `/admin/status` reports `speech.gpu` true, and the final pass takes about 0.13 s;
-    - a Windows host without an NVIDIA GPU loads the CPU build and transcribes;
-    - a Windows host with an NVIDIA GPU keeps the CUDA build.
+  - After merge, the first push run on `master` builds the Windows CPU row and skips the Linux CUDA job, and CI's `native-whisper` job passes on the CUDA build.
+  - Before merge and after the pin, each new archive is tested on real hardware with a gateway built from the branch, while the selection unit tests cover `auto`'s choice between builds:
+    - the Linux CUDA build on the operator's WSL2 host (two RTX 3090s, driver 591): under `auto` in an interactive shell, or with `cuda`, it loads, the log path names `b4938-linux-x86_64-cuda`, `/admin/status` reports `speech.gpu` true, and the final pass takes about 0.13 s;
+    - the Windows CPU build on the operator's Windows host with `whisper_backend = "cpu"`, which forces it despite the host's NVIDIA GPUs: it loads and transcribes;
+    - on the same Windows host, `auto` keeps the CUDA build.
 - Regression, security, and performance:
   - Fail-closed needs no test of its own. No download hashes to all zeros, and the existing pin tests cover a mismatch.
   - A push-triggered run grows only by the Windows CPU row.
@@ -170,6 +197,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, and `cargo xtask site --books-only`.
   - `cargo check -p gateway --no-default-features`.
   - `cargo test -p build-xtask`.
+  - On this host, cargo runs in WSL through the Project survey's wrapper, and `workshop-gateway` runs with `--test-threads=1`, because without nextest its fixture tests race into a pre-existing ETXTBSY under a threaded runner. The WSL toolchain has no clippy, so clippy runs with the Windows toolchain for the changed crates, none of which builds the config UI.
 
 ## Decision Record
 
@@ -179,8 +207,14 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Add-only publishing is the smallest change that lets an already-published tag gain a row without replacing the archives shipped gateways pin. It also protects those pins from any accidental re-dispatch.
   - The Linux CUDA build compiles only on a release dispatch. The user asked for it ("Can we somehow make this Linux CUDA build optional on actual release only?"), and master already made its other hosted CUDA compile, the Blackwell llama-server build, manual-only.
   - A Windows CPU build in this work. The user asked for it ("Windows CPU only would be beneficial in this PR too."), and it gives a Windows host without an NVIDIA GPU working speech.
-  - `auto` detects the GPU the way `[local] llama_backend = "auto"` does, reusing its `nvidia-smi` probe, and downloads the build it picks.
-  - An explicit `cuda` is honored as given: a load failure fails speech, as an explicit `llama_backend` does.
+  - `auto` detects the GPU the way `[local] llama_backend = "auto"` does, reusing its `nvidia-smi` probe, and downloads the build it picks. On Linux it also requires the CUDA build's driver floor, 570, because whisper runs in-process and a CUDA error there ends the gateway, where llama-server fails as a child process.
+    - Hosts with sm_86 or sm_89 GPUs on drivers 525 to 569, which could run the build, get the CPU build under `auto`, and `cuda` remains their override.
+  - An explicit `cuda` is honored as given. Below the Linux floor it can end the gateway at the first transcription on a GPU without native code in the build, which the docs state.
+  - Selection checks the x86 CPU baseline under every setting and fails the speech load with a named error, so a host below the baseline loses speech rather than the gateway.
+    - It covers every x86 row because they share the baseline, which also closes the same exposure in the older Linux CPU and Windows CUDA rows.
+  - The native fixtures read a test-only backend variable that defaults to `cpu`, and CI's native job sets `cuda`, following the existing `PROMPTFORGE_WHISPER_*` fixture variables.
+  - The host-capability and fixture fixes join this plan ahead of the pin step, in the user's words: "Fold these fixes into the whisper plan ahead of its checksum step." The pins land last, because they make the fixed paths reachable.
+  - One pull request, #91, with the release dispatch run from its head after review, which answers the user's "how am I supposed to land this PR in one go after review that takes days?". It replaces the earlier two-PR landing.
   - The setting lives in `[stt]`, not `[local]`. It is a speech concern read at speech boot, and `[local]` configures llama-server and the cache.
   - The CUDA runtime ships inside the Linux archive. cudart, cuBLAS, and cuBLASLt ride along, as the Windows CUDA archive's DLLs do, so a host needs a driver and no toolkit.
   - Each library is packaged once, under its soname. Copying every symlink name, as the CPU archive does, would triple the 170 MB CUDA backend.
@@ -190,6 +224,12 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - The upload itself enforces add-only, so the guarantee does not rest on the job's filtering alone.
     - New archives go up with `gh release upload` without `--clobber`, which refuses a name the release already holds. A filtering mistake then fails the publish instead of replacing an archive that shipped gateways and `.github/workflows/stt-miri.yml` pin.
     - `SHA256SUMS` is the one asset replaced, and its existing lines stay verbatim.
+  - A published new archive is withdrawn by hand, never replaced by the workflow.
+    - The Linux CUDA build exists only once dispatched, so both new builds' real-host checks run after the release dispatch and before the pull request merges.
+    - If one fails, a maintainer deletes that archive and its `SHA256SUMS` line, which is safe while no merged pin names it. The next dispatch's add-only publish uploads the fixed rebuild, and the pin is redone.
+    - Once a merged pin names an archive, it never changes.
+  - The real-hardware archive checks run before merge, on the operator's own machines. The user confirmed this and the withdrawal rule above: "ok to both".
+    - The checks test the published archives themselves, since the selection unit tests cover `auto`'s choice. So forcing the Windows CPU build with `cpu` on an NVIDIA machine stands in for a Windows machine without an NVIDIA GPU.
 - Rejected alternatives:
   - A separate workflow and release tag for the CUDA build: it duplicates the Linux flags and packaging and splits one tag across two releases. Revisit if a build ever needs a different whisper.cpp tag than the other rows.
   - Re-dispatching the workflow as it is: it would replace the five pinned archives with rebuilt ones whose digests differ. No revisit condition.
@@ -200,15 +240,31 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - An operator path override for the whisper library: llama-server has one (`llama_server_path` and `PROMPTFORGE_LLAMA_SERVER`), but it is a separate capability this work does not need, since both new builds are published. Revisit if an operator needs a build this repository does not publish.
   - A warning when the setting is set on a platform with one build: `llama_backend` has none, and the docs say where the setting is consulted. No revisit condition.
   - A config UI control: `llama_backend` has none either, and the Speech card already preserves the field. Revisit if the UI gains controls for build selection generally.
+  - Matching the GPU's compute capability against the archive's native-code list: it couples selection to device code frozen at dispatch. Revisit if a second CUDA build with a different list is added.
+  - Adding more native CUDA architectures: it departs from the Windows CUDA row, grows the archive, and cannot change after the dispatch. Revisit at the next whisper.cpp tag.
+  - Refusing an explicit `cuda` below the floor: it blocks native-code GPUs that run on drivers 525 to 569. Revisit if crashes under an explicit `cuda` are reported.
+  - A lower Windows CPU baseline: slower on every host, different from the other x86 rows, and frozen at dispatch. No revisit condition.
+  - Documentation alone for either crash: it leaves the process-ending path in place. No revisit condition.
+  - A blanket `cpu` in the fixtures: CI's native job would fail until the Windows CPU row is pinned, and that runner's coverage would move to the CPU build. No revisit condition.
+  - Running whisper out of process: a large redesign for two crash paths that selection can avoid. Revisit if another in-process abort path appears.
+  - A separate cleanup plan run after this one closes: the user chose to fold the fixes in. No revisit condition.
 - Assumptions, risks, and notes:
   - The hosted Linux CUDA compile is slow. The hosted Windows CUDA compile took 95 minutes before that row moved to the self-hosted runner.
   - The Linux CUDA job first compiles on a hosted runner at the release dispatch. A failure there publishes nothing, because publishing waits for every build, and the dispatch is re-run after a fix.
   - A release dispatch rebuilds the five existing rows too, and the add-only publish discards them.
   - `auto` depends on `nvidia-smi` being on the gateway's PATH. WSL2 keeps it in `/usr/lib/wsl/lib`, which systemd's default service PATH lacks, so a WSL2 service needs `cuda` set, or that directory on its PATH.
   - A card without native code compiles the PTX once, at first load. That start is slow, and it was not measured.
+  - The CUDA 12.8 floor is driver 570, and CUDA's minor-version compatibility from driver 525 cannot compile newer PTX, per NVIDIA's compatibility documentation as read on 2026-09-29. Neither crash was reproduced on a host.
+  - The implementation reads the baseline extensions from the pinned ggml CMake rather than assuming a list.
+  - Older debt stays recorded and unfixed:
+    - the Windows CUDA build's own driver floor, since that archive's toolkit, possibly CUDA 13 with floor 580, is unverified; the per-row floor then makes it a one-value change;
+    - the MSVC runtime that the Windows archives import without bundling it;
+    - `speech.gpu` reporting how a build was compiled even when ggml finds no device;
+    - the test-only eager gateway constructor that provisions speech before binding.
+  - The `workshop-gateway` fixture race is pre-existing and tracked apart from this plan.
   - Landing needs someone with write access to `cppalliance/promptforge`, to dispatch the workflow and publish.
   - wg21-website's Talktron gateway-host guide, `docs/talktron-gateway.md`, depends on this work.
-    - Today it installs the CUDA build by setting `cuda` and returning to `auto`. With detection, a native Linux host leaves `auto`, and the WSL2 reference host sets `cuda` or extends the unit's PATH.
+    - Today it installs the CUDA build by setting `cuda` and returning to `auto`. With detection, a native Linux host with driver 570 or later leaves `auto`, and the WSL2 reference host sets `cuda` or extends the unit's PATH.
     - Its checks read the `provisioned whisper library` line for the build. The path names it on stdout and in the journal but is redacted in `gateway.log`, where `/admin/status`'s `speech.gpu` is the check that holds.
     - Its revision table must name this work's landed commit, so the website PR that carries it lands after this work and its pins.
   - Local branches `whisper-lib-linux-cuda` and `whisper-cuda-variant` already exist and are not part of this work. New branches use other names.
@@ -230,10 +286,12 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - Full-suite test command:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`; the workshop trio runs apart as `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
   - Without nextest: `cargo test --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features` also runs the doctests, but loses `.config/nextest.toml`'s `heavy` group that throttles `gateway-stt` and `gateway-stt-backend-whisper`.
+  - Without nextest, `workshop-gateway`'s fixture tests also race into ETXTBSY (`Text file busy`) under the threaded runner, a pre-existing copy-then-exec race (https://github.com/rust-lang/rust/issues/114554). So that crate runs apart with `--test-threads=1`.
   - Structural harness: `cargo test -p build-xtask`.
 - Linter and formatter commands:
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`.
   - `cargo fmt --all --check` (`rustfmt.toml`: `style_edition = "2024"`). Headless gate: `cargo check -p gateway --no-default-features`.
+  - On this host the WSL toolchain has no clippy or rustfmt component. So `cargo fmt --all --check`, and clippy for crates that do not build the config UI, such as `gateway-config`, `gateway-local`, and `gateway-stt`, run with the Windows toolchain.
   - Docs: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; CI also runs `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`. Books: `cargo xtask site --books-only`, which runs `$MDBOOK` (default `mdbook`, CI pins mdBook 0.4.44); mdbook is not installed here, so point `MDBOOK` at a binary.
   - CI's STT gates: `RUSTFLAGS="-D warnings" cargo rustc --locked -p <crate> --lib -- -F unsafe-code` for `gateway-stt-engine`, `gateway-stt-backend-whisper`, and `gateway-stt`; `RUSTFLAGS="-D warnings" cargo check --locked -p gateway-whisper-ffi --lib`.
   - Supply chain: `cargo deny check` (installed here), `cargo audit` (CI). Facade surface: `cargo +nightly-2026-09-05 xtask api --check`, needed only when the `promptforge` facade changes; that nightly is not installed here.
@@ -298,23 +356,29 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 ## Execution Instructions
 
 - Components, in dependency order:
-  1. The whisper release pipeline in `.github/workflows/whisper-lib.yml`, Steps 1 to 3. It goes first because it has the longest lead and needs no code: the release dispatch needs it on `master`, a maintainer with write access, and the self-hosted Windows CUDA runner online, and the pins wait on that dispatch's `SHA256SUMS`.
+  1. The whisper release pipeline in `.github/workflows/whisper-lib.yml`, Steps 1 to 3. It goes first because it has the longest lead and needs no code: the release dispatch needs it pushed to `cppalliance/promptforge`, a maintainer with write access, and the self-hosted Windows CUDA runner online, and the pins wait on that dispatch's `SHA256SUMS`.
   2. The `[stt] whisper_backend` setting in `gateway-config`, Step 4. It comes before selection because the whisper rows and `provision_whisper_library` take its `WhisperBackend` type.
-  3. Backend-aware whisper provisioning in `gateway-local` and `gateway-stt`, with its docs and pins, Steps 5 and 6. It comes last because it uses the setting's type, and its new rows install only once the release holds their archives.
+  3. Backend-aware whisper provisioning in `gateway-local` and `gateway-stt`, with its docs, the explicit fixture backend, the host-capability gate, and the pins, Steps 5 to 8. It comes last because it uses the setting's type, and its new rows install only once the release holds their archives.
 - Pieces:
-  - The pipeline's three pieces are built one after another, add-only publish first. Each has its own check, and with the publish first no commit pairs the new builds with a publish that replaces archives.
-  - The setting is one piece, covered by the config tests.
-  - Selection, provisioning, and `prepare()` are built together, because the new `whisper_asset` and `provision_whisper_library` signatures break the provisioning tests and `prepare()` until all of them change. The docs join that step because they describe its behavior. The pins follow alone because they wait on the release.
+  - The pipeline's three pieces, Steps 1 to 3, are built one after another, add-only publish first. Each has its own check, and with the publish first no commit pairs the new builds with a publish that replaces archives.
+  - The setting, Step 4, is one piece, covered by the config tests.
+  - Selection, provisioning, and `prepare()` are built together as Step 5, because the new `whisper_asset` and `provision_whisper_library` signatures break the provisioning tests and `prepare()` until all of them change. The docs join that step because they describe its behavior.
+  - The fixes after Step 5 are two pieces, built one after another because neither uses the other's code:
+    - The explicit fixture backend, Step 6, goes first. It takes the native suites off the host's GPUs, so Step 7 can run them on this Linux GPU host as the real-host check of its CPU detection.
+    - The host-capability gate with its docs, Step 7, is one piece. The driver floor and the baseline check change the same `whisper_asset` signature and the same selection tests, which building them apart would rewrite twice.
+  - The pins, Step 8, follow alone, because they wait on the release and make the paths Steps 6 and 7 fix reachable.
 - Landing:
   - The work happens on branch `whisper-cuda-backend`, fast-forwarded to `master` at `a7e50ec5` before Step 1. `/export-vibe-plan` runs before Step 1.
-  - Steps 1 to 3 reach `master` in their own pull request. A maintainer then dispatches `whisper-lib.yml` from `master` with `whisper_tag` `b4938`.
-  - Steps 4 and 5 continue on the branch while the dispatch is pending, because the new rows' zero digests keep them fail-closed.
-  - Step 6 follows the dispatch. Steps 4 to 6 then reach `master` together in a second pull request, so `master` never selects a row it cannot install.
+  - `/export-vibe-plan` runs again before Step 6, and rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`.
+  - Every step reaches `master` in one pull request, #91 on `cppalliance/promptforge`. After review, a maintainer pushes its head there as a branch or tag and dispatches `whisper-lib.yml` on it with `whisper_tag` `b4938`.
+  - Work before Step 8 does not depend on the release, because the new rows' zero digests keep them fail-closed.
+  - Step 8 follows the dispatch and Steps 6 and 7, and the pull request merges only once Step 8's checks pass, so `master` never selects a row it cannot install or a build that can end the gateway.
   - Every step passes the Testing Plan's exit gates, and its commit carries its tests. A workflow step's dry-run results are recorded under that step in the plan's repository copy.
 - Deferred and out of scope:
   - Updating the wg21-website guide. That belongs to the website work.
   - A linux-aarch64 CUDA build, a Vulkan whisper build, runtime backend loading, llama-server selection, an operator library override, and a config UI control.
-  - A future whisper.cpp tag bump. It publishes a new release whole, and the add-only publish does not block it.
+  - A future whisper.cpp tag bump. It publishes a new release whole, and the add-only publish does not block it. It also re-reads Step 7's x86 baseline list from the new tag's ggml.
+  - The older debt listed under the Decision Record's notes, running whisper out of process, and further changes to `whisper-lib.yml`'s build steps or its CUDA architecture list after Steps 2 and 3.
 
 ### Step 1: Make the whisper release publish add-only [completed]
 
@@ -397,10 +461,56 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `whisper_assets_cover_the_five_release_platforms` is renamed and covers all seven rows, each a zip with a 64-hex digest under `whisper-lib-b4938`.
   - In `crates/gateway/local/src/artifacts/tests.rs`, `provision_whisper_library_reuses_a_verified_install` and `whisper_installs_never_fall_back_to_an_older_abi` pass an explicit backend, so no test probes the host's GPUs.
 
-### Step 6: Pin the two new whisper builds
+### Step 6: Give the native speech fixtures an explicit whisper backend [completed]
 
-- It starts after the release dispatch, once Step 1's checks pass.
+- `crates/gateway/stt/api/src/test_fixtures/native.rs` gains a public `fixture_whisper_backend()` beside its `require_fixture` re-export. It returns the `[stt] whisper_backend` spelling from the test-only `PROMPTFORGE_WHISPER_BACKEND`, and `cpu` when that is unset. It returns the spelling rather than a `WhisperBackend`, so an unknown value fails the fixture's config parse with the error that names the accepted values.
+- The three native fixture configs write that spelling into `[stt]`:
+  - `fixture_service_with_models_on_dedicated_thread` in `crates/gateway/stt/api/tests/common/mod.rs`;
+  - `verbose_round_trip_accepts_literal_timestamp_granularities_field` in `crates/gateway/stt/api/src/batch-native-tests.rs`, whose config gains an `[stt]` section;
+  - `native_speech_service` in `crates/gateway/app/tests/it/realtime_stt.rs`.
+- In `.github/workflows/stt-miri.yml`, the `native-whisper` job's `Provision pinned native fixtures` step adds `PROMPTFORGE_WHISPER_BACKEND=cuda` to `$env:GITHUB_ENV` beside the other fixture variables, so the self-hosted Windows CUDA runner keeps testing the CUDA build.
+- Checks, with the `PROMPTFORGE_WHISPER_*` fixture variables set as `stt-miri.yml` sets them:
+  - Before the change, on this host in WSL with `nvidia-smi` on PATH, the ignored native suites fail, because `auto` selects the unpublished, all-zero `linux-x86_64-cuda` row.
+  - After it, without `PROMPTFORGE_WHISPER_BACKEND`, they pass on the pinned `linux-x86_64` CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and `cargo test --locked -p gateway --test it realtime_stt::realtime_stt_native_incremental -- --ignored --test-threads=1`.
+  - Until Step 8 pins the Windows CPU row, a Windows run of those suites sets `PROMPTFORGE_WHISPER_BACKEND=cuda`, as CI does.
+  - CI's `native-whisper` job skips fork pull requests, so it first runs after merge, or earlier when a maintainer dispatches `stt-miri.yml` on the pushed head. It passes on the CUDA build.
+
+### Step 7: Gate whisper selection on the host's driver and CPU
+
+- In `crates/gateway/local/src/artifacts/assets.rs`:
+  - A new `NvidiaProbe` holds the probe's answer: each GPU's compute capability, and the driver version's major number, `None` when it cannot be read.
+  - `WhisperAsset` gains `min_driver_major: Option<u64>`: `Some(570)` on `linux-x86_64-cuda`, the CUDA 12.8 floor, and `None` on every other row, `windows-x86_64-cuda` included.
+  - `auto_whisper_backend` picks `Cuda` only when the probe reports a GPU and the platform's CUDA row has no floor or a floor at or below the driver's major number. An unreadable version counts as below any floor.
+  - `X86_BASELINE` lists the extensions whisper.cpp `371b5a75` enables under `GGML_NATIVE=OFF`: `sse4.2`, `avx`, `avx2`, `bmi2`, `fma`, and `f16c`. They come from the `INS_ENB` options in `ggml/CMakeLists.txt` and the x86 flags in `ggml/src/ggml-cpu/CMakeLists.txt`, where MSVC's `/arch:AVX2` implies FMA and F16C. The list is tied to `WHISPER_RELEASE`.
+  - `whisper_asset(os, arch, backend, gpus, x86_extensions)` takes the probe's answer as `Option<&NvidiaProbe>` and the host's detected baseline extensions. On `x86_64`, under every setting, a missing baseline extension returns `LocalError::UnsupportedCpu` in place of the row; other architectures skip the check.
+  - `whisper_asset_with_probe` passes both through, and still probes only for `auto` on Windows x86-64 and Linux x86-64.
+- In `crates/gateway/local/src/artifacts.rs`:
+  - `nvidia_compute_caps()` becomes `nvidia_probe()`: one `nvidia-smi --query-gpu=compute_cap,driver_version --format=csv,noheader` run, still without a console window on Windows, whose output a new pure `parse_nvidia_probe(stdout)` reads.
+  - `provision_llama_server_with_cancellation` hands `server_asset` only the probe's compute capabilities, so `server_asset`, `auto_backend`, and their tests stay as they are.
+  - A new `host_x86_extensions()` returns the `X86_BASELINE` members `std::arch::is_x86_feature_detected!` reports, under `#[cfg(target_arch = "x86_64")]`, and none elsewhere.
+  - `ArtifactStore::provision_whisper_library` passes `nvidia_probe` and `host_x86_extensions()` to selection, and its `# Errors` section names the new variant.
+- In `crates/gateway/local/src/error.rs`, `LocalError::UnsupportedCpu { platform, required, missing }` names the selected build, the required extensions, and the missing ones. `SpeechError::WhisperLibrary` already reports it as the provisioning-stage failure.
+- Docs state the Linux CUDA build's driver floor, the `auto` fallback below it, that an explicit `cuda` below it is honored and can end the gateway, and the x86 baseline with the failed speech load below it:
+  - the `whisper_backend` row of the `[stt]` table in `crates/gateway/app/README.md`;
+  - `guide/src/gateway/05-speech.md`, under "The runtime";
+  - the commented `whisper_backend` lines in `gateway.local.example.toml`;
+  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+- Tests:
+  - In `assets.rs`, the whisper selection tests move to the new signature with the full baseline, and new ones join them:
+    - under `auto` on Linux x86-64, driver 569 or an unreadable version selects `linux-x86_64`, and 570 or later selects `linux-x86_64-cuda`, while Windows x86-64 selects `windows-x86_64-cuda` at any driver version;
+    - dropping any one baseline extension fails every x86-64 row under every setting with `UnsupportedCpu` naming it, and the aarch64 rows select as before with no extensions.
+  - In `crates/gateway/local/src/artifacts/tests.rs`, `parse_nvidia_probe` reads `compute_cap, driver_version` lines, this host's recorded output among them, and answers `None` for no GPU. `provision_whisper_library_reuses_a_verified_install` and `whisper_installs_never_fall_back_to_an_older_abi` pass the full baseline to `whisper_asset`.
+  - llama-server's selection tests pass unchanged.
+- Checks:
+  - Before the commit, the query runs on this host under Windows and under WSL, and its lines become parser cases.
+  - `cargo test --locked -p gateway-local --lib artifacts::` and `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::` pass.
+  - With Step 6's fixtures, the ignored native suites still pass on this host's CPU build, which runs `host_x86_extensions()` on a real CPU. `provision_whisper_library_reuses_a_verified_install` now runs that check too, so on an x86-64 host below the baseline it fails with the named error.
+
+### Step 8: Pin the two new whisper builds
+
+- It starts after the release dispatch and Steps 6 and 7, once Step 1's checks pass. It depends on Steps 6 and 7 because its pins make the paths they fix reachable. Step 1's "before Step 6" predates the renumbering and means before this step.
 - The two all-zero digests in `WHISPER_ASSETS`, in `crates/gateway/local/src/artifacts/assets.rs`, take the new archives' lines from the `whisper-lib-b4938` release's `SHA256SUMS`. Nothing else changes.
 - Checks:
   - The pins equal the new `SHA256SUMS` lines, and the seven-row coverage test passes.
-  - After the pin, on real hosts: a Linux GPU host on `auto` loads the CUDA build, its log path names `b4938-linux-x86_64-cuda`, `/admin/status` reports `speech.gpu` true, and the final `small.en` pass takes about 0.13 s; a Windows host without an NVIDIA GPU loads the CPU build and transcribes; and a Windows host with an NVIDIA GPU keeps the CUDA build.
+  - Before merge, with a gateway built from the branch: on the operator's WSL2 host (two RTX 3090s, driver 591), `auto` in an interactive shell, or `cuda`, loads the CUDA build, its log path names `b4938-linux-x86_64-cuda`, `/admin/status` reports `speech.gpu` true, and the final `small.en` pass takes about 0.13 s. On the operator's Windows host, `whisper_backend = "cpu"` loads the new CPU build and transcribes, and `auto` keeps the CUDA build.
+  - If either archive fails, the Decision Record's withdrawal rule applies: a maintainer deletes it and its `SHA256SUMS` line, the release runs again, and this step's pins are redone.

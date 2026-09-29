@@ -90,6 +90,8 @@ jobs:
           "PROMPTFORGE_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
           "PROMPTFORGE_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
+          # Native speech fixture configs default to the CPU build; this runner tests CUDA.
+          "PROMPTFORGE_WHISPER_BACKEND=cuda" | Add-Content $env:GITHUB_ENV
 
       - name: Test safe Whisper backend integration
         run: cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1
