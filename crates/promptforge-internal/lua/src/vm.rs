@@ -13,11 +13,11 @@ use super::{
     Access, Arc, Argv, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS,
     DEFAULT_LUA_MEMORY_BYTES, Emitter, Error, GuardNonce, InstructionBudget, IntoLuaMulti, Json,
     Lua, LuaBlockResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
-    ModelBinding, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Ordering,
-    ProseState, Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime,
-    ToolSet, Value, block_guard, guarded_var, harden, install_compactors,
-    install_deterministic_iteration, install_instruction_budget, install_log, install_messages,
-    install_models, install_shim_prelude, install_store_table,
+    ModelBinding, ModelRuntime, ModelSet, ModelView, MultiValue, Mutex, Ordering, ProseState,
+    Result, StdLib, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
+    block_guard, guarded_var, harden, install_compactors, install_deterministic_iteration,
+    install_instruction_budget, install_log, install_messages, install_models,
+    install_shim_prelude, install_store_table,
     install_tool_call_counts as install_tool_call_counts_impl, install_tools, install_untrusted,
     lifecycle, log_byte_budget, resolve_section_target, scalar_return, seal_sys, take_failure,
     var_to_json,
@@ -1049,11 +1049,6 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Clears the `models.infer` host hook.
-    pub(crate) fn clear_infer_hook(&self) {
-        let _ = self.lua.remove_app_data::<ModelsInferHook>();
-    }
-
     /// Destroys this section VM at an explicit observed lifecycle boundary.
     ///
     /// The emitter is borrowed only for this synchronous call.
@@ -1072,7 +1067,6 @@ impl SectionVm {
     /// ```
     pub fn teardown(self, emitter: &Emitter, section: &str) {
         emitter.report(section, lifecycle::LUA_TEARDOWN_STARTED);
-        self.clear_infer_hook();
         drop(self);
         emitter.report(section, lifecycle::LUA_TEARDOWN_SUCCEEDED);
     }

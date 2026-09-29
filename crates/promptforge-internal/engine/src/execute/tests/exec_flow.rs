@@ -164,8 +164,8 @@ return r[1].text\n\
 ```\n\n"
 );
 
-/// `models.infer(handle, ...)` works inside an arm: the arm installs the infer hook, so a
-/// worker's Lua can call the model directly.
+/// `models.infer(handle, ...)` works inside an arm, so a worker's Lua can call the model
+/// directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_works_inside_an_arm() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
@@ -204,7 +204,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 }
 
 /// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
-/// error through the infer hook.
+/// error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
     // A host without a client performs every `Chat` against the disabled
@@ -224,7 +224,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     let rendered = error.to_string();
     assert!(
         rendered.contains("gateway access is disabled"),
-        "the infer hook must surface the disabled-gateway completion error: {rendered}"
+        "an arm's models.infer must surface the disabled-gateway completion error: {rendered}"
     );
 }
 

@@ -77,6 +77,11 @@ fn guarded_table(
     let table_path = path.to_owned();
     let newindex = lua.create_function(
         move |lua, (_proxy, key, value): (Value, Value, Value)| -> mlua::Result<()> {
+            // The serde bridge turns nil into mlua's null sentinel, which
+            // would keep the key instead of removing it.
+            if value.is_nil() {
+                return write_data.raw_set(key, value);
+            }
             let target = field_path(&table_path, &key);
             if let Value::Function(_) | Value::UserData(_) | Value::Thread(_) = value {
                 return Err(mlua::Error::runtime(format!(
@@ -188,16 +193,16 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
 /// `__newindex` validates the assigned value for JSON-representability
 /// through the serde bridge - a function, userdata, or thread is rejected at
 /// the assigning line, and nested tables are deep-checked by the bridge -
-/// then rebuilds it as fresh guarded data before writing through. Every nested
-/// table is itself an empty proxy over hidden data, so later incremental writes
-/// cross the same validation boundary instead of mutating a stored table
-/// directly. `__metatable` is set so author code cannot replace the guard.
-/// The root data table is stashed in the Lua
-/// registry (unreachable from sandboxed author code) and is the read-back
-/// source for [`var_to_json`], which materializes nested proxies before serde
-/// conversion; proxies never hold entries themselves. The root proxy is
-/// stashed alongside it so [`var_to_json`] can reject an author reassigning
-/// the `var` global instead of silently reading stale data.
+/// then rebuilds it as fresh guarded data before writing through. Assigning nil
+/// removes the key. Every nested table is itself an empty proxy over hidden
+/// data, so later incremental writes cross the same validation boundary instead
+/// of mutating a stored table directly. `__metatable` is set so author code
+/// cannot replace the guard. The root data table is stashed in the Lua registry
+/// (unreachable from sandboxed author code) and is the read-back source for
+/// [`var_to_json`], which materializes nested proxies before serde conversion;
+/// proxies never hold entries themselves. The root proxy is stashed alongside
+/// it so [`var_to_json`] can reject an author reassigning the `var` global
+/// instead of silently reading stale data.
 pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Table> {
     let initial = match initial {
         Some(Json::Object(values)) => Json::Object(values.clone()),

@@ -639,7 +639,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-4>
 
-### Step 4: Pin `var` key removal, delete the unreachable `models.infer` placeholder, and correct the Lua docs
+### Step 4: Pin `var` key removal, delete the unreachable `models.infer` placeholder, and correct the Lua docs [completed]
 
 - Component: Lua sandbox
 - Piece: Lua cleanup, the second piece, built after Step 3, with which it shares no file.

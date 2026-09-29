@@ -2180,6 +2180,30 @@ fn var_guard_rejects_incremental_nested_function_writes_at_the_assigning_line() 
 }
 
 #[test]
+fn assigning_nil_to_a_var_field_removes_it_from_var_and_its_snapshot() {
+    let lua = Lua::new();
+    let var = guarded_var(&lua, Some(&json!({ "k": 1, "kept": "yes" })))
+        .expect("the guarded var builds from a JSON object");
+    lua.globals().raw_set("var", var).expect("var installs");
+    let reads_nil: bool = lua
+        .load("var.k = nil\nreturn var.k == nil")
+        .eval()
+        .expect("assigning nil passes the guard");
+    assert!(reads_nil, "var.k must read as nil after `var.k = nil`");
+    let snapshot = var_snapshot_table(&lua).expect("the snapshot reads back");
+    let keys = snapshot
+        .pairs::<String, Value>()
+        .map(|pair| pair.map(|(key, _)| key))
+        .collect::<mlua::Result<Vec<_>>>()
+        .expect("the snapshot iterates");
+    assert_eq!(keys, ["kept"], "the snapshot must drop the removed key");
+    assert_eq!(
+        var_to_json(&lua).expect("var reads back"),
+        json!({ "kept": "yes" })
+    );
+}
+
+#[test]
 fn reassigning_the_var_global_fails_read_back() {
     // `var = 5` drops the guarded proxy from reach; read-back must reject it
     // rather than silently roll the pre-reassignment data forward.

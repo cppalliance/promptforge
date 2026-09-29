@@ -639,13 +639,17 @@ pub(crate) fn route_store_to_shims(lua: &Lua, shims: &Table) -> Result<()> {
 }
 
 /// Executes one validated store operation against the store view: the
-/// single implementation behind both the direct closures and the
-/// executor's leaf-yield dispatch, so the two paths cannot drift. The
-/// bounded-read argument rules (a negative bound converts to 0, an `end`
-/// without a `start` is refused) sit in the shared `read_store_bounded`
-/// helper above; the read ops route through their named wrappers as the
-/// closures do. `view` is the store view the caller derived; every
-/// operation maps onto one [`Access`] call over it.
+/// executor's leaf-yield dispatch for a `store.*` call inside a block.
+///
+/// The direct closures `install_store_table` builds are a second path.
+/// They run only while the shared library loads, before
+/// `route_store_to_shims` switches the table to the yield shims. They share
+/// this function's operation bodies (the same [`Access`] calls and read
+/// helpers) and add lifecycle events, store-conflict recording, and
+/// `Error::store` wrapping. The bounded-read argument rules (a negative
+/// bound converts to 0, an `end` without a `start` is refused) sit in the
+/// shared `read_store_bounded` helper above. `view` is the store view the
+/// caller derived; every operation maps onto one [`Access`] call over it.
 ///
 /// # Errors
 /// Returns the [`VfsError`](promptforge_vfs::VfsError) the operation
