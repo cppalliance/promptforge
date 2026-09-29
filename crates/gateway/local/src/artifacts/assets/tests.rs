@@ -62,21 +62,49 @@ const WHISPER_BACKENDS: [WhisperBackend; 3] = [
     WhisperBackend::Cuda,
 ];
 
-/// A probe answer that reports one NVIDIA GPU.
-const NVIDIA: [(u64, u64); 1] = [(8, 6)];
+/// A probe answer that reports one NVIDIA GPU on driver `driver_major`.
+fn nvidia(driver_major: Option<u64>) -> NvidiaProbe {
+    NvidiaProbe {
+        compute_caps: vec![(8, 6)],
+        driver_major,
+    }
+}
 
-/// Runs [`whisper_asset_with_probe`] with a probe that reports `answer`,
-/// returning the pick and how many times the probe ran.
+/// A probe answer with two RTX 3090s on driver 591, above every floor.
+fn rtx_3090s() -> NvidiaProbe {
+    NvidiaProbe {
+        compute_caps: vec![(8, 6), (8, 6)],
+        driver_major: Some(591),
+    }
+}
+
+/// A probe answer that names no GPU.
+fn no_gpu() -> NvidiaProbe {
+    NvidiaProbe {
+        compute_caps: Vec::new(),
+        driver_major: Some(591),
+    }
+}
+
+/// Runs [`whisper_asset_with_probe`] on the full x86 baseline with a
+/// probe that reports `answer`, returning the pick and how many times the
+/// probe ran.
 fn pick_with_probe(
     os: &str,
     arch: &str,
     backend: WhisperBackend,
-    answer: Option<Vec<(u64, u64)>>,
+    answer: Option<NvidiaProbe>,
 ) -> (Result<WhisperAsset<'static>>, usize) {
     let mut probes = 0;
-    let pick = whisper_asset_with_probe(os, arch, backend, || {
-        probes += 1;
-        answer
-    });
+    let pick = whisper_asset_with_probe(
+        os,
+        arch,
+        backend,
+        || {
+            probes += 1;
+            answer
+        },
+        X86_BASELINE,
+    );
     (pick, probes)
 }

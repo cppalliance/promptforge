@@ -475,7 +475,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Until Step 8 pins the Windows CPU row, a Windows run of those suites sets `PROMPTFORGE_WHISPER_BACKEND=cuda`, as CI does.
   - CI's `native-whisper` job skips fork pull requests, so it first runs after merge, or earlier when a maintainer dispatches `stt-miri.yml` on the pushed head. It passes on the CUDA build.
 
-### Step 7: Gate whisper selection on the host's driver and CPU
+### Step 7: Gate whisper selection on the host's driver and CPU [completed]
 
 - In `crates/gateway/local/src/artifacts/assets.rs`:
   - A new `NvidiaProbe` holds the probe's answer: each GPU's compute capability, and the driver version's major number, `None` when it cannot be read.

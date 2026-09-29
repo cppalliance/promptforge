@@ -24,6 +24,23 @@ pub enum LocalError {
         arch: String,
     },
 
+    /// The host CPU lacks an x86-64 extension the selected whisper.cpp build
+    /// was compiled to use, so loading the build would fault on its first
+    /// such instruction.
+    #[error(
+        "whisper.cpp build `{platform}` requires x86-64 extensions {}; this CPU lacks {}",
+        required.join(", "),
+        missing.join(", ")
+    )]
+    UnsupportedCpu {
+        /// The selected build's platform name, such as `linux-x86_64`.
+        platform: String,
+        /// Every extension the build requires.
+        required: Vec<String>,
+        /// The required extensions this CPU does not report.
+        missing: Vec<String>,
+    },
+
     /// The model's kind has no local `llama-server` launch mode.
     ///
     /// Speech models configure through `kind = "speech"` but have no local

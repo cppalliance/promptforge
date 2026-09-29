@@ -9,6 +9,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "windows",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
+        min_driver_major: None,
         platform: "windows-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
@@ -22,6 +23,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "windows",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cuda),
+        min_driver_major: None,
         platform: "windows-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
@@ -35,6 +37,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "macos",
         arch: "aarch64",
         backend: None,
+        min_driver_major: None,
         platform: "macos-aarch64-metal",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
@@ -48,6 +51,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "macos",
         arch: "x86_64",
         backend: None,
+        min_driver_major: None,
         platform: "macos-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
@@ -61,6 +65,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "linux",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
+        min_driver_major: None,
         platform: "linux-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
@@ -74,6 +79,8 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "linux",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cuda),
+        // CUDA 12.8 runs on Linux driver 570 or later.
+        min_driver_major: Some(570),
         platform: "linux-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
@@ -87,6 +94,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "linux",
         arch: "aarch64",
         backend: None,
+        min_driver_major: None,
         platform: "linux-aarch64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",
