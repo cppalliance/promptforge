@@ -285,18 +285,10 @@ impl ModelCatalog {
         Ok(Self { models })
     }
 
-    /// Builds a catalog from descriptors already known to be collision-free.
-    ///
-    /// Used by internal callers whose inputs are already validated, where
-    /// duplicate checking is redundant.
-    pub(crate) fn from_validated(models: Vec<ModelDescriptor>) -> ModelCatalog {
-        Self { models }
-    }
-
     /// An empty catalog; every `models.bind` resolves as absent.
     #[must_use]
     pub fn empty() -> Self {
-        Self::from_validated(Vec::new())
+        Self { models: Vec::new() }
     }
 
     /// Returns every descriptor.
