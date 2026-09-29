@@ -1,4 +1,13 @@
 #![doc = include_str!("lib.md")]
+//!
+//! ## Invariants
+//!
+//! - May depend on: `promptforge-types`, `promptforge-lua`,
+//!   `promptforge-parser`, `promptforge-vfs`, and
+//!   `promptforge-model-client`. Read the repository-root `AGENTS.md`
+//!   before adding an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 pub(crate) mod cancel;
 mod error;

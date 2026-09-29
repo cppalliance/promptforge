@@ -1003,7 +1003,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-19>
 
-### Step 19: Split the other `promptforge-engine` tests to the ceiling and add its marker
+### Step 19: Split the other `promptforge-engine` tests to the ceiling and add its marker [completed]
 
 - Component: Engine ceiling
 - Piece: the other test files, the last piece, built after Step 18, with the marker.
