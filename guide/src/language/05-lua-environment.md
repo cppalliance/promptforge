@@ -796,7 +796,7 @@ tools:
   ask: promptforge/user-input/ask
 ````
 
-Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. When the capability is declared with `optional: true` on a host with no input broker, the model reads the fixed sentence instead. A host with no broker refuses the required declaration shown above before the run starts.
+Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. A tool slot requires its capability, so the slot needs the required declaration shown above: declaring `promptforge/user-input` with `optional: true` beside the slot fails the parse ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). A host with no broker refuses the required declaration before the run starts.
 
 Choose any alias except `input`. A tool alias or model role label named `input` collides with the capability's `input` global, and the run fails before it does anything, with run error kind `Lua` and this message:
 

@@ -2,23 +2,25 @@
 //!
 //! The YAML is the whole contract: capabilities install, tools bind, models
 //! declare, args type. Parsing validates the static shape - capability id
-//! arity, the alias grammar on slot keys, the reserved names no tool alias
-//! or model role label may take, the closed model-keyword vocabulary, arg
-//! name and type sanity - and exposes the FULL declaration on the parsed
-//! [`Prompt`](crate::Prompt); satisfying the declaration against the host
-//! environment is prepare's job, never the parser's.
+//! arity, each capability declared once, the alias grammar on slot keys,
+//! the reserved names no tool alias or model role label may take, no tool
+//! slot backed by an optional capability, the closed model-keyword
+//! vocabulary, arg name and type sanity - and exposes the FULL declaration
+//! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
+//! against the host environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
 //! capability and tool-slot shapes plus the map deserializer all four keys
 //! share.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::marker::PhantomData;
 
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
+use promptforge_types::capabilities::CapabilityId;
 use promptforge_types::names::GlobalName;
 use promptforge_types::tools::ToolId;
 
@@ -389,4 +391,48 @@ pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> 
         )),
         None => Ok(()),
     }
+}
+
+/// Refuses a `capabilities:` list that names one capability id twice,
+/// whatever each entry's form, `optional` flag, and `config`. Returns the
+/// refusal's message, naming the first id declared again.
+pub(crate) fn check_distinct_capabilities(capabilities: &[CapabilityDecl]) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    match capabilities.iter().find(|decl| !seen.insert(decl.id())) {
+        Some(decl) => Err(format!(
+            "invalid frontmatter: capability {} is declared more than once under capabilities",
+            decl.id()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Refuses a tool slot whose capability is declared optional: a slot
+/// requires its capability, so an absent optional one would fail the run
+/// anyway. Returns the refusal's message, naming the first offending alias
+/// in sorted order.
+pub(crate) fn check_slot_capabilities(
+    tools: &ToolSlots,
+    capabilities: &[CapabilityDecl],
+) -> Result<(), String> {
+    for (alias, slot) in tools.iter() {
+        let ToolSlot::Exact(tool) = slot;
+        let capability = tool.capability();
+        if capabilities
+            .iter()
+            .any(|decl| decl.is_optional() && declares(decl, &capability))
+        {
+            return Err(format!(
+                "invalid frontmatter: tool alias '{alias}' names {tool}, whose capability \
+                 {capability} is declared optional; a tool slot requires its capability"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `decl` declares `capability`. Both ids have exactly two
+/// segments, so equal namespace and pack segments are equal ids.
+fn declares(decl: &CapabilityDecl, capability: &CapabilityId) -> bool {
+    decl.id().namespace() == capability.namespace() && decl.id().pack() == capability.pack()
 }

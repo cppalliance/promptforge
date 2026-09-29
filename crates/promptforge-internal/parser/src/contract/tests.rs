@@ -377,6 +377,130 @@ fn one_name_as_both_a_tool_alias_and_a_model_role_label_is_refused() {
 }
 
 #[test]
+fn a_tool_slot_backed_by_an_optional_capability_is_refused() {
+    let error = parse(concat!(
+        "name: x\ndescription: d\n",
+        "capabilities:\n",
+        "  - promptforge/web\n",
+        "  - ref: io.github.corp/mcp\n",
+        "    optional: true\n",
+        "tools:\n",
+        "  search: promptforge/web/search\n",
+        "  probe: io.github.corp/mcp/probe\n",
+        "  lookup: io.github.corp/mcp/lookup\n",
+    ))
+    .expect_err("a slot on an optional capability must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
+    assert_eq!(
+        error.to_string(),
+        "invalid frontmatter: tool alias 'lookup' names io.github.corp/mcp/lookup, whose \
+         capability io.github.corp/mcp is declared optional; a tool slot requires its capability",
+        "the refusal names the first offending alias in sorted order"
+    );
+    assert_eq!(error.line(), None, "the refusal spans two keys: {error}");
+}
+
+#[test]
+fn an_optional_capability_without_a_tool_slot_still_parses() {
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "capabilities:\n",
+        "  - ref: promptforge/web\n",
+        "    optional: false\n",
+        "  - ref: io.github.corp/mcp\n",
+        "    optional: true\n",
+        "tools:\n",
+        "  search: promptforge/web/search\n",
+    ))
+    .expect("an optional capability that backs no slot parses");
+    let caps = prompt.frontmatter().capabilities();
+    assert_eq!(caps.len(), 2);
+    assert!(caps[1].is_optional());
+    assert!(prompt.frontmatter().tools().get("search").is_some());
+}
+
+#[test]
+fn a_slot_on_a_required_capability_parses_beside_optional_ones_sharing_one_segment() {
+    // Each optional capability matches the slot's capability in exactly one
+    // segment, so a check comparing only the namespace or only the pack
+    // would refuse this prompt.
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "capabilities:\n",
+        "  - promptforge/web\n",
+        "  - ref: io.github.corp/web\n",
+        "    optional: true\n",
+        "  - ref: promptforge/mcp\n",
+        "    optional: true\n",
+        "tools:\n",
+        "  search: promptforge/web/search\n",
+    ))
+    .expect("a slot whose capability is required parses");
+    assert_eq!(prompt.frontmatter().capabilities().len(), 3);
+    assert!(prompt.frontmatter().tools().get("search").is_some());
+}
+
+#[test]
+fn a_capability_declared_twice_is_refused_whatever_the_entry_forms() {
+    for entries in [
+        "  - promptforge/web\n  - io.github.corp/mcp\n  - promptforge/web\n",
+        "  - ref: promptforge/web\n    optional: true\n  - ref: promptforge/web\n    optional: true\n",
+        "  - promptforge/web\n  - ref: promptforge/web\n    optional: true\n",
+        "  - ref: promptforge/web\n    config: { depth: 1 }\n  - ref: promptforge/web\n    config: { depth: 2 }\n",
+    ] {
+        let error = parse(&format!(
+            "name: x\ndescription: d\ncapabilities:\n{entries}"
+        ))
+        .expect_err("a capability declared twice must be rejected");
+        assert_eq!(
+            error.kind(),
+            ParseErrorKind::Frontmatter,
+            "{entries}: {error}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "invalid frontmatter: capability promptforge/web is declared more than once under \
+             capabilities",
+            "{entries}"
+        );
+    }
+}
+
+#[test]
+fn a_duplicate_capability_that_also_backs_a_slot_reports_the_duplicate() {
+    let error = parse(concat!(
+        "name: x\ndescription: d\n",
+        "capabilities:\n",
+        "  - ref: promptforge/web\n",
+        "    optional: true\n",
+        "  - ref: promptforge/web\n",
+        "    optional: true\n",
+        "tools:\n",
+        "  fetch: promptforge/web/fetch\n",
+    ))
+    .expect_err("a duplicate capability must be rejected");
+    assert_eq!(
+        error.to_string(),
+        "invalid frontmatter: capability promptforge/web is declared more than once under \
+         capabilities"
+    );
+}
+
+#[test]
+fn a_list_of_distinct_capabilities_still_parses() {
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "capabilities:\n",
+        "  - promptforge/web\n",
+        "  - promptforge/web2\n",
+        "  - ref: io.github.corp/web\n",
+        "    optional: true\n",
+    ))
+    .expect("distinct capabilities parse");
+    assert_eq!(prompt.frontmatter().capabilities().len(), 3);
+}
+
+#[test]
 fn args_declarations_round_trip() {
     let prompt = parse(concat!(
         "name: x\ndescription: d\n",

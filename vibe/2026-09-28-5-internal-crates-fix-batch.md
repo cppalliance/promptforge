@@ -742,7 +742,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-8>
 
-### Step 8: Refuse duplicate capabilities and tool slots backed by optional capabilities
+### Step 8: Refuse duplicate capabilities and tool slots backed by optional capabilities [completed]
 
 - Component: Parser validation
 - Piece: the two frontmatter checks, the first of two pieces built sequentially. Both pieces edit `parse.rs`, and their tests sit in separate files (`contract/tests.rs` here, `tests.rs` in Step 9).

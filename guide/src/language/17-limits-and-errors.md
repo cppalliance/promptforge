@@ -285,7 +285,7 @@ A parse failure comes with a location when the parser can point at the problem. 
 
 ### Frontmatter failures
 
-A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker. The one exception is a name declared both under `tools:` and under `models:`, which spans two keys and gives neither a line nor a column.
+A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker. The exceptions are the checks that span entries, which give neither a line nor a column: a name declared both under `tools:` and under `models:`, a capability declared twice, and a tool slot whose capability is declared optional.
 
 A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the host may label the failure with its own name for the file instead.
 

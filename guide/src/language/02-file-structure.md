@@ -259,6 +259,15 @@ Only the recognized keys are accepted, at every level. A misspelled or unknown k
 invalid frontmatter: unknown field `{key}`, expected one of ...
 ````
 
+Two more checks run once the YAML is read, and neither reports a line or column. A `capabilities:` list names each capability once ([Declaring capabilities](12-tools.md#declaring-capabilities)), and a tool slot never names a tool of a capability declared `optional: true`, because a tool slot requires its capability ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)):
+
+````text
+invalid frontmatter: capability {id} is declared more than once under capabilities
+invalid frontmatter: tool alias '{alias}' names {path}, whose capability {id} is declared optional; a tool slot requires its capability
+````
+
+The duplicate check runs first, so a capability declared twice that also backs a slot is reported as a duplicate.
+
 ## Names for aliases, roles, and args
 
 Three of the contract keys are maps from a name to a declaration, and all three names follow one name grammar. The keys under `tools:` are tool aliases, the keys under `models:` are model role labels, and the keys under `args:` are arg names:

@@ -108,9 +108,15 @@ The map form has three keys, and plain and map entries mix freely in one list:
 | `optional` | a boolean | `false` |
 | `config` | any YAML value | no config |
 
-With `optional: true`, a capability the host lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a host without `io.github.corp/mcp` still runs the prompt.
+With `optional: true`, a capability the host lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a host without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
 
 `config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the host, never from the prompt.
+
+Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
+
+````text
+invalid frontmatter: capability {id} is declared more than once under capabilities
+````
 
 ### How declarations are matched
 
@@ -205,7 +211,13 @@ Each `tools:` entry declares a tool slot: an alias, which follows the prompt's [
 
 Prepare [fills each slot](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles) by exact match of its tool path against the run's tool catalog, which holds the activated capabilities' tools in declaration order. A slot whose path matches becomes a bound tool slot, and it stays bound to that same tool for the whole run. Slots are bound before any Lua runs, so Lua only chooses which bound slots the model sees, and scoping an alias that is not bound is an error.
 
-Every capability named by a slot's first two segments belongs in `capabilities:`. If that capability contributed no tools to the catalog, prepare refuses the run with `RequirementsUnmet` and the line `- missing required capability: {id}`, listed once however many slots name it. This holds even for a capability declared `optional: true`. So `fetch: promptforge/web/fetch` needs `promptforge/web` to have contributed tools, and when it contributed none, the slot is reported under `promptforge/web`.
+Every capability named by a slot's first two segments belongs in `capabilities:`. If that capability contributed no tools to the catalog, prepare refuses the run with `RequirementsUnmet` and the line `- missing required capability: {id}`, listed once however many slots name it. So `fetch: promptforge/web/fetch` needs `promptforge/web` to have contributed tools, and when it contributed none, the slot is reported under `promptforge/web`.
+
+A tool slot requires its capability, so an optional capability cannot back one. A slot whose capability is declared `optional: true` fails the parse with parse error kind `Frontmatter` and this message, which reports no line or column. When several slots do, the one whose alias sorts first is named:
+
+````text
+invalid frontmatter: tool alias '{alias}' names {path}, whose capability {id} is declared optional; a tool slot requires its capability
+````
 
 In all, a required capability is reported missing, and the run refused before it starts, in three cases: the host does not have it, it fails to activate, or a slot names it but it contributed no tools. Capability and slot problems at prepare are always reported as `RequirementsUnmet`.
 
