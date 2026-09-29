@@ -6,8 +6,9 @@
 //! CSPRNG and its `started_at` from the wall clock, both written to the
 //! run's row in the log before anything else, so the record can hand them
 //! back verbatim to a future replay. Then the ceremony the engine's
-//! `Environment` expects of a host: parse; hand the run's whole
-//! filesystem, host roots and the declared store, to the capabilities'
+//! `Environment` expects of a host: parse; put the prompt's declared
+//! `input:` file in place in the store (`files::stage_input`); hand the
+//! run's whole filesystem, host roots and the declared store, to the capabilities'
 //! services and to the context as given; activate the prompt's declared
 //! capabilities against the caller's registry, which assembles the
 //! catalog, the preludes, and the implementation table; install the
@@ -16,7 +17,8 @@
 //! unsatisfiable prompt with the engine's model-readable notice; and
 //! build the `Run` beside its performers.
 //!
-//! A refusal (or a prompt that fails to parse) is a run that ended before
+//! A refusal (or a prompt that fails to parse, or an input file that
+//! cannot be put in place) is a run that ended before
 //! it began: its row is closed as failed with the refusal as the message,
 //! so the log answers "why did this session fail" for a run the loop
 //! never saw.
@@ -33,16 +35,18 @@ use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::VfsRef;
+use promptforge::vfs::{VfsError, VfsRef};
 use promptforge::{Environment, RunContext, RunError};
 use promptforge::{ParseError, Prompt, Run};
 use sha2::{Digest as _, Sha256};
 
 use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};
+use crate::files::{InputFileError, stage_input};
 use crate::performers::{
     ActivatedTools, ChatPerformer, LogTaskEvents, Performers, TokioTimer, VfsStore,
 };
+use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
 /// installed capabilities, the host roots, the run's cancel flag, the
@@ -57,6 +61,9 @@ pub struct Services {
     /// passed straight to the context's VFS and handed to the capabilities
     /// as the run's services.
     pub vfs: VfsRef,
+    /// The text staged at the prompt's declared `input:` path before the
+    /// run, when the launch supplied one.
+    pub input_text: Option<String>,
     /// The run's cancel flag: handed to the context, to every capability
     /// activated for the run, and polled by the engine.
     pub cancel: CancelHandle,
@@ -112,6 +119,9 @@ pub struct Prepared {
     /// run's own events; the caller hands them to its sink so the session
     /// sees them in order.
     pub parse_events: Vec<Event>,
+    /// The prompt's declared `output:` path, which the caller reads with
+    /// [`read_output`](crate::files::read_output) once the run completes.
+    pub output_path: Option<String>,
 }
 
 /// Why a run could not be prepared.
@@ -153,6 +163,18 @@ pub enum PrepareError {
         #[source]
         error: RunError,
     },
+    /// The prompt's declared input file could not be put in place: the
+    /// launch supplied text the prompt declares no file for, the prompt
+    /// declares a file that is neither supplied nor in the store, or the
+    /// store refused. The run's row is closed as failed with kind `Input`.
+    #[error("the prompt's declared input file cannot be put in place")]
+    Input {
+        /// The run's row, closed with this refusal.
+        run_id: RunId,
+        /// Why the input could not be put in place.
+        #[source]
+        source: InputFileError,
+    },
     /// The run log refused a write; the run cannot be recorded, so it is
     /// not prepared.
     #[error(transparent)]
@@ -161,16 +183,18 @@ pub enum PrepareError {
 
 /// Prepares the prompt at `prompt_path` for one run with `args`: draws the
 /// run's seed and start and opens its row in the log, parses the prompt,
-/// activates its declared capabilities against the caller's registry,
-/// prepares the context, refuses an unsatisfiable prompt, and builds the
-/// `Run` and its performers.
+/// puts its declared input file in place, activates its declared
+/// capabilities against the caller's registry, prepares the context,
+/// refuses an unsatisfiable prompt, and builds the `Run` and its
+/// performers.
 ///
 /// # Errors
 /// Returns [`PrepareError::Read`] when the file cannot be read (no row is
-/// written), [`PrepareError::Parse`] when it does not parse and
-/// [`PrepareError::Refused`] when the environment cannot satisfy it (in
-/// both cases the row is closed as failed), and [`PrepareError::Log`]
-/// when the log refuses a write.
+/// written), [`PrepareError::Parse`] when it does not parse,
+/// [`PrepareError::Input`] when its declared input file cannot be put in
+/// place, and [`PrepareError::Refused`] when the environment cannot
+/// satisfy it (in these three cases the row is closed as failed), and
+/// [`PrepareError::Log`] when the log refuses a write.
 pub async fn prepare_run(
     prompt_path: &Path,
     args: &str,
@@ -191,10 +215,12 @@ pub async fn prepare_run(
 /// source is attributed to in [`PrepareError::Parse`].
 ///
 /// # Errors
-/// Returns [`PrepareError::Parse`] when the source does not parse and
-/// [`PrepareError::Refused`] when the environment cannot satisfy it (in
-/// both cases the row is closed as failed), and [`PrepareError::Log`]
-/// when the log refuses a write. Never [`PrepareError::Read`].
+/// Returns [`PrepareError::Parse`] when the source does not parse,
+/// [`PrepareError::Input`] when its declared input file cannot be put in
+/// place, and [`PrepareError::Refused`] when the environment cannot
+/// satisfy it (in these three cases the row is closed as failed), and
+/// [`PrepareError::Log`] when the log refuses a write. Never
+/// [`PrepareError::Read`].
 pub async fn prepare_source(
     source: &str,
     prompt_path: &Path,
@@ -204,6 +230,7 @@ pub async fn prepare_source(
     let Services {
         registry,
         vfs,
+        input_text,
         cancel,
         log,
         chat,
@@ -223,7 +250,7 @@ pub async fn prepare_source(
         .await
         .begin_run(RunMeta {
             session_id: session_id.clone(),
-            agent,
+            agent: agent.clone(),
             prompt_hash: prompt_hash(source),
             seed,
             flags: 0,
@@ -255,6 +282,15 @@ pub async fn prepare_source(
             });
         }
     };
+
+    // The declared input is in place before anything else sees the
+    // store: the capabilities activate over the same filesystem, and the
+    // run's first section may read it.
+    stage_declared_input(&prompt, &vfs, input_text, &agent, &log, run_id).await?;
+    let output_path = prompt
+        .frontmatter()
+        .output()
+        .map(|decl| decl.path().to_owned());
 
     // The parse events were stamped under task `0` from zero; the run's
     // root task continues the sequence past them, so `(task_id, task_seq)`
@@ -306,7 +342,51 @@ pub async fn prepare_source(
         started_at,
         performers,
         parse_events,
+        output_path,
     })
+}
+
+/// Puts `prompt`'s declared input file in place in `vfs`'s store on the
+/// blocking pool, tagged with `agent`. A refusal closes `run_id`'s row as
+/// failed under the `Input` kind, with the cause chain as its message.
+async fn stage_declared_input(
+    prompt: &Prompt,
+    vfs: &VfsRef,
+    input_text: Option<String>,
+    agent: &str,
+    log: &SharedLog,
+    run_id: RunId,
+) -> Result<(), PrepareError> {
+    let declared = prompt
+        .frontmatter()
+        .input()
+        .map(|decl| decl.path().to_owned());
+    if declared.is_none() && input_text.is_none() {
+        return Ok(());
+    }
+    let staging = vfs.clone();
+    let path = declared.clone();
+    let staged = spawn_blocking_launch(agent, move || {
+        stage_input(&staging, path.as_deref(), input_text)
+    })
+    .await
+    .unwrap_or_else(|join| {
+        Err(InputFileError::Store {
+            path: declared.unwrap_or_default(),
+            source: VfsError::Backend {
+                message: format!("the staging task failed: {join}"),
+            },
+        })
+    });
+    let Err(source) = staged else {
+        return Ok(());
+    };
+    let outcome = RunOutcome::Failed {
+        kind: "Input".to_owned(),
+        message: display_chain(&source),
+    };
+    close_failed(log, run_id, outcome).await?;
+    Err(PrepareError::Input { run_id, source })
 }
 
 /// Closes `run_id`'s row with `outcome`, a run that ended before the loop

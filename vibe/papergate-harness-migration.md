@@ -27,10 +27,10 @@ Each row is one thing Papergate does today (`src/app.rs`, `src/main.rs`) and wha
 | `Arc<dyn Observer>` and the `StderrObserver` printing `[{execution}] {section}: {event}` per `Observation` | The `Observer` trait and `Observation` enum are gone. Subscribe to `Session::subscribe_events()` (a `broadcast::Receiver<SessionEvent>`; each carries `index`, an optional `reply` id, and `event`, the logged engine `Event` as JSON with a `kind` tag, `execution`, `section`, and `provenance`). Print `event["section"]` and `event["kind"]` for the same progress line. `Session::transcript(from)` reads the same sequence from the log after the fact. Live model text arrives separately on `Session::subscribe_deltas()`. |
 | `fetch_model_catalog(&endpoint, &token)` and `ResolutionContext::new(&picker, &models, &ToolCatalog::new(&[])?)` | Nothing to call: the harness fetches the catalog and binds the prompt's `writer` role itself at launch. The harness resolves the model from `HostSnapshot::selected_model`, or, when that is `None`, from the first entry of the `CatalogBinding` it was given; with neither, the role stays unbound and the launch is refused with the engine's requirements notice. Papergate pushes one of the two before launching (see "Model selection" below). |
 | `promptforge_tool_picker::{Catalog, Config, ToolPicker}` built over an empty catalog | Gone. The harness assembles the tool catalog from the prompt's `capabilities:` declarations against its capability registry. `papergate.md` declares no capabilities and defines its one tool with `tools.add_local`, so nothing replaces this. |
-| `RunConfig::new(execution).observer(observer).cancel(cancel)` and `execute::run(&parsed, "", resolution, &store, config).await` | `Harness::new(HarnessConfig { agents_path, state_dir })`, then `Harness::set_gateway(GatewayBinding { base_url, key, generation })`, then `Harness::launch(LaunchRequest { agent: "papergate".into(), args }).await -> Result<Session, LaunchError>`. The session runs the agent to completion; await `Session::subscribe_state()` reaching `SessionState::Closed`, or watch the transcript for `run_succeeded` or `run_failed`. |
+| `RunConfig::new(execution).observer(observer).cancel(cancel)` and `execute::run(&parsed, "", resolution, &store, config).await` | `Harness::new(HarnessConfig { agents_path, state_dir })`, then `Harness::set_gateway(GatewayBinding { base_url, key, generation })`, then `Harness::launch(LaunchRequest { agent: "papergate".into(), args, input_text: Some(paper_md) }).await -> Result<Session, LaunchError>`. The session runs the agent to completion; await `Session::subscribe_state()` reaching `SessionState::Closed`, or watch the transcript for `run_succeeded` or `run_failed`. |
 | `execution` id minted with `fastrand` as `papergate-<hex>` | The harness mints the session id (`SessionId::fresh()`, 128 random bits) and uses it as the run's `execution`. Read it back with `Session::id()`. Drop `fastrand` unless it is used elsewhere. |
 | `promptforge_core::CancelHandle::new()`, `.clone()`, `.cancel()` from the Ctrl-C task; `RunError::is_cancelled` for exit code 130 | `harness::cancel::CancelHandle` has the same `new`, `child`, `cancel`, `is_cancelled` and adds the awaitable `cancelled()`, plus the task-local helpers `scope`, `maybe_scope`, `current`, `wait_cancelled`, `is_cancelled`. It moved here from the engine because it is a host concern. For the session itself, Ctrl-C calls `Session::close()` (cancel for good: outstanding effects are answered `Dropped`, state drains to `Closed`), not `Session::cancel()` (a turn cancel that relaunches the program). The durable `run_failed` event carries no reason, so detect the cancelled ending in Papergate: close was requested and then `Closed` arrived. |
-| `FileStore::new(temp_dir)`, `StoreRef`, `seed_store` writing `paper.md`, `read_report` reading `report.md`, `remove_dir_all` afterwards | No equivalent through the door today. See "The store gap" below; it is the one item that needs a decision. |
+| `FileStore::new(temp_dir)`, `StoreRef`, `seed_store` writing `paper.md`, `read_report` reading `report.md`, `remove_dir_all` afterwards | `LaunchRequest::input_text` carries the paper, which the harness stages at the prompt's declared `input:` path, and `Session::output_text()` returns what the run left at the declared `output:` path. No store directory to create or remove. See "Declared files" below. |
 | `PROMPTFORGE_GATEWAY_URL`, `PROMPTFORGE_GATEWAY_API_KEY` from the environment | Keep the variables; they populate `GatewayBinding { base_url, key, generation: 1 }`. Note `GatewayBinding::api_root()` appends `/v1` to `base_url`, so the URL variable must hold the gateway origin without the `/v1` suffix (or Papergate strips it). |
 | `Prompt` source read from `--prompt <PATH>` or the embedded `DEFAULT_PROMPT` | The harness launches agents by discovered name: the `.md` file stems under `HarnessConfig::agents_path`. Papergate writes its prompt source to `<agents_path>/papergate.md` (a temporary directory is fine) and launches `"papergate"`. `--prompt` writes the given file's contents to that path instead. |
 | Model-readable failure text from `execute::run` (`RunError`) | `LaunchError` for a refused launch (`UnknownAgent`, `GatewayUnusable`, `SessionState`, `Log`); `Session::subscribe_errors()` for a run that ended in error; `run_failed` in the transcript for the durable record. |
@@ -46,16 +46,15 @@ The harness fetches the gateway's model list itself at launch and checks the sel
 
 where `model` is the catalog id Papergate wants the `writer` role bound to. Take it from a new `PAPERGATE_MODEL` environment variable or a `--model` flag; there is no gateway-side default the harness will pick for an unattended client. The model-catalog fetch helper (`fetch_model_catalog`) now lives in a private harness crate and is not reachable from outside the family.
 
-## The store gap
+## Declared files
 
-Today Papergate seeds the run store with `paper.md` before the run and reads `report.md` from it afterwards, through the engine's `StoreRef` over a temporary directory. The prompt's frontmatter declares both paths as `input:` and `output:`.
+Today Papergate seeds the run store with `paper.md` before the run and reads `report.md` from it afterwards, through the engine's `StoreRef` over a temporary directory. The prompt's frontmatter declares both paths as `input:` and `output:`, and the harness now honors both declarations, so `papergate.md` keeps its `store.read("paper.md")`, `store.read_numbered`, and `store.write("report.md", reply)` as they are.
 
-Through `harness` there is no store access in either direction. A session's run is prepared over `promptforge::vfs::VfsRef::default()`, the default handle: a fresh memory store at `/` and nothing else, the store declared on the handle itself with `VfsRefBuilder::store` rather than added per run. Nothing on `Harness` or `Session` reads or writes it. The run's return value (the `RunResult::Ok(final_text)`) is written to the run log's `runs` row as `final_text`, but the session supervisor discards it and the door exposes no log reader, so a client cannot obtain it either.
+- `LaunchRequest::input_text` is the paper's markdown. Before each run the harness writes it at the declared input path through the store's strict path rules. A run is refused, reported on `Session::subscribe_errors` as `FailureKind::RunFailed`, when the prompt declares no input file, or when it declares one and the launch supplies no text and the store does not already hold it.
+- `Session::output_text()` returns what the completed run left at the declared output path. The harness reads it as the run completes and before the session reports `Closed`, so await `Closed` and then call it. It returns `OutputError::Missing { path }` when the run never wrote the file (the old "did not produce its declared output" error), `OutputError::Unfinished` when no run completed (the run failed, or Ctrl-C closed it first), and `OutputError::Undeclared` for a prompt with no output file. A missing output never fails the run.
+- The default filesystem is a fresh memory store per run, which is what Papergate wants: nothing persists between runs, so `evidence.md` never leaks from one paper into the next, and there is no directory to remove. A host that wants its own filesystem (a host-backed store to keep `evidence.md` for debugging, host mounts, overlays, a policy, or an operation sink) builds a `promptforge::vfs::VfsRef` and launches with `Harness::launch_with(request, LaunchOptions { vfs: Some(handle) })`. Every run of that session then works in the handle, and the harness stages and reads the declared files through its store wherever it is mounted.
 
-Two ways to close the gap, for Papergate's own plan to choose:
-
-1. Change the prompt, not the door. Deliver the paper as the run's argument (`LaunchRequest::args`) and have `papergate.md` read `args` instead of `store.read("paper.md")`, keeping `store.write("paper.md", args)` as its first statement if the `read_numbered` line ranges in `### Evaluate` are to stay as they are. Deliver the report as model text: the `## Analyze` section's `models.infer(prose)` already produces the report, and that call leaves an `assistant_reply` event with `origin: infer` carrying the report in `text` under `section == "Analyze"`. Papergate takes the last such event from the transcript. The `input:` and `output:` frontmatter declarations become documentation only. Cost: a 32k-context paper travels as one argument string, and the report is read from an event rather than a declared output. Recommended: it needs no change to the promptforge repository (confidence: medium; depends on Papergate accepting an event as the report's channel).
-2. Extend the door. Give `LaunchRequest` an optional host root (a directory mounted into the run's VFS beside the store declared on the handle with `VfsRefBuilder::store`, since `RunContext::vfs` is the run's whole filesystem, or a set of seed files written into the store), and give `Session` a way to read the run's final text or a store file once `Closed`. This is a promptforge change with its own plan; the `HostSnapshot::workspace_roots` field already exists and is the natural carrier, but today it feeds only the `ui()` snapshot and mounts nothing.
+The vendored prompt also needs its version line fixed: it says `promptforge: 1`, and the engine accepts only `promptforge: 0`, so an unfixed copy fails its run with "unsupported promptforge version: 1 (this build supports major 0)".
 
 ## The shape of the new run
 
@@ -65,7 +64,8 @@ harness.set_gateway(GatewayBinding { base_url, key, generation: 1 });
 harness.set_catalog(CatalogBinding { generation: 1, models: vec![json!({ "id": &model })] });
 harness.set_host(HostSnapshot { selected_model: Some(model), workspace_roots: Vec::new() });
 
-let session = harness.launch(LaunchRequest { agent: "papergate".into(), args }).await?;
+let request = LaunchRequest { agent: "papergate".into(), args: String::new(), input_text: Some(paper_md) };
+let session = harness.launch(request).await?;
 let mut events = session.subscribe_events();
 let mut state = session.subscribe_state();
 // Ctrl-C task: session.close()
@@ -75,11 +75,10 @@ loop {
         Ok(()) = state.changed() => if *state.borrow() == SessionState::Closed { break },
     }
 }
-let transcript = session.transcript(0).await?;
-// option 1: the report is the last `assistant_reply` event with `origin: infer` under section "Analyze"
+let report = session.output_text()?; // OutputError::Missing when report.md was never written
 ```
 
-`agents_path` holds `papergate.md` (the embedded default or the `--prompt` file), and `state_dir` receives the harness's `runs.db`; both may be temporary directories removed after the run, as the store directory is today. The run log is the durable record the old stderr observer approximated; keep `state_dir` when the transcript is worth retaining.
+`agents_path` holds `papergate.md` (the embedded default or the `--prompt` file), and `state_dir` receives the harness's `runs.db`; both may be temporary directories removed after the run. The run log is the durable record the old stderr observer approximated; keep `state_dir` when the transcript is worth retaining.
 
 ## Checklist
 
@@ -88,5 +87,6 @@ let transcript = session.transcript(0).await?;
 - Write the prompt to `<agents_path>/papergate.md` and launch by name.
 - Push the gateway binding, a one-entry catalog, and the selected model before launch; strip `/v1` from the URL variable if present.
 - Move Ctrl-C to `Session::close()`; keep exit code 130 when close preceded `Closed`.
-- Decide the store gap (option 1 or 2) and, under option 1, update `papergate.md` and read the report from the transcript.
+- Pass the paper as `LaunchRequest::input_text`, read the report with `Session::output_text()` after `Closed`, and delete `with_temp_store`, `seed_store`, and `read_report`.
+- Change the vendored `papergate.md` to `promptforge: 0`.
 - `CancelHandle` imports move from the engine to `harness::cancel`; `RunError::is_cancelled` is no longer on Papergate's path.

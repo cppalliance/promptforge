@@ -330,7 +330,7 @@ assert_eq!(log[0].2, "observer example");
 
 A run's store is the mount its handle declares, and the prompt's `store` table is scoped to it through a *store view*: an [`Access`] rooted at the declared store root, confined to the store's own mount, under the chain's identity. The engine derives one from the chain's capability for every store call, so a [`StoreOp`] can reach only files inside the store, and one chain never conflicts with itself through its view. One handle serves every section of a run, so store files persist from section to section even though each section's Lua state does not. [`RunContext::new`](crate::RunContext::new) starts with the default handle, a fresh memory store at `/`. A host with host roots builds the run's handle itself with [`VfsRef::builder`](crate::vfs::VfsRef::builder), mounting its base at `/` and declaring the store, and hands it to [`RunContext::vfs`](crate::RunContext::vfs). Several concurrent runs can share one host-backed base this way. Each run is its own scope, and two live scopes never order each other, so when a second run writes a path such as `/shared.txt` while the first run's claim on it is live, the write fails with [`VfsError::Conflict`], and the file keeps the first run's contents. A run whose handle declares no store fails with [`RunErrorKind::Store`](crate::RunErrorKind::Store).
 
-A [`StoreOp`] names its paths logically, relative to the store root. So `notes.md` means `/notes.md` when the store is at `/`, and a [`StoreOp`] can reach only files inside the run's store. The host seeds and extracts through the store view's logical paths, as the example below does. The store view validates each logical path before any backend sees it, and reports a broken rule as [`VfsError::InvalidPath`] with a [`PathReason`]. The checks run in this order, and the first rule broken is reported:
+A [`StoreOp`] names its paths logically, relative to the store root. So `notes.md` means `/notes.md` when the store is at `/`, and a [`StoreOp`] can reach only files inside the run's store. The host seeds and extracts through the store view's logical paths, as the example below does. [`VfsRef::acquire_store`] acquires that view in a scope of its own, so a host that seeds the store before a run or reads it after uses the names the prompt uses, wherever the handle mounts the store. The store view validates each logical path before any backend sees it, and reports a broken rule as [`VfsError::InvalidPath`] with a [`PathReason`]. The checks run in this order, and the first rule broken is reported:
 
 1. The path is empty: [`PathReason::Empty`].
 2. The path is over 1024 bytes: [`PathReason::TooLong`].
@@ -341,7 +341,7 @@ A [`StoreOp`] names its paths logically, relative to the store root. So `notes.m
 
 A store failure reaches the author as an error value of kind `store`, carrying `reason`, the variant's fields (`path`, plus `anchor` and the integer `count` for an anchor error, or `rule` for an invalid path), and a model-facing `message` that says what failed and how to fix it. A missing file reads "file not found in store: notes.md". Rust code matches the [`VfsError`] variant directly and reads its fields; a host store performer that fails for its own reasons returns [`VfsError::Backend`].
 
-This example seeds a file through the context's handle, then calls [`perform_store_op`] against the store view, as a host loop does for each store effect:
+This example seeds a file through a store view of the context's handle, then calls [`perform_store_op`] against a store view, as a host loop does for each store effect:
 
 ````
 use promptforge::RunContext;
@@ -349,11 +349,11 @@ use promptforge::timestamp::Timestamp;
 use promptforge::vfs::{perform_store_op, Origin, StoreOp, StoreOutcome, VfsError};
 
 let ctx = RunContext::new("store example", 7, Timestamp::UNIX_EPOCH);
-let seed = ctx.vfs_handle().acquire(Origin::new("seed"))?;
-seed.write("/brief.md", b"one\ntwo\n")?;
+let seed = ctx.vfs_handle().acquire_store(Origin::new("seed"))?;
+seed.write("brief.md", b"one\ntwo\n")?;
 drop(seed);
 
-let access = ctx.vfs_handle().acquire(Origin::new("store example"))?;
+let access = ctx.vfs_handle().acquire_store(Origin::new("store example"))?;
 let read = StoreOp::Read { path: "brief.md".to_owned(), start: Some(2), end: None };
 let StoreOutcome::Text(text) = perform_store_op(&access, read)? else {
     panic!("a read answers with text");

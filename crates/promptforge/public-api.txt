@@ -696,6 +696,7 @@ pub fn promptforge::vfs::VfsPath::as_str(&self) -> &str
 pub fn promptforge::vfs::VfsPath::to_buf(&self) -> promptforge::vfs::VfsPathBuf
 pub fn promptforge::vfs::VfsPathBuf::as_str(&self) -> &str
 pub fn promptforge::vfs::VfsRef::acquire(&self, origin: promptforge::vfs::Origin) -> core::result::Result<promptforge::vfs::Access, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsRef::acquire_store(&self, origin: promptforge::vfs::Origin) -> core::result::Result<promptforge::vfs::Access, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsRef::builder() -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRef::new(backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRef
 pub fn promptforge::vfs::VfsRef::overlay(&self, prefix: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRef

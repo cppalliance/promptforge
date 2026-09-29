@@ -1498,6 +1498,24 @@ impl VfsRef {
         )
     }
 
+    /// Acquires the store view for a new serial thread of execution: an
+    /// [`Access`] rooted at the declared store root whose operations
+    /// reach the store's own mount alone. It is [`VfsRef::acquire`]
+    /// followed by the store view, so it starts a new scope of its own
+    /// and never joins a run's. Logical paths join onto the store root
+    /// under the store's strict path rules, and errors come back in the
+    /// caller's logical form, so a host seeds and extracts store files
+    /// by the names the prompt uses without knowing where the store is
+    /// mounted.
+    ///
+    /// # Errors
+    /// Returns [`VfsError::Unsupported`] when the handle declares no
+    /// store, and the backend's error when it refuses to acquire the
+    /// identity.
+    pub fn acquire_store(&self, origin: Origin) -> Result<Access, VfsError> {
+        self.acquire(origin)?.store_view()
+    }
+
     /// Acquires the capability for the identity and scope in `cx`: a
     /// fresh acquire passes a new scope, and a mounted handle receives
     /// the caller's context, so the forwarded capability joins the

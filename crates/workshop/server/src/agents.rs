@@ -149,6 +149,7 @@ impl AgentSessions {
             .launch(LaunchRequest {
                 agent: name.to_owned(),
                 args: String::new(),
+                input_text: None,
             })
             .await?;
         status::spawn_reporter(

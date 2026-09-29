@@ -166,6 +166,7 @@ async fn a_prompt_that_needs_only_user_input_prepares_and_runs_on_an_unusable_ga
     let services = Services {
         registry: Some(Arc::clone(resources.registry())),
         vfs: VfsRef::default(),
+        input_text: None,
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(NoChat),

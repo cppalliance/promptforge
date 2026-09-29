@@ -6,7 +6,8 @@
 //! a second run whose transcript indices continue; and a catalog whose
 //! models changed retires the run. The close path - draining outstanding
 //! effects and reporting the interrupt as one `Interrupted` failure -
-//! sits in the `close` child module.
+//! sits in the `close` child module, and the prompt's declared input and
+//! output files in the `files` child module.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -25,6 +26,9 @@ use tokio::sync::broadcast;
 
 #[path = "session-close.rs"]
 mod close;
+
+#[path = "session-files.rs"]
+mod files;
 
 #[path = "session-infer.rs"]
 mod infer;
@@ -77,6 +81,7 @@ async fn launch(harness: &Harness) -> Session {
         .launch(LaunchRequest {
             agent: "asks".to_owned(),
             args: String::new(),
+            input_text: None,
         })
         .await
         .expect("the discovered agent launches")
@@ -88,6 +93,7 @@ async fn launch_agent(harness: &Harness, agent: &str) -> Session {
         .launch(LaunchRequest {
             agent: agent.to_owned(),
             args: String::new(),
+            input_text: None,
         })
         .await
         .expect("the discovered agent launches")
@@ -151,6 +157,7 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
         .launch(LaunchRequest {
             agent: "../etc/passwd".to_owned(),
             args: String::new(),
+            input_text: None,
         })
         .await
         .expect_err("a path-shaped name is not a discovered agent");
@@ -161,6 +168,7 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
         .launch(LaunchRequest {
             agent: "asks".to_owned(),
             args: String::new(),
+            input_text: None,
         })
         .await
         .expect_err("no gateway means no model round could ever complete");

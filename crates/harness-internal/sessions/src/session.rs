@@ -21,8 +21,11 @@
 //! read derives the same count from the event sequence through the one
 //! rule [`reply_stamp`], so live and replayed stamps agree.
 
+pub(crate) mod files;
 pub(crate) mod run;
 pub(crate) mod supervisor;
+
+pub use files::OutputError;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -35,6 +38,7 @@ use promptforge::event::Event;
 use promptforge::model::StreamDelta;
 use tokio::sync::{broadcast, mpsc, watch};
 
+use self::files::SessionFiles;
 use crate::discovery::AgentSource;
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use crate::lifecycle::RunLifecycle;
@@ -279,6 +283,8 @@ pub(crate) struct SessionCore {
     pub(crate) prompt_path: PathBuf,
     /// The run's argument text.
     pub(crate) args: String,
+    /// The filesystem, input text, and collected output of every run.
+    pub(crate) files: SessionFiles,
     /// Cancellation provenance and the accepted-turn exclusion boundary.
     pub(crate) lifecycle: Arc<RunLifecycle>,
     /// The session's unresolved user-input waits.
@@ -315,6 +321,7 @@ pub(crate) struct SessionSeed {
     pub(crate) source: AgentSource,
     pub(crate) prompt_path: PathBuf,
     pub(crate) args: String,
+    pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
     pub(crate) log: SharedLog,
 }
@@ -334,6 +341,7 @@ impl SessionCore {
             source: seed.source,
             prompt_path: seed.prompt_path,
             args: seed.args,
+            files: seed.files,
             lifecycle: seed.lifecycle,
             waits: Arc::new(WaitRegistry::new()),
             wait_frames,

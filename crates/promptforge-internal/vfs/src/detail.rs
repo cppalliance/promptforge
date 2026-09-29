@@ -3,8 +3,10 @@
 //! The `promptforge` facade never re-exports this module, so nothing here
 //! is reachable from a host: a host passes a run's capability through, and
 //! the engine alone forks it for concurrent arms, joins the arms'
-//! identities back on delivery, derives the store view for store
-//! calls, and ends the run's scope when the run ends.
+//! identities back on delivery, derives the store view from a chain's
+//! access for store calls, and ends the run's scope when the run ends. A
+//! host that holds the handle acquires a store view in a scope of its own
+//! with [`VfsRef::acquire_store`](crate::VfsRef::acquire_store).
 
 use std::fmt;
 use std::sync::{Arc, Weak};
@@ -559,6 +561,60 @@ mod tests {
         drop(view);
         assert!(access.exists("/outer-store/a.txt")?);
         assert!(!access.exists("/inner/s/a.txt")?);
+        Ok(())
+    }
+
+    #[test]
+    fn acquire_store_roots_logical_paths_at_the_declared_store() -> Result<(), VfsError> {
+        let vfs = stock();
+        {
+            let view = vfs.acquire_store(Origin::new("acquire_store test"))?;
+            view.write("paper.md", b"seeded")?;
+            assert_eq!(view.read("paper.md")?, b"seeded");
+        }
+        // The write landed under the store root, beside the base at `/`.
+        let access = vfs.acquire(Origin::new("acquire_store test"))?;
+        assert_eq!(access.read("/my/store/paper.md")?, b"seeded");
+        assert!(!access.exists("/paper.md")?);
+        Ok(())
+    }
+
+    #[test]
+    fn acquire_store_applies_the_strict_path_rules() -> Result<(), VfsError> {
+        let vfs = stock();
+        let view = vfs.acquire_store(Origin::new("acquire_store test"))?;
+        match view.write("../escape.md", b"out") {
+            Err(VfsError::InvalidPath {
+                path,
+                reason: PathReason::Traversal,
+            }) => assert_eq!(path, "../escape.md"),
+            other => panic!("expected a traversal refusal, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn acquire_store_on_a_handle_without_a_store_is_unsupported() {
+        let vfs = VfsRef::builder().mount("/", MemoryBackend::new()).build();
+        match vfs.acquire_store(Origin::new("acquire_store test")) {
+            Err(VfsError::Unsupported { detail, .. }) => {
+                assert!(detail.contains("no store"), "{detail}");
+            }
+            other => panic!("expected no declared store, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn acquire_store_is_a_scope_of_its_own() -> Result<(), VfsError> {
+        let vfs = stock();
+        let (_access, run_view) = chain(&vfs);
+        run_view.write("claimed.md", b"run")?;
+        // A host view is a second scope: the live run's claim conflicts.
+        let host = vfs.acquire_store(Origin::new("acquire_store test"))?;
+        assert!(matches!(
+            host.write("claimed.md", b"host"),
+            Err(VfsError::Conflict { .. })
+        ));
         Ok(())
     }
 }

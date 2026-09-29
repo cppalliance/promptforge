@@ -6,8 +6,9 @@
 //! `ToolCall` effect's id in the activated table. The host's optional
 //! input broker - handed to every activated capability and behind the
 //! `promptforge/user-input` capability - sits in the `input` child
-//! module, and a capability's prelude reaching the prepared run sits in
-//! the `prelude` child module.
+//! module, a capability's prelude reaching the prepared run sits in
+//! the `prelude` child module, and the prompt's declared input and output
+//! files sit in the `files` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,6 +28,8 @@ use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
 use crate::support::Unused;
 
+#[path = "prepare-files.rs"]
+mod files;
 #[path = "prepare-input.rs"]
 mod input;
 #[path = "prepare-prelude.rs"]
@@ -67,6 +70,7 @@ fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Servi
     Services {
         registry,
         vfs: promptforge::vfs::VfsRef::default(),
+        input_text: None,
         cancel: CancelHandle::new(),
         log: Arc::clone(log),
         chat: Arc::new(Unused),

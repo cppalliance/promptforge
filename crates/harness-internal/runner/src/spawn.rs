@@ -7,7 +7,7 @@
 //! [`Provenance`] - so a run's tasks trace as a group and slice by task.
 //! The last two cover the work that performs no effect: a session's
 //! supervisor, whose span records the session id, and a launch's
-//! filesystem probes, whose span records the agent name. Each is a
+//! filesystem work, whose span records the agent name. Each is a
 //! permitted caller of the raw tokio method it wraps, and no other
 //! harness code is.
 
@@ -110,8 +110,11 @@ where
 /// a span named `launch` that records the agent name under `agent`.
 ///
 /// A launch walks the agents directory and reads the agent's source
-/// before any run or session exists, so the work has no [`Tag`] and no
-/// session id; the agent name is what ties it to the launch that asked.
+/// before any run or session exists, and each run puts the prompt's
+/// declared input file in place before its first step and reads its
+/// declared output file after its last. None of that performs an effect,
+/// so the work has no [`Tag`]; the agent name is what ties it to the
+/// launch that asked.
 /// The closure runs to completion even if its [`JoinHandle`] is aborted
 /// or dropped, just as with `tokio::task::spawn_blocking`.
 ///

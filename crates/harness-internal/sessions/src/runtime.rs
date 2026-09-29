@@ -18,12 +18,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use harness_log::{LogError, RunLog};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
+use promptforge::vfs::VfsRef;
 use tokio::sync::{OnceCell, mpsc};
 
 use crate::discovery::{agent_source, discover_agents};
 use crate::environment::{Bindings, CatalogBinding, GatewayBinding, HostSnapshot};
 use crate::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
 use crate::protocol::{LaunchRequest, SessionId};
+use crate::session::files::SessionFiles;
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
 
@@ -38,6 +40,23 @@ pub struct HarnessConfig {
     /// The directory the harness keeps its state under, the run log
     /// included.
     pub state_dir: PathBuf,
+}
+
+/// What a launch hands the session beyond its [`LaunchRequest`]: the
+/// session's environment rather than data about what to run. Build it
+/// with `..LaunchOptions::default()` so a later field is not a break.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOptions {
+    /// The filesystem every run of the session works in: its declared
+    /// store, and any host mounts, overlays, policy, and op sink the
+    /// client built into the handle with `promptforge::vfs`. Every run
+    /// shares it, relaunches included, so files a retired run wrote are
+    /// still there, and the declared input is staged and the declared
+    /// output read through its store. The harness owns the handle from
+    /// launch on; a backend, policy, or op sink in it runs inside the
+    /// session's store operations. `None` gives each run a fresh memory
+    /// store at `/`.
+    pub vfs: Option<VfsRef>,
 }
 
 /// A refused launch.
@@ -201,9 +220,12 @@ impl Harness {
     }
 
     /// Launches a session running the discovered agent `request.agent`
-    /// with `request.args` and returns it. The session runs until its
+    /// with `request.args`, staging `request.input_text` at the prompt's
+    /// declared input file, and returns it. The session runs until its
     /// program returns, fails, or it is closed; turn-cancel relaunches the
     /// program over the retained transcript without ending the session.
+    /// Each run works in a fresh memory store; [`Harness::launch_with`]
+    /// hands the session a filesystem of the client's own.
     ///
     /// # Errors
     /// Returns [`LaunchError::UnknownAgent`] when the name is not a
@@ -213,7 +235,25 @@ impl Harness {
     /// the agent's source cannot be read, and [`LaunchError::Log`] when the
     /// run log cannot be opened.
     pub async fn launch(&self, request: LaunchRequest) -> Result<Session, LaunchError> {
-        let LaunchRequest { agent, args } = request;
+        self.launch_with(request, LaunchOptions::default()).await
+    }
+
+    /// Launches a session as [`Harness::launch`] does, under `options`:
+    /// every run of the session works in `options.vfs` when it is set.
+    ///
+    /// # Errors
+    /// Returns the errors [`Harness::launch`] does.
+    pub async fn launch_with(
+        &self,
+        request: LaunchRequest,
+        options: LaunchOptions,
+    ) -> Result<Session, LaunchError> {
+        let LaunchRequest {
+            agent,
+            args,
+            input_text,
+        } = request;
+        let LaunchOptions { vfs } = options;
         // Resolving through the discovered list is the trust boundary: a
         // client-sent name never reaches the filesystem unless it is the
         // bare stem of a real `.md` file in the configured directory. The
@@ -261,6 +301,7 @@ impl Harness {
             agent,
             source,
             args,
+            files: SessionFiles::new(vfs, input_text),
             lifecycle: Arc::new(RunLifecycle::new(events, cancellations)),
             log,
         });

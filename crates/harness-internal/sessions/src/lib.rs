@@ -14,6 +14,11 @@
 //!   API (the gateway, the chat catalog, the host snapshot); this crate
 //!   never resolves a gateway or reads a client's state itself. It is the
 //!   one place a capability provider crate is named, at registration.
+//! - A launch's filesystem (`LaunchOptions::vfs`) is the one client-built
+//!   handle the harness holds: every run of the session works in it, and
+//!   the harness reaches its store only through `VfsRef::acquire_store`,
+//!   to stage the prompt's declared input file and read its declared
+//!   output file.
 //! - The supervisor's state transitions are a pure reducer whose matches
 //!   stay wildcard-free, so a new variant is a compile error.
 //! - A session's transcript is the run log: the live broadcast and a

@@ -15,7 +15,9 @@ pub use harness_sessions::protocol::SessionId;
 pub use harness_sessions::runtime::Harness;
 pub use harness_sessions::runtime::HarnessConfig;
 pub use harness_sessions::runtime::LaunchError;
+pub use harness_sessions::runtime::LaunchOptions;
 pub use harness_sessions::session::FailureKind;
+pub use harness_sessions::session::OutputError;
 pub use harness_sessions::session::Session;
 pub use harness_sessions::session::SessionFailure;
 pub use harness_sessions::transition::SessionState;
@@ -38,4 +40,11 @@ pub mod log {
     pub use harness_log::JsonSource;
     pub use harness_log::LogError;
     pub use harness_log::RunId;
+}
+
+pub mod vfs {
+    #![doc = include_str!("vfs.md")]
+
+    pub use promptforge::vfs::VfsError;
+    pub use promptforge::vfs::VfsRef;
 }

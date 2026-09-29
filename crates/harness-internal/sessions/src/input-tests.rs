@@ -290,6 +290,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let services = Services {
         registry: Some(Arc::new(capabilities)),
         vfs: VfsRef::default(),
+        input_text: None,
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(NoChat),
