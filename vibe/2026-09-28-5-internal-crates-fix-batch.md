@@ -666,7 +666,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-5>
 
-### Step 5: Refuse dangling symlinks in the host backend
+### Step 5: Refuse dangling symlinks in the host backend [completed]
 
 - Component: VFS safety
 - Piece: the dangling-link refusal, the first of two pieces built sequentially. The pieces share no file (`host.rs` here, `handle.rs` in Step 6) and have separate test sets.

@@ -13,14 +13,11 @@
 //! final-component link as a link, never its target. Operations on
 //! contents (`read`, `read_range`, `write`, `append`, `list`, `glob`,
 //! `copy`) follow links under the containment check, which denies a
-//! link that resolves outside the root.
+//! link that resolves outside the root and refuses a path that passes
+//! through a dangling link.
 //!
 //! Stage 2 hardening (the Bashkit RealFs resolver trio, symlink
-//! policies, Windows long paths and device names) is deferred. The
-//! known stage 1 limitation: containment canonicalizes the nearest
-//! existing ancestor, so a dangling symlink inside the root is not
-//! itself resolved; writing through one follows the host's own
-//! symlink semantics.
+//! policies, Windows long paths and device names) is deferred.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -127,6 +124,8 @@ fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
 /// is canonicalized and must sit under the (already canonical) root;
 /// the missing tail is re-appended lexically. This catches link escapes
 /// for existing paths while still resolving paths yet to be created.
+/// A dangling link on the way up is refused: its target cannot be
+/// canonicalized, and the host would follow it when creating.
 fn contain(root: &Path, candidate: &Path, original: &VfsPath) -> Result<PathBuf, VfsError> {
     let denied = || VfsError::PermissionDenied {
         path: original.to_string(),
@@ -146,6 +145,12 @@ fn contain(root: &Path, candidate: &Path, original: &VfsPath) -> Result<PathBuf,
                 resolved.push(component);
             }
             return Ok(resolved);
+        }
+        if ancestor.symlink_metadata().is_ok() {
+            return Err(VfsError::PermissionDenied {
+                path: original.to_string(),
+                reason: format!("{original} passes through a dangling symbolic link"),
+            });
         }
         let Some(parent) = ancestor.parent() else {
             return Err(denied());
@@ -824,6 +829,29 @@ mod tests {
         fs::symlink_metadata(host).is_ok_and(|metadata| metadata.file_type().is_symlink())
     }
 
+    /// Makes `link` a dangling directory link: a link to `target`, which
+    /// is then removed. A directory link needs no privilege on any host.
+    fn make_dangling_dir_link(link: &Path, target: &Path) -> Result<(), VfsError> {
+        fs::create_dir(target).map_err(|err| map_io("creating the link target", &err))?;
+        assert!(
+            make_dir_link(link, target),
+            "the directory link must be created"
+        );
+        fs::remove_dir(target).map_err(|err| map_io("removing the link target", &err))
+    }
+
+    /// Asserts `result` is the dangling-link refusal, not some other
+    /// denial or an OS failure.
+    fn assert_dangling_refusal<T: std::fmt::Debug>(result: Result<T, VfsError>, operation: &str) {
+        match result {
+            Err(VfsError::PermissionDenied { reason, .. }) => assert!(
+                reason.contains("passes through a dangling symbolic link"),
+                "{operation}: {reason}"
+            ),
+            other => panic!("{operation} must be refused as a dangling link, got {other:?}"),
+        }
+    }
+
     #[test]
     fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> {
         let temp = TempDir::new()?;
@@ -879,8 +907,10 @@ mod tests {
             .map_err(|err| map_io("seeding the outside file", &err))?;
         let root = TempDir::new()?;
         if !make_dir_link(&root.path().join("link"), outside.path()) {
-            // The host refused the link (privileges); there is nothing
-            // to escape through, so the test vacuously passes.
+            eprintln!(
+                "skipped: the host refused to create a directory link, so there is no link \
+                 to escape through"
+            );
             return Ok(());
         }
         let mut access = rooted_access(root.path())?;
@@ -897,6 +927,13 @@ mod tests {
                 Err(VfsError::PermissionDenied { .. })
             ),
             "a write through the escaping link must be denied"
+        );
+        assert!(
+            matches!(
+                access.append(&path("/link/secret.txt")?, b"x"),
+                Err(VfsError::PermissionDenied { .. })
+            ),
+            "an append through the escaping link must be denied"
         );
         assert_eq!(
             fs::read(outside.path().join("secret.txt"))
@@ -988,6 +1025,53 @@ mod tests {
             !is_link(&root.path().join("dangling")),
             "the link must be gone"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn content_operations_refuse_a_path_through_a_dangling_link() -> Result<(), VfsError> {
+        let outside = TempDir::new()?;
+        for target_in_root in [true, false] {
+            let root = TempDir::new()?;
+            let target = if target_in_root {
+                root.path().join("gone")
+            } else {
+                outside.path().join("gone")
+            };
+            make_dangling_dir_link(&root.path().join("link"), &target)?;
+            let mut access = rooted_access(root.path())?;
+            for spelled in ["/link", "/link/new.txt"] {
+                let at = path(spelled)?;
+                assert_dangling_refusal(access.append(&at, b"x"), &format!("append {spelled}"));
+                assert_dangling_refusal(access.write(&at, b"x"), &format!("write {spelled}"));
+                assert_dangling_refusal(access.read(&at), &format!("read {spelled}"));
+                assert_dangling_refusal(access.list(&at), &format!("list {spelled}"));
+            }
+            assert!(
+                fs::symlink_metadata(&target).is_err(),
+                "nothing may appear at the link's target {}",
+                target.display()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn path_operations_act_on_a_dangling_link_itself_and_refuse_a_path_through_it()
+    -> Result<(), VfsError> {
+        let root = TempDir::new()?;
+        let link = root.path().join("link");
+        make_dangling_dir_link(&link, &root.path().join("gone"))?;
+        let mut access = rooted_access(root.path())?;
+        assert!(access.exists(&path("/link")?)?, "the link itself exists");
+        assert_dangling_refusal(
+            access.exists(&path("/link/new.txt")?),
+            "exists /link/new.txt",
+        );
+        assert_dangling_refusal(access.mkdir(&path("/link/sub")?, false), "mkdir /link/sub");
+        access.remove(&path("/link")?, false)?;
+        assert!(!is_link(&link), "the link must be gone");
+        assert!(!access.exists(&path("/link")?)?);
         Ok(())
     }
 
@@ -1263,7 +1347,8 @@ mod tests {
         }
 
         #[test]
-        fn dotdot_stops_at_the_access_root() -> Result<(), VfsError> {
+        fn dotdot_resolves_inside_the_access_root_and_is_refused_above_it() -> Result<(), VfsError>
+        {
             let temp = TempDir::new()?;
             let access = rooted(&temp)?.acquire(Origin::new("host semantics test"))?;
             access.write("/drafts/f.txt", b"x")?;
