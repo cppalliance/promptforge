@@ -13,9 +13,9 @@ categories = ["data-structures"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-# The canonical metrics vocabulary (Usage, LlamaTimings, VllmMetrics,
-# ClientTiming, CallMetrics) this crate parses response bodies into and
-# re-exports.
+# The canonical metrics vocabulary this crate parses response bodies into,
+# the StreamDelta the reassembly reports, and the model catalog types the
+# `model` module re-exports.
 promptforge-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true

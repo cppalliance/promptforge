@@ -120,9 +120,6 @@ pub struct RunContext {
     /// shared library replays. Empty on a caller-built context that was
     /// never prepared.
     pub(crate) preludes: Vec<Prelude>,
-    // No test-only host field: the in-crate suites assemble a
-    // `RunHost` themselves and pass it to the tokio driver, so this
-    // production struct carries only the engine's inputs.
 }
 
 impl RunContext {

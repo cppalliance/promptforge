@@ -189,8 +189,7 @@ impl Scheduler {
         // The counts seed from the section's effective scope; a bound alias
         // outside it must still be seeded here, because the increment
         // errors on an unseeded alias. The attempt counts at dispatch -
-        // before the tool runs, so a cancelled dispatch still counts,
-        // exactly as the shared body has always counted it.
+        // before the tool runs, so a cancelled dispatch still counts.
         counts.ensure(binding.alias())?;
         counts.increment(binding.alias())?;
         let origin = ToolCallOrigin {

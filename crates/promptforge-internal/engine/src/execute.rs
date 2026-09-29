@@ -126,8 +126,10 @@ pub fn perform_store_op(
 /// - [`RunErrorKind::Cancelled`] - the host cancelled the run (mid-run
 ///   classification only; the interface reports [`RunResult::Cancelled`]).
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
-/// - [`RunErrorKind::RequirementsUnmet`] - an H1 assertion or model
-///   requirement the environment cannot satisfy.
+/// - [`RunErrorKind::RequirementsUnmet`] - a missing required capability,
+///   a missing host service, a capability conflict, an unmet model
+///   requirement (a context minimum or a hard keyword), or a failed H1
+///   hard gate.
 #[derive(Debug)]
 pub enum RunResult {
     /// The run completed with its final text. Mirrors `Result` vocabulary,

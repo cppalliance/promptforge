@@ -11,7 +11,6 @@ use std::sync::Arc;
 use promptforge_types::event::Event;
 use promptforge_types::ids::Provenance;
 
-#[path = "run-effect.rs"]
 mod effect;
 
 pub use effect::{
@@ -222,9 +221,8 @@ impl Run {
     }
 }
 
-/// Assembles the run state from the host's context: the version gate, the
-/// shared library, and the declared store, in the order the run has
-/// always checked them.
+/// Assembles the run state from the host's context, checking the version
+/// gate, the shared library, and the declared store in that order.
 ///
 /// # Errors
 /// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
@@ -263,5 +261,4 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
 }
 
 #[cfg(test)]
-#[path = "run-tests.rs"]
 mod tests;

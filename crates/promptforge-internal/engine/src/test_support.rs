@@ -14,10 +14,10 @@
 //! the timer wheel, and hands every event to the caller's sink. It is the
 //! host the engine's own suites drive.
 //!
-//! [`RunHost`] bundles the resources the suites used to hand the retired
-//! in-crate loop - an observer, a client, a fixture tool table, a delta
-//! hook - and [`run_with_host`] is that loop's implicit-prepare path over
-//! the tokio driver: prepare, refuse or run. The tool fixtures implement
+//! [`RunHost`] bundles a suite's resources for one run - an observer, a
+//! client, a fixture tool table, a delta hook - and [`run_with_host`] is
+//! the implicit-prepare path over the tokio driver: prepare, refuse or
+//! run. The tool fixtures implement
 //! the stand-in trait [`TestTool`]; the production trait is the harness's,
 //! which no engine crate names.
 //! [`Observer`](recording::Observer) and
@@ -165,8 +165,8 @@ pub fn drive(
     }
 }
 
-/// The retired loop's implicit-prepare path over the tokio driver: prepares
-/// and runs `prompt` with the resources `host` bundles.
+/// The implicit-prepare path over the tokio driver: prepares and runs
+/// `prompt` with the resources `host` bundles.
 ///
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there

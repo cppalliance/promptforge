@@ -1,6 +1,6 @@
 # promptforge-types
 
-This crate holds shared host-support primitives and canonical runtime-event vocabulary.
+This crate holds the canonical vocabulary every PromptForge crate shares - the run event, emitter, and metrics vocabulary, the model identity and catalog (`models`), the streaming delta (`wire`), the tool, capability, and naming vocabulary (`tools`, `capabilities`, `names`), run identity and replay (`ids`, `replay`, `timestamp`) - beside the host-support primitives: the untrusted guards and the polled cancellation tree.
 
 - Every `Event` the engine returns is report-only; reported data cannot steer an execution decision.
 - Read-side history is requested through the `TaskEvents` effect and answered by the host; the engine never reads back the events it returned.

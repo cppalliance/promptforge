@@ -23,9 +23,7 @@ use promptforge_types::ids::TaskId;
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 use serde_json::Value;
 
-#[path = "recording-forward.rs"]
 mod forward;
-#[path = "recording-observation.rs"]
 mod observation;
 
 pub use forward::forward;

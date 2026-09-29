@@ -13,9 +13,10 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 
 use promptforge_types::metrics::ClientTiming;
+use promptforge_types::wire::StreamDelta;
 use serde_json::Value;
 
-use super::{Applied, Completion, SseScanner, StreamAccumulator, StreamDelta};
+use super::{Applied, Completion, SseScanner, StreamAccumulator};
 use crate::Error;
 use crate::model::CompletionError;
 

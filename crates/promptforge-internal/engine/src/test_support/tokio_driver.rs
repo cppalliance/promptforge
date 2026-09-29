@@ -165,9 +165,9 @@ pub(crate) struct TokioDriver<'a> {
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
     /// and replaying its events through the `host` the suite assembled
-    /// itself. The host supplies the observer, broker, tools, delta hook,
-    /// and debug capture; `client` is the run's mock-gateway client when
-    /// the suite supplies one, overriding any on the host.
+    /// itself. The host supplies the observer, chat client, tools, delta
+    /// hook, and debug capture; `client` is the run's mock-gateway client
+    /// when the suite supplies one, overriding any on the host.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
@@ -518,7 +518,7 @@ impl std::fmt::Debug for TokioDriver<'_> {
 /// Aborts every performer still out when the driver is dropped
 /// mid-run - a host tearing the run down without driving it to its end.
 /// Dropping a bare `JoinHandle` detaches the task, which would strand a
-/// broker wait or gateway round forever, so the drop applies the same
+/// tool call or model round forever, so the drop applies the same
 /// abort the run's end does.
 impl Drop for TokioDriver<'_> {
     fn drop(&mut self) {

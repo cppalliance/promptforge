@@ -1236,9 +1236,7 @@ fn strip_root(root: &str, matched: &str) -> Option<String> {
 }
 
 /// The largest logical store path, in bytes, accepted by the store
-/// view: the ceiling the retired store facade enforced
-/// (`MAX_STORE_PATH_BYTES`), kept so a store path stays a bounded
-/// denial-of-service lever.
+/// view, so a store path stays a bounded denial-of-service lever.
 const MAX_STORE_PATH_BYTES: usize = 1024;
 
 /// The store's strict logical-path rules, applied by the store view

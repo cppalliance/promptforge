@@ -146,8 +146,9 @@ pub enum ToolSchemaError {
 /// A tool invocation requested by the model.
 ///
 /// `OpenAI` returns tool calls with `function.arguments` as a JSON-encoded
-/// string; this type holds that string parsed into a [`Value`] (falling back to
-/// a string `Value` if it is not valid JSON).
+/// string; the wire decoder stores that string decoded into a JSON object,
+/// and fails the turn when the arguments are missing, not a string, not
+/// valid JSON, or not an object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolCall {

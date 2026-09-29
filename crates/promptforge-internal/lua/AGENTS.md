@@ -1,6 +1,6 @@
 # promptforge-lua
 
-This crate owns the sandboxed Lua runtime, its host surface, and coroutine protocol vocabulary.
+This crate owns the sandboxed Lua runtime, its host surface, and coroutine protocol vocabulary. The host surface includes the VFS-backed `store` table, the `messages` builders, the `tasks` shims, and the capability preludes (`prelude.rs`), such as the `input` table `promptforge/user-input` contributes.
 
 - Host functions that would create a parser-to-Lua dependency cycle stay in this crate rather than `promptforge-parser`.
 - Executors drive this crate. It never imports or composes an executor.

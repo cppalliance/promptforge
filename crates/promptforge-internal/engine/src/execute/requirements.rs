@@ -109,9 +109,8 @@ impl Requirements {
     /// required versus actual.
     #[must_use]
     pub fn notice(&self) -> String {
-        // Writing to a String is infallible; the `let _` mirrors the
-        // crate's established pattern (subst.rs) under the denied
-        // `unwrap_used`/`expect_used` lints.
+        // Writing to a String is infallible, so each `write!` result is
+        // discarded under the denied `unwrap_used`/`expect_used` lints.
         use std::fmt::Write as _;
         let mut notice = String::from("the environment cannot satisfy this prompt:");
         for id in &self.missing_required {

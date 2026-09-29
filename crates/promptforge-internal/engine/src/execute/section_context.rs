@@ -67,8 +67,7 @@ pub(crate) struct LocalCall {
 pub(crate) struct SectionContext {
     /// The frame's engine: the owned section VM, `Some` from construction
     /// until the frame's `Drop` takes it for the teardown boundary.
-    /// `SectionVm` stays a standalone type in `lua/` with its own test
-    /// suite.
+    /// `SectionVm` is `promptforge-lua`'s type, tested in that crate.
     vm: Option<SectionVm>,
     /// The section's own name, retained so `Drop` reports the teardown
     /// boundary and the completion observation without a parameter.

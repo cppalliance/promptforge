@@ -40,7 +40,7 @@ pub(crate) enum Error {
     /// The prompt frontmatter was not valid YAML, preserving the parser cause.
     ///
     /// This retains the originating YAML decode failure (a
-    /// `serde_yaml_ng::Error`) as the `#[source]` cause (F3) so
+    /// `serde_yaml_ng::Error`) as the `#[source]` cause so
     /// [`crate::ParseError`] can expose the frontmatter syntax location through
     /// [`std::error::Error::source`] instead of flattening it into the message.
     #[error("invalid frontmatter: {message}")]
@@ -365,9 +365,11 @@ pub(crate) enum Error {
     #[error("unsupported promptforge version: {0} (this build supports major 0)")]
     UnsupportedVersion(u32),
 
-    /// The environment cannot satisfy the prompt's declared requirements:
-    /// required capabilities are missing, or the filled model fails a
-    /// declared hard requirement (a context minimum or hard keyword).
+    /// The environment cannot satisfy the prompt: a required capability is
+    /// missing, a required capability needs a host service this host does
+    /// not provide, two declared capabilities conflict, the filled model
+    /// fails a declared requirement (a context minimum or a hard keyword),
+    /// or an H1 block failed the prompt's hard gate.
     ///
     /// The notice is the whole message, written to be read by a model: it
     /// may arrive as tool output when the prompt runs as a sub-run tool.
@@ -519,7 +521,7 @@ impl Error {
     }
 
     /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
-    /// `#[source]` cause (F4) rather than flattening it to a string.
+    /// `#[source]` cause rather than flattening it to a string.
     #[cfg(test)]
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {

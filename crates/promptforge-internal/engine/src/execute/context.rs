@@ -63,8 +63,9 @@ pub(crate) struct RunState {
     argv: Option<Arc<serde_json::Value>>,
     /// The run's resource limits.
     limits: RunLimits,
-    /// The run's event buffer, shared by every chain's emitter and every
-    /// spawned leaf task, drained by the driver after each dispatch round.
+    /// The run's event buffer, shared by every chain's emitter, spawned
+    /// task chains' included, and drained once per `step` into the batch
+    /// handed to the host.
     events: EventSink,
     /// This context's task-scoped emitter: the root task's at
     /// construction, a spawned chain's own after [`with_task`](Self::with_task).
@@ -77,12 +78,12 @@ pub(crate) struct RunState {
     /// same flag the activated capabilities and the run's `cancel` share.
     cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
-    /// the values themselves - their provenance included - rather than on
-    /// what the host observer was handed.
+    /// the values themselves - their provenance included - without
+    /// collecting each step's batch.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<Event>>>>,
-    /// The model-turn counter this context advances (the run's, or one
-    /// shared by all arms of a fanout).
+    /// The model-turn counter this context advances: the run's, or a
+    /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library, so

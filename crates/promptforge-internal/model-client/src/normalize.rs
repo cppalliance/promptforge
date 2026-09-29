@@ -31,12 +31,7 @@ const EMPTY_REPLY_REASONING_IGNORED: &str =
     "empty model reply: reasoning content was present but ignored";
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
-///
-/// `Eq` is intentionally omitted: [`CompletionResult`] holds tool-call
-/// arguments as a [`serde_json::Value`], which is not `Eq` (it can hold an
-/// `f64`), so only `Clone` and `PartialEq` are coherent here.
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub(crate) struct NormalizedTurn {
     /// The text or tool-call product the tool loop consumes.
     pub(crate) outcome: CompletionResult,

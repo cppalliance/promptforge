@@ -239,7 +239,6 @@ impl ModelDescriptor {
 ///
 /// `#[non_exhaustive]` so the collision-free catalog invariant is only ever
 /// established through [`ModelCatalog::new`]/[`ModelCatalog::empty`].
-// No `Eq`: bindings hold `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelCatalog {

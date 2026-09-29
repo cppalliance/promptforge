@@ -375,5 +375,5 @@ fn forward_debug(event: Event, debug: Option<&dyn DebugCapture>) {
 }
 
 #[cfg(test)]
-#[path = "recording-forward-tests.rs"]
+#[path = "forward-tests.rs"]
 mod tests;

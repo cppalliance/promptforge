@@ -345,7 +345,7 @@ The critical fixes are the smallest changes that close each failure path at its 
 
 <step-4>
 
-### Step 4: Sweep dead items and stale text, then fold two directories
+### Step 4: Sweep dead items and stale text, then fold two directories [completed]
 
 - Component: Internal crates sweep
 - Piece: dead items, docs, comments, and the two directory folds, built jointly in one commit. None of them changes behavior, so no new test covers any one of them, and one pass of the full gates verifies all of them. Within the step, make the folds last, so every other edit, this step's and Steps 1 to 3's, already sits in the moved files.

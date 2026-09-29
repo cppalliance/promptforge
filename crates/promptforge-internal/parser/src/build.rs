@@ -1,9 +1,7 @@
-//! Frontmatter parsing and heading-tree construction (PF-PARSER-012).
-//!
-//! Split out of the `parser` facade so the facade (public types +
-//! orchestration) stays small. This owns the [`Frontmatter`] model, the
-//! `max_tool_iterations` cap, frontmatter splitting/version detection, and the
-//! markdown heading walk that builds the [`Section`] tree.
+//! Frontmatter parsing and heading-tree construction: the [`Frontmatter`]
+//! model, the `max_tool_iterations` cap, frontmatter splitting/version
+//! detection, and the markdown heading walk that builds the [`Section`]
+//! tree.
 
 use std::ops::Range;
 

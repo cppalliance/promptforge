@@ -24,9 +24,10 @@
 use std::collections::BTreeMap;
 
 use promptforge_types::metrics::ClientTiming;
+use promptforge_types::wire::StreamDelta;
 use serde_json::{Map, Value};
 
-use super::{Completion, StreamDelta};
+use super::Completion;
 use crate::model::CompletionError;
 use crate::{Error, Result};
 

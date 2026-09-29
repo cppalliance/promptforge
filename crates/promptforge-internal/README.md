@@ -24,4 +24,4 @@ The PromptForge virtual filesystem: canonical interned paths, the claims model, 
 
 ## promptforge-model-client
 
-The model vocabulary: the chat-completions wire types and SSE reassembly a `Chat` effect exchanges, and the model catalog and binding vocabulary. The engine and the Lua host call models through it. Depends on promptforge-types; it owns no transport - the HTTP client is the harness's (`harness-models`).
+The model vocabulary: the chat-completions wire types and SSE reassembly a `Chat` effect exchanges, and the model catalog and binding vocabulary. The model catalog types (`ModelCatalog`, `ModelDescriptor`, `ModelId`, `ThinkingMode`) are defined in promptforge-types and re-exported by model-client's `model` module. The engine and the Lua host call models through it. Depends on promptforge-types; it owns no transport - the HTTP client is the harness's (`harness-models`).

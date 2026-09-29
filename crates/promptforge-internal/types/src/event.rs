@@ -412,9 +412,10 @@ events! {
             /// The sentence the model reads.
             text: String,
         },
-        /// A task set its own progress note through `tasks.note`, the text
-        /// its owner reads through `task_status`. Reported under the task's
-        /// target section.
+        /// Reserved for a task setting its own progress note through
+        /// `tasks.note`, the text its owner reads through `task_status`,
+        /// under the task's target section. Not yet produced: the engine
+        /// stores the note on the chain without reporting it.
         TaskNote {
             /// The task that set the note.
             task: TaskId,

@@ -3,9 +3,10 @@
 //! walked section (a spawned task's first entry included, seeded with its
 //! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
-//! setup half (host injection, host APIs, the control surface, the shared
-//! replay, the captured alias bindings) is shared; only the seed, the `sys`
-//! extras, and the `list_from_section` visible set differ.
+//! setup half (host injection, host APIs, the control surface, the
+//! capability preludes, the shared replay, the store yield shims, the
+//! captured alias bindings) is shared; only the seed, the `sys` extras,
+//! and the `list_from_section` visible set differ.
 
 use std::sync::Arc;
 
@@ -27,8 +28,9 @@ impl SectionContext {
     /// preamble: the `sys` JSON, the section-started observation, VM
     /// construction and limits, the control surface (the `jump` and
     /// `list_from_section` callbacks resolved over the section's visible
-    /// set, plus the coroutine yield shims for the suspending calls), the
-    /// shared setup half (host injection, host APIs, the shared replay, the
+    /// set, plus the coroutine yield shims for the suspending calls), and
+    /// the rest of the shared setup half (host injection, host APIs, the
+    /// capability preludes, the shared replay, the store yield shims, the
     /// captured alias bindings).
     ///
     /// `siblings` is the caller's own walk slice, from which the section's
@@ -63,7 +65,7 @@ impl SectionContext {
         let mut sys = ctx.sys_json(section_id, task_id, section.name());
         // A spawned chain's `sys.index` is the spawn's own value, verbatim;
         // absent otherwise, so a walked section reading `sys.index` raises
-        // the sealed-sys unknown-field error exactly as before.
+        // the sealed-sys unknown-field error.
         if let Some(index) = seed.index {
             sys["index"] = serde_json::Value::from(index);
         }
@@ -128,7 +130,8 @@ impl SectionContext {
     /// `when` like every section after it), VM construction over the
     /// run's shared sets, limits, and the shared
     /// setup half (host injection, host APIs, the control surface, the
-    /// coroutine shims, the shared replay, the captured alias bindings).
+    /// coroutine shims, the capability preludes, the shared replay, the
+    /// store yield shims, the captured alias bindings).
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed

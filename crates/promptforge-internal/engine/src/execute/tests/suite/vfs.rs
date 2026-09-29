@@ -225,7 +225,7 @@ impl TempDir {
             .expect("the clock is after the epoch")
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "promptforge-api-vfs-{}-{unique}-{name}",
+            "promptforge-engine-vfs-{}-{unique}-{name}",
             std::process::id(),
         ));
         std::fs::create_dir_all(&dir).expect("the temp dir creates");

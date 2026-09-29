@@ -170,18 +170,16 @@ impl Scheduler {
     /// The fallible half of spawn dispatch, shared with the model's `task`
     /// built-in: `call`'s depth cap against the spawner's call-depth field
     /// (the refusal named after the author-facing call that tripped it,
-    /// `fanout` for an arm and `call` otherwise, so the text is the one
-    /// each path always had), `call`'s target resolution over the
-    /// spawner's visible set, the worker-template check (a list section is
-    /// not a target), then the task chain one level deeper under the
-    /// spawn's `args` and `var` snapshot, with its own access capability
-    /// (a concurrent thread of execution, forked from the spawner's so
-    /// the spawn is the happens-before edge; every delivery of the task
-    /// joins it back) and a
-    /// fresh turn counter. The child leaves this call queued for
-    /// admission - holding no Lua VM yet - with its `var` snapshot moved
-    /// into the chain and its start record stashed; the drain admits it
-    /// when a slot frees up.
+    /// `fanout` for an arm and `call` otherwise), `call`'s target
+    /// resolution over the spawner's visible set, the worker-template
+    /// check (a list section is not a target), then the task chain one
+    /// level deeper under the spawn's `args` and `var` snapshot, with its
+    /// own access capability (a concurrent thread of execution, forked
+    /// from the spawner's so the spawn is the happens-before edge; every
+    /// delivery of the task joins it back) and a fresh turn counter. The
+    /// child leaves this call queued for admission - holding no Lua VM
+    /// yet - with its `var` snapshot moved into the chain and its start
+    /// record stashed; the drain admits it when a slot frees up.
     #[expect(
         clippy::too_many_arguments,
         reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
@@ -472,13 +470,10 @@ impl Scheduler {
                 }
                 // `Author`, or an origin `promptforge-types` adds behind
                 // its `#[non_exhaustive]` `TaskOrigin`: treated as the
-                // author's. Both origins as they stand today are driven
-                // through this arm by
-                // `an_ending_owner_leaks_its_author_task_and_never_its_model_task`,
-                // which is the whole of the guarantee: a variant added to
-                // `TaskOrigin` lands here silently until someone extends
-                // that test, because `#[non_exhaustive]` denies this crate
-                // the exhaustive match that would fail the build instead.
+                // author's. `#[non_exhaustive]` denies this crate an
+                // exhaustive match, so a new variant lands here silently.
+                // Only one test pins which origins leak:
+                // `an_ending_owner_leaks_its_author_task_and_never_its_model_task`.
                 _ => leaked.push(task),
             }
         }
@@ -497,8 +492,7 @@ impl Scheduler {
     /// abandons that chain's own tasks (as `OwnerAborted`) on the way, so
     /// a nested slot is already terminal when its owner's turn comes and
     /// `is_live()` skips it. The leaked-author list is discarded: no one
-    /// receives an outcome for a run that is ending. Detected by
-    /// `cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_ends`.
+    /// receives an outcome for a run that is ending.
     pub(super) fn settle_all_tasks(&mut self, reason: AbandonReason) {
         let mut owners: Vec<ChainIndex> = self
             .tasks

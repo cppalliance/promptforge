@@ -390,5 +390,5 @@ pub struct ToolAnswerRecord {
 }
 
 #[cfg(test)]
-#[path = "run-effect-tests.rs"]
+#[path = "effect-tests.rs"]
 mod tests;

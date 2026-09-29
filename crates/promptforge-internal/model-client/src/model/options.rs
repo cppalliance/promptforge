@@ -84,8 +84,6 @@ pub struct ModelInvocation {
     pub thinking: Option<bool>,
 }
 
-// No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
-
 /// One prompt-local alias bound to a model identity and frozen invocation.
 // No `Eq`: the frozen invocation holds an `f64` temperature.
 #[derive(Debug, Clone, PartialEq)]
