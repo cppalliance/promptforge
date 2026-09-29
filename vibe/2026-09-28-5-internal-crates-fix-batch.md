@@ -1024,7 +1024,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-20>
 
-### Step 20: Split `promptforge-vfs`'s `handle.rs` to the ceiling
+### Step 20: Split `promptforge-vfs`'s `handle.rs` to the ceiling [completed]
 
 - Component: VFS ceiling
 - Piece: `handle.rs`, the first of two pieces built sequentially. This file alone (3,825 lines at `a05d5cbd`) fills one sub-agent's read, and the marker waits for the last file, in Step 21.
