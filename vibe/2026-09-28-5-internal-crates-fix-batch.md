@@ -691,7 +691,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-6>
 
-### Step 6: Close the three claims-ledger gaps
+### Step 6: Close the three claims-ledger gaps [completed]
 
 - Component: VFS safety
 - Piece: the claims gaps, the second piece, built after Step 5.

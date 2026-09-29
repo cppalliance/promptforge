@@ -481,7 +481,8 @@ impl Claims {
     /// that may create the path as a directory, its parent's children,
     /// every pattern that matches it, and every subtree that covers it -
     /// and of the ancestors it may create against their reads and
-    /// writes. Records nothing.
+    /// writes, their parents' children, and the patterns that match
+    /// them. Records nothing.
     fn check_write(
         tables: &ClaimsTables,
         scope: &Scope,
@@ -520,25 +521,7 @@ impl Claims {
                 }
             }
         }
-        if let Some(parent) = parent_of(path)
-            && let Some(region) = tables.children.get(&parent)
-        {
-            for (&other, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, view, other_scope, other, other_clock) {
-                    return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
-                }
-            }
-        }
-        for (pattern, region) in &tables.patterns {
-            if !pattern_matches_path(pattern, path) {
-                continue;
-            }
-            for (&other, &(other_scope, other_clock)) in &region.reads {
-                if tables.conflicts(scope, view, other_scope, other, other_clock) {
-                    return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
-                }
-            }
-        }
+        Self::check_observers(tables, scope, view, path, path)?;
         for (subtree, region) in &tables.subtrees {
             if !subtree_covers(subtree, path) {
                 continue;
@@ -556,11 +539,14 @@ impl Claims {
             }
         }
         for ancestor in may_create(path) {
-            // An ancestor it may create is checked against the ancestor's
-            // own reads and writes: a read observes the entry this write
-            // may create under it, and a write or remove of the ancestor
-            // itself races with the creation, while another write may
-            // create alongside.
+            // An ancestor it may create is checked, like the leaf,
+            // against its parent's listings and the patterns that match
+            // it, since creating it changes what those observe. It is
+            // also checked against its own reads and writes: a read
+            // observes the entry this write may create under it, and a
+            // write or remove of the ancestor itself races with the
+            // creation, while another write may create alongside.
+            Self::check_observers(tables, scope, view, path, &ancestor)?;
             let Some(region) = tables.paths.get(&ancestor) else {
                 continue;
             };
@@ -574,6 +560,40 @@ impl Claims {
                     epoch.id,
                     ClaimKind::Write,
                 ));
+            }
+            for (&other, &(other_scope, other_clock)) in &region.reads {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
+                    return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The checks of a write of `path` by `view` of `scope` that creates
+    /// `entry` (the path itself or an ancestor it may create) against the
+    /// accesses that observe the entry's presence: listings of its parent
+    /// and patterns that match it. Records nothing.
+    fn check_observers(
+        tables: &ClaimsTables,
+        scope: &Scope,
+        view: &View,
+        path: &VfsPath,
+        entry: &VfsPath,
+    ) -> Result<(), VfsError> {
+        let id = view.id;
+        if let Some(parent) = parent_of(entry)
+            && let Some(region) = tables.children.get(&parent)
+        {
+            for (&other, &(other_scope, other_clock)) in &region.reads {
+                if tables.conflicts(scope, view, other_scope, other, other_clock) {
+                    return Err(conflict(path, id, ClaimKind::Write, other, ClaimKind::Read));
+                }
+            }
+        }
+        for (pattern, region) in &tables.patterns {
+            if !pattern_matches_path(pattern, entry) {
+                continue;
             }
             for (&other, &(other_scope, other_clock)) in &region.reads {
                 if tables.conflicts(scope, view, other_scope, other, other_clock) {
@@ -675,8 +695,10 @@ impl Claims {
     }
 
     /// Checks and records a list of `dir`'s children by `id` of `scope`:
-    /// the may-create writes that would change the listing, and every
-    /// subtree that covers it.
+    /// the may-create writes that would change the listing, every
+    /// subtree that covers it, and every subtree rooted at one of its
+    /// direct children. A subtree rooted deeper leaves the listing
+    /// unchanged, so it is not a conflict.
     fn claim_list(&self, scope: &Arc<Scope>, id: ExecId, dir: &VfsPath) -> Result<(), VfsError> {
         let mut tables = self.tables();
         let view = &scope.view(id);
@@ -688,7 +710,7 @@ impl Claims {
             }
         }
         for (subtree, region) in &tables.subtrees {
-            if !subtree_covers(subtree, dir) {
+            if !subtree_covers(subtree, dir) && parent_of(subtree).as_ref() != Some(dir) {
                 continue;
             }
             if let Some((other_scope, epoch)) = region.write
@@ -833,8 +855,9 @@ impl Claims {
     }
 
     /// The checks of a whole-subtree claim on `path` by `view` of
-    /// `scope`: the subtree's own standing write, every path and listing
-    /// under it, and every pattern that overlaps it. Records nothing.
+    /// `scope`: every subtree that covers it or that it covers, every
+    /// path and listing under it, the listing of its parent, and every
+    /// pattern that overlaps it. Records nothing.
     fn check_subtree(
         tables: &ClaimsTables,
         scope: &Scope,
@@ -842,17 +865,36 @@ impl Claims {
         path: &VfsPath,
     ) -> Result<(), VfsError> {
         let id = view.id;
-        if let Some(region) = tables.subtrees.get(path)
-            && let Some((other_scope, epoch)) = region.write
-            && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
+        for (other, region) in &tables.subtrees {
+            if !subtree_covers(path, other) && !subtree_covers(other, path) {
+                continue;
+            }
+            if let Some((other_scope, epoch)) = region.write
+                && tables.conflicts(scope, view, other_scope, epoch.id, epoch.clock)
+            {
+                return Err(conflict(
+                    path,
+                    id,
+                    ClaimKind::Write,
+                    epoch.id,
+                    ClaimKind::Write,
+                ));
+            }
+        }
+        if let Some(parent) = parent_of(path)
+            && let Some(region) = tables.children.get(&parent)
         {
-            return Err(conflict(
-                path,
-                id,
-                ClaimKind::Write,
-                epoch.id,
-                ClaimKind::Write,
-            ));
+            for (&reader, &(other_scope, other_clock)) in &region.reads {
+                if tables.conflicts(scope, view, other_scope, reader, other_clock) {
+                    return Err(conflict(
+                        path,
+                        id,
+                        ClaimKind::Write,
+                        reader,
+                        ClaimKind::Read,
+                    ));
+                }
+            }
         }
         for (other, region) in &tables.paths {
             if !subtree_covers(path, other) {
@@ -3322,6 +3364,107 @@ mod tests {
                     "{name}, the write into /d first: {into_first}: {message}"
                 );
             }
+        }
+        Ok(())
+    }
+
+    type ClaimStep = fn(&Access) -> Result<(), VfsError>;
+
+    /// Lists `dir`, counting the stub's refusal to list as success: the
+    /// claim is taken before the backend is asked.
+    fn list_claim(access: &Access, dir: &str) -> Result<(), VfsError> {
+        match access.list(dir) {
+            Ok(_) | Err(VfsError::Unsupported { .. }) => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Runs `lead` in one child of a parent and returns `trail`'s result
+    /// in a sibling. When `joined`, the parent joins the first child
+    /// before spawning the second, which orders the two.
+    fn run_pair(
+        lead: ClaimStep,
+        trail: ClaimStep,
+        joined: bool,
+    ) -> Result<Result<(), VfsError>, VfsError> {
+        let vfs = handle(&StubFs::seeded(&[("/a/b", "b")]));
+        let parent = vfs.acquire(test_origin())?;
+        let first = parent.spawn(test_origin())?;
+        if joined {
+            lead(&first)?;
+            let first_id = first.id;
+            drop(first);
+            parent.join(first_id);
+            let second = parent.spawn(test_origin())?;
+            return Ok(trail(&second));
+        }
+        let second = parent.spawn(test_origin())?;
+        lead(&first)?;
+        Ok(trail(&second))
+    }
+
+    /// The claims-gap pairs that race when unordered, by name.
+    fn racing_pairs() -> [(&'static str, ClaimStep, ClaimStep); 5] {
+        [
+            (
+                "remove /a against remove /a/b",
+                |access| access.remove("/a", true).map(|_| ()),
+                |access| access.remove("/a/b", true).map(|_| ()),
+            ),
+            (
+                "remove /a against rename /a/b",
+                |access| access.remove("/a", true).map(|_| ()),
+                |access| access.rename("/a/b", "/x"),
+            ),
+            (
+                "list /a against remove /a/b",
+                |access| list_claim(access, "/a"),
+                |access| access.remove("/a/b", true).map(|_| ()),
+            ),
+            (
+                "write /a/b/c against list /a",
+                |access| access.write("/a/b/c", b"c"),
+                |access| list_claim(access, "/a"),
+            ),
+            (
+                "write /a/b/c against glob /a/*",
+                |access| access.write("/a/b/c", b"c"),
+                |access| access.glob("/a/*").map(|_| ()),
+            ),
+        ]
+    }
+
+    #[test]
+    fn nested_subtrees_parent_listings_and_created_ancestors_conflict_in_either_order()
+    -> Result<(), VfsError> {
+        for (name, one, other) in racing_pairs() {
+            for (lead, trail) in [(one, other), (other, one)] {
+                let message = conflict_message(run_pair(lead, trail, false)?);
+                assert!(message.contains("/a"), "{name}: {message}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_join_orders_each_claims_gap_pair() -> Result<(), VfsError> {
+        for (name, one, other) in racing_pairs() {
+            for (lead, trail) in [(one, other), (other, one)] {
+                if let Err(err) = run_pair(lead, trail, true)? {
+                    panic!("{name}, joined: {err:?}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_listing_does_not_conflict_with_a_recursive_remove_of_a_grandchild() -> Result<(), VfsError>
+    {
+        let list: ClaimStep = |access| list_claim(access, "/a");
+        let remove: ClaimStep = |access| access.remove("/a/b/c", true).map(|_| ());
+        for (lead, trail) in [(list, remove), (remove, list)] {
+            run_pair(lead, trail, false)??;
         }
         Ok(())
     }
