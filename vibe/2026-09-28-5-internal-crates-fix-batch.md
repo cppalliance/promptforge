@@ -1045,7 +1045,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-21>
 
-### Step 21: Split the rest of `promptforge-vfs`, add its marker, and pass the exit gate
+### Step 21: Split the rest of `promptforge-vfs`, add its marker, and pass the exit gate [completed]
 
 - Component: VFS ceiling
 - Piece: the remaining VFS files, the second piece, built after Step 20, with the marker and the full exit gate.

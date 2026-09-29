@@ -12,6 +12,14 @@
 //!
 //! This crate is the permanent bottom of the dependency stack: std only,
 //! no workspace or external crates.
+//!
+//! ## Invariants
+//!
+//! - May depend on: nothing. Std only, with no workspace or external
+//!   crate, which the manifest test enforces. Read the repository-root
+//!   `AGENTS.md` before adding an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 pub mod detail;
 mod error;
