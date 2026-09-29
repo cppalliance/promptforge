@@ -982,7 +982,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-18>
 
-### Step 18: Split `promptforge-engine`'s scheduler tests to the ceiling
+### Step 18: Split `promptforge-engine`'s scheduler tests to the ceiling [completed]
 
 - Component: Engine ceiling
 - Piece: the scheduler test files, the third piece, built after Step 17.
