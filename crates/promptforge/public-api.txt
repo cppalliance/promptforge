@@ -72,9 +72,6 @@
 #[non_exhaustive] pub struct promptforge::tools::ToolIdError { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::tools::ToolOutput { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::vfs::Entry { .. }
-#[non_exhaustive] pub struct promptforge::vfs::GrepMatch { .. }
-#[non_exhaustive] pub struct promptforge::vfs::GrepQuery { .. }
-#[non_exhaustive] pub struct promptforge::vfs::GrepResults { .. }
 #[non_exhaustive] pub struct promptforge::vfs::HostBackend { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::vfs::MemoryBackend { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::vfs::Origin { .. }
@@ -183,9 +180,6 @@ auto promptforge::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwin
 auto promptforge::vfs::Entry: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::ExecId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::FileType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::GrepMatch: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::GrepQuery: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::GrepResults: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::HostBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::MemoryBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Mode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -308,9 +302,6 @@ derives promptforge::vfs::AllowAll: Debug, Default
 derives promptforge::vfs::Entry: Clone, Debug
 derives promptforge::vfs::ExecId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::FileType: Clone, Copy, Debug, Eq, Hash, PartialEq
-derives promptforge::vfs::GrepMatch: Clone, Debug, Eq, PartialEq
-derives promptforge::vfs::GrepQuery: Clone, Debug
-derives promptforge::vfs::GrepResults: Clone, Debug, Default, Eq, PartialEq
 derives promptforge::vfs::HostBackend: Clone, Debug
 derives promptforge::vfs::MemoryBackend: Clone, Debug, Default
 derives promptforge::vfs::Mode: Clone, Copy, Debug, Eq, PartialEq
@@ -417,7 +408,6 @@ pub enum promptforge::vfs::Op
 pub enum promptforge::vfs::StoreOutcome
 pub enum promptforge::vfs::Verdict
 pub fn promptforge::CapabilityConflict::new(first: promptforge::capabilities::CapabilityId, second: promptforge::capabilities::CapabilityId) -> promptforge::CapabilityConflict
-pub fn promptforge::Environment::max_depth(self, max_depth: u32) -> promptforge::Environment
 pub fn promptforge::Environment::new() -> promptforge::Environment
 pub fn promptforge::Environment::preludes(self, preludes: alloc::vec::Vec<promptforge::capabilities::Prelude>) -> promptforge::Environment
 pub fn promptforge::Environment::prepare(&self, prompt: &promptforge::Prompt, ctx: promptforge::RunContext) -> (promptforge::RunContext, promptforge::Requirements)
@@ -642,7 +632,6 @@ pub fn promptforge::vfs::Access::append(&self, path: &str, contents: &[u8]) -> c
 pub fn promptforge::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::exists(&self, path: &str) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
-pub fn promptforge::vfs::Access::grep(&self, query: &promptforge::vfs::GrepQuery) -> core::result::Result<promptforge::vfs::GrepResults, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::list(&self, path: &str) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::mkdir(&self, path: &str, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
@@ -680,7 +669,6 @@ pub fn promptforge::vfs::VfsAccess::copy(&mut self, from: &promptforge::vfs::Vfs
 pub fn promptforge::vfs::VfsAccess::exists(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::glob_kind(&self, pattern: &str, dirs_only: bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError> { .. }
-pub fn promptforge::vfs::VfsAccess::grep(&self, query: &promptforge::vfs::GrepQuery) -> core::result::Result<promptforge::vfs::GrepResults, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::list(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::mkdir(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::read(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
@@ -1287,17 +1275,6 @@ pub promptforge::vfs::FileType::Fifo
 pub promptforge::vfs::FileType::File
 pub promptforge::vfs::FileType::Socket
 pub promptforge::vfs::FileType::Symlink
-pub promptforge::vfs::GrepMatch::line: alloc::string::String
-pub promptforge::vfs::GrepMatch::line_number: usize
-pub promptforge::vfs::GrepMatch::path: alloc::string::String
-pub promptforge::vfs::GrepQuery::case_insensitive: bool
-pub promptforge::vfs::GrepQuery::glob_filter: core::option::Option<alloc::string::String>
-pub promptforge::vfs::GrepQuery::is_regex: bool
-pub promptforge::vfs::GrepQuery::max_results: core::option::Option<usize>
-pub promptforge::vfs::GrepQuery::pattern: alloc::string::String
-pub promptforge::vfs::GrepQuery::root: promptforge::vfs::VfsPathBuf
-pub promptforge::vfs::GrepResults::matches: alloc::vec::Vec<promptforge::vfs::GrepMatch>
-pub promptforge::vfs::GrepResults::truncated: bool
 pub promptforge::vfs::Mode::Agent
 pub promptforge::vfs::Mode::Ask
 pub promptforge::vfs::Mode::Plan
@@ -1307,7 +1284,6 @@ pub promptforge::vfs::Op::Copy
 pub promptforge::vfs::Op::Delete
 pub promptforge::vfs::Op::Exists
 pub promptforge::vfs::Op::Glob
-pub promptforge::vfs::Op::Grep
 pub promptforge::vfs::Op::List
 pub promptforge::vfs::Op::Mkdir
 pub promptforge::vfs::Op::Read

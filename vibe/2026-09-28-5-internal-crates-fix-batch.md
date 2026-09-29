@@ -718,7 +718,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-7>
 
-### Step 7: Remove grep and `Environment::max_depth` from the public surface
+### Step 7: Remove grep and `Environment::max_depth` from the public surface [completed]
 
 - Component: Dead API removal
 - Piece: the grep removal and the `max_depth` removal, built jointly in one commit. Each must land with its facade re-exports, docs, and listing change, the two share one re-bless, and one pass of the gates is their test set.

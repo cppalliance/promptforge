@@ -14,7 +14,6 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
-use crate::grep::{GrepQuery, GrepResults};
 use crate::handle::VfsRef;
 use crate::observe::{OpEvent, OpSink};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
@@ -313,21 +312,6 @@ impl VfsAccess for RoutingAccess {
         self.check_writable(path)?;
         let stripped = self.strip(path)?;
         self.with_mount(path, |session| session.str_replace(&stripped, old, new))
-    }
-
-    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        let root = canonicalize_absolute(query.root.as_str())?;
-        let (prefix, _) =
-            resolve(&self.mounts, root.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: root.to_string(),
-            })?;
-        let mut scoped = query.clone();
-        scoped.root = canonicalize_absolute(strip_mount(prefix.as_str(), root.as_str()))?.to_buf();
-        let mut results = self.with_mount(&root, |session| session.grep(&scoped))?;
-        for hit in &mut results.matches {
-            hit.path = rejoin(prefix.as_str(), &hit.path);
-        }
-        Ok(results)
     }
 
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {

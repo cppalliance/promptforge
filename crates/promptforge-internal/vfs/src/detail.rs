@@ -110,11 +110,9 @@ pub const fn access_id(access: &Access) -> ExecId {
 #[cfg(test)]
 mod tests {
     use super::{access_spawn, end_scope, probe_store, scope_handle, store_view};
-    use crate::grep::GrepQuery;
-    use crate::path::canonicalize_absolute;
     use crate::{
         Access, AcquireContext, ExecId, MemoryBackend, Origin, PathReason, Vfs, VfsAccess,
-        VfsError, VfsPathBuf, VfsRef,
+        VfsError, VfsRef,
     };
 
     /// A base at `/` beside a store declared at `/my/store`: the shape
@@ -473,41 +471,6 @@ mod tests {
         // inside the mount.
         assert_eq!(view.glob("*.txt")?, vec!["a.txt".to_owned()]);
         assert_eq!(view.glob("**")?, vec!["a.txt".to_owned()]);
-        Ok(())
-    }
-
-    #[test]
-    fn the_store_views_grep_runs_the_strict_rules_on_the_root() -> Result<(), VfsError> {
-        let vfs = stock();
-        let (_access, view) = chain(&vfs);
-        let query = |root: VfsPathBuf| GrepQuery {
-            pattern: "hit".to_owned(),
-            root,
-            is_regex: false,
-            case_insensitive: false,
-            glob_filter: None,
-            max_results: None,
-        };
-        // An absolute root would canonicalize namespace-absolute and
-        // register the grep's claims outside the store mount, so the
-        // strict rules refuse every absolute form - even one that
-        // names the store mount itself - with the root as supplied.
-        for root in [
-            canonicalize_absolute("/etc")?,
-            canonicalize_absolute("/my/store/notes")?,
-        ] {
-            let root = root.to_buf();
-            let reported = root.as_str().to_owned();
-            match view.grep(&query(root)) {
-                Err(VfsError::InvalidPath {
-                    path,
-                    reason: PathReason::Absolute,
-                }) => assert_eq!(path, reported, "reports the root as supplied"),
-                other => {
-                    panic!("expected an absolute-root refusal for {reported:?}, got {other:?}")
-                }
-            }
-        }
         Ok(())
     }
 

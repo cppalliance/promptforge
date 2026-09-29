@@ -146,9 +146,6 @@ pub mod vfs {
     pub use promptforge_vfs::Entry;
     pub use promptforge_vfs::ExecId;
     pub use promptforge_vfs::FileType;
-    pub use promptforge_vfs::GrepMatch;
-    pub use promptforge_vfs::GrepQuery;
-    pub use promptforge_vfs::GrepResults;
     pub use promptforge_vfs::HostBackend;
     pub use promptforge_vfs::MemoryBackend;
     pub use promptforge_vfs::Mode;

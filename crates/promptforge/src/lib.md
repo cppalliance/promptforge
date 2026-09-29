@@ -391,11 +391,10 @@ assert!(ctx.cancel_handle().is_cancelled());
 
 ## Environment
 
-[`Environment`] describes one deployment: a nesting cap, the catalog of tools available to runs, and the Lua preludes the host's capabilities contributed. Build it once and share it across concurrent runs. It is [`Clone`], [`Send`], [`Sync`], and `'static`, and everything that changes per run sits on the [`RunContext`]. It holds tool descriptors only, and the tool implementations stay with the host.
+[`Environment`] describes one deployment: the catalog of tools available to runs and the Lua preludes the host's capabilities contributed. Build it once and share it across concurrent runs. It is [`Clone`], [`Send`], [`Sync`], and `'static`, and everything that changes per run sits on the [`RunContext`]. It holds tool descriptors only, and the tool implementations stay with the host.
 
-[`Environment::new`] returns an environment with a nesting cap of `3`, an empty tool catalog, and no preludes. [`Environment::default`] returns the same thing. Three builder methods adjust it. Each takes the environment by value plus one argument, returns the updated environment, and cannot fail.
+[`Environment::new`] returns an environment with an empty tool catalog and no preludes. [`Environment::default`] returns the same thing. Two builder methods adjust it. Each takes the environment by value plus one argument, returns the updated environment, and cannot fail.
 
-- [`Environment::max_depth`] takes a [`u32`] cap on model-orchestrated prompt-tool nesting. The default is `3`. The cap is inert today. It is stored, but nothing reads it until the sub-run adapter lands, and [`RunContext::depth`] stays `0`. It is a different limit from the enforced cap of 8 on nested `call` and `fanout`.
 - [`Environment::tools`] takes the [`ToolCatalog`](crate::tools::ToolCatalog) that runs bind against, assembled from the host's activated capabilities. The [`tools`] module page shows how to build one. The default is an empty catalog, and with it every exact tool slot's capability is reported missing.
 - [`Environment::preludes`] takes a [`Vec`] of [`Prelude`](crate::capabilities::Prelude), the Lua source of the host's activated capabilities in the order the prompt declares them. Every section of a run installs each one before the prompt's shared library runs. A prelude that fails to load, or whose global takes a name already in use, fails the run with [`RunErrorKind::Lua`] before it issues any effect. The default is no preludes. The [`capabilities`] module page shows a prelude in use.
 

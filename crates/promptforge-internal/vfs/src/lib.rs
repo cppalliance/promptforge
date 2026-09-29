@@ -16,7 +16,6 @@
 pub mod detail;
 mod error;
 mod glob;
-mod grep;
 mod handle;
 mod host;
 mod memory;
@@ -29,7 +28,6 @@ mod traits;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub use error::{PathReason, VfsError};
-pub use grep::{GrepMatch, GrepQuery, GrepResults};
 pub use handle::{Access, VfsRef};
 pub use host::HostBackend;
 pub use memory::MemoryBackend;

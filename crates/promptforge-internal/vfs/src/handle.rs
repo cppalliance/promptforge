@@ -43,7 +43,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use crate::error::{PathReason, VfsError};
 use crate::glob::{compile_glob, matches_tokens, validate_glob_grammar, validate_glob_pattern};
-use crate::grep::{GrepQuery, GrepResults};
 use crate::observe::{OpEvent, OpSink, Origin};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize, canonicalize_absolute};
 use crate::router::{Mounts, Router, StoreDecl, VfsRefBuilder};
@@ -1079,9 +1078,8 @@ fn pattern_base(pattern: &VfsPath) -> Vec<VfsPath> {
 }
 
 /// Whether `pattern` matches `path`, as the glob grammar reads it. A
-/// pattern whose grammar did not pass validation (a grep filter never
-/// validated at this layer) falls back to its literal prefix, which is
-/// conservative.
+/// pattern whose grammar did not pass validation falls back to its
+/// literal prefix, which is conservative.
 fn pattern_matches_path(pattern: &VfsPath, path: &VfsPath) -> bool {
     if validate_glob_grammar(pattern.as_str()).is_err() {
         return pattern_base(pattern)
@@ -2141,45 +2139,6 @@ impl Access {
         self.inner().copy(&from, &to)
     }
 
-    /// Searches files under the query's root.
-    ///
-    /// # Errors
-    /// Returns an error when a store view's strict path rules refuse
-    /// the root, when the policy denies the search, when an access
-    /// unordered with this one holds a conflicting claim on what the
-    /// search observes (the root and the filter, as a pattern), or when
-    /// the backend fails.
-    pub fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        // The store view runs the strict rules on the root before
-        // canonicalization: an absolute root is the one shape that
-        // would canonicalize namespace-absolute and carry the grep's
-        // claims outside the store mount.
-        if self.store_root.is_some() {
-            validate_store_path(query.root.as_str())?;
-        }
-        let root = canonicalize(&self.root, query.root.as_str())?;
-        self.check_policy(Op::Grep, &root)
-            .map_err(|err| self.relativize(err))?;
-        // The search observes every file its glob pattern covers: the
-        // root and the filter, as the default body composes them.
-        let base = match root.as_str() {
-            "/" => "",
-            root => root,
-        };
-        let pattern = match &query.glob_filter {
-            Some(filter) => format!("{base}/**/{filter}"),
-            None => format!("{base}/**/*"),
-        };
-        match canonicalize(&self.root, &pattern) {
-            Ok(pattern) => self.admit(Claims::claim_glob, &pattern)?,
-            // A filter the canonicalizer cannot hold (a traversal, for
-            // example) falls back to the root alone, conservatively.
-            Err(_) => self.admit(Claims::claim_read, &root)?,
-        }
-        self.fire(Op::Grep, &root);
-        self.inner().grep(query)
-    }
-
     /// Canonicalizes at receipt and consults the policy - in that order,
     /// so a denied operation never registers a claim and every claim key
     /// is the canonical path. A path without a leading `/` joins onto the
@@ -2392,10 +2351,6 @@ impl VfsAccess for HandleAccess {
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         self.0.str_replace(path.as_str(), old, new)
     }
-
-    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        self.0.grep(query)
-    }
 }
 
 /// The store's mount as the store view's router sees it: the declared
@@ -2489,10 +2444,6 @@ impl VfsAccess for StoreMountSession {
 
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         self.0.str_replace(path, old, new).map_err(trim_mount_error)
-    }
-
-    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        self.0.grep(query).map_err(trim_mount_error)
     }
 
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
@@ -2593,10 +2544,6 @@ impl VfsAccess for StoreScoped {
         self.inner
             .str_replace(path, old, new)
             .map_err(|err| self.logical(err))
-    }
-
-    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        self.inner.grep(query).map_err(|err| self.logical(err))
     }
 
     fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {

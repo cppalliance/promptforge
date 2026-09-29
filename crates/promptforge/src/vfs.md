@@ -83,7 +83,7 @@ assert!(matches!(access.read("/Drafts/plan/today.md"), Err(VfsError::NotFound { 
 
 # Identities and claims
 
-Each [`VfsRef::acquire`] starts a *scope*: it vends a fresh [`ExecId`], a process-unique identity, and binds the new [`Access`] to it. A scope is one root identity together with every identity forked from it, and it is the happens-before state that keeps concurrent work from interleaving. An operation through an access claims what it touches: a read claims the path it observes (a file read, `exists`, `stat`, and a `str_replace`'s read of its target), the directory's children it lists, or the pattern it matches (a glob, or a grep's root and filter). A write claims its path, the ancestors it may create, and - for a recursive remove or a directory rename - the whole subtree it moves. Claims follow FastTrack-style happens-before (Flanagan and Freund, PLDI 2009): each identity holds a vector clock, and every access records an *epoch*, its identity paired with its own clock entry at that moment. Two epochs conflict exactly when neither is ordered before the other's identity.
+Each [`VfsRef::acquire`] starts a *scope*: it vends a fresh [`ExecId`], a process-unique identity, and binds the new [`Access`] to it. A scope is one root identity together with every identity forked from it, and it is the happens-before state that keeps concurrent work from interleaving. An operation through an access claims what it touches: a read claims the path it observes (a file read, `exists`, `stat`, and a `str_replace`'s read of its target), the directory's children it lists, or the pattern it matches (a glob). A write claims its path, the ancestors it may create, and - for a recursive remove or a directory rename - the whole subtree it moves. Claims follow FastTrack-style happens-before (Flanagan and Freund, PLDI 2009): each identity holds a vector clock, and every access records an *epoch*, its identity paired with its own clock entry at that moment. Two epochs conflict exactly when neither is ordered before the other's identity.
 
 - A spawn is the *fork*: the child shares a snapshot of the parent's clock, and the parent's entry advances, so everything the parent did before the spawn happens before the child's first step, and nothing after it does.
 - A delivery is the *join*: merging the child's final clock into the owner's orders everything the child did before the owner's next step. The engine joins every task at every delivery and at chain end.
@@ -247,7 +247,7 @@ struct DraftsOnly;
 
 impl Policy for DraftsOnly {
     fn check(&self, op: Op, path: &VfsPath) -> Verdict {
-        let reads = matches!(op, Op::Read | Op::Exists | Op::Glob | Op::List | Op::Stat | Op::Grep | Op::ReadLink);
+        let reads = matches!(op, Op::Read | Op::Exists | Op::Glob | Op::List | Op::Stat | Op::ReadLink);
         if reads || path.as_str().starts_with("/drafts/") {
             Verdict::Allow
         } else {
@@ -376,9 +376,9 @@ assert!(matches!(error, VfsError::NotFound { .. }));
 A backend implements two traits. [`Vfs`] is the backend itself. [`Vfs::acquire`] opens a session for the identity named in an [`AcquireContext`] and returns it boxed, and [`Vfs::release`] ends the session for that [`ExecId`]. A backend that wraps another [`Vfs`] passes the context through unchanged. [`Vfs::read_only`] defaults to `false`. A [`Vfs`] must be [`Send`] but need not be [`Sync`], because the handle serializes access to it. [`VfsAccess`] is one identity's session, and it declares every filesystem operation. Paths arrive validated, canonical, and relative to the backend's mount, so a backend never checks them again.
 
 - Eleven methods are required: [`VfsAccess::read`], [`VfsAccess::write`], [`VfsAccess::append`], [`VfsAccess::remove`], [`VfsAccess::exists`], [`VfsAccess::glob`], [`VfsAccess::list`], [`VfsAccess::stat`], [`VfsAccess::mkdir`], [`VfsAccess::rename`], and [`VfsAccess::copy`].
-- Seven have default bodies, and a backend overrides any of them to push work down: [`VfsAccess::read_range`], [`VfsAccess::str_replace`], [`VfsAccess::grep`], [`VfsAccess::symlink`], [`VfsAccess::read_link`], [`VfsAccess::chmod`], and [`VfsAccess::glob_kind`]. For example, a backend can add regex search by overriding [`VfsAccess::grep`], or seeking reads by overriding [`VfsAccess::read_range`], as [`HostBackend`] does.
+- Six have default bodies, and a backend overrides any of them to push work down: [`VfsAccess::read_range`], [`VfsAccess::str_replace`], [`VfsAccess::symlink`], [`VfsAccess::read_link`], [`VfsAccess::chmod`], and [`VfsAccess::glob_kind`]. For example, a backend can add seeking reads by overriding [`VfsAccess::read_range`], as [`HostBackend`] does.
 
-**[`Stat`] and [`Entry`] have no public constructor, so a custom backend cannot build them.** Both are `#[non_exhaustive]`, which rules out a struct literal, and the crate offers no other way to make one. For [`VfsAccess::stat`] and [`VfsAccess::list`], a custom backend can only pass through values obtained from another backend, for example by delegating to a wrapped [`MemoryBackend`] session, as the example below does. [`GrepMatch`] has no public constructor either, so an overriding [`VfsAccess::grep`] can fill its results only with matches from another backend. [`GrepResults`] is the exception: [`GrepResults::default`] builds an empty value, and its public fields can then be assigned.
+**[`Stat`] and [`Entry`] have no public constructor, so a custom backend cannot build them.** Both are `#[non_exhaustive]`, which rules out a struct literal, and the crate offers no other way to make one. For [`VfsAccess::stat`] and [`VfsAccess::list`], a custom backend can only pass through values obtained from another backend, for example by delegating to a wrapped [`MemoryBackend`] session, as the example below does.
 
 This backend refuses any single write or append over a byte limit, and delegates everything else to a memory backend session:
 
@@ -555,7 +555,6 @@ Each method canonicalizes its path arguments, consults the policy, registers a c
 - [`Access::glob`] takes `pattern`, a [`&str`](str) holding a glob over virtual paths, and returns the matching paths, sorted, as a [`Vec`] of [`String`]. It lists files, or only directories when the pattern ends in `/`, as in `"x/*/"`. A pattern holds literal bytes, `*` for zero or more bytes within one segment, and `**` for any number of whole segments. `**` must occupy a whole segment, as in `**`, `**/...`, `.../**`, or `.../**/...`. There are no escapes. The raw pattern is validated before canonicalization, and each broken rule fails with [`VfsError::InvalidPath`] naming the rule in its [`PathReason`]: an empty pattern is [`PathReason::Empty`], one over 1024 bytes is [`PathReason::TooLong`], a control character is [`PathReason::Control`], a backslash is [`PathReason::Backslash`], and malformed wildcard grammar is [`PathReason::Wildcard`]. A pattern without a leading `/` joins onto the access's root, and its results come back relative to that root. The claim, the policy check, and the op sink all use the canonicalized pattern as the path, with a read claim and [`Op::Glob`]; the claim is the pattern itself, not each match, so a write to any path the pattern matches conflicts. A router sends the pattern to the longest-prefix mount, strips the prefix, and joins it back onto each result.
 - [`Access::list`] takes the `path` of a directory and returns its immediate children as a [`Vec`] of [`Entry`], sorted by name in the built-in backends. It registers a read claim and reports [`Op::List`]. It fails with [`VfsError::NotADirectory`] on a file and [`VfsError::NotFound`] when the path is absent.
 - [`Access::stat`] takes `path` and returns its [`Stat`]. It registers a read claim and reports [`Op::Stat`]. It fails with [`VfsError::NotFound`] when the path is absent. The host backend does not follow symlinks here, so a link reports [`FileType::Symlink`].
-- [`Access::grep`] takes `query`, a reference to a [`GrepQuery`], and returns a [`GrepResults`]. Through a router, each match's [`GrepMatch::path`] is the full virtual path. The query's [`GrepQuery::root`] is canonicalized, checked by the policy under [`Op::Grep`], and read-claimed as the pattern the search observes: the root and the filter, as the default body composes them. The claim and the op sink use that pattern, not each searched file. It fails with [`VfsError::Unsupported`] when [`GrepQuery::is_regex`] is `true` and the backend uses the default body, and with any error from the backend's glob or reads. A host cannot build a [`GrepQuery`] of its own, as its entry explains, so in practice a host calls [`Access::grep`] only with a query it received and cloned.
 
 Dropping an [`Access`] drops one reference to its identity and releases its backend session, as [Identities and claims](#identities-and-claims) describes.
 
@@ -596,7 +595,7 @@ Dropping an [`Access`] drops one reference to its identity and releases its back
 - [`VfsError::PermissionDenied`]: the operation is not permitted. The causes are a policy [`Verdict::Deny`] or [`Verdict::Ask`], whose text is the [`reason`](VfsError#variant.PermissionDenied.field.reason), a read-only mount, a host path escaping its rooted directory, removing or renaming a backend's root, or a host OS permission error. Show the message to the model or the user. Retrying unchanged fails again.
   - [`VfsError::PermissionDenied::path`](VfsError#variant.PermissionDenied.field.path), a [`String`], is the path the operation targeted.
   - [`VfsError::PermissionDenied::reason`](VfsError#variant.PermissionDenied.field.reason), a [`String`], names why the operation was refused.
-- [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose detail is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", a regex grep against the default body, and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
+- [`VfsError::Unsupported`]: the serving backend does not implement the operation. That covers a rename or copy across mounts, whose detail is "{op} across mounts is unsupported: {from} and {to} are served by different mounts", and the default [`VfsAccess::symlink`], [`VfsAccess::read_link`], and [`VfsAccess::chmod`].
   - [`VfsError::Unsupported::path`](VfsError#variant.Unsupported.field.path), a [`String`], is the path the operation targeted.
   - [`VfsError::Unsupported::detail`](VfsError#variant.Unsupported.field.detail), a [`String`], names what is unsupported and why.
 - [`VfsError::Conflict`]: the operation conflicts with a claim unordered with its own - a claim by an identity in another live scope, or one in the same scope whose epoch the access's clock has not seen - and it never reached the backend. The detail is `"{kind} on {path} by {id:?} conflicts with a {other_kind} claim by {other:?}"`. During a run, a conflict on a store path ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism), which Lua cannot catch.
@@ -662,32 +661,6 @@ The backend overrides [`VfsAccess::read_range`] with a seek. [`Access::list`] so
 - [`FileType::CharDevice`]: a character device, such as `/dev/null`. Only the host backend on Unix reports it.
 - [`FileType::BlockDevice`]: a block device. Only the host backend on Unix reports it.
 
-## GrepQuery
-
-[`GrepQuery`] is one content search, passed to [`Access::grep`] and [`VfsAccess::grep`]. It is `#[non_exhaustive]` and has no public constructor and no [`Default`], so a host cannot build one. A host holds one only when a backend's [`VfsAccess::grep`] receives it, and can clone that one and assign its public fields.
-
-- [`GrepQuery::pattern`], a [`String`], is the text to search for. With the default body it is a literal substring matched within each line.
-- [`GrepQuery::root`], a [`VfsPathBuf`], is the directory the search starts from. [`Access::grep`] canonicalizes it, and a router strips the mount prefix before passing it to the backend.
-- [`GrepQuery::is_regex`], a [`bool`], says whether the pattern is a regular expression. The default body fails with [`VfsError::Unsupported`] when it is `true`, so only an overriding backend can serve regex.
-- [`GrepQuery::case_insensitive`], a [`bool`], says whether matching ignores case. The default body lowercases both the line and the pattern.
-- [`GrepQuery::glob_filter`], an [`Option`] of [`String`], restricts which files are searched. The default body globs `{root}/**/{filter}`, or `{root}/**/*` when it is [`None`].
-- [`GrepQuery::max_results`], an [`Option`] of [`usize`], caps the returned matches. [`None`] means no cap. When the cap is reached and another match turns up, the default body stops and sets [`GrepResults::truncated`].
-
-## GrepResults
-
-[`GrepResults`] is the outcome of one search: the hits and whether the cap cut them short. The host receives it from [`Access::grep`]. It is `#[non_exhaustive]`, but [`GrepResults::default`] builds an empty value with no matches and [`GrepResults::truncated`] set to `false`, and its public fields can then be assigned. That makes it the one search type a custom backend can build.
-
-- [`GrepResults::matches`], a [`Vec`] of [`GrepMatch`], holds the hits in backend order. The default body walks files in the glob's sorted order and lines in file order.
-- [`GrepResults::truncated`], a [`bool`], is `true` when [`GrepQuery::max_results`] cut the results short, and `false` when every match fit.
-
-## GrepMatch
-
-[`GrepMatch`] is one search hit. The host receives it inside [`GrepResults::matches`]. It is `#[non_exhaustive]` and has no public constructor.
-
-- [`GrepMatch::path`], a [`String`], is the path of the file containing the hit. Through a router, the mount prefix is joined back on, so it is the full virtual path.
-- [`GrepMatch::line_number`], a [`usize`], is the 1-based line number of the hit.
-- [`GrepMatch::line`], a [`String`], is the full text of the matching line, without its line terminator.
-
 ## VfsPath
 
 [`VfsPath`] is a canonical virtual path: rooted, separated by `/`, with no `.` or `..` segments and no duplicate or trailing slashes. Policies receive it in [`Policy::check`], backends receive it in every [`VfsAccess`] method relative to their mount, and the op sink receives it from [`OpEvent::path`]. Hosts never build one, because canonicalization is its only constructor and it is private. Its [`Display`](std::fmt::Display) form writes the canonical string, so `format!("{path}")` works.
@@ -697,7 +670,7 @@ The backend overrides [`VfsAccess::read_range`] with a seek. [`Access::list`] so
 
 ## VfsPathBuf
 
-[`VfsPathBuf`] is an owned canonical virtual path, used where a path must be owned, such as [`GrepQuery::root`] or a symlink target. Build one with [`VfsPath::to_buf`] or with its [`From`] conversion from a [`VfsPath`]. Its field is private, so it cannot be built from an arbitrary string. Its [`Display`](std::fmt::Display) form writes the canonical string.
+[`VfsPathBuf`] is an owned canonical virtual path, used where a path must be owned, such as a symlink target. Build one with [`VfsPath::to_buf`] or with its [`From`] conversion from a [`VfsPath`]. Its field is private, so it cannot be built from an arbitrary string. Its [`Display`](std::fmt::Display) form writes the canonical string.
 
 - [`VfsPathBuf::as_str`] returns the canonical path as a [`&str`](str).
 
@@ -705,7 +678,7 @@ The backend overrides [`VfsAccess::read_range`] with a seek. [`Access::list`] so
 
 [`Policy`] is the per-handle hook that decides whether each operation may proceed. A host implements it, and installs it with [`VfsRef::with_policy`] or [`VfsRefBuilder::policy`]. The trait requires [`Send`], and both installers also require [`Sync`] and `'static`. The crate implements it for [`AllowAll`] and [`ModePolicy`].
 
-[`Policy::check`] is the one required method. It takes `&self`, `op`, the [`Op`] being attempted, and `path`, a reference to the canonical [`VfsPath`] in the handle's namespace. For a glob the path is the canonicalized pattern, and for a grep it is the canonical root. A rename or copy calls it once per path. It returns a [`Verdict`], and the verdict is the whole outcome, so it has no failure of its own. A refused operation registers no claim and fires no op event.
+[`Policy::check`] is the one required method. It takes `&self`, `op`, the [`Op`] being attempted, and `path`, a reference to the canonical [`VfsPath`] in the handle's namespace. For a glob the path is the canonicalized pattern. A rename or copy calls it once per path. It returns a [`Verdict`], and the verdict is the whole outcome, so it has no failure of its own. A refused operation registers no claim and fires no op event.
 
 ## Verdict
 
@@ -726,7 +699,6 @@ The backend overrides [`VfsAccess::read_range`] with a seek. [`Access::list`] so
 - [`Op::Rename`]: renaming or moving a path, from [`Access::rename`], checked once for each of its two paths. It is a mutation.
 - [`Op::Mkdir`]: creating a directory, from [`Access::mkdir`]. It is a mutation.
 - [`Op::Copy`]: copying a file, from [`Access::copy`], checked once for the source and once for the destination. A policy cannot tell the two checks apart. It is a mutation.
-- [`Op::Grep`]: searching file contents, from [`Access::grep`], with the canonical root as the path. It only looks.
 - [`Op::Exists`]: testing for existence, from [`Access::exists`]. It only looks.
 - [`Op::Glob`]: matching paths against a pattern, from [`Access::glob`], with the canonicalized pattern as the path. It only looks.
 - [`Op::List`]: listing a directory, from [`Access::list`]. It only looks.
@@ -769,7 +741,7 @@ For a mutation, [`Mode::Agent`] returns [`Verdict::Allow`]. [`Mode::Ask`] return
 [`OpEvent`] describes one admitted operation, handed to the op sink installed with [`VfsRefBuilder::on_op`]. It borrows the access's own values, so firing it allocates nothing. Hosts never build one, and its fields are private, so read it through its accessors. None of them can fail.
 
 - [`OpEvent::op`] returns the [`Op`], by value.
-- [`OpEvent::path`] returns a reference to the canonical [`VfsPath`] the operation acts on. For a glob it is the canonicalized pattern, and for a grep the canonicalized root. A rename or copy fires one event per path. A sink that keeps events copies the path out, for example with `event.path().to_string()`.
+- [`OpEvent::path`] returns a reference to the canonical [`VfsPath`] the operation acts on. For a glob it is the canonicalized pattern. A rename or copy fires one event per path. A sink that keeps events copies the path out, for example with `event.path().to_string()`.
 - [`OpEvent::origin`] returns a reference to the [`Origin`] that was passed to [`VfsRef::acquire`] for the access that admitted the operation.
 
 ## OpSink
@@ -861,7 +833,7 @@ Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute"
 
 **Required methods.**
 
-- [`VfsAccess::read`] takes `path` and returns the file's bytes as a [`Vec`] of [`u8`]. Return [`VfsError::NotFound`] when the file is absent. The built-ins return [`VfsError::IsADirectory`] for a directory, and the default [`VfsAccess::grep`] skips files whose read fails that way.
+- [`VfsAccess::read`] takes `path` and returns the file's bytes as a [`Vec`] of [`u8`]. Return [`VfsError::NotFound`] when the file is absent. The built-ins return [`VfsError::IsADirectory`] for a directory.
 - [`VfsAccess::write`] takes `&mut self`, `path`, and `contents`, a [`&[u8]`](slice) holding the complete new file, and returns `()` once the file is created or overwritten. The built-ins create missing ancestors, and the host backend writes failure-atomically.
 - [`VfsAccess::append`] takes `&mut self`, `path`, and `contents`, the bytes to append, and returns `()`. It must create the file when it is absent.
 - [`VfsAccess::remove`] takes `&mut self`, `path`, and `recursive`, a [`bool`] that says whether a directory's subtree is removed, and returns `()`. Return [`VfsError::NotFound`] when the path is absent, and an error for a directory without `recursive`. The built-ins use [`VfsError::DirectoryNotEmpty`] for a non-empty one. On a symlink, remove the link, never the target.
@@ -878,7 +850,6 @@ Its [`Display`](std::fmt::Display) texts are "path is empty", "path is absolute"
 
 - [`VfsAccess::read_range`] takes `path`, `offset`, a [`u64`] starting byte, and `len`, a [`u64`] maximum byte count. It returns up to `len` bytes from `offset`, empty when `offset` is at or past the end, and clipped at the end of the file. The default body reads the whole file and slices it. It fails as [`VfsAccess::read`] does, and with [`VfsError::Backend`] and "read_range offset {offset} exceeds the addressable size" or "read_range length {len} exceeds the addressable size" when a value does not fit a [`usize`]. Override it to seek, as the host backend does. A router passes it to the mount. The trait's documentation says the handle's line-based ranges are built on this method, but [`Access::read_range`] reads the whole file through [`Access::read`] instead, and [`Access`] exposes no byte-range read.
 - [`VfsAccess::str_replace`] takes `&mut self`, `path`, `old`, and `new`, and returns `()` after the rewritten file is written. The default body reads the file, counts matches of `old`, replaces the one occurrence, and writes the result. An empty `old`, a count other than one, and text that is not UTF-8 fail with [`VfsError::Anchor`] or [`VfsError::NotUtf8`], as [`Access::str_replace`] describes, and a read or write failure passes through. A router checks the mount's read-only flag before passing it on.
-- [`VfsAccess::grep`] takes `query`, a reference to a [`GrepQuery`] whose root is mount-relative through a router, and returns a [`GrepResults`]. The default body globs `{root}/**/{filter}`, where the filter is [`GrepQuery::glob_filter`] or `*`, and a root of `/` becomes the empty base. It skips directories and files that are not UTF-8, splits lines with [`str::lines`], and matches the pattern as a literal substring, lowercasing both sides when [`GrepQuery::case_insensitive`] is `true`. It stops when a match turns up after [`GrepQuery::max_results`] hits are already collected, and sets [`GrepResults::truncated`]. It fails with [`VfsError::Unsupported`] and "the default grep matches literal text only; regex requires a backend override" when [`GrepQuery::is_regex`] is `true`, and with errors from glob, from canonicalizing a globbed path, or from reads other than [`VfsError::IsADirectory`]. Override it for indexed or regex search.
 - [`VfsAccess::symlink`] takes `&mut self`, `target`, the link's target, passed verbatim because a router neither strips nor resolves it, and `link`, the path of the link to create. The default body fails with [`VfsError::Unsupported`] and "symlink is not supported by this backend: {link}".
 - [`VfsAccess::read_link`] takes `path`, a link, and returns its target as a [`VfsPathBuf`], which an override builds with [`VfsPath::to_buf`]. The default body fails with [`VfsError::Unsupported`] and "read_link is not supported by this backend: {path}".
 - [`VfsAccess::chmod`] takes `&mut self`, `path`, and `mode`, a [`u32`] of POSIX mode bits such as `0o644`. The default body fails with [`VfsError::Unsupported`] and "chmod is not supported by this backend: {path}".

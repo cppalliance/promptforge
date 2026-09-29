@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::VfsError;
-use crate::grep::{GrepMatch, GrepQuery, GrepResults};
 use crate::handle::Scope;
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
 use crate::stat::{Entry, FileType, Stat};
@@ -294,72 +293,6 @@ pub trait VfsAccess: Send {
         }
     }
 
-    /// Searches files under the query's root.
-    ///
-    /// Default: glob, read, line scan with literal substring matching.
-    /// Override for indexed backends. Regex queries return
-    /// [`VfsError::Unsupported`]: this crate is std-only, so a regex
-    /// engine must come from an overriding backend. Non-UTF-8 files and
-    /// directories are skipped.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VfsError::Unsupported`] for regex queries, or an error
-    /// when the glob or a read fails.
-    fn grep(&self, query: &GrepQuery) -> Result<GrepResults, VfsError> {
-        if query.is_regex {
-            return Err(VfsError::Unsupported {
-                path: query.root.to_string(),
-                detail:
-                    "the default grep matches literal text only; regex requires a backend override"
-                        .into(),
-            });
-        }
-        let base = match query.root.as_str() {
-            "/" => "",
-            root => root,
-        };
-        let pattern = match &query.glob_filter {
-            Some(filter) => format!("{base}/**/{filter}"),
-            None => format!("{base}/**/*"),
-        };
-        let mut matches = Vec::new();
-        let mut truncated = false;
-        'files: for path in self.glob(&pattern)? {
-            let vfs_path = canonicalize_absolute(&path)?;
-            let bytes = match self.read(&vfs_path) {
-                Ok(bytes) => bytes,
-                Err(VfsError::IsADirectory { .. }) => continue,
-                Err(err) => return Err(err),
-            };
-            let Ok(text) = String::from_utf8(bytes) else {
-                continue;
-            };
-            for (index, line) in text.lines().enumerate() {
-                let hit = if query.case_insensitive {
-                    line.to_lowercase().contains(&query.pattern.to_lowercase())
-                } else {
-                    line.contains(&query.pattern)
-                };
-                if !hit {
-                    continue;
-                }
-                if let Some(cap) = query.max_results
-                    && matches.len() >= cap
-                {
-                    truncated = true;
-                    break 'files;
-                }
-                matches.push(GrepMatch {
-                    path: path.clone(),
-                    line_number: index + 1,
-                    line: line.to_owned(),
-                });
-            }
-        }
-        Ok(GrepResults { matches, truncated })
-    }
-
     /// Creates a symbolic link at `link` naming `target`.
     ///
     /// POSIX extra; the default returns [`VfsError::Unsupported`].
@@ -422,8 +355,6 @@ pub enum Op {
     Mkdir,
     /// Copying a file.
     Copy,
-    /// Searching file contents.
-    Grep,
     /// Testing for existence.
     Exists,
     /// Matching paths against a pattern.
@@ -479,13 +410,11 @@ mod tests {
 
     use super::{AllowAll, Op, Policy, Verdict, VfsAccess};
     use crate::error::VfsError;
-    use crate::grep::{GrepQuery, GrepResults};
     use crate::path::{VfsPath, canonicalize_absolute};
     use crate::stat::{Entry, Stat};
 
     /// Minimal in-memory backend exercising the trait defaults: the
-    /// required methods are direct map operations, and glob understands
-    /// the one pattern shape the default grep emits (`<root>/**<filter>`).
+    /// required methods are direct map operations.
     struct StubBackend {
         files: BTreeMap<String, Vec<u8>>,
     }
@@ -501,17 +430,6 @@ mod tests {
 
     fn path(s: &str) -> Result<VfsPath, VfsError> {
         canonicalize_absolute(s)
-    }
-
-    fn query(root: &str, pattern: &str) -> Result<GrepQuery, VfsError> {
-        Ok(GrepQuery {
-            pattern: pattern.to_owned(),
-            root: canonicalize_absolute(root)?.to_buf(),
-            is_regex: false,
-            case_insensitive: false,
-            glob_filter: None,
-            max_results: None,
-        })
     }
 
     impl VfsAccess for StubBackend {
@@ -552,18 +470,10 @@ mod tests {
         }
 
         fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-            let Some(index) = pattern.find("/**/") else {
-                return Ok(Vec::new());
-            };
-            let prefix = format!("{}/", &pattern[..index]);
-            let filter = &pattern[index + 4..];
-            let suffix = filter.strip_prefix('*').unwrap_or(filter);
-            Ok(self
-                .files
-                .keys()
-                .filter(|name| name.starts_with(&prefix) && name.ends_with(suffix))
-                .cloned()
-                .collect())
+            Err(VfsError::Unsupported {
+                path: pattern.to_owned(),
+                detail: "the stub does not glob".into(),
+            })
         }
 
         fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
@@ -716,70 +626,6 @@ mod tests {
                 path: "/bin.dat".to_owned(),
             })
         );
-        Ok(())
-    }
-
-    #[test]
-    fn the_default_grep_matches_literal_text_with_line_numbers() -> Result<(), VfsError> {
-        let backend = stub(&[
-            ("/docs/a.md", "first hit line\nplain line\nsecond hit line"),
-            ("/docs/b.md", "nothing here"),
-        ]);
-        let results: GrepResults = backend.grep(&query("/docs", "hit")?)?;
-        assert!(!results.truncated);
-        assert_eq!(results.matches.len(), 2);
-        assert_eq!(results.matches[0].path, "/docs/a.md");
-        assert_eq!(results.matches[0].line_number, 1);
-        assert_eq!(results.matches[0].line, "first hit line");
-        assert_eq!(results.matches[1].line_number, 3);
-        Ok(())
-    }
-
-    #[test]
-    fn the_default_grep_honors_case_insensitive_matching() -> Result<(), VfsError> {
-        let backend = stub(&[("/a.txt", "MixedCase line")]);
-        let mut q = query("/", "mixedcase")?;
-        assert!(backend.grep(&q)?.matches.is_empty());
-        q.case_insensitive = true;
-        assert_eq!(backend.grep(&q)?.matches.len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn the_default_grep_scopes_the_search_to_the_glob_filter() -> Result<(), VfsError> {
-        let backend = stub(&[("/src/a.rs", "needle"), ("/src/b.txt", "needle")]);
-        let mut q = query("/src", "needle")?;
-        q.glob_filter = Some("*.rs".to_owned());
-        let results = backend.grep(&q)?;
-        assert_eq!(results.matches.len(), 1);
-        assert_eq!(results.matches[0].path, "/src/a.rs");
-        Ok(())
-    }
-
-    #[test]
-    fn the_default_grep_caps_results_and_reports_truncation() -> Result<(), VfsError> {
-        let backend = stub(&[("/a.txt", "hit\nhit\nhit")]);
-        let mut q = query("/", "hit")?;
-        q.max_results = Some(2);
-        let results = backend.grep(&q)?;
-        assert_eq!(results.matches.len(), 2);
-        assert!(results.truncated);
-        q.max_results = Some(10);
-        let results = backend.grep(&q)?;
-        assert_eq!(results.matches.len(), 3);
-        assert!(!results.truncated);
-        Ok(())
-    }
-
-    #[test]
-    fn the_default_grep_rejects_regex_without_a_backend_override() -> Result<(), VfsError> {
-        let backend = stub(&[("/a.txt", "hit")]);
-        let mut q = query("/", "h.t")?;
-        q.is_regex = true;
-        assert!(matches!(
-            backend.grep(&q),
-            Err(VfsError::Unsupported { .. })
-        ));
         Ok(())
     }
 

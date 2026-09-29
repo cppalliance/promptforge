@@ -11,9 +11,9 @@ use super::config::RunContext;
 use super::fill::{fill_model_bindings, fill_tool_bindings};
 use super::requirements::Requirements;
 
-/// What exists in this deployment and its standing policy: the nesting
-/// cap, the catalog of tools the host has made available, and the
-/// preludes its activated capabilities contributed.
+/// What exists in this deployment: the catalog of tools the host has
+/// made available and the preludes its activated capabilities
+/// contributed.
 ///
 /// Safe to share across concurrent runs (`Sync`): everything that can
 /// change per run sits on the [`RunContext`], and the tool implementations
@@ -23,15 +23,10 @@ use super::requirements::Requirements;
 ///
 /// [`prepare`](Environment::prepare) fills the prompt's tool slots by
 /// identity against the catalog and fills the model bindings from the
-/// context's current model; the `max_depth` guard lands with the sub-run
-/// adapter in the deferred prompt-pack work and is stored but not
-/// consulted until then.
+/// context's current model.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// Maximum model-orchestrated prompt-tool nesting, copied into every
-    /// run. Inert until the sub-run adapter lands with the prompt-pack.
-    max_depth: u32,
     /// The tools a run may bind, as descriptors: assembled by the host from
     /// its activated capabilities. The default is empty, so every exact
     /// slot's capability is reported missing.
@@ -43,24 +38,13 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Builds the default environment: a nesting cap of 3, an empty
-    /// catalog, and no preludes.
+    /// Builds the default environment: an empty catalog and no preludes.
     #[must_use]
     pub fn new() -> Environment {
         Environment {
-            max_depth: 3,
             tools: ToolCatalog::default(),
             preludes: Vec::new(),
         }
-    }
-
-    /// Sets the maximum model-orchestrated prompt-tool nesting depth.
-    /// Consulted by the sub-run adapter when it lands with the
-    /// prompt-pack; stored inert until then.
-    #[must_use]
-    pub fn max_depth(mut self, max_depth: u32) -> Environment {
-        self.max_depth = max_depth;
-        self
     }
 
     /// Sets the catalog of tools a run may bind: the descriptors the host
@@ -141,7 +125,6 @@ impl Default for Environment {
 impl fmt::Debug for Environment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Environment")
-            .field("max_depth", &self.max_depth)
             .field("tools", &self.tools)
             .field(
                 "preludes",
