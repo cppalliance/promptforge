@@ -897,7 +897,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-14>
 
-### Step 14: Split `promptforge-lua`'s `tests.rs` to the ceiling
+### Step 14: Split `promptforge-lua`'s `tests.rs` to the ceiling [completed]
 
 - Component: Lua ceiling
 - Piece: `src/tests.rs`, the first of two pieces built sequentially. This file alone (3,653 lines at `a05d5cbd`, plus Step 3's tests) fills one sub-agent's read, and the marker waits for the last file, in Step 15.
