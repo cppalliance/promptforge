@@ -613,12 +613,12 @@ The accessors take `&self` and cannot fail.
 
 ## ToolArguments
 
-[`ToolArguments`] is a read-only view of one [`ToolCall`]'s arguments. The host gets one from [`ToolCall::arguments`] and never builds one. It borrows from its call.
+[`ToolArguments`] is a read-only view of one [`ToolCall`]'s arguments. The host gets one from [`ToolCall::arguments`] and never builds one. It borrows from its call. The arguments are always a JSON object, because the wire decoder and [`ToolCall::from_parts`] both refuse any other value.
 
-- [`ToolArguments::to_json_string`] returns the arguments as canonical JSON text in a [`String`]. When the wire arguments were not valid JSON, the call holds them as a JSON string, so this returns that string JSON-quoted.
-- [`ToolArguments::is_empty`] returns `true` for a JSON `null` payload or an empty object, and `false` for anything else.
-- [`ToolArguments::contains`] takes `key`, a [`&str`](str), and returns `true` when the arguments are a JSON object with that top-level key. It returns `false` when the key is absent or the arguments are not an object.
-- [`ToolArguments::names`] returns an [`Iterator`] over the top-level argument names as [`&str`](str) values when the arguments are an object, or an empty iterator otherwise.
+- [`ToolArguments::to_json_string`] returns the arguments object as canonical JSON text in a [`String`].
+- [`ToolArguments::is_empty`] returns `true` when the arguments object has no keys, and `false` otherwise.
+- [`ToolArguments::contains`] takes `key`, a [`&str`](str), and returns `true` when the arguments object has that top-level key, and `false` otherwise.
+- [`ToolArguments::names`] returns an [`Iterator`] over the top-level argument names as [`&str`](str) values. It yields nothing when the arguments object has no keys.
 
 ## StreamDelta
 

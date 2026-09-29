@@ -190,9 +190,10 @@ impl ToolCall {
 
 /// A typed, borrowed view over one [`ToolCall`]'s arguments.
 ///
-/// Tool-call arguments arrive as arbitrary wire JSON; this view exposes them
-/// without leaking a [`serde_json::Value`] into the public API (F8). The raw
-/// `Value` is confined to crate-private wire code.
+/// The arguments are always a JSON object: the wire decoder and
+/// [`ToolCall::from_parts`] both refuse any other value. This view exposes
+/// them without leaking a [`serde_json::Value`] into the public API (F8). The
+/// raw `Value` is confined to crate-private wire code.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ToolArguments<'a> {
@@ -200,14 +201,13 @@ pub struct ToolArguments<'a> {
 }
 
 impl ToolArguments<'_> {
-    /// Returns the arguments serialized as canonical JSON text.
+    /// Returns the arguments object serialized as canonical JSON text.
     #[must_use]
     pub fn to_json_string(&self) -> String {
         self.value.to_string()
     }
 
-    /// Returns whether the call's arguments are empty (a `null` payload or
-    /// an empty JSON object).
+    /// Returns whether the arguments object has no keys.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.value {
@@ -217,8 +217,7 @@ impl ToolArguments<'_> {
         }
     }
 
-    /// Returns whether a top-level argument named `key` is present, when the
-    /// arguments are a JSON object.
+    /// Returns whether the arguments object has a top-level key named `key`.
     #[must_use]
     pub fn contains(&self, key: &str) -> bool {
         self.value
@@ -226,8 +225,7 @@ impl ToolArguments<'_> {
             .is_some_and(|map| map.contains_key(key))
     }
 
-    /// Returns the top-level argument names, when the arguments are a JSON
-    /// object (an empty iterator otherwise).
+    /// Returns the top-level argument names of the arguments object.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.value
             .as_object()
