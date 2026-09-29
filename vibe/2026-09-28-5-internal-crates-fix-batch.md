@@ -961,7 +961,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-17>
 
-### Step 17: Split `promptforge-engine`'s `suite/exec_flow.rs` to the ceiling
+### Step 17: Split `promptforge-engine`'s `suite/exec_flow.rs` to the ceiling [completed]
 
 - Component: Engine ceiling
 - Piece: `exec_flow.rs`, the second piece, built after Step 16.
