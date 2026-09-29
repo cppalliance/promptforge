@@ -1,6 +1,6 @@
 //! Family-matrix fixtures: the dependency rules between product families,
 //! the desktop-app boundary, and the classification itself. Container-privacy
-//! fixtures sit in `product-container-tests.rs`.
+//! fixtures sit in `container_tests.rs`.
 
 use super::test_support::{workspace_root, write_crate};
 use super::*;

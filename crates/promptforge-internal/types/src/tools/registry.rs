@@ -58,7 +58,7 @@ impl ToolCatalog {
         let mut seen = std::collections::BTreeSet::new();
         for tool in tools {
             // The catalog is the transport boundary: reject a wire name that
-            // is empty or holds a separator/control character (tools.rs F4).
+            // is empty or holds a separator/control character.
             if let Err(error) = validate_identifier("wire name", &tool.wire_name) {
                 return Err(ToolCatalogError::InvalidWireName {
                     wire_name: tool.wire_name.clone(),
@@ -129,12 +129,11 @@ pub enum ToolCatalogErrorKind {
 
 /// A [`ToolCatalog`] could not be built from the supplied tools.
 ///
-/// This classifying error supersedes the design's `DuplicateToolId` name
-/// (DESIGN-2.4): the catalog is the schema/transport boundary, so besides
-/// rejecting a repeated identity it also rejects a descriptor whose
+/// The catalog is the schema/transport boundary, so besides rejecting a
+/// repeated identity it also rejects a descriptor whose
 /// [`wire_name`](ToolDescriptor::wire_name) is empty or contains a
-/// separator or control character (tools.rs F4). It exposes a stable
-/// [`kind`](Self::kind) classifier (DESIGN-5).
+/// separator or control character. It exposes a stable
+/// [`kind`](Self::kind) classifier.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolCatalogError {
@@ -157,7 +156,7 @@ pub enum ToolCatalogError {
 }
 
 impl ToolCatalogError {
-    /// Returns the stable classification of this error (DESIGN-5).
+    /// Returns the stable classification of this error.
     #[must_use]
     pub fn kind(&self) -> ToolCatalogErrorKind {
         match self {

@@ -3,14 +3,14 @@
 
 use super::*;
 
-/// The single configurable mock gateway every execution test uses
-/// (EXEC-TESTS-005). It serves a fixed script of chat-completions responses in
-/// order, repeating the last entry once the script is exhausted, records every
-/// request body it receives, and counts calls. Scripts stay in the buffered
-/// chat-completion shape; each is converted to the SSE chunk stream the
-/// always-streaming client consumes at serve time (see [`sse_events`]).
+/// The single configurable mock gateway every execution test uses. It serves a
+/// fixed script of chat-completions responses in order, repeating the last
+/// entry once the script is exhausted, records every request body it receives,
+/// and counts calls. Scripts stay in the buffered chat-completion shape; each
+/// is converted to the SSE chunk stream the always-streaming client consumes
+/// at serve time (see [`sse_events`]).
 ///
-/// The server is OWNED (EXEC-TESTS-003): the guard holds the bound address, a
+/// The server is OWNED: the guard holds the bound address, a
 /// graceful-shutdown sender, and the serving task's `JoinHandle`. Dropping the
 /// guard (at test end) signals shutdown and aborts the task, so no detached
 /// server survives the test to `.unwrap()`-panic during runtime teardown. The
@@ -286,7 +286,7 @@ impl ScriptedGateway {
         let (shutdown, rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             // No `.unwrap()`: the serve outcome is swallowed so a torn-down test
-            // runtime can never trigger a detached-task panic (EXEC-TESTS-003).
+            // runtime can never trigger a detached-task panic.
             let _ = axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
                     let _ = rx.await;

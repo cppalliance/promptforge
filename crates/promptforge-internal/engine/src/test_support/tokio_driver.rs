@@ -32,9 +32,9 @@
 //! determinism suites sweep across seeds. The performers all post
 //! independently of the run, so the hold cannot deadlock.
 //!
-//! This is a test host: the engine's own suites drive it in place of the
-//! scheduler they used to drive, and a companion crate's suite enables
-//! the `test-support` feature for it. The harness is the production host.
+//! This is a test host: the engine's own suites drive runs through it,
+//! and a companion crate's suite enables the `test-support` feature for
+//! it. The harness is the production host.
 
 use std::collections::HashMap;
 #[cfg(test)]

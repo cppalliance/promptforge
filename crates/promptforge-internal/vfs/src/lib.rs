@@ -169,16 +169,38 @@ mod tests {
 
     /// A manifest section is a dependency table when it is exactly one of
     /// the three dependency tables, a sub-table of one
-    /// (`[dependencies.foo]` declares a dependency the same way), or a
-    /// target-qualified dependency table.
+    /// (`[dependencies.foo]` declares a dependency the same way), or either
+    /// of those under a `target.<cfg>` qualifier. A cfg string may itself
+    /// hold dots (`"sse4.1"`), so a target section is matched on any
+    /// dot-separated key rather than on a fixed position.
     fn is_dependency_table(section: &str) -> bool {
         const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
-        TABLES.iter().any(|table| {
-            section == *table
-                || section
-                    .strip_prefix(*table)
-                    .is_some_and(|rest| rest.starts_with('.'))
-        }) || (section.starts_with("target.") && section.ends_with(".dependencies"))
+        let mut keys = section.split('.');
+        match keys.next() {
+            Some("target") => keys.any(|key| TABLES.contains(&key)),
+            first => first.is_some_and(|key| TABLES.contains(&key)),
+        }
+    }
+
+    /// Every entry `manifest` declares under a dependency table, each
+    /// naming its section and entry.
+    fn dependency_declarations(manifest: &str) -> Vec<String> {
+        let mut section = String::new();
+        let mut declared = Vec::new();
+        for raw_line in manifest.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                section = line.trim_matches(['[', ']']).to_owned();
+                continue;
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if is_dependency_table(&section) {
+                declared.push(format!("[{section}] declares `{line}`"));
+            }
+        }
+        declared
     }
 
     /// The zero-dependency rule is load-bearing: this crate compiles alone
@@ -190,28 +212,39 @@ mod tests {
         let manifest = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
         )?;
-        let mut section = String::new();
-        for raw_line in manifest.lines() {
-            let line = raw_line.trim();
-            if line.starts_with('[') {
-                section = line.trim_matches(['[', ']']).to_owned();
-                continue;
-            }
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            assert!(
-                !is_dependency_table(&section),
-                "zero-dependency rule violated: [{section}] declares `{line}`"
-            );
-        }
+        let declared = dependency_declarations(&manifest);
+        assert!(
+            declared.is_empty(),
+            "zero-dependency rule violated: {declared:?}"
+        );
         Ok(())
     }
 
     #[test]
+    fn a_manifest_with_a_target_qualified_dependency_table_is_refused() {
+        for (table, entry) in [
+            ("target.'cfg(windows)'.dev-dependencies", "foo = \"1\""),
+            (
+                "target.'cfg(target_feature = \"sse4.1\")'.build-dependencies",
+                "foo = \"1\"",
+            ),
+            ("target.'cfg(windows)'.dependencies.foo", "version = \"1\""),
+        ] {
+            let manifest = format!(
+                "[package]\nname = \"fixture\"\n\n[target.'cfg(windows)']\n\n[{table}]\n{entry}\n"
+            );
+            assert_eq!(
+                dependency_declarations(&manifest),
+                [format!("[{table}] declares `{entry}`")],
+                "[{table}] must be refused"
+            );
+        }
+    }
+
+    #[test]
     fn dependency_sub_tables_count_as_dependency_tables() {
-        // Regression: `[dependencies.foo]` once slipped past the exact-
-        // match section check while still declaring a dependency.
+        // `[dependencies.foo]` declares a dependency without its section
+        // name equalling a dependency table's.
         for section in [
             "dependencies",
             "dependencies.foo",
@@ -223,7 +256,13 @@ mod tests {
         ] {
             assert!(is_dependency_table(section), "[{section}] must be caught");
         }
-        for section in ["package", "lints", "features", "dependenciesfoo"] {
+        for section in [
+            "package",
+            "lints",
+            "features",
+            "dependenciesfoo",
+            "target.'cfg(windows)'",
+        ] {
             assert!(!is_dependency_table(section), "[{section}] must pass");
         }
     }

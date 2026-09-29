@@ -98,9 +98,7 @@ pub(crate) fn difference(committed: Option<&str>, lines: &[String]) -> Vec<Strin
     report
 }
 
-#[path = "listing-compact.rs"]
 mod compact;
 
 #[cfg(test)]
-#[path = "listing-tests.rs"]
 mod tests;

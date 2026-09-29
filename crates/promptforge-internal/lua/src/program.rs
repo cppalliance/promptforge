@@ -37,7 +37,7 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// `#[non_exhaustive]` so the crate can evolve the retained representation
 /// (fields are already private) without a breaking change before release.
 ///
-/// # Sensitivity (LUA-015)
+/// # Sensitivity
 /// A program retains the author's original prompt Lua source verbatim, and
 /// [`source`](Self::source) exposes it. Prompt source can embed
 /// author-sensitive material (system instructions, embedded credentials in a
@@ -246,7 +246,7 @@ impl LuaProgram {
             return Error::LuaQuota { resource };
         }
         let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
-        // Retain the originating `mlua` error as the private source (F4) with the
+        // Retain the originating `mlua` error as the private source with the
         // mapped prompt-location message, instead of flattening it to a string.
         Error::LuaRuntime {
             message: mapped,

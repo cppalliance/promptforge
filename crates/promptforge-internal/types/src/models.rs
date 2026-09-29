@@ -76,7 +76,7 @@ impl ModelId {
 
     /// Validates one identity component, naming the field in any error.
     ///
-    /// Rejection is by Unicode scalar, not raw byte (MODEL-004): every control
+    /// Rejection is by Unicode scalar, not raw byte: every control
     /// character is refused, including C1 controls such as U+0085 (NEL) whose
     /// UTF-8 encoding a byte-range scan would miss.
     fn validate(field: &'static str, value: &str) -> std::result::Result<(), ModelIdError> {
@@ -325,7 +325,7 @@ mod tests {
         // The C0 record separator (U+001E) must never survive into an id.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{001e}b").is_err());
         // A C1 control (NEL, U+0085) whose UTF-8 bytes (0xC2 0x85) a byte-range
-        // scan would miss but a scalar `is_control` scan rejects (MODEL-004).
+        // scan would miss but a scalar `is_control` scan rejects.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{0085}b").is_err());
         // DEL (U+007F) and NUL are refused too.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{007f}b").is_err());

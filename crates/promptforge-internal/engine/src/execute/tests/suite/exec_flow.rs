@@ -99,8 +99,8 @@ macro_rules! flow_prompt {
 }
 
 /// The `tasks` global is the task namespace (`tasks.spawn` and, later, the
-/// waits), not the retired control-flow table (note 42): indexing it by a
-/// heading string reads nil, and control flow takes heading strings only.
+/// waits), not a control-flow table: indexing it by a heading string reads
+/// nil, and control flow takes heading strings only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tasks_global_is_the_task_namespace() {
     let md = flow_prompt!(
@@ -146,9 +146,9 @@ return 'helped:' .. store.read('seen.txt')\n\
 }
 
 /// A jump inside `call()` is contained by the chain: followed, not
-/// rejected (the retired reject policy's inversion). The chain's index moves
-/// to the target - the sections between the jumper and the target do not
-/// run - and the target's reply returns to the caller.
+/// rejected. The chain's index moves to the target - the sections between
+/// the jumper and the target do not run - and the target's reply returns to
+/// the caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_inside_call_is_contained_in_the_chain() {
     let md = flow_prompt!(
@@ -1985,7 +1985,7 @@ fanout('### Niece', {'x'})\n\
     );
 }
 
-/// The retired two-string form errors at the boundary, pointing at
+/// The two-string form errors at the boundary, pointing at
 /// `list_from_section`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_string_second_parameter_errors_pointing_at_list_from_section() {
@@ -2260,8 +2260,9 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
 
 #[tokio::test]
 async fn models_bind_is_gone_from_the_lua_surface() {
-    // `models.bind` is removed: binding is the frontmatter's. The legacy call
-    // is a nil call, and the failed H1 gate classifies as RequirementsUnmet.
+    // `models.bind` does not exist: binding is the frontmatter's. A
+    // `models.bind` call is a nil call, and the failed H1 gate classifies as
+    // RequirementsUnmet.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ```lua\nmodels.bind('writer', 'A general model for tests')\n```\n\n\

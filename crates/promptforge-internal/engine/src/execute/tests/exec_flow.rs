@@ -137,8 +137,7 @@ fn list_from_section_ambiguous_error_is_loud() {
 }
 
 /// Two top-level sections sharing one name error loudly as ambiguous rather
-/// than silently resolving to the first (the retired `resolve_h2_section`
-/// first-match behavior).
+/// than silently resolving to the first.
 #[test]
 fn duplicate_top_level_section_names_error_loudly() {
     let sections = vec![
@@ -251,7 +250,7 @@ return models.infer(models.get('ghost'), 'ping')\n\
 
 #[test]
 fn advance_turn_saturates_and_never_wraps_the_stored_counter() {
-    // FANOUT-008: the shared turn counter must saturate at u32::MAX rather than
+    // The shared turn counter must saturate at u32::MAX rather than
     // wrapping through fetch_add and reusing a turn index.
     let turns = AtomicU32::new(0);
     assert_eq!(advance_turn(&turns), 1);

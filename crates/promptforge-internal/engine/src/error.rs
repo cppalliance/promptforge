@@ -96,8 +96,7 @@ pub(crate) enum Error {
 
     /// A client or endpoint configuration input was invalid, retaining the
     /// concrete cause (a secret or URL validation failure) as a private
-    /// `#[source]` (client F13 / AUDIT-DISCARDED-SOURCE) instead of flattening
-    /// it into the message.
+    /// `#[source]` instead of flattening it into the message.
     #[error("{message}")]
     #[non_exhaustive]
     Config {
@@ -119,9 +118,9 @@ pub(crate) enum Error {
 
     /// The backend returned a non-success status.
     ///
-    /// The `Display` is deliberately body-free (F5): the bounded,
-    /// control-escaped body is stored only in the private `body` field,
-    /// reachable through the explicit
+    /// The `Display` is deliberately body-free: the bounded, control-escaped
+    /// body is stored only in the private `body` field, reachable through
+    /// the explicit
     /// [`CompletionError::backend_body`](promptforge_model_client::model::CompletionError::backend_body) opt-in, so a raw or hostile
     /// payload cannot forge log lines or leak into an error message.
     #[error("non-success backend status {status}")]
@@ -140,8 +139,8 @@ pub(crate) enum Error {
     ///
     /// Like [`Error::MalformedResponse`] but retains the underlying decode
     /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
-    /// rather than flattening it into the message (MODEL-009 / client F11), so
-    /// the error chain survives through the public wrappers' `source()`.
+    /// rather than flattening it into the message, so the error chain
+    /// survives through the public wrappers' `source()`.
     #[error("malformed response: {message}")]
     #[non_exhaustive]
     MalformedResponseSource {
@@ -155,9 +154,9 @@ pub(crate) enum Error {
     /// Reading a non-success backend response body failed at the transport
     /// layer.
     ///
-    /// Retains the `reqwest::Error` as the `#[source]` cause (MODEL-010)
-    /// rather than flattening the read failure into display text, so the error
-    /// chain (timeout, connection reset) survives. The status the backend had
+    /// Retains the `reqwest::Error` as the `#[source]` cause rather than
+    /// flattening the read failure into display text, so the error chain
+    /// (timeout, connection reset) survives. The status the backend had
     /// already returned is preserved for classification.
     #[error("unreadable backend error body (status {status})")]
     #[non_exhaustive]
@@ -197,15 +196,15 @@ pub(crate) enum Error {
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
     /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
-    /// retains that cause as a private source (F4). The message is the specific
+    /// retains that cause as a private source. The message is the specific
     /// failure as a noun phrase; the public wrapper classifies this as a Lua
-    /// failure, so no redundant `lua error:` type label is prepended (F8).
+    /// failure, so no redundant `lua error:` type label is prepended.
     #[error("{0}")]
     Lua(String),
 
     /// A section's Lua phase failed at runtime or while bridging host values,
     /// retaining the originating `mlua` error as the private `#[source]` cause
-    /// (F4) alongside the mapped prompt-location message.
+    /// alongside the mapped prompt-location message.
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: the Lua
     /// crate builds it from a concrete `mlua::Error` (see
@@ -226,7 +225,7 @@ pub(crate) enum Error {
     /// Lua source was not syntactically valid at its prompt location.
     ///
     /// Retains the originating `mlua` compile error as the private `#[source]`
-    /// cause (F4) alongside the location metadata, so the compiler diagnostic
+    /// cause alongside the location metadata, so the compiler diagnostic
     /// chain survives through the public wrappers' `source()` instead of being
     /// flattened into `message` alone.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
@@ -246,7 +245,7 @@ pub(crate) enum Error {
     },
 
     /// Building a model-facing tool schema for a bound alias failed, retaining
-    /// the schema validation error as the private `#[source]` cause (F5) rather
+    /// the schema validation error as the private `#[source]` cause rather
     /// than flattening it into `detail`.
     ///
     /// Constructed only by the tool-scope preparation, which is test-only
@@ -913,7 +912,7 @@ mod tests {
 
     #[test]
     fn source_bearing_binding_errors_preserve_their_cause() {
-        // F5: the binding and tool-scope failures keep the originating typed
+        // The binding and tool-scope failures keep the originating typed
         // error as a private `source()` instead of flattening it to a string,
         // and the chain survives through the public `RunError` wrapper.
         use promptforge_model_client::client::ToolSchemaError;
@@ -934,7 +933,7 @@ mod tests {
 
     #[test]
     fn lua_compile_preserves_the_originating_compiler_error() {
-        // F4: a compile failure keeps the concrete `mlua` error as a private
+        // A compile failure keeps the concrete `mlua` error as a private
         // `source()` instead of flattening it into `message` alone, and the
         // chain survives through the public `RunError` wrapper.
         let compile = Error::LuaCompile {
@@ -952,7 +951,7 @@ mod tests {
 
     #[test]
     fn typed_error_survives_the_lua_external_boundary() {
-        // LUA-012: passing the typed error (not its `to_string()`) to
+        // Passing the typed error (not its `to_string()`) to
         // `mlua::Error::external` keeps the original error as a downcastable
         // source across the Lua boundary, rather than flattening it to text.
         let original = Error::OutOfScopeToolCall {
@@ -978,11 +977,11 @@ mod tests {
 
     #[test]
     fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
-        // AUDIT-DISCARDED-SOURCE: a transport's configuration failure (an
-        // unusable credential, a bad endpoint URL) arrives as the client
-        // error type's `Config` variant with its concrete cause attached;
-        // the cause survives both the public CompletionError::source and
-        // the mapping onto this crate's error type, classified as Config.
+        // A transport's configuration failure (an unusable credential, a
+        // bad endpoint URL) arrives as the client error type's `Config`
+        // variant with its concrete cause attached; the cause survives both
+        // the public CompletionError::source and the mapping onto this
+        // crate's error type, classified as Config.
         use crate::model::CompletionError;
         use promptforge_model_client::Error as ClientError;
         use promptforge_model_client::model::CompletionErrorKind;

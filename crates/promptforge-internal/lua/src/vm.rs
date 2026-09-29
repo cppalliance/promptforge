@@ -818,8 +818,8 @@ impl SectionVm {
 
     /// Executes a compiled Lua chunk in this VM's persistent environment.
     ///
-    /// This is the legacy engine's path for running a section's Lua blocks;
-    /// the scheduler drives blocks through
+    /// This is the direct, scheduler-free path for running a section's Lua
+    /// blocks; the scheduler drives blocks through
     /// [`start_block_coro`](Self::start_block_coro) instead. Store and
     /// `log` reports go to the emitter captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
@@ -1077,8 +1077,7 @@ impl SectionVm {
     }
 
     /// Takes any recorded jump target, propagating a poisoned jump-slot lock
-    /// rather than silently coercing the failure into "no jump"
-    /// (source-audit discarded-error-001).
+    /// rather than silently coercing the failure into "no jump".
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the jump-slot mutex is poisoned.
@@ -1101,8 +1100,7 @@ impl SectionVm {
         let result = program.load(&self.lua)?.call(());
         // A recorded jump takes precedence over the chunk's error: that error
         // is the jump's own transfer marker, not a real failure. A poisoned
-        // slot propagates rather than coercing into "no jump"
-        // (discarded-error-001).
+        // slot propagates rather than coercing into "no jump".
         if let Some(heading) = self.take_jump()? {
             return Ok(LuaBlockResult::Jump(heading));
         }
@@ -1116,18 +1114,19 @@ impl SectionVm {
     /// This is the scheduler's chunk-execution path: one coroutine per Lua
     /// block, created from the block's loaded function on this persistent
     /// VM, so the VM's globals (`var`, the bare globals, the captured
-    /// handles) roll forward across blocks as on the legacy
+    /// handles) roll forward across blocks as on the direct
     /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
     /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
     /// installed on the fresh thread; the main-state hook from construction
     /// never fires inside a resumed coroutine.
     ///
-    /// A coroutine that returns ends the block under the legacy contract: a
-    /// recorded jump takes precedence over the chunk's own error, genuine
-    /// failures map through [`LuaProgram::map_runtime_error`], and the
-    /// scalar-return rule applies to the return values. A coroutine that
-    /// yields suspends with the shim's request table; the driver resumes it
-    /// with [`resume_block_coro`](Self::resume_block_coro). No observation
+    /// A coroutine that returns ends the block under the direct path's
+    /// contract: a recorded jump takes precedence over the chunk's own
+    /// error, genuine failures map through
+    /// [`LuaProgram::map_runtime_error`], and the scalar-return rule
+    /// applies to the return values. A coroutine that yields suspends with
+    /// the shim's request table; the driver resumes it with
+    /// [`resume_block_coro`](Self::resume_block_coro). No observation
     /// events fire here; the driver owns the chunk observation boundaries.
     ///
     /// The coroutine body is the shim's block guard, resumed first with
@@ -1194,8 +1193,8 @@ impl SectionVm {
     /// failure answer the envelope includes the error's structured table
     /// (`kind`, `message`, fields) for the shim to raise, and the typed
     /// error the answer owned is substituted back when the shim-raised
-    /// error surfaces as the coroutine's failure (the LUA-012 contract), so
-    /// the Rust caller receives the structured error rather than a string.
+    /// error surfaces as the coroutine's failure, so the Rust caller
+    /// receives the structured error rather than a string.
     ///
     /// The error type is the driver's own (`E`); this crate's internal
     /// failures convert into it through [`From`], and its
@@ -1238,7 +1237,7 @@ impl SectionVm {
             }
             result => {
                 // A recorded jump takes precedence over the chunk's error,
-                // exactly as on the legacy path.
+                // exactly as on the direct path.
                 if let Some(heading) = self.take_jump()? {
                     return Ok(CoroStep::Done(LuaBlockResult::Jump(heading)));
                 }
@@ -1321,7 +1320,7 @@ pub enum CoroStep {
     /// the request table.
     Yielded(Thread, MultiValue),
     /// The coroutine ended (return, jump, or error); the block outcome
-    /// follows the legacy `run_loaded_with_control` contract.
+    /// follows the `run_loaded_with_control` contract.
     Done(LuaBlockResult),
 }
 

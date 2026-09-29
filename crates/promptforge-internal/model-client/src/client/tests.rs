@@ -40,7 +40,7 @@ fn from_validated_parts_serializes_role_and_content_verbatim() {
 
 #[test]
 fn tool_arguments_view_exposes_no_raw_value() {
-    // F8: the public arguments view surfaces typed accessors, never a
+    // The public arguments view surfaces typed accessors, never a
     // serde_json::Value.
     let call = ToolCall {
         id: "call_1".to_owned(),
@@ -118,7 +118,7 @@ fn from_result_refuses_an_empty_batch_and_duplicate_ids_and_accepts_text() {
 
 #[test]
 fn tool_schema_new_validates_wire_name_and_object_schema() {
-    // F7: a valid name and object schema are accepted.
+    // A valid name and object schema are accepted.
     let schema =
         tool_schema_new("web.search-1", "desc", json_object()).expect("a valid schema is accepted");
     assert_eq!(schema.name, "web.search-1");

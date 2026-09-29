@@ -172,7 +172,7 @@ fn unclosed_is_error() {
     assert_eq!(err_of("open {{ args").kind, SubstErrorKind::Unclosed);
 }
 
-// --- SUBST-003: escape grammar -------------------------------------------
+// --- Escape grammar ------------------------------------------------------
 
 #[test]
 fn escaped_delimiters_are_literal() {
@@ -210,7 +210,7 @@ fn replacement_produced_delimiters_are_not_resubstituted() {
     assert_eq!(out, "value: {{ args }}");
 }
 
-// --- SUBST-004: path segment grammar -------------------------------------
+// --- Path segment grammar ------------------------------------------------
 
 #[test]
 fn empty_or_padded_segments_are_rejected() {
@@ -231,7 +231,7 @@ fn valid_nested_segment_still_resolves() {
     assert_eq!(run("{{ var.row.a }}").unwrap(), "1");
 }
 
-// --- SUBST-005: typed error kind/offset/source ---------------------------
+// --- Typed error kind/offset/source --------------------------------------
 
 #[test]
 fn error_has_kind_and_offset() {
@@ -346,7 +346,7 @@ fn not_a_table_kind() {
     assert!(e.to_string().contains("not a table"));
 }
 
-// --- SUBST-006: null, arrays, trust-neutral passthrough ------------------
+// --- Null, arrays, trust-neutral passthrough -----------------------------
 
 #[test]
 fn array_renders_as_json() {

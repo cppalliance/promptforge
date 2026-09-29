@@ -251,9 +251,9 @@ impl Request {
 /// One validated store operation: the `store.*` call's name and its
 /// author-supplied arguments, checked once here at the protocol boundary.
 ///
-/// The read bounds stay `i64` as the legacy callback's signature had
-/// them: a negative bound converts to 0 at execution, which the facade's
-/// range validation rejects with the same error a zero bound produces.
+/// The read bounds are `i64`: a negative bound converts to 0 at execution,
+/// which the facade's range validation rejects with the same error a zero
+/// bound produces.
 ///
 /// Plain data, so the executor's effect record can move an operation
 /// through serde as the shim yielded it.

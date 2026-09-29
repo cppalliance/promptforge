@@ -109,8 +109,8 @@ impl Section {
     ///
     /// A section is list-only exactly when it parsed into non-empty
     /// [`items`](Self::items) - i.e. it had no Lua blocks and every nonblank
-    /// prose line was a valid list item (PF-PARSER-005). Ordinary prose (even
-    /// prose that happens to contain a single bullet line) is not list-only.
+    /// prose line was a valid list item. Ordinary prose (even prose that
+    /// happens to contain a single bullet line) is not list-only.
     #[must_use]
     pub fn is_list_only(&self) -> bool {
         !self.items.is_empty()

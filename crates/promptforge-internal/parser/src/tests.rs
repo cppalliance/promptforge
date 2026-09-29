@@ -25,9 +25,9 @@ fn assert_runtime_error_line(program: &LuaProgram, absolute_line: u32) {
 
 #[test]
 fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
-    // error.rs F3: a malformed-YAML frontmatter must classify as
-    // `Frontmatter` and retain the underlying serde_yaml_ng failure as the
-    // public error's `source()`, instead of flattening it into a string.
+    // A malformed-YAML frontmatter must classify as `Frontmatter` and
+    // retain the underlying serde_yaml_ng failure as the public error's
+    // `source()`, instead of flattening it into a string.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
     let error = parse(src).expect_err("malformed YAML frontmatter must fail to parse");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
@@ -103,8 +103,8 @@ fn orphan_empty_heading_and_misplaced_shared_fence_errors_report_a_line() {
 
 #[test]
 fn mixed_prose_with_one_bullet_is_not_a_list() {
-    // PF-PARSER-005: an incidental bullet line in ordinary prose must not
-    // force strict list parsing; the section stays prose.
+    // An incidental bullet line in ordinary prose must not force strict
+    // list parsing; the section stays prose.
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\nHere is context.\n- one incidental bullet\nMore prose follows.\n";
     let prompt = parse(src).unwrap();
     let section = &prompt.sections[0];
@@ -143,9 +143,9 @@ fn list_error_kind_does_not_depend_on_the_section_name() {
 
 #[test]
 fn parsed_prompt_value_types_are_equatable() {
-    // PF-PARSER-011: parsing the same source twice yields equal values, and
-    // a differing source yields unequal values, across the finalized parser
-    // value types (`Prompt`, `Frontmatter`, `Section`, `Block`).
+    // Parsing the same source twice yields equal values, and a differing
+    // source yields unequal values, across the finalized parser value types
+    // (`Prompt`, `Frontmatter`, `Section`, `Block`).
     let src = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## One\n\ndo a thing\n";
     let a = parse(src).unwrap();
     let b = parse(src).unwrap();
@@ -864,14 +864,14 @@ fn duplicate_sibling_section_names_are_rejected() {
         message.contains("duplicate sibling section name"),
         "expected a duplicate-sibling error, got: {err}"
     );
-    // PF-PARSER-002: both duplicate locations are named. The first `## S` is
-    // at body line 3 (line 8 overall) and the second at body line 7 (line 12).
+    // Both duplicate locations are named. The first `## S` is at body line 3
+    // (line 8 overall) and the second at body line 7 (line 12).
     assert!(
         message.contains("first declared at line 8") && message.contains("again at line 12"),
         "both duplicate locations must be reported, got: {message}"
     );
-    // PF-PARSER-008: a structured parse error reports a stable kind and a
-    // byte span rather than inferring them from the message.
+    // A structured parse error reports a stable kind and a byte span rather
+    // than inferring them from the message.
     assert_eq!(err.kind(), ParseErrorKind::Structure);
     let (start, end) = err.span().expect("duplicate section has a span");
     assert!(

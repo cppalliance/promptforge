@@ -55,11 +55,11 @@ pub(super) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<Strin
 /// Returns true when `prose` is entirely list markers: every nonblank line is a
 /// list marker (well-formed or empty) and there is at least one such line.
 ///
-/// This is the list-only invariant (PF-PARSER-005): a single incidental bullet
-/// line in otherwise ordinary prose leaves a non-marker line present, so the
-/// section is classified as prose rather than forced through strict list
-/// parsing. A section whose lines are all markers but include an empty one is
-/// still a list, so [`parse_bullet_items`] reports the empty item.
+/// This is the list-only invariant: a single incidental bullet line in
+/// otherwise ordinary prose leaves a non-marker line present, so the section
+/// is classified as prose rather than forced through strict list parsing. A
+/// section whose lines are all markers but include an empty one is still a
+/// list, so [`parse_bullet_items`] reports the empty item.
 pub(super) fn is_all_list_markers(prose: &str) -> bool {
     let mut saw_marker = false;
     for line in prose.lines() {

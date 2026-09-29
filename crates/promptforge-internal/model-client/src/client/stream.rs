@@ -449,7 +449,7 @@ fn append_string_fragment(
 ///
 /// Control characters (including newlines and carriage returns) are rendered in
 /// their `\u{..}`/`\n` escaped form so a backend body cannot forge log lines or
-/// smuggle terminal control sequences into a diagnostic (F5). An empty body is
+/// smuggle terminal control sequences into a diagnostic. An empty body is
 /// reported as a fixed marker.
 ///
 /// A transport runs a non-success status's error body through here before

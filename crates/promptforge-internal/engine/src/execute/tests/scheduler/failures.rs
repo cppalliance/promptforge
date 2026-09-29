@@ -51,9 +51,8 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_arm_rewriting_its_own_path_succeeds() {
-    // Mirror of the legacy case of the same name: the registry records
-    // (fanout token, arm index), so the same arm writing the same path
-    // again is a rewrite, not a race.
+    // The registry records (fanout token, arm index), so the same arm
+    // writing the same path again is a rewrite, not a race.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -81,9 +80,8 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sequential_fanouts_may_write_one_path() {
-    // Mirror of the legacy case of the same name: a later fanout takes a
-    // fresh write token, so its write overwrites the earlier fanout's
-    // registry record instead of racing against it.
+    // A later fanout takes a fresh write token, so its write overwrites the
+    // earlier fanout's registry record instead of racing against it.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -111,8 +109,7 @@ async fn sequential_fanouts_may_write_one_path() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fatal_arm_aborts_queued_siblings() {
-    // Mirror of the legacy `fatal_arm_aborts_and_drops_blocked_siblings`:
-    // with the ceiling at 1 the siblings stay queued, and once the first
+    // With the ceiling at 1 the siblings stay queued, and once the first
     // arm fails fatally they are cancelled before admission - proven by
     // the store side-channel only the fatal arm ever wrote to, and by the
     // terminal observations: one FAILED, nothing else. The start event
@@ -250,10 +247,9 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_caught_fanout_failure_lets_the_caller_continue() {
     // The fanout error is the call's answer resumed through the envelope,
-    // so an author `pcall` catches it exactly as on the legacy callback
-    // path; the run then continues - including past a stale answer the
-    // aborted sibling's already-completed I/O task may have posted, which
-    // the driver must discard rather than fail on.
+    // so an author `pcall` catches it; the run then continues - including
+    // past a stale answer the aborted sibling's already-completed I/O task
+    // may have posted, which the driver must discard rather than fail on.
     let gateway = ScriptedGateway::start(vec![
         resp_text("boom-answer"),
         resp_text("slow-answer"),

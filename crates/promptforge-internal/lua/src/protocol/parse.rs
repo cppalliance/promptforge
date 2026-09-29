@@ -66,14 +66,12 @@ enum FieldFailure {
     Malformed,
     /// An author-supplied argument had the wrong shape: the call's error,
     /// resumed as the answer so the shim raises it at the call site - an
-    /// author `pcall` catches it, as the legacy callback's argument error
-    /// surfaced.
+    /// author `pcall` catches it.
     Call(Error),
 }
 
 /// Reads one author-supplied required string argument. Every wrong shape,
-/// absent included, is the call's error: the legacy callback's argument
-/// conversion failed at the call site too.
+/// absent included, is the call's error, raised at the call site.
 fn call_string(table: &mlua::Table, name: &str) -> std::result::Result<String, FieldFailure> {
     match table.raw_get::<Value>(name) {
         Ok(Value::String(value)) => value.to_str().map(|value| value.to_owned()).map_err(|_| {
@@ -162,8 +160,7 @@ pub enum YieldParse {
     Request(Request),
     /// A well-formed shim call whose author-supplied argument failed
     /// validation: the call's answer, resumed into the caller so the shim
-    /// raises the error at the call site, as the legacy callback's argument
-    /// error surfaced.
+    /// raises the error at the call site.
     Call(Answer<Error>),
     /// Not a well-formed request table: a hand-rolled or corrupted yield,
     /// failing the block with the fixed direct-yield message.
@@ -180,10 +177,9 @@ impl Request {
     /// yield directly". A well-formed shim call whose author-supplied
     /// argument fails validation is [`YieldParse::Call`]: the error is
     /// returned as the call's answer so the shim raises it at the call site,
-    /// keeping the legacy callback's errors catchable by an author `pcall`.
-    /// One boundary conversion keeps its own byte-identical error: a `call`
-    /// or `spawn` target that is not a string fails as
-    /// `resolve_section_target` fails.
+    /// where an author `pcall` can catch it. One boundary conversion keeps
+    /// its own byte-identical error: a `call` or `spawn` target that is not
+    /// a string fails as `resolve_section_target` fails.
     pub fn from_yield(lua: &Lua, yielded: &Value) -> YieldParse {
         let Value::Table(table) = yielded else {
             return YieldParse::Malformed(direct_yield_error());
@@ -438,9 +434,8 @@ fn parse_local_tool_done(table: &mlua::Table) -> Option<Request> {
 }
 
 /// Reads one author-supplied optional line bound: absent or nil is `None`,
-/// an integer (or a float with an integral value, matching the legacy
-/// callback's `i64` conversion) is `Some`, any other shape is the call's
-/// error.
+/// an integer (or a float with an integral value, as Lua's own integer
+/// conversion accepts) is `Some`, any other shape is the call's error.
 fn call_optional_line(
     table: &mlua::Table,
     name: &str,
@@ -470,8 +465,7 @@ fn call_optional_line(
 
 /// Parses a `store` request: the operation name and its author-supplied
 /// arguments. Every wrong shape is the call's error, resumed as the answer
-/// so the shim raises it at the call site - an author `pcall` catches it,
-/// as the legacy callback's argument conversion failed there.
+/// so the shim raises it at the call site - an author `pcall` catches it.
 fn parse_store(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let op = call_string(table, "store_op")?;
     let op = match op.as_str() {

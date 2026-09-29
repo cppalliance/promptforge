@@ -6,9 +6,8 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
-    // THE DECISION GATE: under the legacy bridge this prompt fails with
-    // `Error::Internal` on a current-thread runtime; under the scheduler
-    // the nested call and both infers complete on the one thread.
+    // On a current-thread runtime the nested call and both infers complete
+    // on the one thread.
     let gateway =
         ScriptedGateway::start(vec![resp_text("inner answer"), resp_text("outer answer")]).await;
     let md = "---\nname: gate\ndescription: d\npromptforge: 0\n---\n\n\
@@ -147,8 +146,8 @@ async fn a_lua_infer_of_prose_uses_the_run_configured_client() {
 async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
     // A failed dispatch (here an unresolvable call target) is the call's
     // answer resumed through the error envelope, so an author `pcall`
-    // catches it exactly as on the legacy callback path; a driver that
-    // failed the chain instead would error the run.
+    // catches it; a driver that failed the chain instead would error the
+    // run.
     let md = "---\nname: catch\ndescription: d\npromptforge: 0\n---\n\n\
         # Catch\n\n\
         ## Only\n\n\
@@ -174,15 +173,12 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
     );
 }
 
-// --- Walk translation: the core rules mirrored from the legacy suite ---
-// Each test names the legacy case it mirrors. The legacy cases keep
-// exercising the legacy engine untouched; these prove the scheduler.
+// --- The core walk rules ---
 
 #[tokio::test(flavor = "current_thread")]
 async fn sections_run_in_fall_through_order() {
-    // Mirror of the legacy `falls_through_to_next_section`, strengthened
-    // with an order log: a section without a return falls through to the
-    // next section in document order.
+    // A section without a return falls through to the next section in
+    // document order, as the order log shows.
     let store = TestStore::new();
     let md = "---\nname: walk\ndescription: d\npromptforge: 0\n---\n\n\
         # Walk\n\n\
@@ -202,9 +198,8 @@ async fn sections_run_in_fall_through_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn generic_result_when_nothing_produced() {
-    // Mirror of the legacy `generic_result_when_nothing_produced`: a walk
-    // that exhausts its slice with no reply yields the shared generic
-    // completion.
+    // A walk that exhausts its slice with no reply yields the shared
+    // generic completion.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Generic\n\n\
         ## Only\n\n\
@@ -221,9 +216,8 @@ async fn generic_result_when_nothing_produced() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sys_id_increments_per_section() {
-    // Mirror of the legacy `sys_id_increments_per_section`: every section
-    // entry takes the walk chain's next entry id (`0.N`; entry 0 is the
-    // H1 pass, present or not).
+    // Every section entry takes the walk chain's next entry id (`0.N`;
+    // entry 0 is the H1 pass, present or not).
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
         ## First\n\n\
@@ -242,10 +236,9 @@ async fn sys_id_increments_per_section() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
-    // Mirror of the legacy case of the same name: A executes the off-walk
-    // S1, which runs because it is addressed; the chain falls through to
-    // S2, and S2's reply returns to A. The main walk ends at B and never
-    // runs S1 or S2.
+    // A executes the off-walk S1, which runs because it is addressed; the
+    // chain falls through to S2, and S2's reply returns to A. The main walk
+    // ends at B and never runs S1 or S2.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Siblings\n\n\
@@ -279,10 +272,7 @@ async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn var_persists_across_sections_in_fall_through() {
-    // Mirror of the fall-through half of the legacy
-    // `var_persists_across_sections_fallthrough_and_jump` (its jump half
-    // lands with the jump translation): one section's `var` writes reach
-    // the next across fall-through.
+    // One section's `var` writes reach the next across fall-through.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Var\n\n\
         ## A\n\n\
@@ -306,9 +296,8 @@ async fn var_persists_across_sections_in_fall_through() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_clones_var_in_and_discards_child_writes() {
-    // Mirror of the legacy case of the same name: `call` clones the
-    // caller's `var` in; the contained chain reads the clone, and its
-    // writes are discarded when the chain ends.
+    // `call` clones the caller's `var` in; the contained chain reads the
+    // clone, and its writes are discarded when the chain ends.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Clone\n\n\
         ## Main\n\n\
@@ -336,9 +325,9 @@ async fn call_clones_var_in_and_discards_child_writes() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_sequence() {
-    // Mirror of the legacy case of the same name: the contained chain is
-    // the walk's first child `0.0`, so its entries are `0.0.N`, and the
-    // outer walk resumes its own `0.N` sequence when the chain ends.
+    // The contained chain is the walk's first child `0.0`, so its entries
+    // are `0.0.N`, and the outer walk resumes its own `0.N` sequence when
+    // the chain ends.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Sequence\n\n\
@@ -374,9 +363,9 @@ async fn a_call_chain_counts_its_own_entries_and_the_outer_walk_resumes_its_own_
 
 #[tokio::test(flavor = "current_thread")]
 async fn entering_the_same_section_twice_takes_two_ids() {
-    // Mirror of the legacy case of the same name: entering the same
-    // section twice hands out two distinct `sys.id` values - two call
-    // children of the walk, so two chains `0.0` and `0.1`.
+    // Entering the same section twice hands out two distinct `sys.id`
+    // values - two call children of the walk, so two chains `0.0` and
+    // `0.1`.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Twice\n\n\
         ## Main\n\n\
@@ -399,9 +388,7 @@ async fn entering_the_same_section_twice_takes_two_ids() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fall_through_fires_section_finished_before_the_next_section_starts() {
-    // The boundary half of the legacy
-    // `a_two_section_run_reports_the_exact_observation_sequence`: each
-    // entered section's armed frame drop fires SECTION_FINISHED at the
+    // Each entered section's armed frame drop fires SECTION_FINISHED at the
     // fall-through, before the next section's SECTION_STARTED.
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -436,15 +423,11 @@ async fn fall_through_fires_section_finished_before_the_next_section_starts() {
     );
 }
 
-// --- Walk translation: jumps, returns, and observation boundaries ---
-// Each test names the legacy case it mirrors. The legacy cases keep
-// exercising the legacy engine untouched; these prove the scheduler.
+// --- Jumps, returns, and observation boundaries ---
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
-    // Mirror of the legacy
-    // `jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks`:
-    // the jump transfers control and the jumper's remaining blocks never
+    // The jump transfers control and the jumper's remaining blocks never
     // run.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -474,9 +457,8 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn section_cannot_jump_to_itself() {
-    // Mirror of the legacy case of the same name: the caller is outside its
-    // own visible set, so naming its own heading to `jump` resolves as
-    // not-found.
+    // The caller is outside its own visible set, so naming its own heading
+    // to `jump` resolves as not-found.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Self\n\n\
         ## Self\n\n\
@@ -497,8 +479,7 @@ async fn section_cannot_jump_to_itself() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_to_off_walk_section_runs_it() {
-    // Mirror of the legacy case of the same name: a jump addresses an
-    // off-walk section directly, so it runs.
+    // A jump addresses an off-walk section directly, so it runs.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Addressed\n\n\
         ## A\n\n\
@@ -520,10 +501,7 @@ async fn jump_to_off_walk_section_runs_it() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn var_persists_across_a_jump() {
-    // The jump half of the legacy
-    // `var_persists_across_sections_fallthrough_and_jump` (its H1-seed half
-    // has no scheduler counterpart - the scheduler's drive starts at the
-    // walk): the jumper's `var` writes cross the transfer, and the target's
+    // The jumper's `var` writes cross the transfer, and the target's
     // writes roll forward into the fall-through that follows.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Var\n\n\
@@ -595,9 +573,8 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_erroring_section_reports_started_but_not_finished() {
-    // Mirror of the legacy case of the same name: a section that errors
-    // mid-walk emits SECTION_STARTED and never SECTION_FINISHED - the
-    // frame's drop stays unarmed on the error path.
+    // A section that errors mid-walk emits SECTION_STARTED and never
+    // SECTION_FINISHED - the frame's drop stays unarmed on the error path.
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fail\n\n\
@@ -623,10 +600,9 @@ async fn an_erroring_section_reports_started_but_not_finished() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_to_a_child_starts_the_child_level_walk() {
-    // Mirror of the legacy case of the same name: a jump to an H3 child
-    // starts a child-level walk at the target, which falls through to the
-    // target's following siblings; when the level exhausts, the parent walk
-    // resumes after the jumper.
+    // A jump to an H3 child starts a child-level walk at the target, which
+    // falls through to the target's following siblings; when the level
+    // exhausts, the parent walk resumes after the jumper.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Descend\n\n\
@@ -656,10 +632,9 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn child_walk_recurses_to_h4() {
-    // Mirror of the legacy case of the same name: the child-level rule
-    // recurses - a jump from an H3 child to an H4 grandchild starts an
-    // H4-level walk, and each level's exhaustion resumes its parent after
-    // the jumper.
+    // The child-level rule recurses - a jump from an H3 child to an H4
+    // grandchild starts an H4-level walk, and each level's exhaustion
+    // resumes its parent after the jumper.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Recurse\n\n\
@@ -696,9 +671,8 @@ async fn child_walk_recurses_to_h4() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_to_an_off_walk_child_runs_it() {
-    // Mirror of the legacy case of the same name: an off-walk child stays
-    // addressable - a jump to it runs it, and the fall-through that follows
-    // skips nothing addressed.
+    // An off-walk child stays addressable - a jump to it runs it, and the
+    // fall-through that follows skips nothing addressed.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # OffChild\n\n\
@@ -725,9 +699,8 @@ async fn jump_to_an_off_walk_child_runs_it() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn running_child_addresses_its_own_siblings_and_children() {
-    // Mirror of the legacy case of the same name: a running child's visible
-    // set is its own siblings plus its own children - it can execute a
-    // child and jump to a sibling.
+    // A running child's visible set is its own siblings plus its own
+    // children - it can execute a child and jump to a sibling.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Visible\n\n\
@@ -757,9 +730,8 @@ async fn running_child_addresses_its_own_siblings_and_children() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn running_child_cannot_address_a_top_level_section() {
-    // Mirror of the legacy case of the same name: a running child cannot
-    // address a top-level section - the parent level is not in its visible
-    // set, so the jump resolves as not-found.
+    // A running child cannot address a top-level section - the parent level
+    // is not in its visible set, so the jump resolves as not-found.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Escape\n\n\
         ## A\n\n\
@@ -784,9 +756,8 @@ async fn running_child_cannot_address_a_top_level_section() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_to_a_niece_errors() {
-    // Mirror of the legacy case of the same name: a sibling's child (a
-    // niece or nephew) is not in the visible set, so the jump resolves as
-    // not-found.
+    // A sibling's child (a niece or nephew) is not in the visible set, so
+    // the jump resolves as not-found.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Niece\n\n\
         ## A\n\n\
@@ -810,10 +781,9 @@ async fn jump_to_a_niece_errors() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_level() {
-    // Mirror of the legacy case of the same name: `sys.id` counts the
-    // sections the walk chain has entered - the detour into a child level
-    // is the same chain, so it continues the count rather than
-    // restarting it.
+    // `sys.id` counts the sections the walk chain has entered - the detour
+    // into a child level is the same chain, so it continues the count
+    // rather than restarting it.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Ids\n\n\
@@ -932,9 +902,8 @@ async fn two_runs_of_the_same_prompt_produce_identical_ids() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
-    // The rule-5 clause the legacy cases imply but none isolates: a scalar
-    // return inside a jump-started child-level walk ends the whole chain,
-    // not just the child level - the parent walk never resumes.
+    // A scalar return inside a jump-started child-level walk ends the whole
+    // chain, not just the child level - the parent walk never resumes.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Return\n\n\
         ## A\n\n\
@@ -955,10 +924,10 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_inside_call_is_contained_in_the_chain() {
-    // Mirror of the legacy case of the same name: a jump inside `call()`
-    // is contained by the chain - followed, not rejected. The chain's index
-    // moves to the target, the sections between the jumper and the target
-    // do not run, and the target's reply returns to the caller.
+    // A jump inside `call()` is contained by the chain - followed, not
+    // rejected. The chain's index moves to the target, the sections between
+    // the jumper and the target do not run, and the target's reply returns
+    // to the caller.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Contained\n\n\
         ## Main\n\n\
@@ -984,10 +953,9 @@ async fn jump_inside_call_is_contained_in_the_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn jump_inside_a_call_chain_moves_within_the_chain() {
-    // Mirror of the legacy case of the same name: a jump inside a
-    // `call()` chain to a sibling moves within the contained chain - the
-    // walk continues from the jump target under the normal rules, and the
-    // chain's final reply is the call's return value.
+    // A jump inside a `call()` chain to a sibling moves within the
+    // contained chain - the walk continues from the jump target under the
+    // normal rules, and the chain's final reply is the call's return value.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Move\n\n\
@@ -1018,9 +986,7 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
-    // Mirror of the legacy
-    // `call_chain_jumps_to_a_child_and_returns_the_chain_reply` (the
-    // canonical contained chain): A calls Sub; Sub jumps to its child S1,
+    // The canonical contained chain: A calls Sub; Sub jumps to its child S1,
     // starting a child-level walk that falls through to S2; S2's return is
     // the chain's final text back to A, and the outer walk continues at B,
     // never having moved.
@@ -1063,9 +1029,9 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_outer_walk_never_moves_during_a_contained_chain() {
-    // Mirror of the legacy case of the same name: the outer walk never
-    // moves while a contained chain runs - wherever the chain ends, the
-    // outer walk resumes at the section after the caller.
+    // The outer walk never moves while a contained chain runs - wherever
+    // the chain ends, the outer walk resumes at the section after the
+    // caller.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Outer\n\n\
@@ -1098,10 +1064,9 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
-    // Mirror of the legacy case of the same name: a return inside a
-    // contained chain ends the chain, not the run - the returned value is
-    // the call's return, the chain's remaining sections do not run, and
-    // the outer walk continues.
+    // A return inside a contained chain ends the chain, not the run - the
+    // returned value is the call's return, the chain's remaining sections
+    // do not run, and the outer walk continues.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Scoped\n\n\
@@ -1131,10 +1096,9 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn call_to_a_child_starts_a_contained_chain() {
-    // Mirror of the legacy case of the same name: `call` to a child
-    // starts a contained chain at the target - the chain falls through to
-    // the target's following siblings under the same rules as any walk, and
-    // the chain's final reply is the call's return value.
+    // `call` to a child starts a contained chain at the target - the chain
+    // falls through to the target's following siblings under the same rules
+    // as any walk, and the chain's final reply is the call's return value.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ChildExecute\n\n\
@@ -1163,13 +1127,12 @@ async fn call_to_a_child_starts_a_contained_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_jump_descent_does_not_consume_call_depth() {
-    // The depth-cap interaction, identical to the legacy engine: a jump
-    // descent is not a call, so the child level shares the chain's
-    // call-depth field. X and Y ping-pong calls from inside a
-    // jump-started child walk; each entry appends once. The cap trips when
-    // the ninth nested call would run (depth 9 > 8), after exactly nine
-    // section entries - a descent that wrongly consumed depth would trip
-    // the cap one entry earlier.
+    // The depth-cap interaction: a jump descent is not a call, so the child
+    // level shares the chain's call-depth field. X and Y ping-pong calls
+    // from inside a jump-started child walk; each entry appends once. The
+    // cap trips when the ninth nested call would run (depth 9 > 8), after
+    // exactly nine section entries - a descent that wrongly consumed depth
+    // would trip the cap one entry earlier.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
@@ -1205,10 +1168,9 @@ async fn a_jump_descent_does_not_consume_call_depth() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn walk_never_descends_into_children() {
-    // Mirror of the legacy case of the same name: the walk never descends -
-    // a section's children do not run unless addressed. This is the
-    // negative half of the child-descent rule: a fall-through that
-    // descended would run the child and trip its error.
+    // The walk never descends - a section's children do not run unless
+    // addressed. This is the negative half of the child-descent rule: a
+    // fall-through that descended would run the child and trip its error.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # NoDescent\n\n\
@@ -1234,9 +1196,8 @@ async fn walk_never_descends_into_children() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_failed_jump_resolution_still_finishes_the_jumper() {
     // The error half of the jump observation boundary: the jumper's frame
-    // closes as completed before the heading resolves (the legacy walk
-    // resolves after the jumper's teardown), so SECTION_FINISHED fires for
-    // the jumper even when the target does not resolve.
+    // closes as completed before the heading resolves, so SECTION_FINISHED
+    // fires for the jumper even when the target does not resolve.
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Unresolved\n\n\

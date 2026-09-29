@@ -507,7 +507,7 @@ fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
 
 #[test]
 fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
-    // LUA-002: many small events must not emit unbounded total log bytes.
+    // Many small events must not emit unbounded total log bytes.
     // With a 4-event budget the byte budget is 4 * 256 = 1024 bytes; three
     // 400-byte messages (200 two-byte chars each) exceed it on the third
     // call, while only three of the four events have been spent - so the
@@ -529,7 +529,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
     );
     let error = run_scalar(&vm, &program, recorder.emitter(), "Budget")
         .expect_err("the cumulative byte budget must refuse the third message");
-    // LUA-002: the refusal is the stable typed quota error, not an opaque
+    // The refusal is the stable typed quota error, not an opaque
     // Lua authoring string.
     assert!(
         matches!(
@@ -1738,7 +1738,7 @@ fn runtime_assert_failure_reports_chunk_name_and_line() {
 
 #[test]
 fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
-    // LUA-006: an unset live slot is a legitimate state and yields the
+    // An unset live slot is a legitimate state and yields the
     // fallback; a poisoned lock is a real failure and must NOT masquerade as
     // the fallback.
     let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Section").expect("VM must build");
@@ -2968,7 +2968,7 @@ fn store_exists_reports_its_pair_from_the_shared_library() {
 
 #[test]
 fn lua_runtime_error_preserves_its_mlua_source() {
-    // F4: a Lua runtime failure is the source-bearing `LuaRuntime` variant and
+    // A Lua runtime failure is the source-bearing `LuaRuntime` variant and
     // retains the originating `mlua` error as a private `source()` instead of
     // flattening it to a string.
     let err = run("error('boom')", "").expect_err("an explicit error() must raise");

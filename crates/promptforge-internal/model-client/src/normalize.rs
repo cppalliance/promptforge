@@ -195,9 +195,9 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
                 "tool call was not an object".into(),
             ));
         }
-        // `type` must be present and name a function call (PF-NORM-003): the
-        // OpenAI protocol invariant requires `"type": "function"`, so a missing,
-        // null, non-string, or other value is a malformed shape, not an absence.
+        // `type` must be present and name a function call: the OpenAI protocol
+        // invariant requires `"type": "function"`, so a missing, null,
+        // non-string, or other value is a malformed shape, not an absence.
         match raw.get("type") {
             Some(Value::String(kind)) if kind == "function" => {}
             _ => {
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn missing_or_null_type_field_is_rejected() {
-        // PF-NORM-003: `type` is required to be exactly "function"; a missing or
+        // `type` is required to be exactly "function"; a missing or
         // null value is malformed rather than tacitly accepted.
         for type_field in [None, Some(serde_json::Value::Null)] {
             let mut call = serde_json::json!({

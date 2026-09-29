@@ -7,9 +7,6 @@ use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
 // --- Fanout on the scheduler: N arm chains interleaved by the driver ---
-// Each mirrored test names the legacy case it mirrors. The legacy cases
-// keep exercising the legacy fanout driver untouched; these prove the
-// scheduler's arm chains.
 
 /// Builds the run context and its silent host for a scheduler fanout test
 /// with the given limits, so an admission test can narrow the ceiling.
@@ -38,8 +35,7 @@ pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_results_follow_collection_order_not_finish_order() {
-    // Mirror of the legacy `results_follow_collection_order_not_finish_order`:
-    // arm "two" finishes first (one infer) while arm "one" is still parked
+    // Arm "two" finishes first (one infer) while arm "one" is still parked
     // on its second; the packed sequence must follow collection order. A
     // join that keyed results by completion order would return "r2|r1:r3".
     let gateway =
@@ -120,8 +116,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
-    // The admission mirror of the legacy `ArmWindow` contract: with the
-    // run's concurrency ceiling at 1, the first arm runs both of its
+    // With the run's concurrency ceiling at 1, the first arm runs both of its
     // infers and ends before the second is admitted - admission that let
     // arms overlap would interleave the requests (x:a, y:a, ...). The
     // fanout spawns every arm up front, so the later arms wait queued,
@@ -168,10 +163,7 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_structured_results() {
-    // Mirror of the legacy
-    // `fanout_arms_take_child_ids_in_collection_order_and_a_per_fanout_index`
-    // plus the structured-result shape of `fanout_returns_structured_results`:
-    // each arm is a child chain of the caller (`0.0`, `0.1`) whose worker
+    // Each arm is a child chain of the caller (`0.0`, `0.1`) whose worker
     // entry is `0.K.0`, `sys.index` is the
     // 1-based per-fanout position, and the packed sequence holds `.ok`
     // and `.item` with `__tostring` driving `table.concat`. The ids log is
@@ -222,16 +214,15 @@ async fn fanout_arms_take_child_ids_in_collection_order_per_fanout_index_and_str
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
-    // Mirror of the legacy `fanout_accepts_a_list_over_the_old_default_cap`,
-    // plus the plan's VM-count pin: a 1025-member collection runs to
-    // completion under the 8-wide default ceiling - every arm spawns up
-    // front and the admission queue feeds them in as slots free. Each arm
-    // parks on one model round, so its Lua VM stays live from its
-    // admission to its end; the test-support tally of live section VMs
-    // must never exceed the ceiling's arms plus the parent. The completion
-    // assertion alone cannot see a regression that builds a VM per queued
-    // arm at spawn - all 1025 would complete regardless - but the tally's
-    // peak sees it, because every VM would be live at once.
+    // A 1025-member collection runs to completion under the 8-wide default
+    // ceiling - every arm spawns up front and the admission queue feeds
+    // them in as slots free. Each arm parks on one model round, so its Lua
+    // VM stays live from its admission to its end; the test-support tally
+    // of live section VMs must never exceed the ceiling's arms plus the
+    // parent. The completion assertion alone cannot see a regression that
+    // builds a VM per queued arm at spawn - all 1025 would complete
+    // regardless - but the tally's peak sees it, because every VM would be
+    // live at once.
     let gateway = ScriptedGateway::start(vec![resp_text("r"); 1025]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -267,8 +258,7 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn pre_cancelled_fanout_returns_interrupted() {
-    // Mirror of the legacy `pre_cancelled_fanout_returns_interrupted`: a
-    // fanout entered under an already-cancelled handle fails the run with
+    // A fanout entered under an already-cancelled handle fails the run with
     // Error::Interrupted instead of running the arms.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -292,8 +282,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn model_required_when_arm_infer_has_no_binding() {
-    // Mirror of the legacy `model_required_when_arm_prose_has_no_binding`:
-    // an arm whose explicit infer of its prose has no model binding fails
+    // An arm whose explicit infer of its prose has no model binding fails
     // the fanout with Error::ModelRequired naming the worker section. The
     // context is built directly so the model set stays empty - the shared
     // test context pre-fills a default binding.
@@ -333,12 +322,11 @@ async fn model_required_when_arm_infer_has_no_binding() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn the_shared_replay_sees_the_arm_item() {
-    // Mirror of the legacy `the_shared_replay_sees_the_arm_item`: the `item`
-    // global installs before `replay_shared`, so the shared library's
-    // top-level code may read `item`; moving the install after the replay
-    // would capture nil in the arm and fail this test. The context holds
-    // the prompt's real compiled shared library, not the empty stand-in the
-    // other scheduler tests use.
+    // The `item` global installs before `replay_shared`, so the shared
+    // library's top-level code may read `item`; moving the install after
+    // the replay would capture nil in the arm and fail this test. The
+    // context holds the prompt's real compiled shared library, not the
+    // empty stand-in the other scheduler tests use.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ```lua shared\n\
@@ -377,8 +365,7 @@ async fn the_shared_replay_sees_the_arm_item() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
-    // Mirror of the legacy `jump_inside_a_fanout_arm_drives_a_child_walk`:
-    // the arm's remaining blocks are skipped, the walk continues on the
+    // The arm's remaining blocks are skipped, the walk continues on the
     // target's own slice from the target (the arm chain's entry sequence
     // continues, the walk falls through to the target's following
     // siblings), and the walk's reply becomes the arm's text. A
@@ -425,12 +412,10 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
-    // Mirror of the legacy
-    // `jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice`:
-    // the descent runs the worker's child slice from the target, the target
-    // takes the arm chain's next entry id with no `item` seed (the transfer clears
-    // the arm's at-worker state, so the child walk runs as plain sections),
-    // and the walk falls through to the target's child siblings.
+    // The descent runs the worker's child slice from the target, the target
+    // takes the arm chain's next entry id with no `item` seed (the transfer
+    // clears the arm's at-worker state, so the child walk runs as plain
+    // sections), and the walk falls through to the target's child siblings.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -540,18 +525,15 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
 }
 
 // --- Fanout failure semantics on the scheduler ---
-// Each mirrored test names the legacy case it mirrors. The arms are task
-// chains the `fanout` shim spawns, so their lifecycle reports through the
-// `Task*` observations: started under the caller's section, the terminal
-// under the worker's.
+// The arms are task chains the `fanout` shim spawns, so their lifecycle
+// reports through the `Task*` observations: started under the caller's
+// section, the terminal under the worker's.
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_empty_collection_errors_before_any_scheduling() {
-    // Pin of the pre-scheduling guard, mirroring the legacy
-    // `fanout_collection_empty_errors` and
-    // `an_empty_collection_is_rejected_before_any_scheduling`: the fanout
-    // errors before any arm is created - no STARTED observation, and the
-    // worker's store tripwire never fires.
+    // Pin of the pre-scheduling guard: the fanout errors before any arm is
+    // created - no STARTED observation, and the worker's store tripwire
+    // never fires.
     let store = TestStore::new();
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -585,8 +567,8 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_worker_that_is_a_list_section_errors() {
-    // Pin of the worker-template guard, mirroring the legacy case of the
-    // same name: a resolved list section is not a worker template.
+    // Pin of the worker-template guard: a resolved list section is not a
+    // worker template.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -618,8 +600,8 @@ async fn fanout_depth_cap_reads_the_chain_field() {
     // fanout mark, so the spawn arm names the cap after `fanout` in the
     // typed error itself; the shim re-raises that table and the retained
     // typed `Lua` error is substituted back at every `call` level, so the
-    // run's error is byte-identical to the retired Rust raise: the exact
-    // variant, the exact text, no runtime-error prefix or traceback.
+    // run's error is the typed error itself: the exact variant, the exact
+    // text, no runtime-error prefix or traceback.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\

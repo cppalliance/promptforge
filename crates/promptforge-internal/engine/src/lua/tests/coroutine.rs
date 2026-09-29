@@ -97,7 +97,8 @@ fn a_shim_yield_suspends_and_resumes_across_pcall() {
 fn jump_transfers_through_thread_resume_unchanged() {
     // Spike (c): `jump` records the heading and raises its transfer
     // marker; through `Thread::resume` the slot still takes precedence
-    // over the chunk's error, so the outcome matches the legacy path.
+    // over the chunk's error, so the outcome matches the direct
+    // `run_chunk` path.
     let vm = scheduler_vm(&ModelSet::default(), None);
     let program = compile_block("jump(\"## Target\")\nerror(\"unreachable\")");
     match vm

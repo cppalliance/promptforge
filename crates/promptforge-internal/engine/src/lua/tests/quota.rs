@@ -1,10 +1,9 @@
-//! The Lua loop's instruction cost. `models.loop` now runs on the author's
+//! The Lua loop's instruction cost. `models.loop` runs on the author's
 //! Lua instruction budget: every instruction the shim spends per round is
 //! one the every-Nth-instruction hook counts, so a round must cost a few
 //! hundred instructions of shim bookkeeping, never thousands. That keeps
-//! the cancel poll's cadence in rounds where the Rust loop left it and
-//! stops the loop from taxing an author's block for work the host used to
-//! do for free.
+//! the cancel poll's cadence measured in rounds and keeps the loop's own
+//! bookkeeping from taxing an author's block.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

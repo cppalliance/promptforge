@@ -120,22 +120,21 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
-/// `yield` capture (legacy VMs keep exactly `STRING | TABLE | MATH`); the
-/// `coroutine` global is stripped again before returning, so author code
-/// cannot yield directly and a hand-rolled yield fails the driver's strict
-/// validation. The `models`, `tools`, and `compactors` tables are passed
-/// to the shim chunk as arguments, so the chunk never reads a global; the
-/// chunk shims `models.infer` and installs `tools.call`, and the `call`
-/// shim comes back for the host to install as a global. The `tasks`
-/// namespace is a second chunk, run over the same `yield` and
-/// `var_snapshot` captures plus the prelude's returned failure helpers,
-/// and installed as the `tasks` global; `fanout` is a third, run over the
-/// same captures plus the collection enumerator and the item renderer,
-/// and installed
-/// as the `fanout` global. The `models.loop` shim is stashed in the
-/// registry for [`install_section_loop_shim`]. `max_tool_iterations` is
-/// the loop's round cap, the run's resolved value, captured by the chunk
-/// so the shim reads it without a host call.
+/// `yield` capture (a VM without the shims keeps exactly
+/// `STRING | TABLE | MATH`); the `coroutine` global is stripped again
+/// before returning, so author code cannot yield directly and a hand-rolled
+/// yield fails the driver's strict validation. The `models`, `tools`, and
+/// `compactors` tables are passed to the shim chunk as arguments, so the
+/// chunk never reads a global; the chunk shims `models.infer` and installs
+/// `tools.call`, and the `call` shim comes back for the host to install as
+/// a global. The `tasks` namespace is a second chunk, run over the same
+/// `yield` and `var_snapshot` captures plus the prelude's returned failure
+/// helpers, and installed as the `tasks` global; `fanout` is a third, run
+/// over the same captures plus the collection enumerator and the item
+/// renderer, and installed as the `fanout` global. The `models.loop` shim
+/// is stashed in the registry for [`install_section_loop_shim`].
+/// `max_tool_iterations` is the loop's round cap, the run's resolved value,
+/// captured by the chunk so the shim reads it without a host call.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table

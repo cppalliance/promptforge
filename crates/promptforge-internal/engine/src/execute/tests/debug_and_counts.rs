@@ -55,9 +55,8 @@ async fn debug_capture_receives_request_and_response_when_set() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
-    // F4: a nested infer called from Lua must route its request/response
-    // capture to the run's owned debug sink instead of dropping it (was
-    // hard-coded to `None`).
+    // A nested infer called from Lua must route its request/response
+    // capture to the run's owned debug sink instead of dropping it.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
@@ -207,11 +206,10 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_calls_count_increments_even_when_tool_errors() {
-    // TESTS-002: drive a real `FailingTool` through a `models.loop` round
-    // and prove `tools.calls` records exactly one call even though the tool
-    // errors (the count is incremented before dispatch). The tool's own
-    // failure is the call's error result, so the loop continues to the
-    // terminal reply.
+    // Drive a real `FailingTool` through a `models.loop` round and prove
+    // `tools.calls` records exactly one call even though the tool errors
+    // (the count is incremented before dispatch). The tool's own failure is
+    // the call's error result, so the loop continues to the terminal reply.
     use super::models_loop::{always_tool, loop_context, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 

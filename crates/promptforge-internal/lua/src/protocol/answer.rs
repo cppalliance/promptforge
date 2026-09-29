@@ -17,11 +17,11 @@ use crate::{Error, Result, ToolOutputKind};
 
 /// The outcome of one dispatched store operation: the value the shim
 /// returns to its caller. Mutating ops produce `Unit` (the shim returns
-/// nil), as the legacy closures returned nil.
+/// nil).
 ///
 /// Serde's externally tagged form makes the outcome itself the log's
-/// success payload: an answer record built from it serializes
-/// byte-identically to the record type it replaced.
+/// success payload, so an answer record built from it serializes to the
+/// run log's fixed store-answer JSON.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StoreOutcome {
     /// The operation succeeded with no return value.

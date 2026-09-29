@@ -71,14 +71,14 @@ pub enum TemperatureError {
 pub struct ModelInvocation {
     /// Sampling temperature, when the bind declared one.
     ///
-    /// A validated [`Temperature`] (PF-LM-004): a non-finite or out-of-range
-    /// value is unrepresentable, so an invalid temperature can never reach the
-    /// binding or the wire.
+    /// A validated [`Temperature`]: a non-finite or out-of-range value is
+    /// unrepresentable, so an invalid temperature can never reach the binding
+    /// or the wire.
     pub temperature: Option<Temperature>,
     /// Maximum generation tokens, when the bind declared one (always non-zero).
     ///
-    /// A [`NonZeroU32`] (MODEL-003): a zero-token generation cap would forbid
-    /// all output, so it is unrepresentable and rejected at the parse boundary.
+    /// A [`NonZeroU32`]: a zero-token generation cap would forbid all output,
+    /// so it is unrepresentable and rejected at the parse boundary.
     pub max_tokens: Option<NonZeroU32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
     pub thinking: Option<bool>,
@@ -102,8 +102,8 @@ pub struct ModelBinding {
 impl ModelBinding {
     /// Builds a binding atomically from every part a resolved model requires.
     ///
-    /// The non-zero `context` window is a required argument (MODEL-006): there
-    /// is no zero-context sentinel patched in by a later setter, so a binding
+    /// The non-zero `context` window is a required argument: there is no
+    /// zero-context sentinel patched in by a later setter, so a binding
     /// cannot exist in a half-initialized state.
     #[must_use]
     pub fn new(
@@ -249,7 +249,7 @@ impl CompletionOptions {
 
     /// Sets the maximum generation tokens.
     ///
-    /// Takes a [`NonZeroU32`] (MODEL-003) so a zero generation cap, which would
+    /// Takes a [`NonZeroU32`] so a zero generation cap, which would
     /// forbid all output, cannot be placed into a request.
     #[must_use]
     pub fn with_max_tokens(mut self, max_tokens: NonZeroU32) -> CompletionOptions {

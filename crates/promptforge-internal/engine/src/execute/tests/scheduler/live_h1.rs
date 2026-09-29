@@ -7,7 +7,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 /// Builds the run context for a scheduler live-H1 test: the shared model
 /// set starts empty - the live H1 pass under test records its own
-/// bindings, exactly as the legacy run's H1 hand-off leaves them.
+/// bindings.
 fn h1_context(prompt: &Prompt) -> (RunState, RunHost) {
     h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
@@ -46,9 +46,8 @@ fn h1_context_on(
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_infer_runs_once() {
-    // Mirror of the legacy case of the same name: the H1 pass selects the
-    // default model by label, a handle's `infer` yields through the shim,
-    // and the H1 `var` hand-off seeds the walk.
+    // The H1 pass selects the default model by label, a handle's `infer`
+    // yields through the shim, and the H1 `var` hand-off seeds the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
     let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
@@ -71,8 +70,7 @@ async fn live_h1_infer_runs_once() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
-    // Mirror of the legacy case of the same name: the H1
-    // `models.infer` (no handle) resolves the current model from the
+    // The H1 `models.infer` (no handle) resolves the current model from the
     // shared set and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
@@ -114,9 +112,8 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
-    // Mirror of the legacy case of the same name: the H1 pass is the root
-    // chain's entry 0, so the first walked section takes entry 1 of the
-    // same chain.
+    // The H1 pass is the root chain's entry 0, so the first walked section
+    // takes entry 1 of the same chain.
     let md = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 0\n---\n\n\
         # Live H1 Sys Id\n\n\
         ```lua\n\
@@ -476,8 +473,7 @@ async fn list_from_section_works_on_the_h1() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn h1_only_lua_return() {
-    // Mirror of the legacy case of the same name: an H1-only prompt's
-    // scalar return is the run's result.
+    // An H1-only prompt's scalar return is the run's result.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\nreturn \"hello\"\n```\n";
@@ -493,8 +489,8 @@ async fn h1_only_lua_return() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn h1_only_lua_no_return() {
-    // Mirror of the legacy case of the same name: an H1-only prompt that
-    // produces nothing ends in the shared generic completion.
+    // An H1-only prompt that produces nothing ends in the shared generic
+    // completion.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\nlocal x = 1\n```\n";
@@ -556,10 +552,8 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
-    // Mirror of the legacy
-    // `h1_and_h2_prose_both_run_through_the_shared_block_loop`: the live H1
-    // pass and the H2 section each read their own pending buffer into an
-    // explicit infer - two completions, in source order.
+    // The live H1 pass and the H2 section each read their own pending
+    // buffer into an explicit infer - two completions, in source order.
     let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
     let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
@@ -607,9 +601,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
-    // Mirror of the legacy
-    // `live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model`:
-    // H1 prose no longer drives inference, so an unread buffer - even one
+    // H1 prose does not drive inference, so an unread buffer - even one
     // whose substitution would fail or stay empty - discards at the pass's
     // end without requiring a model. Only an explicit `models.infer` of the
     // prose requires a binding.
@@ -645,9 +637,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
-    // Mirror of the var half of the legacy
-    // `live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var`:
-    // the pass reads its pending buffer only through an explicit infer, and
+    // The pass reads its pending buffer only through an explicit infer, and
     // `var` writes accumulate across the pass into the walk.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\

@@ -401,7 +401,7 @@ fn no_content_at_all_reassembles_null_content() {
 
 #[test]
 fn escape_controls_neutralizes_control_bytes_and_bounds_length() {
-    // F5: newlines and other control characters are escaped, not passed
+    // Newlines and other control characters are escaped, not passed
     // through, so a body cannot forge log lines.
     let escaped = escape_controls("line1\nline2\r\u{7}end", 2000);
     assert!(!escaped.contains('\n'), "raw newline must be escaped");

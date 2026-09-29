@@ -848,7 +848,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-12>
 
-### Step 12: Fold two `build-xtask` directories, widen the VFS manifest test, and sweep audit comments
+### Step 12: Fold two `build-xtask` directories, widen the VFS manifest test, and sweep audit comments [completed]
 
 - Component: Housekeeping
 - Piece: the two folds, the manifest-test forms, and the comment sweep, built jointly in one commit. None changes behavior outside a test, no piece depends on another, and one pass of the gates verifies all three.

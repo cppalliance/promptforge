@@ -295,8 +295,7 @@ async fn a_chat_round_streams_its_deltas_to_the_host() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_nested_infer_round_streams_no_deltas_to_the_host() {
     // A nested `models.infer` consumes only the completed reply; its
-    // fragments have no consumer and never reach the host's hook, exactly
-    // as the legacy infer round behaved.
+    // fragments have no consumer and never reach the host's hook.
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let (seen, delta_host) = delta_hook();

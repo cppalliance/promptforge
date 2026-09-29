@@ -20,9 +20,9 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// resolver decision cache), so a non-`Clone` dependency error cannot be moved
 /// into a fresh [`Error`] each time. Wrapping it in a reference-counted
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
-/// cheaply per lookup instead of being flattened to a string (resolve F4).
-/// The compiled-program statics (the coroutine shim and the messages
-/// library) are the callers, through [`crate::detail::shared_source_new`].
+/// cheaply per lookup instead of being flattened to a string. The
+/// compiled-program statics (the coroutine shim and the messages library) are
+/// the callers, through [`crate::detail::shared_source_new`].
 #[derive(Debug, Clone)]
 pub struct SharedSource(pub(crate) std::sync::Arc<dyn std::error::Error + Send + Sync>);
 
@@ -50,15 +50,15 @@ pub enum Error {
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
     /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
-    /// retains that cause as a private source (F4). The message is the specific
+    /// retains that cause as a private source. The message is the specific
     /// failure as a noun phrase; the public wrapper classifies this as a Lua
-    /// failure, so no redundant `lua error:` type label is prepended (F8).
+    /// failure, so no redundant `lua error:` type label is prepended.
     #[error("{0}")]
     Lua(String),
 
     /// A section's Lua phase failed at runtime or while bridging host values,
     /// retaining the originating `mlua` error as the private `#[source]` cause
-    /// (F4) alongside the mapped prompt-location message.
+    /// alongside the mapped prompt-location message.
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
     /// from a concrete `mlua::Error` (see `Error::lua` and
@@ -77,7 +77,7 @@ pub enum Error {
     /// Lua source was not syntactically valid at its prompt location.
     ///
     /// Retains the originating `mlua` compile error as the private `#[source]`
-    /// cause (F4) alongside the location metadata, so the compiler diagnostic
+    /// cause alongside the location metadata, so the compiler diagnostic
     /// chain survives through the public wrappers' `source()` instead of being
     /// flattened into `message` alone.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
@@ -177,7 +177,7 @@ pub(crate) mod lua_quota {
 
 impl Error {
     /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
-    /// `#[source]` cause (F4) rather than flattening it to a string.
+    /// `#[source]` cause rather than flattening it to a string.
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
             message: source.to_string(),

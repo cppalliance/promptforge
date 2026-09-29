@@ -104,7 +104,7 @@ impl CompletionError {
     /// Returns the bounded, control-escaped backend error body, when the failure
     /// was a non-success backend status.
     ///
-    /// This is an explicit opt-in diagnostic channel (F5): the raw body never
+    /// This is an explicit opt-in diagnostic channel: the raw body never
     /// appears in the public [`Display`](std::fmt::Display), so a hostile or
     /// sensitive payload cannot forge log lines or leak into an error message.
     /// The returned text is bounded and has its control characters escaped.

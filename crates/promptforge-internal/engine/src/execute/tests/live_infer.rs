@@ -240,9 +240,9 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn nested_lua_infer_emits_a_model_turn_observation() {
-    // observe.rs F1: a nested Lua infer must surface its model-turn
-    // observation to the run's observer, proving owned-observer propagation
-    // reaches the nested inference path.
+    // A nested Lua infer must surface its model-turn observation to the
+    // run's observer, proving owned-observer propagation reaches the nested
+    // inference path.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
     let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\

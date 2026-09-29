@@ -148,5 +148,5 @@ impl Shared<'_> {
 }
 
 #[cfg(test)]
-#[path = "listing-compact-tests.rs"]
+#[path = "compact-tests.rs"]
 mod tests;

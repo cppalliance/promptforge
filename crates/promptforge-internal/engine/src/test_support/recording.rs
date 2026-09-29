@@ -32,9 +32,9 @@ pub use observation::Observation;
 #[cfg(test)]
 pub(crate) use observation::detail;
 
-/// The recording seam a suite implements: one method per report the
-/// engine used to make through a callback, each with a default body that
-/// discards it, so a recorder pays only for the hooks it overrides.
+/// The recording seam a suite implements: one method per run report,
+/// each with a default body that discards it, so a recorder pays only
+/// for the hooks it overrides.
 #[expect(
     clippy::too_many_arguments,
     reason = "each content report names its full run coordinates in one call, as the suites' recorders expect"

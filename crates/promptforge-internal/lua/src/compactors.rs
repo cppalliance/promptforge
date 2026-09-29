@@ -192,11 +192,11 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
 /// `compactors.fail` is a Rust-backed function: invoked with the overflow
 /// reason tag, it raises typed context exhaustion as an external error, so
 /// the [`Error::ContextExhausted`] value crosses the Lua boundary
-/// downcastable rather than flattened to text (LUA-012); the loop shim,
-/// which invokes the selected compactor on an overflow round, normalizes
-/// that raise into the structured error table before re-raising it, so
-/// the kind reaches author code and the host alike. The namespace installs
-/// with the host tables during host injection, beside `messages`.
+/// downcastable rather than flattened to text; the loop shim, which invokes
+/// the selected compactor on an overflow round, normalizes that raise into
+/// the structured error table before re-raising it, so the kind reaches
+/// author code and the host alike. The namespace installs with the host
+/// tables during host injection, beside `messages`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the function or the global install fails.

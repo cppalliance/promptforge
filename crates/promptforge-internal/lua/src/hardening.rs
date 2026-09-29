@@ -90,7 +90,7 @@ end
 /// loop is legal and only the run's cancel flag aborts it. The flag is the
 /// run's synchronous [`CancelHandle`], installed once by the executor
 /// through [`set_cancel`](Self::set_cancel); a VM no executor claimed
-/// (a test fixture, the legacy chunk path) is never cancelled.
+/// (a test fixture, the direct chunk path) is never cancelled.
 ///
 /// Instruction hooks are per-coroutine in PUC Lua: the hook installed on the
 /// main state at construction never fires inside a resumed coroutine, so

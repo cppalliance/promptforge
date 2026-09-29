@@ -27,7 +27,7 @@ pub(super) fn test_context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, TEST_SEED, TEST_STARTED_AT)
 }
 
-/// F10: compile-time proof that the public execution types are thread-safe.
+/// Compile-time proof that the public execution types are thread-safe.
 ///
 /// `RunContext` holds `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
@@ -111,9 +111,9 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
 /// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts with their own `models.default` call (or the legacy
-/// `models.bind` of the removal tests) keep their shape and get only the
-/// role declaration.
+/// Prompts with their own `models.default` call (or the `models.bind`
+/// call the removal tests expect to fail) keep their shape and get only
+/// the role declaration.
 pub(super) fn ensure_model_h1(md: &str) -> String {
     let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
@@ -151,10 +151,9 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
     }
 }
 
-// PFCORE-EXEC-TESTS-001: the former `resolver` parameter was a fake seam - it was
-// accepted and discarded because live tool binding resolved elsewhere. It has
-// been removed so the test helper cannot imply a resolution path it does not
-// exercise; exact slots fill by identity against the fixture capability's
+// The helper takes no resolver: live tool binding resolves elsewhere, so a
+// resolver argument would imply a resolution path the helper does not
+// exercise. Exact slots fill by identity against the fixture capability's
 // contributed tools at prepare.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();

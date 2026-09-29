@@ -64,7 +64,7 @@ pub fn message_raw_tool_calls(message: &Message) -> Option<&[Value]> {
 /// a character outside `[A-Za-z0-9_.-]`, and
 /// [`ToolSchemaError::NonObjectSchema`] when `parameters` is not a JSON
 /// object, so a tool can never be advertised to the model with an unusable
-/// name or a non-object JSON Schema (F7).
+/// name or a non-object JSON Schema.
 pub fn tool_schema_new(
     name: impl Into<String>,
     description: impl Into<String>,

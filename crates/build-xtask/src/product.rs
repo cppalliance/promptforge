@@ -419,14 +419,10 @@ fn collect_deps(table: &toml::map::Map<String, toml::Value>, names: &mut Vec<Str
 }
 
 #[cfg(test)]
-#[path = "product-container-tests.rs"]
 mod container_tests;
 #[cfg(test)]
-#[path = "product-harness-tests.rs"]
 mod harness_tests;
 #[cfg(test)]
-#[path = "product-test-support.rs"]
 pub(crate) mod test_support;
 #[cfg(test)]
-#[path = "product-tests.rs"]
 mod tests;

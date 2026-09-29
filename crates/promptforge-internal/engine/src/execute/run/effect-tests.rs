@@ -151,10 +151,9 @@ fn a_failed_tool_call_answer_records_the_errors_display_text_and_hides_its_sourc
 
 #[test]
 fn the_store_answer_records_byte_identical_json_for_every_outcome() {
-    // `AnswerRecord::Store` now holds the `StoreOutcome` itself, so its
-    // JSON must stay byte-identical to the retired `StoreAnswerRecord`
-    // shape: the unit outcome as a bare string, the payload outcomes in
-    // serde's externally tagged form.
+    // `AnswerRecord::Store` holds the `StoreOutcome` itself, and its JSON
+    // is a fixed run-log format: the unit outcome as a bare string, the
+    // payload outcomes in serde's externally tagged form.
     let unit = EffectAnswer::Store(Ok(StoreOutcome::Unit)).record();
     assert_eq!(
         serde_json::to_string(&unit).expect("a store answer records"),

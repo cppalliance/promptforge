@@ -58,8 +58,7 @@ pub enum Error {
 
     /// A client or endpoint configuration input was invalid, retaining the
     /// concrete cause (a secret or URL validation failure) as a private
-    /// `#[source]` (client F13 / AUDIT-DISCARDED-SOURCE) instead of flattening
-    /// it into the message.
+    /// `#[source]` instead of flattening it into the message.
     #[error("{message}")]
     Config {
         /// The human-readable configuration diagnostic (no raw source dump).
@@ -80,7 +79,7 @@ pub enum Error {
 
     /// The backend returned a non-success status.
     ///
-    /// The `Display` is deliberately body-free (F5): the bounded,
+    /// The `Display` is deliberately body-free: the bounded,
     /// control-escaped body is stored only in the private `body` field,
     /// reachable through the explicit
     /// [`crate::model::CompletionError::backend_body`] opt-in, so a raw or
@@ -101,8 +100,8 @@ pub enum Error {
     ///
     /// Like [`Error::MalformedResponse`] but retains the underlying decode
     /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
-    /// rather than flattening it into the message (MODEL-009 / client F11), so
-    /// the error chain survives through the public wrappers' `source()`.
+    /// rather than flattening it into the message, so the error chain
+    /// survives through the public wrappers' `source()`.
     #[error("malformed response: {message}")]
     MalformedResponseSource {
         /// The human-readable diagnostic (no raw body).
@@ -116,10 +115,9 @@ pub enum Error {
     /// layer.
     ///
     /// Retains the transport's own read error as the `#[source]` cause
-    /// (MODEL-010) rather than flattening the read failure into display
-    /// text, so the error chain (timeout, connection reset) survives. The
-    /// status the backend had already returned is preserved for
-    /// classification.
+    /// rather than flattening the read failure into display text, so the
+    /// error chain (timeout, connection reset) survives. The status the
+    /// backend had already returned is preserved for classification.
     #[error("unreadable backend error body (status {status})")]
     BackendBodyRead {
         /// The non-success HTTP status whose body could not be read.

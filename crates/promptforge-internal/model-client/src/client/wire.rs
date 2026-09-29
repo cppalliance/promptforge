@@ -13,7 +13,7 @@ use serde_json::Value;
 /// A plain `user` message serializes to just `{"role":..,"content":..}`; the
 /// optional `tool_call_id` and `tool_calls` fields are emitted only when set,
 /// which keeps the wire shape of ordinary messages unchanged.
-// `PartialEq`/`Eq` compare messages structurally (F9). `serde_json::Value`
+// `PartialEq`/`Eq` compare messages structurally. `serde_json::Value`
 // implements `Eq` (its `Number` compares/hashes float bits), so the
 // `tool_calls` field does not block a total equivalence.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -103,7 +103,7 @@ impl Message {
 ///
 /// When serialized into a request the wrapping code turns this into
 /// `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
-// `PartialEq`/`Eq` compare schemas structurally (F9). `serde_json::Value`
+// `PartialEq`/`Eq` compare schemas structurally. `serde_json::Value`
 // implements `Eq`, so the `parameters` schema does not block equivalence.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
@@ -122,8 +122,8 @@ pub struct ToolSchema {
 ///
 /// `ToolSchema` is built only inside the engine (from the executor's `Tool`
 /// contract, through [`crate::detail::tool_schema_new`]), so the raw-`Value`
-/// validation and its error stay off the facade (client F8, lib F3). The
-/// type is public so `promptforge-engine` can box it as an error source.
+/// validation and its error stay off the facade. The type is public so
+/// `promptforge-engine` can box it as an error source.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolSchemaError {
@@ -157,7 +157,7 @@ pub struct ToolCall {
     /// The name of the tool to invoke.
     pub(crate) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
-    /// crate-private (F8): hosts inspect arguments through
+    /// crate-private: hosts inspect arguments through
     /// [`ToolCall::arguments`].
     pub(crate) arguments: Value,
 }
@@ -177,7 +177,7 @@ impl ToolCall {
 
     /// Returns a typed, borrowed view of the call's arguments.
     ///
-    /// F8: the raw wire JSON - a [`serde_json::Value`] - stays crate-private;
+    /// The raw wire JSON - a [`serde_json::Value`] - stays crate-private;
     /// callers inspect the arguments through [`ToolArguments`] (canonical
     /// JSON text, key presence, argument names).
     #[must_use]
@@ -192,7 +192,7 @@ impl ToolCall {
 ///
 /// The arguments are always a JSON object: the wire decoder and
 /// [`ToolCall::from_parts`] both refuse any other value. This view exposes
-/// them without leaking a [`serde_json::Value`] into the public API (F8). The
+/// them without leaking a [`serde_json::Value`] into the public API. The
 /// raw `Value` is confined to crate-private wire code.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -237,7 +237,7 @@ impl ToolArguments<'_> {
 /// The outcome of a completion round trip.
 ///
 /// `Eq` holds because [`ToolCall`] arguments are a [`serde_json::Value`],
-/// which implements `Eq` (F9), so structural equivalence over the outcome is
+/// which implements `Eq`, so structural equivalence over the outcome is
 /// total.
 ///
 /// # Examples

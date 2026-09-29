@@ -119,8 +119,7 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
 }
 
 /// Renders a store op's return value: nil for the mutating ops, the text
-/// for reads, a sequence table for glob, a boolean for exists - the legacy
-/// closures' exact return shapes.
+/// for reads, a sequence table for glob, a boolean for exists.
 fn store_value(lua: &Lua, outcome: StoreOutcome) -> mlua::Result<Value> {
     Ok(match outcome {
         StoreOutcome::Unit => Value::Nil,

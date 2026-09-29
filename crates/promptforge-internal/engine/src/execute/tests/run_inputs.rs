@@ -81,8 +81,8 @@ fn a_different_seed_changes_the_nonce_but_not_sys_when() {
 
 #[test]
 fn the_h1_pass_reads_the_same_sys_when_as_the_walk() {
-    // H1 used to stamp its own `now`; both now read the run's `started_at`.
-    // A scalar H1 return short-circuits the run with that value.
+    // The H1 pass and the walk both read the run's `started_at`. A scalar
+    // H1 return short-circuits the run with that value.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\n\
