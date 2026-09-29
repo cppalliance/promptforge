@@ -36,11 +36,14 @@ impl Scheduler {
     /// `lineage` with its id `counters` and returns its arena index. A
     /// fresh chain starts its counters at zero and enters its first
     /// section on its first step, taking entry 0 of its own id; the root
-    /// walk continues the counters of the H1 pass it follows. The chain's
-    /// `var` slot seeds from `var` (a call chain's or task chain's caller
-    /// snapshot, discarded with the chain). The chain's task is its call
-    /// parent's when it has one, else task `0`; a spawned chain's dispatch
-    /// overwrites it with the chain's own id. `concurrency` is the
+    /// walk continues the counters of the H1 pass it follows. The live H1
+    /// pass starts here too, then takes its capability and its H1 mark.
+    /// Until its first entry the chain reports under the section at
+    /// `index`, or the prompt's title when `index` is past the slice. The
+    /// chain's `var` slot seeds from `var` (a call chain's or task chain's
+    /// caller snapshot, discarded with the chain). The chain's task is its
+    /// call parent's when it has one, else task `0`; a spawned chain's
+    /// dispatch overwrites it with the chain's own id. `concurrency` is the
     /// chain's effective admission limit for the tasks it spawns: the
     /// caller's own for a call child or a task, the run's ceiling for the
     /// root.
@@ -74,7 +77,7 @@ impl Scheduler {
             || TaskId::from(ChainId::root()),
             |parent| self.chains[parent.index()].task.clone(),
         );
-        let entered = slice.first_name(ctx.prompt()).to_owned();
+        let entered = slice.name_at(ctx.prompt(), index).to_owned();
         self.chains.push(Chain {
             lineage,
             counters,

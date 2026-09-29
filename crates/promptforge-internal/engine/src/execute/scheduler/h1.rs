@@ -11,14 +11,14 @@
 
 use std::sync::Arc;
 
-use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::ids::ChainId;
 
 use crate::execute::engine::section_position;
 use crate::execute::support::GENERIC_COMPLETION;
-use crate::fanout;
+use crate::heading_address;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
+use super::{ChainIndex, Counters, Scheduler, SlicePath, prompt_origin};
 
 impl Scheduler {
     /// Starts the H1 pass as the driver loop's first chain: the prompt's
@@ -29,10 +29,6 @@ impl Scheduler {
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`,
     /// or [`Error::Store`] when the backend refuses acquisition.
     pub(super) fn start_live_h1(&mut self) -> Result<ChainIndex> {
-        let id = ChainIndex(
-            u32::try_from(self.chains.len())
-                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
-        );
         // The live H1 pass runs under the prompt's title, from its first
         // compiled H1 chunk.
         let origin = prompt_origin(
@@ -45,40 +41,20 @@ impl Scheduler {
         // The pass is the root chain: its one frame takes entry 0, and the
         // walk that follows continues its counters as the same chain. Its
         // admission limit is the run's ceiling.
-        self.chains.push(Chain {
-            lineage: ChainId::root(),
-            counters: Counters::default(),
-            task: TaskId::from(ChainId::root()),
-            owner: None,
-            seed: None,
-            waiting_on: Vec::new(),
-            awaiting: None,
-            blocked: None,
-            task_notices: Vec::new(),
-            note: None,
-            ctx: self.ctx.clone(),
-            access: Some(Arc::new(access)),
-            frame: None,
-            slice: SlicePath::root(),
-            index: 0,
-            entered: SlicePath::root().first_name(self.ctx.prompt()).to_owned(),
-            positions: Vec::new(),
-            block: 0,
-            coroutine: None,
-            incoming: None,
-            pending_prose: None,
-            var: serde_json::json!({}),
-            call_depth: 0,
-            concurrency: self.ctx.limits().concurrency().get(),
-            slots_used: 0,
-            holding: false,
-            released_holder: None,
-            admitted: false,
-            pending_spawn: None,
-            parent: None,
-            advertised: None,
-            h1: true,
-        });
+        let id = self.start_chain(
+            ChainId::root(),
+            Counters::default(),
+            self.ctx.clone(),
+            SlicePath::root(),
+            0,
+            None,
+            serde_json::json!({}),
+            0,
+            self.ctx.limits().concurrency().get(),
+        )?;
+        let chain = &mut self.chains[id.index()];
+        chain.access = Some(Arc::new(access));
+        chain.h1 = true;
         Ok(id)
     }
 
@@ -170,7 +146,7 @@ impl Scheduler {
     ) -> Result<()> {
         let prompt = self.prompt();
         let sections = promptforge_parser::detail::sections(&prompt);
-        let target = fanout::resolve_sibling(heading, sections)?;
+        let target = heading_address::resolve_sibling(heading, sections)?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",
         ))?;

@@ -1,6 +1,7 @@
 //! Walk, call, jump, cancel, and depth tests for the scheduler.
 
 use super::*;
+use crate::execute::run::Run;
 use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
@@ -1254,5 +1255,38 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
     assert!(
         observed.contains(&("A".to_string(), detail::SECTION_FINISHED.to_string())),
         "the jumper completed before the resolution failed: {observed:?}"
+    );
+}
+
+#[test]
+fn a_chain_started_past_index_0_names_its_start_section_before_its_first_entry() {
+    // A jump out of H1, a `call`, and a spawn start their chain at the
+    // target's index, so the chain's reports before its first entry name
+    // the target, not the slice's first section. An index past the slice
+    // names the prompt's title.
+    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
+        # Title\n\n\
+        ## A\n\n\
+        ```lua\nreturn 'a'\n```\n\n\
+        ## B\n\n\
+        ```lua\nreturn 'b'\n```\n";
+    let prompt = parse(md);
+    let (state, _host) = scheduler_context(&prompt);
+    let mut run = Run::from_state(state);
+    let scheduler = run.scheduler_for_test();
+
+    assert_eq!(
+        scheduler
+            .name_before_first_entry_for_test(1)
+            .expect("the chain starts"),
+        "B",
+        "a chain started at index 1 names the section at index 1"
+    );
+    assert_eq!(
+        scheduler
+            .name_before_first_entry_for_test(2)
+            .expect("the chain starts"),
+        "Title",
+        "a chain started past the slice names the prompt's title"
     );
 }

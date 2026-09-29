@@ -196,14 +196,12 @@ impl Scheduler {
         self.ready.clear();
         self.resuming.clear();
         self.spawned.clear();
-        for (index, chain) in self.chains.iter().enumerate() {
+        // The arena is u32-bounded at insertion (`start_chain`), so the
+        // index range covers every chain.
+        for (owner, chain) in (0..).map(ChainIndex).zip(&self.chains) {
             let Some(access) = chain.access.as_ref() else {
                 continue;
             };
-            let owner = ChainIndex(
-                u32::try_from(index)
-                    .unwrap_or_else(|_| panic!("the arena is u32-bounded at insertion")),
-            );
             self.join_owned_tasks(owner, access);
         }
         for chain in &mut self.chains {

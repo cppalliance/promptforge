@@ -825,7 +825,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-11>
 
-### Step 11: Fix the `entered` placeholder, share the `Chain` constructor, and rename `fanout.rs`
+### Step 11: Fix the `entered` placeholder, share the `Chain` constructor, and rename `fanout.rs` [completed]
 
 - Component: Engine fixes
 - Piece: the scheduler fixes, the second piece, built after Step 10, which also edits `src/lib.rs`.

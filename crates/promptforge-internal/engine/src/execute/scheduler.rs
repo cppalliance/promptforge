@@ -133,11 +133,12 @@ impl SlicePath {
         slice
     }
 
-    /// The name of the slice's first section, or the prompt's title when
-    /// the slice is empty: a chain's section name before its first entry.
-    fn first_name<'p>(&self, prompt: &'p Prompt) -> &'p str {
+    /// The name of the slice's section at `index`, or the prompt's title
+    /// when `index` is past the slice: a chain's section name before its
+    /// first entry.
+    fn name_at<'p>(&self, prompt: &'p Prompt, index: usize) -> &'p str {
         self.resolve(prompt)
-            .first()
+            .get(index)
             .map_or(prompt.title(), Section::name)
     }
 }
@@ -295,8 +296,8 @@ struct Chain {
     /// The name of the section the chain most recently entered: the name
     /// its reports carry on the walk, including between sections and after
     /// the walk runs off its slice, where `index` names no running section.
-    /// Before the first entry, the slice's first section's name, or the
-    /// prompt's title for an empty slice.
+    /// Before the first entry, the name of the section at the chain's
+    /// start index, or the prompt's title when the index is past the slice.
     entered: String,
     /// The suspended parent positions of the chain's jump-started child
     /// walks: the parent slice plus the jumper's index in it. A jump to a

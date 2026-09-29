@@ -3,10 +3,12 @@
 //! (overflow bounds, inline answers, and task slots). Compiled only under
 //! test; nothing here exists in a shipped engine.
 
-use promptforge_types::ids::TaskId;
+use promptforge_types::ids::{ChainId, TaskId};
+
+use crate::Result;
 
 pub(crate) use super::tasks::TaskState;
-use super::{ChainIndex, Scheduler};
+use super::{ChainIndex, Counters, Scheduler, SlicePath};
 
 impl Scheduler {
     /// Shrinks the chain-count bound so a test can drive the
@@ -32,5 +34,28 @@ impl Scheduler {
     /// was ever started, so a test can prove a chain's end moved its slot.
     pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {
         self.tasks.get(task).map(|slot| slot.state)
+    }
+
+    /// Starts a chain over the top-level slice at `index`, as a jump out
+    /// of the H1 pass starts the walk, and returns the section name the
+    /// chain reports before its first entry.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`](crate::Error::Internal) when the run's
+    /// chain count exceeds its bound.
+    pub(crate) fn name_before_first_entry_for_test(&mut self, index: usize) -> Result<String> {
+        let ctx = self.ctx.clone();
+        let id = self.start_chain(
+            ChainId::root(),
+            Counters::default(),
+            ctx,
+            SlicePath::root(),
+            index,
+            None,
+            serde_json::json!({}),
+            0,
+            1,
+        )?;
+        Ok(self.chains[id.index()].section_name().to_owned())
     }
 }

@@ -3,7 +3,7 @@
 pub(crate) mod cancel;
 mod error;
 mod execute;
-pub(crate) mod fanout;
+pub(crate) mod heading_address;
 pub(crate) mod lua;
 pub(crate) mod model;
 pub(crate) mod parser;

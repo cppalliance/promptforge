@@ -10,7 +10,7 @@
 //! callback resolves through them too, so every control surface agrees on
 //! what a heading may name.
 
-use crate::fanout;
+use crate::heading_address;
 use crate::parser::Section;
 use crate::{Error, Result};
 
@@ -52,11 +52,12 @@ pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Sectio
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed, matches no visible
-/// section, or matches more than one (see [`fanout::resolve_sibling`]), or
-/// when the resolved section has no pre-parsed items - the error that catches
-/// naming a prose section by mistake.
+/// section, or matches more than one (see
+/// [`heading_address::resolve_sibling`]), or when the resolved section has
+/// no pre-parsed items - the error that catches naming a prose section by
+/// mistake.
 pub(super) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
-    let section = fanout::resolve_sibling(heading, visible)?;
+    let section = heading_address::resolve_sibling(heading, visible)?;
     if section.items().is_empty() {
         return Err(Error::Lua(format!(
             "section `{}` has no pre-parsed items",
@@ -81,8 +82,9 @@ pub(super) enum JumpTarget {
 /// sibling within the jumper's own slice.
 ///
 /// Resolution is an exact `(level, name)` match (see
-/// [`fanout::resolve_sibling`]): two visible sections sharing an address
-/// error loudly as ambiguous instead of silently resolving to the first.
+/// [`heading_address::resolve_sibling`]): two visible sections sharing an
+/// address error loudly as ambiguous instead of silently resolving to the
+/// first.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed, matches no visible
@@ -93,7 +95,7 @@ pub(super) fn resolve_jump_target(
     jumper: &Section,
 ) -> Result<JumpTarget> {
     let visible = visible_sections(siblings, jumper);
-    let target = fanout::resolve_sibling(heading, &visible)?;
+    let target = heading_address::resolve_sibling(heading, &visible)?;
     if let Some(index) = section_position(jumper.children(), target) {
         return Ok(JumpTarget::Child(index));
     }
