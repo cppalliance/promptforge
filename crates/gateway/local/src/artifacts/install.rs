@@ -23,6 +23,11 @@ use super::{
 };
 use crate::error::LocalError;
 
+#[path = "install-machine.rs"]
+mod machine;
+
+use machine::{host_x86_extensions, nvidia_probe};
+
 /// Validates an operator-supplied `llama-server` path (the config key or
 /// the environment variable) and returns it as the provisioned server. A
 /// set-but-missing path is an operator error and fails loud rather than
@@ -39,33 +44,6 @@ fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
         executable: path,
         path_prefix: Vec::new(),
     })
-}
-
-/// Queries the machine's NVIDIA compute capabilities through `nvidia-smi`.
-/// Returns `None` when the driver or the tool is absent or fails; the
-/// `llama-server` pick then falls back to the Vulkan build and the whisper
-/// pick to the CPU build.
-fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
-    let mut command = std::process::Command::new("nvidia-smi");
-    command.args(["--query-gpu=compute_cap", "--format=csv,noheader"]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        command.creation_flags(crate::CREATE_NO_WINDOW);
-    }
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let caps: Vec<(u64, u64)> = stdout
-        .lines()
-        .filter_map(|line| {
-            let (major, minor) = line.trim().split_once('.')?;
-            Some((major.trim().parse().ok()?, minor.trim().parse().ok()?))
-        })
-        .collect();
-    if caps.is_empty() { None } else { Some(caps) }
 }
 
 impl ArtifactStore {
@@ -106,11 +84,11 @@ impl ArtifactStore {
         // The GPU probe matters only for the Windows x86-64 `auto` pick;
         // every other platform and every explicit backend already knows its
         // row.
-        let gpus = if std::env::consts::OS == "windows"
+        let probe = if std::env::consts::OS == "windows"
             && std::env::consts::ARCH == "x86_64"
             && selection.backend == LlamaBackend::Auto
         {
-            nvidia_compute_caps()
+            nvidia_probe()
         } else {
             None
         };
@@ -118,7 +96,7 @@ impl ArtifactStore {
             std::env::consts::OS,
             std::env::consts::ARCH,
             selection.backend,
-            gpus.as_deref(),
+            probe.as_ref().map(|probe| probe.compute_caps.as_slice()),
         )?;
         let executable = self.provision_server(asset, activity, token)?;
         Ok(ProvisionedServer {
@@ -132,14 +110,18 @@ impl ArtifactStore {
     ///
     /// `backend` (the `[stt] whisper_backend` setting) chooses between the
     /// CPU and CUDA builds on Windows x86-64 and Linux x86-64, where `auto`
-    /// probes the host's NVIDIA GPUs; every other platform has one build.
+    /// probes the host's NVIDIA GPUs and driver version; every other
+    /// platform has one build. On x86-64 the host CPU must report every
+    /// extension the builds execute, under every setting.
     /// The archive is downloaded, digest-verified, and extracted under the
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
     ///
     /// # Errors
-    /// Returns a [`LocalError`] when the platform is unsupported or download,
-    /// verification, extraction, or cache publication fails.
+    /// Returns [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks an
+    /// extension the selected build executes, and another [`LocalError`]
+    /// when the platform is unsupported or download, verification,
+    /// extraction, or cache publication fails.
     pub fn provision_whisper_library(
         &self,
         backend: WhisperBackend,
@@ -149,7 +131,8 @@ impl ArtifactStore {
             std::env::consts::OS,
             std::env::consts::ARCH,
             backend,
-            nvidia_compute_caps,
+            nvidia_probe,
+            &host_x86_extensions(),
         )?;
         let archives = [asset.archive];
         self.provision_install(whisper_install_asset(asset, &archives), activity, None)

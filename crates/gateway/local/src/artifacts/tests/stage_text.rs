@@ -2,7 +2,7 @@
 
 use gateway_config::WhisperBackend;
 
-use super::super::assets::{ArchiveKind, LLAMA_RELEASE, server_asset, whisper_asset};
+use super::super::assets::{ArchiveKind, LLAMA_RELEASE, X86_BASELINE, server_asset, whisper_asset};
 use super::*;
 
 #[test]
@@ -197,10 +197,17 @@ fn provision_server_writes_no_stage_text_on_a_warm_cache() {
 #[test]
 fn provision_whisper_library_reuses_a_verified_install() {
     // Explicit backends keep the host's GPU probe out of the test; on a
-    // platform with both builds each one reuses its own install.
+    // platform with both builds each one reuses its own install. The
+    // provision itself checks this CPU against the x86 baseline.
     for backend in [WhisperBackend::Cpu, WhisperBackend::Cuda] {
-        let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH, backend, None)
-            .expect("host whisper asset");
+        let asset = whisper_asset(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            backend,
+            None,
+            X86_BASELINE,
+        )
+        .expect("host whisper asset");
         let temp = TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
 
@@ -248,6 +255,7 @@ fn whisper_installs_never_fall_back_to_an_older_abi() {
         std::env::consts::ARCH,
         WhisperBackend::Cpu,
         None,
+        X86_BASELINE,
     )
     .expect("host whisper asset");
     let archives = [asset.archive];

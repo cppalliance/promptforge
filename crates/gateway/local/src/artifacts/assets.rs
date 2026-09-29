@@ -11,13 +11,29 @@ mod whisper_rows;
 #[cfg(test)]
 mod tests;
 
-use whisper_auto::{auto_whisper_backend, whisper_backend_applies};
+use whisper_auto::{auto_whisper_backend, whisper_backend_applies, whisper_row};
 use whisper_rows::WHISPER_ASSETS;
 
 /// The `llama.cpp` release tag every managed `llama-server` build is pinned to.
 pub(super) const LLAMA_RELEASE: &str = "b10082";
 /// The whisper.cpp release tag every managed shared library is pinned to.
 pub(super) const WHISPER_RELEASE: &str = "b4938";
+/// The x86-64 extensions every x86-64 [`WHISPER_RELEASE`] build executes,
+/// in `is_x86_feature_detected!` spelling. They are what whisper.cpp
+/// `371b5a75` (the tag's commit) enables under `GGML_NATIVE=OFF`: the
+/// `INS_ENB` options in `ggml/CMakeLists.txt` and the x86 flags in
+/// `ggml/src/ggml-cpu/CMakeLists.txt`, where MSVC's `/arch:AVX2` implies FMA
+/// and F16C. A release bump re-derives the list.
+pub(super) const X86_BASELINE: &[&str] = &["sse4.2", "avx", "avx2", "bmi2", "fma", "f16c"];
+
+/// What the host's `nvidia-smi` reported: each GPU's compute capability as
+/// `(major, minor)`, and the driver version's major number, `None` when it
+/// cannot be read.
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct NvidiaProbe {
+    pub(super) compute_caps: Vec<(u64, u64)>,
+    pub(super) driver_major: Option<u64>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArchiveKind {
@@ -62,11 +78,14 @@ pub(super) struct ServerAsset<'a> {
 /// `backend` is `Some` only on the Windows x86-64 and Linux x86-64 rows,
 /// the two platforms with both a CPU and a CUDA build; the macOS and
 /// linux-aarch64 rows are each their platform's one build and carry `None`.
+/// `min_driver_major` is the lowest NVIDIA driver major version the build
+/// runs on, which only the `auto` pick consults; `None` sets no floor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     arch: &'a str,
     pub(super) backend: Option<WhisperBackend>,
+    pub(super) min_driver_major: Option<u64>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
@@ -226,56 +245,78 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 
 /// Selects the pinned whisper.cpp runtime for `(os, arch)`.
 ///
-/// `backend` (the `[stt] whisper_backend` setting) and `gpus` (the probed
-/// NVIDIA compute capabilities, when a probe was needed and worked) are
-/// consulted only on Windows x86-64 and Linux x86-64, the two platforms
-/// with a choice; every other platform has exactly one row.
+/// `backend` (the `[stt] whisper_backend` setting) and `gpus` (what the
+/// NVIDIA probe reported, when a probe was needed and worked) are consulted
+/// only on Windows x86-64 and Linux x86-64, the two platforms with a
+/// choice; every other platform has exactly one row. On x86-64, under every
+/// setting, the selected row needs every [`X86_BASELINE`] extension in
+/// `x86_extensions`, the ones the host CPU reports.
 ///
 /// # Errors
-/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the platform.
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
+/// host, and [`LocalError::UnsupportedCpu`] when an x86-64 host lacks a
+/// baseline extension.
 pub(super) fn whisper_asset(
     os: &str,
     arch: &str,
     backend: WhisperBackend,
-    gpus: Option<&[(u64, u64)]>,
+    gpus: Option<&NvidiaProbe>,
+    x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
     let wanted = if whisper_backend_applies(os, arch) {
         Some(match backend {
-            WhisperBackend::Auto => auto_whisper_backend(gpus),
+            WhisperBackend::Auto => auto_whisper_backend(os, arch, gpus),
             explicit => explicit,
         })
     } else {
         None
     };
-    WHISPER_ASSETS
-        .iter()
-        .copied()
-        .find(|asset| asset.os == os && asset.arch == arch && asset.backend == wanted)
-        .ok_or_else(|| LocalError::UnsupportedPlatform {
-            os: os.to_owned(),
-            arch: arch.to_owned(),
-        })
+    let asset = whisper_row(os, arch, wanted).ok_or_else(|| LocalError::UnsupportedPlatform {
+        os: os.to_owned(),
+        arch: arch.to_owned(),
+    })?;
+    if arch == "x86_64" {
+        let missing: Vec<String> = X86_BASELINE
+            .iter()
+            .filter(|extension| !x86_extensions.contains(extension))
+            .map(|&extension| extension.to_owned())
+            .collect();
+        if !missing.is_empty() {
+            return Err(LocalError::UnsupportedCpu {
+                platform: asset.platform.to_owned(),
+                required: X86_BASELINE
+                    .iter()
+                    .map(|&extension| extension.to_owned())
+                    .collect(),
+                missing,
+            });
+        }
+    }
+    Ok(asset)
 }
 
 /// [`whisper_asset`] with the GPU evidence gathered on demand: `probe`
 /// (the host's `nvidia-smi` query in production) runs only for `auto` on a
 /// platform with both builds, because every explicit backend and every
-/// other platform already knows its row.
+/// other platform already knows its row. `x86_extensions` passes through.
 ///
 /// # Errors
-/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
+/// host, and [`LocalError::UnsupportedCpu`] when an x86-64 host lacks a
+/// baseline extension.
 pub(super) fn whisper_asset_with_probe(
     os: &str,
     arch: &str,
     backend: WhisperBackend,
-    probe: impl FnOnce() -> Option<Vec<(u64, u64)>>,
+    probe: impl FnOnce() -> Option<NvidiaProbe>,
+    x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
     let gpus = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
         probe()
     } else {
         None
     };
-    whisper_asset(os, arch, backend, gpus.as_deref())
+    whisper_asset(os, arch, backend, gpus.as_ref(), x86_extensions)
 }
 
 /// Selects the pinned GPU-capable `llama-server` asset for `(os, arch)`.
