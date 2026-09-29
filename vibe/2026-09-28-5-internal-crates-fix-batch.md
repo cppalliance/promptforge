@@ -939,7 +939,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-16>
 
-### Step 16: Split the `promptforge-engine` source files to the ceiling
+### Step 16: Split the `promptforge-engine` source files to the ceiling [completed]
 
 - Component: Engine ceiling
 - Piece: the engine's source files, the first of four pieces built sequentially, each sized for one sub-agent: the source files (3,556 lines at `a05d5cbd`), `exec_flow.rs` (2,641), the scheduler tests (4,237), and the other tests (4,393). The engine's 14,827 oversized lines do not fit one step, and the marker waits for the last piece.
