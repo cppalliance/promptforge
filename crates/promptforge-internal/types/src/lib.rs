@@ -26,6 +26,14 @@
 //! [`ReplayError`](replay::ReplayError) kinds. This crate depends on no
 //! other promptforge crate, so every promptforge crate may depend on it,
 //! and it declares no async runtime.
+//!
+//! ## Invariants
+//!
+//! - May depend on: no workspace crate beyond `workspace-hack` and the
+//!   doctest-only `promptforge` dev-dependency. Read the repository-root
+//!   `AGENTS.md` before adding an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 pub mod cancel;
 pub mod capabilities;

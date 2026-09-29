@@ -30,6 +30,13 @@
 //! it reaches this vocabulary through the `promptforge` facade.
 //! This crate contains no HTTP, no prompt parser, no Lua runtime, and no
 //! executor.
+//!
+//! ## Invariants
+//!
+//! - May depend on: `promptforge-types`. Read the repository-root
+//!   `AGENTS.md` before adding an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 pub mod client;
 pub mod detail;

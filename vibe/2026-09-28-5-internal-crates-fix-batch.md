@@ -873,7 +873,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-13>
 
-### Step 13: Split `promptforge-types`, `promptforge-model-client`, and `promptforge-parser` to the ceiling
+### Step 13: Split `promptforge-types`, `promptforge-model-client`, and `promptforge-parser` to the ceiling [completed]
 
 - Component: Small-crate ceiling
 - Piece: the three crates' splits and markers, built jointly in one commit. They share no file, and together (4,405 oversized lines at `a05d5cbd`) one sub-agent can read every file they cut.

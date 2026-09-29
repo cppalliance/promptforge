@@ -47,7 +47,6 @@ use std::fmt;
 
 use sha2::{Digest as _, Sha256};
 
-#[path = "untrusted-inventory.rs"]
 mod inventory;
 
 /// The domain tag hashed ahead of the seed, so the nonce never equals a
@@ -204,5 +203,4 @@ fn neutralize(text: &str, nonce: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "untrusted-tests.rs"]
 mod tests;
