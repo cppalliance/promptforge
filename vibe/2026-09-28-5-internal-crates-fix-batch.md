@@ -770,7 +770,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-9>
 
-### Step 9: Close the frontmatter only at column 0, skip container headings, and locate structural errors
+### Step 9: Close the frontmatter only at column 0, skip container headings, and locate structural errors [completed]
 
 - Component: Parser validation
 - Piece: the structure fixes, the second piece, built after Step 8, which also edits `parse.rs`.

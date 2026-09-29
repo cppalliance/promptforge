@@ -260,7 +260,8 @@ pub(crate) struct Heading {
 /// and everything between them).
 ///
 /// The file must open with a `---` line and close the frontmatter with another
-/// `---` line. `str::lines` handles both `\n` and `\r\n`.
+/// `---` line starting at column 0; an indented `---` is YAML block scalar
+/// text. `str::lines` handles both `\n` and `\r\n`.
 pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
     let input = input.strip_prefix('\u{feff}').unwrap_or(input); // drop BOM
     let mut lines = input.lines();
@@ -278,7 +279,7 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
     let mut line_count: u32 = 1; // opening ---
     for line in lines.by_ref() {
         line_count += 1;
-        if line.trim() == "---" {
+        if line.trim_end() == "---" {
             closed = true;
             break;
         }
@@ -353,6 +354,9 @@ fn level_num(level: HeadingLevel) -> u8 {
 
 /// Walks the markdown body and collects every heading with the content that
 /// follows it, up to the next heading of any level.
+///
+/// A heading inside a block quote or list item is not a section boundary; its
+/// text stays in the enclosing heading's content.
 pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     // First pass: find each heading's level, title, and source byte range.
     struct Raw {
@@ -362,10 +366,15 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     }
     let mut raws: Vec<Raw> = Vec::new();
     let mut current: Option<(u8, Range<usize>, String)> = None;
+    let mut container_depth: usize = 0;
 
     for (event, range) in Parser::new_ext(body, Options::empty()).into_offset_iter() {
         match event {
-            Event::Start(Tag::Heading { level, .. }) => {
+            Event::Start(Tag::BlockQuote(_) | Tag::Item) => container_depth += 1,
+            Event::End(TagEnd::BlockQuote(_) | TagEnd::Item) => {
+                container_depth = container_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Heading { level, .. }) if container_depth == 0 => {
                 current = Some((level_num(level), range.clone(), String::new()));
             }
             Event::End(TagEnd::Heading(_)) => {
@@ -480,8 +489,9 @@ pub(crate) fn build_sections(
         // a heading has no well-defined parent, so reject it rather than
         // silently reparenting it to a shallower ancestor.
         if level > parent_level + 1 {
-            return Err(Error::parse(
+            return Err(Error::parse_at(
                 ParseErrorKind::Structure,
+                headings[*pos].span.clone(),
                 format!(
                     "section `{}` is an orphan H{level} heading with no parent H{}",
                     headings[*pos].title.trim(),
@@ -494,8 +504,9 @@ pub(crate) fn build_sections(
         // A section's name is its runtime address (jumps, lookups, fanout), so an
         // empty/whitespace heading is unaddressable and must be rejected at parse.
         if name.trim().is_empty() {
-            return Err(Error::parse(
+            return Err(Error::parse_at(
                 ParseErrorKind::Structure,
+                h.span.clone(),
                 format!("an H{level} section heading must not be empty"),
             ));
         }
@@ -529,16 +540,13 @@ pub(crate) fn build_sections(
         // target ambiguous. Reject the duplicate at parse, naming BOTH heading
         // locations so the author can find each one.
         if let Some((_, first_line)) = sibling_lines.iter().find(|(n, _)| *n == name) {
-            return Err(Error::ParseStructured {
-                kind: ParseErrorKind::Structure,
-                span: Some((heading_span.start, heading_span.end)),
-                message: format!(
+            return Err(Error::parse_at(
+                ParseErrorKind::Structure,
+                heading_span,
+                format!(
                     "duplicate sibling section name `{name}`: first declared at line {first_line}, again at line {heading_abs_line}; sibling section names must be unique"
                 ),
-                name: None,
-                line: None,
-                column: None,
-            });
+            ));
         }
         sibling_lines.push((name.clone(), heading_abs_line));
 

@@ -148,9 +148,10 @@ impl Prompt {
                 "prompt allows at most one `lua shared` fence",
             ));
         }
-        if shared_fences.len() != h1_shared_fences.len() {
-            return Err(Error::parse(
+        if let ([start], true) = (shared_fences.as_slice(), h1_shared_fences.is_empty()) {
+            return Err(Error::parse_at(
                 ParseErrorKind::Fence,
+                *start..*start + "```lua shared".len(),
                 "`lua shared` fence is allowed only in H1",
             ));
         }

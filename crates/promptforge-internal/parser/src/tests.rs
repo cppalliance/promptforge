@@ -82,6 +82,26 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
 }
 
 #[test]
+fn orphan_empty_heading_and_misplaced_shared_fence_errors_report_a_line() {
+    // `prompt_src` puts `# T` on line 6 and the body from line 8.
+    for (body, line, kind) in [
+        ("## A\n\na\n\n#### D\n\nd\n", 12, ParseErrorKind::Structure),
+        ("## \n\na\n", 8, ParseErrorKind::Structure),
+        (
+            "## S\n\n```lua shared\nlocal a = 1\n```\n",
+            10,
+            ParseErrorKind::Fence,
+        ),
+    ] {
+        let error = parse(&prompt_src(body)).expect_err("the body must fail to parse");
+        assert_eq!(error.kind(), kind, "{error}");
+        assert_eq!(error.line(), Some(line), "{error}");
+        assert_eq!(error.column(), Some(1), "{error}");
+        assert!(error.span().is_some(), "{error}");
+    }
+}
+
+#[test]
 fn mixed_prose_with_one_bullet_is_not_a_list() {
     // PF-PARSER-005: an incidental bullet line in ordinary prose must not
     // force strict list parsing; the section stays prose.
@@ -272,6 +292,13 @@ fn name_and_description_are_sufficient_frontmatter_for_parsing() {
 fn missing_frontmatter_delimiter_errors() {
     let src = "# T\n\n## S\n\np\n";
     assert!(parse(src).is_err());
+}
+
+#[test]
+fn an_indented_delimiter_in_a_block_scalar_does_not_close_the_frontmatter() {
+    let src = "---\nname: x\ndescription: |\n  first\n  ---\n  last\n---\n\n# T\n\n## S\n\np\n";
+    let prompt = parse(src).expect("an indented --- is block scalar text");
+    assert_eq!(prompt.frontmatter.description(), "first\n---\nlast\n");
 }
 
 #[test]
@@ -753,6 +780,25 @@ fn recursive_nesting_h2_h3_h4() {
     let c = &b.children[0];
     assert_eq!(c.name, "C");
     assert_eq!(c.level, 4);
+}
+
+#[test]
+fn headings_inside_block_quotes_and_list_items_stay_in_the_section_prose() {
+    let src = prompt_src("## S\n\n> ## Quoted\n> kept\n\n- ## Listed\n\ntail\n\n## Next\n\nnext\n");
+    let prompt = parse(&src).expect("container headings are prose");
+    let names: Vec<&str> = prompt.sections.iter().map(Section::name).collect();
+    assert_eq!(
+        names,
+        ["S", "Next"],
+        "container headings are not sections, and a heading after the containers is"
+    );
+    let section = &prompt.sections[0];
+    assert!(section.children.is_empty());
+    let prose = section.prose();
+    assert!(
+        prose.contains("> ## Quoted") && prose.contains("- ## Listed") && prose.contains("tail"),
+        "container headings stay in the enclosing prose: {prose}"
+    );
 }
 
 #[test]
