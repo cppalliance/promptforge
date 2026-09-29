@@ -44,7 +44,7 @@ use archive::require_executable;
 use assets::ArchiveKind;
 use assets::FileAsset;
 use assets::{
-    LLAMA_RELEASE, ServerAsset, WHISPER_RELEASE, WhisperAsset, server_asset,
+    LLAMA_RELEASE, NvidiaProbe, ServerAsset, WHISPER_RELEASE, WhisperAsset, server_asset,
     whisper_asset_with_probe,
 };
 use confine::validate_tree_path;
@@ -146,13 +146,16 @@ fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
     })
 }
 
-/// Queries the host's NVIDIA compute capabilities through `nvidia-smi`.
-/// Returns `None` when the driver or the tool is absent or fails; the
-/// `llama-server` pick then falls back to the Vulkan build and the whisper
-/// pick to the CPU build.
-fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
+/// Queries the host's NVIDIA GPUs and driver version through `nvidia-smi`.
+/// Returns `None` when the driver or the tool is absent or fails, or it
+/// reports no GPU; the `llama-server` pick then falls back to the Vulkan
+/// build and the whisper pick to the CPU build.
+fn nvidia_probe() -> Option<NvidiaProbe> {
     let mut command = std::process::Command::new("nvidia-smi");
-    command.args(["--query-gpu=compute_cap", "--format=csv,noheader"]);
+    command.args([
+        "--query-gpu=compute_cap,driver_version",
+        "--format=csv,noheader",
+    ]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
@@ -162,15 +165,65 @@ fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
     if !output.status.success() {
         return None;
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let caps: Vec<(u64, u64)> = stdout
+    parse_nvidia_probe(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Reads `nvidia-smi --query-gpu=compute_cap,driver_version
+/// --format=csv,noheader` output, one `8.6, 591.86` line per GPU. A line
+/// without a readable compute capability names no GPU, and `None` means no
+/// line did. Every GPU reports the host's one driver, so the lowest reading
+/// stands for it, and an unreadable one reads lowest of all.
+fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
+    let (compute_caps, driver_majors): (Vec<(u64, u64)>, Vec<Option<u64>>) = stdout
         .lines()
         .filter_map(|line| {
-            let (major, minor) = line.trim().split_once('.')?;
-            Some((major.trim().parse().ok()?, minor.trim().parse().ok()?))
+            let (cap, driver) = line.split_once(',').unwrap_or((line, ""));
+            let (major, minor) = cap.trim().split_once('.')?;
+            let cap = (major.trim().parse().ok()?, minor.trim().parse().ok()?);
+            let driver_major = driver
+                .trim()
+                .split('.')
+                .next()
+                .and_then(|major| major.parse().ok());
+            Some((cap, driver_major))
         })
-        .collect();
-    if caps.is_empty() { None } else { Some(caps) }
+        .unzip();
+    if compute_caps.is_empty() {
+        return None;
+    }
+    Some(NvidiaProbe {
+        compute_caps,
+        // `None` orders below every `Some`.
+        driver_major: driver_majors.into_iter().min().flatten(),
+    })
+}
+
+/// The [`assets::X86_BASELINE`] extensions this CPU reports, in baseline
+/// order; none off x86-64, where no whisper row needs them.
+fn host_x86_extensions() -> Vec<&'static str> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // The detection macro takes only a literal, so each baseline
+        // spelling needs its arm here. A spelling without one reads as
+        // absent, and selection then names it instead of passing unchecked.
+        assets::X86_BASELINE
+            .iter()
+            .copied()
+            .filter(|&extension| match extension {
+                "sse4.2" => std::arch::is_x86_feature_detected!("sse4.2"),
+                "avx" => std::arch::is_x86_feature_detected!("avx"),
+                "avx2" => std::arch::is_x86_feature_detected!("avx2"),
+                "bmi2" => std::arch::is_x86_feature_detected!("bmi2"),
+                "fma" => std::arch::is_x86_feature_detected!("fma"),
+                "f16c" => std::arch::is_x86_feature_detected!("f16c"),
+                _ => false,
+            })
+            .collect()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        Vec::new()
+    }
 }
 
 /// Cache root plus HTTP client for provisioning local inference artifacts.
@@ -234,11 +287,11 @@ impl ArtifactStore {
         // The GPU probe matters only for the Windows x86-64 `auto` pick;
         // every other platform and every explicit backend already knows its
         // row.
-        let gpus = if std::env::consts::OS == "windows"
+        let probe = if std::env::consts::OS == "windows"
             && std::env::consts::ARCH == "x86_64"
             && selection.backend == LlamaBackend::Auto
         {
-            nvidia_compute_caps()
+            nvidia_probe()
         } else {
             None
         };
@@ -246,7 +299,7 @@ impl ArtifactStore {
             std::env::consts::OS,
             std::env::consts::ARCH,
             selection.backend,
-            gpus.as_deref(),
+            probe.as_ref().map(|probe| probe.compute_caps.as_slice()),
         )?;
         let executable = self.provision_server(asset, activity, token)?;
         Ok(ProvisionedServer {
@@ -260,14 +313,18 @@ impl ArtifactStore {
     ///
     /// `backend` (the `[stt] whisper_backend` setting) chooses between the
     /// CPU and CUDA builds on Windows x86-64 and Linux x86-64, where `auto`
-    /// probes the host's NVIDIA GPUs; every other platform has one build.
+    /// probes the host's NVIDIA GPUs and driver version; every other
+    /// platform has one build. On x86-64 the host CPU must report every
+    /// extension the builds execute, under every setting.
     /// The archive is downloaded, digest-verified, and extracted under the
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
     ///
     /// # Errors
-    /// Returns a [`LocalError`] when the platform is unsupported or download,
-    /// verification, extraction, or cache publication fails.
+    /// Returns [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks an
+    /// extension the selected build executes, and another [`LocalError`]
+    /// when the platform is unsupported or download, verification,
+    /// extraction, or cache publication fails.
     pub fn provision_whisper_library(
         &self,
         backend: WhisperBackend,
@@ -277,7 +334,8 @@ impl ArtifactStore {
             std::env::consts::OS,
             std::env::consts::ARCH,
             backend,
-            nvidia_compute_caps,
+            nvidia_probe,
+            &host_x86_extensions(),
         )?;
         let archives = [asset.archive];
         self.provision_install(whisper_install_asset(asset, &archives), activity, None)

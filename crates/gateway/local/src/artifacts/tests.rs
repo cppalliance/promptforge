@@ -13,7 +13,7 @@ use gateway_progress::ProgressHub;
 use tokio_util::sync::CancellationToken;
 
 use super::archive::{extract_archive, extract_archive_with_progress, safe_archive_path};
-use super::assets::{ArchiveRef, whisper_asset};
+use super::assets::{ArchiveRef, X86_BASELINE, whisper_asset};
 use super::confine::source_marker_path;
 use super::digest::file_digest;
 use super::download::{
@@ -1485,12 +1485,71 @@ fn provision_server_writes_no_stage_text_on_a_warm_cache() {
 }
 
 #[test]
+fn parse_nvidia_probe_reads_each_gpu_and_the_driver_major() {
+    // Two RTX 3090s on driver 591.86, recorded on one host under Windows
+    // (CRLF) and under WSL (LF).
+    for stdout in [
+        "8.6, 591.86\r\n8.6, 591.86\r\n",
+        "8.6, 591.86\n8.6, 591.86\n",
+    ] {
+        assert_eq!(
+            parse_nvidia_probe(stdout),
+            Some(NvidiaProbe {
+                compute_caps: vec![(8, 6), (8, 6)],
+                driver_major: Some(591),
+            }),
+            "{stdout:?}"
+        );
+    }
+    for (stdout, compute_caps, driver_major) in [
+        // A Linux driver version has three parts; only the major counts.
+        ("12.0, 570.133.07\n", vec![(12, 0)], Some(570)),
+        // An unreadable version keeps the GPU and reads no major.
+        ("8.9, [N/A]\n", vec![(8, 9)], None),
+        // The GPUs share one driver; the lowest reading stands for it
+        // whatever the line order, and an unreadable one is the lowest.
+        ("8.6, 591.86\n8.9, [N/A]\n", vec![(8, 6), (8, 9)], None),
+        ("8.9, [N/A]\n8.6, 591.86\n", vec![(8, 9), (8, 6)], None),
+        (
+            "8.6, 570.10\n8.9, 591.86\n",
+            vec![(8, 6), (8, 9)],
+            Some(570),
+        ),
+        // A line without a readable compute capability names no GPU.
+        ("[N/A], 591.86\n8.6, 591.86\n", vec![(8, 6)], Some(591)),
+    ] {
+        assert_eq!(
+            parse_nvidia_probe(stdout),
+            Some(NvidiaProbe {
+                compute_caps,
+                driver_major,
+            }),
+            "{stdout:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_nvidia_probe_answers_none_without_a_gpu() {
+    for stdout in ["", "\r\n", "No devices were found\n", "[N/A], 591.86\n"] {
+        assert_eq!(parse_nvidia_probe(stdout), None, "{stdout:?}");
+    }
+}
+
+#[test]
 fn provision_whisper_library_reuses_a_verified_install() {
     // Explicit backends keep the host's GPU probe out of the test; on a
-    // platform with both builds each one reuses its own install.
+    // platform with both builds each one reuses its own install. The
+    // provision itself checks this CPU against the x86 baseline.
     for backend in [WhisperBackend::Cpu, WhisperBackend::Cuda] {
-        let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH, backend, None)
-            .expect("host whisper asset");
+        let asset = whisper_asset(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            backend,
+            None,
+            X86_BASELINE,
+        )
+        .expect("host whisper asset");
         let temp = TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
 
@@ -1538,6 +1597,7 @@ fn whisper_installs_never_fall_back_to_an_older_abi() {
         std::env::consts::ARCH,
         WhisperBackend::Cpu,
         None,
+        X86_BASELINE,
     )
     .expect("host whisper asset");
     let archives = [asset.archive];

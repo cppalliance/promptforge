@@ -134,7 +134,7 @@ Version 2 accepts only the canonical `[stt]` section. Legacy `[workshop.stt]` in
 | `window_seconds` | `15` | Seconds of trailing audio each interim pass transcribes. |
 | `interval_ms` | `500` | Milliseconds between interim passes while a take is recording. |
 | `vocabulary` | `[]` | Domain terms whisper is biased toward. Empty disables biasing. |
-| `whisper_backend` | `"auto"` | Which whisper.cpp build to download on Windows x86-64 and Linux x86-64: `auto` picks from the host's GPUs (any NVIDIA GPU gets the CUDA build, anything else the CPU build); `cpu` and `cuda` force the row. Consulted only on Windows x86-64 and Linux x86-64. |
+| `whisper_backend` | `"auto"` | Which whisper.cpp build to download on Windows x86-64 and Linux x86-64: `auto` picks from the host's GPUs (an NVIDIA GPU gets the CUDA build, anything else the CPU build); `cpu` and `cuda` force the row. Consulted only on Windows x86-64 and Linux x86-64. The Linux CUDA build needs NVIDIA driver 570 or later, the CUDA 12.8 floor: below it, or when the driver version cannot be read, `auto` takes the CPU build, while an explicit `cuda` is still honored and loading it can end the gateway. Under every value, each x86-64 build needs SSE4.2, AVX, AVX2, BMI2, FMA, and F16C; on a CPU without one, the speech load fails at the whisper library stage naming the missing extensions, and the gateway keeps serving without speech. |
 
 ### Realtime transcription
 
