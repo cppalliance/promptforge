@@ -331,7 +331,7 @@ assert!(matches!(events.last(), Some(Event::ParseFailed { .. })));
 - [`SourceLocation::path`], a [`String`], is the prompt's frontmatter name when the parse got that far, or the Rust source file for an internal fault. A frontmatter YAML failure happens before the name is known, so its path is the placeholder `"<prompt>"`, which the host replaces with its own label.
 - [`SourceLocation::line`], an [`Option`] of [`u32`], is the 1-based line, when known. It is always [`Some`] for internal faults.
 - [`SourceLocation::column`], an [`Option`] of [`u32`], is the 1-based column, when known. It is [`None`] for internal faults.
-- [`SourceLocation::span`], an [`Option`] of a [`Range`](std::ops::Range) of [`usize`], is the byte span of the offending region in the prompt source. Only structured parse failures have one.
+- [`SourceLocation::span`], an [`Option`] of a [`Range`](std::ops::Range) of [`usize`], is the byte span of the offending region. Only structured parse failures have one. The offsets are relative to the document body after the frontmatter and a leading BOM, with CRLF normalized to LF, so they do not index the original file; [`SourceLocation::line`] and [`SourceLocation::column`] locate the error in the original file.
 
 ## RunContext
 

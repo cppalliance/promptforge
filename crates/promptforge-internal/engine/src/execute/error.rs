@@ -62,7 +62,12 @@ pub struct SourceLocation {
     pub line: Option<u32>,
     /// The 1-based column, when known.
     pub column: Option<u32>,
-    /// The byte span of the offending region, as today, when known.
+    /// The byte span of the offending region, when known. Only structured
+    /// parse failures have one. The offsets are relative to the document
+    /// body after the frontmatter and a leading BOM, with CRLF normalized to
+    /// LF, so they do not index the original source;
+    /// [`line`](SourceLocation::line) and [`column`](SourceLocation::column)
+    /// locate the failure in the original file.
     pub span: Option<Range<usize>>,
 }
 

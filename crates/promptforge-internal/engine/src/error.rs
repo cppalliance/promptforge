@@ -67,7 +67,9 @@ pub(crate) enum Error {
     ParseStructured {
         /// The stable classification of this parse failure.
         kind: crate::parser::ParseErrorKind,
-        /// The byte span of the offending region within the source, when known.
+        /// The byte span of the offending region, when known, relative to the
+        /// document body after the frontmatter and a leading BOM, with CRLF
+        /// normalized to LF.
         span: Option<(usize, usize)>,
         /// The human-readable diagnostic.
         message: String,
