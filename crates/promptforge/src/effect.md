@@ -1,321 +1,431 @@
-Every kind of outside work that a run hands to its host, the answer for each kind, and the log records for both.
+Answer every kind of outside work a run asks for, and log what your program did.
 
-A run never performs outside work itself. Each model round, tool call, store operation, timer, and read of a task's history reaches your program as an [`Effect`], and your program sends back exactly one [`EffectAnswer`]. This module is that whole contract: five effect kinds, six answer kinds, and a pair of serializable records for logging them. By the end of this page you can answer every kind of effect, give up on one cleanly, and log each effect with its answer.
+You need this when your prompts call models or tools, wait on a timer, or read a task's history, or when you want a log of every piece of outside work your program did for a run.
 
 # Where this fits
 
-[`Run::step`](crate::Run::step) returns [`Step::Pending`](crate::Step::Pending), whose [`effects`](crate::Step#variant.Pending.field.effects) list holds tuples of an [`EffectId`], a [`Provenance`](crate::ids::Provenance), and an [`Effect`]. The host appends the step's [`events`](crate::Step#variant.Pending.field.events) to its log first. Then it performs each [`Effect`] by kind and hands the result back as the matching [`EffectAnswer`] through [`Run::resume`](crate::Run::resume), under the same [`EffectId`]. The loop repeats until [`Step::Done`](crate::Step::Done). The [crate page](crate) explains the loop, and this page explains what goes inside it.
+[Run a prompt](crate#run-a-prompt) taught the loop every program writes: step the run, answer each *effect*, a piece of outside work the run asks for, and resume. That program answers only store effects and drops the rest. This page adds model rounds, tool calls, timers, and task history reads. Then it shows how to log each effect beside its answer.
 
-Each effect kind has one performer on the host side:
+# Answer every kind of effect
 
-- [`Effect::Chat`] is a model round, answered with [`EffectAnswer::Chat`].
-- [`Effect::ToolCall`] is a call into the host's own tool implementation, answered with [`EffectAnswer::ToolCall`].
-- [`Effect::Store`] is a store operation, performed with [`perform_store_op`](crate::vfs::perform_store_op) and answered with [`EffectAnswer::Store`].
-- [`Effect::Timer`] is a sleep, answered with [`EffectAnswer::Timer`].
-- [`Effect::TaskEvents`] is a filter over the host's own event log, answered with [`EffectAnswer::TaskEvents`].
+Your prompt calls a model, a tool, and a timed wait, but your program answers only store operations.
 
-The sixth answer, [`EffectAnswer::Dropped`], gives up on any kind of effect.
+A run asks for five kinds of outside work: a model round, a tool call, an operation on its store of virtual files, a timer, and a read of a [task](crate::ids)'s history. Each is an [`Effect`] that takes one [`EffectAnswer`] of its kind.
 
-# A host that answers every kind
-
-This host drives a prompt whose one section writes a note to the store, reads it back, and returns it. The host answers every other kind of effect too, so the example shows the shape of each answer.
+The greeter prompt asks for all five. Its text sits in the example's collapsed setup lines. `Quick`, the task behind the timed wait, does no outside work, so it finishes while the run steps, before any timer answer can arrive, and the greeter's return value never reads what `join_any` returns. The order rule below covers when order does matter.
 
 ````
-use std::sync::Arc;
-use std::time::Duration;
-
-use promptforge::effect::{Effect, EffectAnswer};
-use promptforge::event::Event;
-use promptforge::model::{Completion, CompletionResult};
-use promptforge::timestamp::Timestamp;
-use promptforge::tools::ToolError;
-use promptforge::vfs::perform_store_op;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
-
-let source = concat!(
-    "---\n",
-    "name: keeper\n",
-    "description: keeps a note\n",
-    "promptforge: 0\n",
-    "---\n",
-    "\n",
-    "# Keeper\n",
-    "\n",
-    "## Keep\n",
-    "\n",
-    "```lua\n",
-    "store.write('note.md', 'a kept note')\n",
-    "return store.read('note.md')\n",
-    "```\n",
-);
-let (parsed, _parse_events) = Prompt::parse(source, "keeper");
-let ctx = RunContext::new("keeper", 7, Timestamp::UNIX_EPOCH);
-let mut run = Run::new(Arc::new(parsed?), "", ctx);
-
-let mut log: Vec<Event> = Vec::new();
-let result = loop {
-    match run.step() {
-        Step::Pending { effects, events } => {
-            log.extend(events);
-            for (id, _provenance, effect) in effects {
-                let answer = match effect {
-                    Effect::Chat { .. } => {
-                        let reply = CompletionResult::Text("a canned reply".to_owned());
-                        EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "canned")?)))
-                    }
-                    Effect::ToolCall { .. } => {
-                        EffectAnswer::ToolCall(Err(ToolError::message("this host has no tools")))
-                    }
-                    Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
-                    Effect::Timer { seconds } => {
-                        std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO));
-                        EffectAnswer::Timer
-                    }
-                    Effect::TaskEvents { task, last } => EffectAnswer::TaskEvents(
-                        log.iter()
-                            .filter(|event| {
-                                let provenance = event.provenance();
-                                provenance.task == task && last.is_none_or(|seen| provenance.seq > seen)
-                            })
-                            .cloned()
-                            .collect(),
-                    ),
-                };
-                run.resume(id, answer);
-            }
+# use std::num::NonZeroU32;
+# use std::sync::Arc;
+# use std::time::Duration;
+# use promptforge::effect::{Effect, EffectAnswer};
+# use promptforge::event::Event;
+# use promptforge::model::{Completion, CompletionError, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
+# use promptforge::timestamp::Timestamp;
+# use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
+# use promptforge::vfs::perform_store_op;
+# use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+# const GREETER: &str = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Asks a model and a tool at once, waits, and reads a task's history.\n",
+#     "promptforge: 0\n",
+#     "models:\n",
+#     "  writer: {}\n",
+#     "tools:\n",
+#     "  shout: example/text/shout\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+#     "local ask = tasks.spawn('## Ask')\n",
+#     "local shout = tasks.spawn('## Shout')\n",
+#     "store.write('note.md', 'hello')\n",
+#     "local results = tasks.join({ ask, shout })\n",
+#     "tasks.join_any({ tasks.spawn('## Quick') }, { timeout = 0.01 })\n",
+#     "local history = tasks.events(ask)\n",
+#     "return results[1].result .. ' / ' .. results[2].result .. ' / ' .. history[#history].kind\n",
+#     "```\n\n",
+#     "## Ask\n\n",
+#     "```lua\n",
+#     "models.use('writer')\n",
+#     "return models.infer('hello')\n",
+#     "```\n\n",
+#     "## Shout\n\n",
+#     "```lua\n",
+#     "return tools.call('shout', { text = 'hello' })\n",
+#     "```\n\n",
+#     "## Quick\n\n",
+#     "```lua\n",
+#     "return 'quick'\n",
+#     "```\n",
+# );
+# fn canned_completion(text: &str) -> Result<Box<Completion>, CompletionError> {
+#     let reply = CompletionResult::Text(text.to_owned());
+#     Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into)
+# }
+# fn prepared_run() -> Result<Run, Box<dyn std::error::Error>> {
+#     let (parsed, _parse_events) = Prompt::parse(GREETER, "greeter");
+#     let prompt = parsed?;
+#     let model = ModelDescriptor::new(
+#         ModelId::gateway("canned")?,
+#         "Always replies hi there",
+#         NonZeroU32::new(8_192).ok_or("a context window is never zero")?,
+#         ThinkingMode::Never,
+#     );
+#     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
+#     let shout = ToolDescriptor::new(
+#         ToolId::parse("example/text/shout")?,
+#         "shout",
+#         "Returns the text in capital letters.",
+#         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
+#     );
+#     let environment = Environment::new().tools(ToolCatalog::new(&[shout])?);
+#     let (ctx, requirements) = environment.prepare(&prompt, ctx);
+#     if let Some(refusal) = requirements.refusal() {
+#         return Err(refusal.into());
+#     }
+#     Ok(Run::new(Arc::new(prompt), "", ctx))
+# }
+// 1. Answer each effect with the answer of its own kind, reading task history from the log.
+fn answer(effect: Effect, log: &[Event]) -> EffectAnswer {
+    match effect {
+        Effect::Chat { .. } => EffectAnswer::Chat(canned_completion("hi there")),
+        Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("HI THERE"))),
+        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Timer { seconds } => {
+            std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or_default());
+            EffectAnswer::Timer
         }
-        Step::Done { result, events } => {
-            log.extend(events);
-            break result;
+        Effect::TaskEvents { task, last } => EffectAnswer::TaskEvents(
+            log.iter()
+                .filter(|event| event.provenance().task == task)
+                .filter(|event| last.is_none_or(|seen| event.provenance().seq > seen))
+                .cloned()
+                .collect(),
+        ),
+    }
+}
+
+// 2. Drive one run, committing each step's events first, then answering its effects in issue order or reversed.
+fn drive(mut run: Run, reverse: bool) -> Result<String, Box<dyn std::error::Error>> {
+    let mut log: Vec<Event> = Vec::new();
+    loop {
+        match run.step() {
+            Step::Pending { mut effects, events } => {
+                log.extend(events);
+                if reverse {
+                    effects.reverse();
+                }
+                for (id, _provenance, effect) in effects {
+                    run.resume(id, answer(effect, &log));
+                }
+            }
+            Step::Done { result: RunResult::Ok(text), .. } => return Ok(text),
+            Step::Done { result, .. } => return Err(format!("the greeter did not succeed: {result:?}").into()),
         }
     }
-};
-
-match result {
-    RunResult::Ok(text) => assert_eq!(text, "a kept note"),
-    other => panic!("the run should succeed: {other:?}"),
 }
+
+// 3. Answering in reverse gives the same result as answering in issue order.
+let text = drive(prepared_run()?, true)?;
+assert_eq!(text, drive(prepared_run()?, false)?);
+assert_eq!(text, "hi there / HI THERE / task_succeeded");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-Here is what each part does.
+1. `answer` matches each effect with its answer.
+   - For [`Effect::Chat`], forward live pieces to your streaming callback only when `stream` is `true`, as in rounds of `models.loop`, the section's chat loop. A `models.infer` round, a nested one-shot call over one user message with no tools, sets it `false`, so no live pieces arrive and a callback waiting on them never hears anything.
+   - [`Effect::ToolCall`]'s `origin`, a [`ToolCallOrigin`], says whether Lua ([`ToolCaller::Script`]) or a model round ([`ToolCaller::Model`]) asked, so you can let a script call a tool freely and still check the call when a model asks for it.
+   - [`Effect::Store`] holds `access`, an [`Arc`](std::sync::Arc) around an [`Access`](crate::vfs::Access), the chain's permission to the store, where a *chain* is one walk over sibling sections. Pass it to [`perform_store_op`](crate::vfs::perform_store_op) as given, and never build a second access from it, widen it to more of the store, or use it for any store work beyond this one operation. Holding the `Arc` afterward is harmless, because the access refuses every operation once the run reaches `Done` or is dropped.
+   - Sleep for [`Effect::Timer`]'s `seconds`, then answer [`EffectAnswer::Timer`].
+   - Answer [`Effect::TaskEvents`] from your log with the task's [`Event`](crate::event::Event)s after `last`, or all of them when `last` is `None`, in sequence order.
+2. `drive` resumes each effect from [`Step::Pending`](crate::Step::Pending) with [`Run::resume`](crate::Run::resume), backward when `reverse` is set, after logging the step's events.
+3. Both runs return the same text, ending in `task_succeeded`, the last event in `Ask`'s history.
 
-1. **The prompt.** The section's two store calls each issue an [`Effect::Store`]. The other four arms never fire for this prompt, but each one shows the shape of its answer.
-2. **One arm per kind.** Neither [`Effect`] nor [`EffectAnswer`] is `#[non_exhaustive]`, so the `match` lists all five effect kinds and needs no wildcard arm.
-3. **The store answers.** The host passes each store effect's view and operation to [`perform_store_op`](crate::vfs::perform_store_op) and answers with its result as it is. The section reads back the note it wrote and returns it, so the note becomes the text of [`RunResult::Ok`](crate::RunResult::Ok).
-4. **Answering in place.** Every arm here produces its answer on the calling thread before the next effect. A real host may perform one step's effects concurrently and resume them in any order.
+Every store operation leaves a claim on its path, and a claim clashes with one left by a chain that is not ordered with it. A store answer reporting such a clash ends the run at once, with a failure the prompt cannot catch; [vfs](crate::vfs) explains claims.
 
-# One answer per effect
+````text
+  the run asks for          your host answers with
+  ───────────────────       ──────────────────────────────────────────────
+  Effect::Chat         ──>  EffectAnswer::Chat        completion or error
+  Effect::ToolCall     ──>  EffectAnswer::ToolCall    tool output or error
+  Effect::Store        ──>  EffectAnswer::Store       store outcome or error
+  Effect::Timer        ──>  EffectAnswer::Timer       after the sleep ends
+  Effect::TaskEvents   ──>  EffectAnswer::TaskEvents  the task's events
 
-Every issued effect receives exactly one answer, and [`Step::Done`](crate::Step::Done) arrives only once every issued effect has its answer.
+  any of the five      ──>  EffectAnswer::Dropped     given up, still its one answer
+````
 
-**Giving up.** [`EffectAnswer::Dropped`] answers an effect without performing it. It is valid for every effect kind, and it counts as that effect's one answer. A host drops an effect when the run was cancelled, when the effect's task ended first, or once [`Run::decided`](crate::Run::decided) returns `true`. If a chain still waits on a dropped effect, the chain resumes with a cancelled error, and if nothing handles that error, the run ends with [`RunResult::Cancelled`](crate::RunResult::Cancelled).
+Give up on an effect by answering [`EffectAnswer::Dropped`]; a chain still waiting on it resumes with a cancelled error.
 
-**Pairing.** [`Run::resume`](crate::Run::resume) checks every answer without panicking or returning an error. An answer whose kind does not match its effect, an answer for an id the run never issued, and a second answer for one effect all end the run with [`RunErrorKind::Internal`](crate::RunErrorKind::Internal). An answer for an effect whose chain stopped waiting is discarded, but it still counts as that effect's answer. After [`Step::Done`](crate::Step::Done), every answer is ignored.
+A chain stops waiting when the run's outcome is decided, or when its task is torn down because its owner, the chain that spawned it, ended. After a `Pending` step, [`Run::decided`](crate::Run::decided) returning `true` means nobody waits on any effect still out. Still answer each one, because [`Step::Done`](crate::Step::Done) waits for every issued effect, and the run discards an answer nobody waits on, so `Dropped` and the real answer both work.
 
-# Answering each kind
+You might expect `resume` to need answers in issue order. Instead, it matches each answer to its effect by the [`EffectId`] you pass, so resume each as it finishes.
 
-This section takes the five effect kinds in turn. For each one it names the answer variant, says how the host produces the answer, and says what the run does with it.
+However you pace or order your answers, each task's effects, events, and provenance come out the same, and so does the run's returned text; only the interleaving of events across tasks can differ. Answer order does decide which task finishes first, so a result that depends on that, such as what `tasks.join_any` or a timed wait returns, or whether a spawner is still running when its task ends, can change with order.
 
-**Chat.** [`Effect::Chat`] asks for one model round. The host sees it for each round of a section's `models.loop`, and for a nested `models.infer`. Answer it with [`EffectAnswer::Chat`], which holds a [`Result`] of a [`Box`] of a [`Completion`](crate::model::Completion) or a [`CompletionError`](crate::model::CompletionError). Both kinds of round take the same answer.
+Next, [Log effects and answers](#log-effects-and-answers).
 
-To produce the answer, build the request body with [`build_request_body`](crate::transport::build_request_body) from the effect's [`messages`](Effect#variant.Chat.field.messages), [`tools`](Effect#variant.Chat.field.tools), and [`options`](Effect#variant.Chat.field.options). Send the body with your HTTP client, and read the response with [`read_completion_stream`](crate::transport::read_completion_stream), which returns the [`Completion`](crate::model::Completion). Put it in a [`Box`] and answer [`Ok`]. When the request fails, convert the transport's [`ClientError`](crate::transport::ClientError) into a [`CompletionError`](crate::model::CompletionError) with [`From`], and answer [`Err`]. The [`transport`](crate::transport) module page covers both calls. For a canned reply in a test, [`Completion::from_result`](crate::model::Completion::from_result) builds a completion from a [`CompletionResult`](crate::model::CompletionResult) and a model name, as the example above does.
+# Log effects and answers
 
-The effect's [`stream`](Effect#variant.Chat.field.stream) flag tells the host whether to forward the round's live deltas to its delta consumer. It is `true` for the rounds of `models.loop`. It is `false` for a nested `models.infer`, where only the completed reply matters, and then the host passes a no-op delta callback to [`read_completion_stream`](crate::transport::read_completion_stream).
+You want a log of every piece of outside work a run asked for, and of how your program answered it.
 
-The run reads the answer this way. A backend error that reports a provider context overflow becomes the overflow answer under a failed turn. An empty-reply error becomes a completed round with no reply. Any other error fails the turn. If the model requests a tool outside the set advertised for the round, the call fails as out of scope. The host never sees an over-window request for a `models.loop` round, because the run refuses it before issuing the effect.
-
-**ToolCall.** [`Effect::ToolCall`] asks for one call to a bound tool. The host sees it when a section's script calls a bound tool, or when a model round requests one. Answer it with [`EffectAnswer::ToolCall`], which holds a [`Result`] of a [`ToolOutput`](crate::tools::ToolOutput) or a [`ToolError`](crate::tools::ToolError).
-
-To produce the answer, resolve the effect's [`tool`](Effect#variant.ToolCall.field.tool) to your own implementation. It is the tool's stable [`ToolId`](crate::tools::ToolId), and it names the implementation behind the tool slot that [`Environment::prepare`](crate::Environment::prepare) filled. The [`alias`](Effect#variant.ToolCall.field.alias) is only the prompt's local name, so never resolve by it. Call the implementation with the effect's [`args`](Effect#variant.ToolCall.field.args). Build a success with [`ToolOutput::trusted`](crate::tools::ToolOutput::trusted) or [`ToolOutput::untrusted`](crate::tools::ToolOutput::untrusted), and a failure with [`ToolError::message`](crate::tools::ToolError::message) or [`ToolError::with_source`](crate::tools::ToolError::with_source), optionally refined with [`ToolError::with_kind`](crate::tools::ToolError::with_kind). When the id resolves to nothing in your table, answer an error, as the example above does. The [`tools`](crate::tools) module page covers tool implementations.
-
-The effect's [`origin`](Effect#variant.ToolCall.field.origin) says who asked for the call: the run's execution, the section whose Lua was running, and whether the section's script or a model round made the request. It plays no part in resolving the implementation. A host can read it to log the call, or to treat the same tool differently depending on who called it.
-
-The run counts the call when it issues the effect, before the host runs the tool. After the answer arrives, the run applies its trust rule, which wraps untrusted output in a nonce envelope. A local tool is a Lua function on the section's own Lua state, and the run answers it internally, so it never becomes an [`Effect::ToolCall`].
-
-**Store.** [`Effect::Store`] is one store operation through the chain's store view. The host sees one for every `store.*` call, whatever backend serves the store. Answer it with [`EffectAnswer::Store`], which holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError). To produce the answer, pass a reference to the effect's [`access`](Effect#variant.Store.field.access) and its [`op`](Effect#variant.Store.field.op) to [`perform_store_op`](crate::vfs::perform_store_op). Its return value is exactly the variant's payload, so wrap it in [`EffectAnswer::Store`] as it is.
-
-Use the store view exactly as given. Never derive, widen, or keep store scope from it. Dropping your handle to it when the operation completes is good hygiene, but when it drops never affects correctness: claims follow happens-before within the run's scope, and the run ends that scope at [`Step::Done`](crate::Step::Done), after which a view still held refuses every operation. [`perform_store_op`](crate::vfs::perform_store_op) is synchronous, because the store is synchronous by design, so an async host runs it off its executor, for example with tokio's [`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html). A store answer that reports a conflicting access ends the run at once with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism).
-
-**Timer.** [`Effect::Timer`] is one sleep of [`seconds`](Effect#variant.Timer.field.seconds). It is the internal timeout behind a timed wait, which an author sets with `opts.timeout` and a model sets with the timeout of its `await_tasks` call. Answer it with [`EffectAnswer::Timer`], which carries no data, once that many seconds have passed. The example converts the value with [`Duration::try_from_secs_f64`](std::time::Duration::try_from_secs_f64) and sleeps with [`sleep`](std::thread::sleep).
-
-A timer resumes no chain. Its firing completes an internal task slot and wakes whatever waits on it. Dropping a timer instead moves its slot to cancelled without waking its owner, so a host drops a live timer only when it is cancelling the run.
-
-**TaskEvents.** [`Effect::TaskEvents`] is one read of a task's reported history. The run issues it for an author's `tasks.events(task, opts?)` call and for a model's `task_events` built-in. Answer it with [`EffectAnswer::TaskEvents`], which holds a [`Vec`] of [`Event`](crate::event::Event) values taken from the host's own log.
-
-To produce the answer, keep every event in your log whose [`Event::provenance`](crate::event::Event::provenance) has a [`Provenance::task`](crate::ids::Provenance::task) equal to the effect's [`task`](Effect#variant.TaskEvents.field.task). When the effect's [`last`](Effect#variant.TaskEvents.field.last) is [`Some`], keep only events whose [`Provenance::seq`](crate::ids::Provenance::seq) is greater than it. When it is [`None`], keep all of the task's events. Return them in log order. An empty [`Vec`] is a valid answer.
-
-Commit each step's events to the log before performing that step's effects, so the read sees everything reported before it was issued. The reader receives the events as untrusted, nonce-wrapped JSON lines, or the trusted sentence "no new events" when the answer is empty.
-
-# Logging effects and answers
-
-[`Effect`] and [`EffectAnswer`] do not serialize, and they are not [`Clone`]. An effect can hold a live handle such as the store view, and an answer can hold values that a log cannot keep whole, such as a completion's bodies or an error's boxed cause. So a logging host projects each one onto a record.
-
-- [`Effect::record`] returns an [`EffectRecord`], the same request minus its live handles.
-- [`EffectAnswer::record`] returns an [`AnswerRecord`], the same outcome with every failure rendered as its [`Display`](std::fmt::Display) text.
-
-Both methods borrow, so order matters. Call [`Effect::record`] before the host moves the effect's fields out, because performing an [`Effect::Store`] or an [`Effect::Chat`] consumes them. Call [`EffectAnswer::record`] before handing the answer to [`Run::resume`](crate::Run::resume), which consumes it.
-
-Both records derive serde's [`Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and [`Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html) with no attributes, so they use serde's default externally tagged form. A struct variant becomes an object under its name, such as `{"Timer":{"seconds":0.5}}`. A unit variant becomes its bare name, such as `"Dropped"`. An inner [`Result`] becomes `{"Ok": ...}` or `{"Err": "..."}`. They round-trip through serde, for example as JSON, so a host can store a run log and later compare a re-executed run's records against it. Replay itself is not built yet. The records define what a log stores and what a future replay would compare, and nothing re-executes a log today.
+Logging effects is like logging requests and responses in web middleware, except that an effect can hold a live store handle. So you log a *record*: the same content minus live handles and full error values, ready to serialize. An effect's record is an [`EffectRecord`], and an answer's is an [`AnswerRecord`].
 
 ````
-use promptforge::effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectRecord, ToolAnswerRecord,
+# use std::num::NonZeroU32;
+# use std::sync::Arc;
+# use std::time::Duration;
+# use promptforge::effect::{Effect, EffectAnswer};
+# use promptforge::event::Event;
+# use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
+# use promptforge::timestamp::Timestamp;
+# use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
+# use promptforge::vfs::perform_store_op;
+# use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+# const GREETER: &str = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Asks a model and a tool at once, waits, and reads a task's history.\n",
+#     "promptforge: 0\n",
+#     "models:\n",
+#     "  writer: {}\n",
+#     "tools:\n",
+#     "  shout: example/text/shout\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+#     "local ask = tasks.spawn('## Ask')\n",
+#     "local shout = tasks.spawn('## Shout')\n",
+#     "store.write('note.md', 'hello')\n",
+#     "local results = tasks.join({ ask, shout })\n",
+#     "tasks.join_any({ tasks.spawn('## Quick') }, { timeout = 0.01 })\n",
+#     "local history = tasks.events(ask)\n",
+#     "return results[1].result .. ' / ' .. results[2].result .. ' / ' .. history[#history].kind\n",
+#     "```\n\n",
+#     "## Ask\n\n",
+#     "```lua\n",
+#     "models.use('writer')\n",
+#     "return models.infer('hello')\n",
+#     "```\n\n",
+#     "## Shout\n\n",
+#     "```lua\n",
+#     "return tools.call('shout', { text = 'hello' })\n",
+#     "```\n\n",
+#     "## Quick\n\n",
+#     "```lua\n",
+#     "return 'quick'\n",
+#     "```\n",
+# );
+# fn answer(effect: Effect, log: &[Event]) -> EffectAnswer {
+#     match effect {
+#         Effect::Chat { .. } => {
+#             let reply = CompletionResult::Text("hi there".to_owned());
+#             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
+#         }
+#         Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("HI THERE"))),
+#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Timer { seconds } => {
+#             std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or_default());
+#             EffectAnswer::Timer
+#         }
+#         Effect::TaskEvents { task, last } => EffectAnswer::TaskEvents(
+#             log.iter()
+#                 .filter(|event| {
+#                     let provenance = event.provenance();
+#                     provenance.task == task && last.is_none_or(|seen| provenance.seq > seen)
+#                 })
+#                 .cloned()
+#                 .collect(),
+#         ),
+#     }
+# }
+# fn prepared_run() -> Result<Run, Box<dyn std::error::Error>> {
+#     let (parsed, _parse_events) = Prompt::parse(GREETER, "greeter");
+#     let prompt = parsed?;
+#     let model = ModelDescriptor::new(
+#         ModelId::gateway("canned")?,
+#         "Always replies hi there",
+#         NonZeroU32::new(8_192).ok_or("a context window is never zero")?,
+#         ThinkingMode::Never,
+#     );
+#     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model);
+#     let shout = ToolDescriptor::new(
+#         ToolId::parse("example/text/shout")?,
+#         "shout",
+#         "Returns the text in capital letters.",
+#         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
+#     );
+#     let environment = Environment::new().tools(ToolCatalog::new(&[shout])?);
+#     let (ctx, requirements) = environment.prepare(&prompt, ctx);
+#     if let Some(refusal) = requirements.refusal() {
+#         return Err(refusal.into());
+#     }
+#     Ok(Run::new(Arc::new(prompt), "", ctx))
+# }
+use promptforge::effect::{AnswerRecord, EffectRecord};
+use serde_json::{json, Value};
+
+// 1. Drive the greeter from the tour above, committing each step's events before its effects.
+let mut run = prepared_run()?;
+let mut events: Vec<Event> = Vec::new();
+let mut log: Vec<String> = Vec::new();
+let mut issued = 0;
+let result = loop {
+    match run.step() {
+        Step::Pending { effects, events: reported } => {
+            events.extend(reported);
+            for (id, provenance, effect) in effects {
+                issued += 1;
+                // 2. Take the effect's record before performing it, and the answer's before resuming it.
+                let effect_record = effect.record();
+                let reply = answer(effect, &events);
+                let answer_record = reply.record();
+                run.resume(id, reply);
+                // 3. Write one JSON line per effect, keyed by provenance, with the answer after the effect.
+                let line = json!({ "provenance": provenance, "effect": effect_record, "answer": answer_record });
+                log.push(line.to_string());
+            }
+        }
+        Step::Done { result, .. } => break result,
+    }
 };
-use promptforge::model::{Completion, CompletionResult};
-use promptforge::tools::{ToolError, ToolOutput};
+assert!(matches!(result, RunResult::Ok(_)));
 
-let effect = Effect::Timer { seconds: 0.5 };
-let record = effect.record();
-assert_eq!(record, EffectRecord::Timer { seconds: 0.5 });
-assert_eq!(serde_json::to_string(&record)?, r#"{"Timer":{"seconds":0.5}}"#);
+// 4. The log holds one line per effect, and each line parses back into both record types.
+let lines: Vec<Value> = log.iter().map(|line| serde_json::from_str(line)).collect::<Result<_, _>>()?;
+assert_eq!(lines.len(), issued);
+for line in &lines {
+    let _: EffectRecord = serde_json::from_value(line["effect"].clone())?;
+    let _: AnswerRecord = serde_json::from_value(line["answer"].clone())?;
+}
 
-let reply = CompletionResult::Text("the reply".to_owned());
-let answer = EffectAnswer::Chat(Ok(Box::new(Completion::from_result(reply, "test-model")?)));
-assert_eq!(
-    answer.record(),
-    AnswerRecord::Chat(Ok(ChatAnswerRecord {
-        model: "test-model".to_owned(),
-        finish_reason: None,
-        reply: Some("the reply".to_owned()),
-        tool_calls: Vec::new(),
-    })),
-);
-
-let trusted = EffectAnswer::ToolCall(Ok(ToolOutput::trusted("done"))).record();
-assert_eq!(
-    trusted,
-    AnswerRecord::ToolCall(Ok(ToolAnswerRecord { text: "done".to_owned(), trusted: true })),
-);
-let failed = EffectAnswer::ToolCall(Err(ToolError::message("backend failed"))).record();
-assert_eq!(failed, AnswerRecord::ToolCall(Err("backend failed".to_owned())));
-
-let dropped = EffectAnswer::Dropped.record();
-assert_eq!(serde_json::to_string(&dropped)?, r#""Dropped""#);
-let stored: AnswerRecord = serde_json::from_str(r#""Dropped""#)?;
-assert_eq!(stored, dropped);
+// 5. The note's write logs as an externally tagged store operation, answered with a unit outcome.
+let write = lines.iter().find(|line| line["effect"]["Store"]["op"].get("Write").is_some()).ok_or("the greeter writes its note")?;
+assert_eq!(write["effect"], json!({ "Store": { "op": { "Write": { "path": "note.md", "contents": "hello" } } } }));
+assert_eq!(write["answer"], json!({ "Store": { "Ok": "Unit" } }));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-The timer's record keeps the effect's `0.5` seconds, and its JSON is the externally tagged form. The canned completion records as a [`ChatAnswerRecord`] with its reply text and no finish reason. The failed tool call records only its message. The dropped answer's record reads back from JSON unchanged.
+1. The loop reuses the greeter and `answer` from the first tour, and commits each step's events before its effects as before, so logging changes nothing about how you answer.
+2. It calls [`Effect::record`] before `answer` consumes the effect, and [`EffectAnswer::record`] before [`Run::resume`](crate::Run::resume) consumes the answer. Both methods borrow, so take each record while you hold the live value.
+3. It writes one JSON line per effect: the provenance, the effect record, then its one answer record.
+   - Provenance serializes as its task and `seq`, and two runs of the same prompt with the same inputs and answers stamp the same provenance on the same effects, so the key matches across runs.
+   - A *replay* re-runs the prompt and compares each new effect's record with the logged one.
+   - Records hold no id, so use the number from [`EffectId::get`] only to pair lines within one run.
+4. It parses every line back into both record types, and the line count equals the number of effects issued, so the log holds exactly one answer per effect.
+5. The note's write logs as `Store`, then `op`, then `Write`, answered by `Store` with `Ok` holding `Unit`. Both records use serde's external tagging, so you can match on variant names; only [`ToolCaller`] uses snake case, `"script"` and `"model"`.
+
+The records keep what identifies the work:
+
+- [`EffectRecord::Chat`]'s `model` is the bound model's name, and [`ChatAnswerRecord`]'s `model` is the one that served the round; log both to audit which model answered.
+- An `AnswerRecord` stores failures as display text, so you cannot recover a [`CompletionError`](crate::model::CompletionError), [`ToolError`](crate::tools::ToolError), or [`VfsError`](crate::vfs::VfsError); branch on the live answer before logging it.
+- A chat answer record keeps the reply text or the tool names, never both, and no arguments, ids, bodies, or metrics.
+- A text round's metrics arrive in the `metrics` field of [`Event::AssistantReply`](crate::event::Event::AssistantReply), and its raw bodies only as debug events, which are off by default; [Capture raw model traffic](crate::event#capture-raw-model-traffic) shows how to log them.
+- [`ToolAnswerRecord`]'s `text` is the tool's raw output before trust handling, and its `trusted` is `true` only when the tool declared its output [`OutputTrust::Trusted`](crate::tools::OutputTrust::Trusted); every other trust level records `false`.
+- An `EffectRecord::Chat` leaves out `stream`, so rounds that differ only in streaming log the same, and an [`AnswerRecord::TaskEvents`] copies every event it returned, so history reads grow your log.
+
+You might expect to serialize each [`Effect`] straight into your log. Instead, `Effect` is not `Serialize`, `Clone`, or `PartialEq`, because it may hold a live store handle, so you log its record, which drops the handle and keeps the operation.
+
+Log the records, keyed by provenance. Next, [ids](crate::ids) explains the tasks and provenance your log keys on.
 
 # Reference
 
-This part covers every item in the module: the effect handle, the effect and answer enums, and the records a log stores for them.
+## ChatAnswerRecord
+
+[`ChatAnswerRecord`] records a completed model round in your log, keeping what identifies the answer and leaving out the request and response bodies. It is the success payload of [`AnswerRecord::Chat`], which [`EffectAnswer::record`] builds from a [`Completion`](crate::model::Completion). It serializes as `{ "model": ..., "finish_reason": "stop", "reply": ..., "tool_calls": [] }`. [Log effects and answers](#log-effects-and-answers) shows what it keeps.
+
+- `model`: the model that served the round, as the response named it, which can differ from the bound name in [`EffectRecord::Chat`].
+- `reply`: the reply text for a text reply, and `None` for a tool-call reply, so `reply` and `tool_calls` are never both filled.
+- `tool_calls`: only the requested tools' names, in call order, without arguments or ids; empty for a text reply.
 
 ## EffectId
 
-[`EffectId`] is the run-wide handle of one in-flight effect, the key that pairs an issued [`Effect`] with its [`EffectAnswer`]. The host receives it as the first element of each tuple in [`Step::Pending::effects`](crate::Step#variant.Pending.field.effects) and passes the same id back to [`Run::resume`](crate::Run::resume). It has no public constructor and no serde form, so a host only ever receives one from a run.
+[`EffectId`] pairs one in-flight effect with its answer. Take it from an `(id, provenance, effect)` triple in [`Step::Pending`](crate::Step::Pending), and hand it back with the answer through [`Run::resume`](crate::Run::resume). An id means nothing outside the run that issued it. [Answer every kind of effect](#answer-every-kind-of-effect) shows the pairing, and [Log effects and answers](#log-effects-and-answers) shows why a log keys by provenance instead.
 
-- [`EffectId::get`] takes the id by value and returns its raw [`u64`] handle, so a host can key its own log or task table by it. It cannot fail.
-
-[`EffectId`] implements [`Display`](std::fmt::Display), which writes the same raw number, and it can serve as a [`HashMap`](std::collections::HashMap) key. The id comes from a run-wide counter and means something only within the run that issued it. It need not reproduce across runs, so a log that matches effects across runs uses the effect's [`Provenance`](crate::ids::Provenance) instead.
-
-## Effect
-
-[`Effect`] is one piece of work the run asks the host to perform. The host receives it from [`Run::step`](crate::Run::step) in [`Step::Pending::effects`](crate::Step#variant.Pending.field.effects), in issue order, paired with its [`EffectId`] and the [`Provenance`](crate::ids::Provenance) of the task that built it. The variants and their fields are public, so a value can be built directly, as the records example builds a timer. A host never needs to build one to drive a run. [`Effect`] has no serde form and is not [`Clone`], so a host logs it through [`Effect::record`]. [Answering each kind](#answering-each-kind) says how to answer each variant.
-
-- [`Effect::Chat`]: one model round over its messages, with its tool schemas advertised, under the binding's frozen options. The host sees it for each round of a section's `models.loop` and for a nested `models.infer`. Answer it with [`EffectAnswer::Chat`].
-  - [`Effect::Chat::binding`](Effect#variant.Chat.field.binding), a [`ModelBinding`](crate::model::ModelBinding), is the round's binding: its alias, model id, frozen invocation, and context window. Read [`ModelBinding::id`](crate::model::ModelBinding::id), [`ModelBinding::alias`](crate::model::ModelBinding::alias), and [`ModelBinding::invocation`](crate::model::ModelBinding::invocation) when routing the request. The effect's record takes its model name, alias, temperature, token cap, and thinking switch from the binding.
-  - [`Effect::Chat::messages`](Effect#variant.Chat.field.messages), a [`Vec`] of [`Message`](crate::model::Message), is the projected conversation in wire order. Pass it as the first argument of [`build_request_body`](crate::transport::build_request_body). A nested `models.infer` carries exactly one message, built with [`Message::user`](crate::model::Message::user) from its prompt.
-  - [`Effect::Chat::tools`](Effect#variant.Chat.field.tools), a [`Vec`] of [`ToolSchema`](crate::model::ToolSchema), is the set of tool schemas advertised for the round. It is always empty for a nested `models.infer`. Pass it to [`build_request_body`](crate::transport::build_request_body), which omits the tools field from the body when the slice is empty.
-  - [`Effect::Chat::options`](Effect#variant.Chat.field.options), a [`CompletionOptions`](crate::model::CompletionOptions), holds the per-request fields, built from the binding with [`ModelBinding::completion_options`](crate::model::ModelBinding::completion_options) when the run issued the effect. They name the model on the wire. Pass them as the third argument of [`build_request_body`](crate::transport::build_request_body).
-  - [`Effect::Chat::stream`](Effect#variant.Chat.field.stream), a [`bool`], says whether the host forwards the round's live deltas to its delta consumer. It is `true` for a `models.loop` round and `false` for a nested `models.infer`. It is not recorded, because a delta is not an event and the flag changes nothing in the request body.
-- [`Effect::ToolCall`]: one call to a bound tool. The host sees it when a section's script calls a bound tool, or when a model round requests one. Answer it with [`EffectAnswer::ToolCall`].
-  - [`Effect::ToolCall::tool`](Effect#variant.ToolCall.field.tool), a [`ToolId`](crate::tools::ToolId), is the tool's stable identity, in `namespace/pack/name` form. The host resolves this field to its implementation.
-  - [`Effect::ToolCall::alias`](Effect#variant.ToolCall.field.alias), a [`String`], is the prompt-local name used in the call. It is kept for the record and plays no part in resolving the implementation.
-  - [`Effect::ToolCall::args`](Effect#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments. Pass it to the tool implementation.
-  - [`Effect::ToolCall::origin`](Effect#variant.ToolCall.field.origin), a [`ToolCallOrigin`], says who made the call and where: the run's execution identifier, the section that made the call, and a [`ToolCaller`] naming the script or the model. Like the alias, it plays no part in resolving the implementation.
-- [`Effect::Store`]: one store operation through the chain's store view. The host sees one for every `store.*` call. Answer it with [`EffectAnswer::Store`].
-  - [`Effect::Store::access`](Effect#variant.Store.field.access), an [`Arc`](std::sync::Arc) of an [`Access`](crate::vfs::Access), is the chain's store view: an ordinary access rooted at the handle's declared store, confined to its mount, under the chain's identity, derived by the engine at dispatch. Pass a reference to it to [`perform_store_op`](crate::vfs::perform_store_op). It is not recorded, and when it drops never affects correctness: claims follow happens-before within the run's scope, which the run ends at [`Step::Done`](crate::Step::Done) or when it is dropped.
-  - [`Effect::Store::op`](Effect#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation: a write, append, read, numbered read, string replace, delete, glob, or existence check. Pass it by value to [`perform_store_op`](crate::vfs::perform_store_op).
-- [`Effect::Timer`]: one sleep, the internal timeout behind a timed wait. Answer it with [`EffectAnswer::Timer`].
-  - [`Effect::Timer::seconds`](Effect#variant.Timer.field.seconds), an [`f64`], is the sleep duration in seconds. It is non-negative and finite, because the run checks it with [`Duration::try_from_secs_f64`](std::time::Duration::try_from_secs_f64) before issuing the effect.
-- [`Effect::TaskEvents`]: one read of a task's reported history. Answer it with [`EffectAnswer::TaskEvents`].
-  - [`Effect::TaskEvents::task`](Effect#variant.TaskEvents.field.task), a [`TaskId`](crate::ids::TaskId), is the task whose events are read. Compare it with each logged event's [`Provenance::task`](crate::ids::Provenance::task).
-  - [`Effect::TaskEvents::last`](Effect#variant.TaskEvents.field.last), an [`Option`] of [`u32`], is the highest sequence number already seen by the reader. [`None`] asks for all of the task's events. [`Some`] asks only for events whose [`Provenance::seq`](crate::ids::Provenance::seq) is greater than the value.
-
-[`Effect::record`] borrows the effect and returns its [`EffectRecord`]. It cannot fail. The record of an [`Effect::Chat`] flattens the binding to the model name, alias, and frozen invocation, and stores the messages in wire form and the tools by name. The record of an [`Effect::Store`] keeps only the operation.
-
-## EffectAnswer
-
-[`EffectAnswer`] is the host's reply to one [`Effect`]: one variant per effect kind, plus [`EffectAnswer::Dropped`] for an effect the host gave up on. The host builds it from the result of performing the effect and passes it to [`Run::resume`](crate::Run::resume) under the effect's [`EffectId`]. Each variant with a payload wraps the exact result type that its performer returns. [`EffectAnswer`] has no serde form and is not [`Clone`], so a host logs it through [`EffectAnswer::record`].
-
-- [`EffectAnswer::Chat`] holds a [`Result`] of a [`Box`] of a [`Completion`](crate::model::Completion) or a [`CompletionError`](crate::model::CompletionError). It answers an [`Effect::Chat`], including one from a nested `models.infer`. The completion is boxed because it holds both the request and response bodies.
-- [`EffectAnswer::ToolCall`] holds a [`Result`] of the tool's own [`ToolOutput`](crate::tools::ToolOutput) or [`ToolError`](crate::tools::ToolError). It answers an [`Effect::ToolCall`], and the run applies its trust rule after it arrives.
-- [`EffectAnswer::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or a [`VfsError`](crate::vfs::VfsError), which is exactly the return type of [`perform_store_op`](crate::vfs::perform_store_op). It answers an [`Effect::Store`].
-- [`EffectAnswer::Timer`] carries no data. It answers an [`Effect::Timer`] once the effect's [`seconds`](Effect#variant.Timer.field.seconds) have passed.
-- [`EffectAnswer::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values: the task's events after the read's [`last`](Effect#variant.TaskEvents.field.last), in the host's log order. It answers an [`Effect::TaskEvents`].
-- [`EffectAnswer::Dropped`] carries no data. It answers any kind of effect without performing it, as [One answer per effect](#one-answer-per-effect) describes.
-
-[`EffectAnswer::record`] borrows the answer and returns its [`AnswerRecord`]. It cannot fail. A failure is recorded as its [`Display`](std::fmt::Display) text. A completion is recorded as a [`ChatAnswerRecord`], because the round's bodies travel as debug events and its metrics travel in the turn's event. A tool output becomes a [`ToolAnswerRecord`], a store outcome keeps its [`StoreOutcome`](crate::vfs::StoreOutcome), and task events are cloned.
-
-## EffectRecord
-
-[`EffectRecord`] is an [`Effect`] minus its live handles, which is what a run log stores for the effect. The host gets one from [`Effect::record`], or deserializes one from a stored log. Every variant can also be built directly. It uses serde's externally tagged form, described in [Logging effects and answers](#logging-effects-and-answers).
-
-- [`EffectRecord::Chat`]: one model round, recorded from an [`Effect::Chat`]. It reads like the request body the host would build. Neither [`Effect::Chat::stream`](Effect#variant.Chat.field.stream) nor the full [`CompletionOptions`](crate::model::CompletionOptions) is recorded.
-  - [`EffectRecord::Chat::model`](EffectRecord#variant.Chat.field.model), a [`String`], is the bound model's name, from [`ModelId::name`](crate::model::ModelId::name) of the binding's id, for example `"test-model"`.
-  - [`EffectRecord::Chat::alias`](EffectRecord#variant.Chat.field.alias), a [`String`], is the prompt-local alias of the round's binding, from [`ModelBinding::alias`](crate::model::ModelBinding::alias), for example `"writer"`.
-  - [`EffectRecord::Chat::messages`](EffectRecord#variant.Chat.field.messages), a [`Vec`] of [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), is the conversation with one wire-form message per entry, for example `{"role":"user","content":"ask"}`.
-  - [`EffectRecord::Chat::tools`](EffectRecord#variant.Chat.field.tools), a [`Vec`] of [`String`], holds the advertised tool names in schema order. It is empty when the round advertised none.
-  - [`EffectRecord::Chat::temperature`](EffectRecord#variant.Chat.field.temperature), an [`Option`] of [`f64`], is the frozen sampling temperature from the binding's invocation, when the binding declared one.
-  - [`EffectRecord::Chat::max_tokens`](EffectRecord#variant.Chat.field.max_tokens), an [`Option`] of [`u32`], is the frozen generation cap from the binding's invocation, when the binding declared one. [`Effect::record`] never produces `Some(0)`, because the cap it copies is non-zero.
-  - [`EffectRecord::Chat::thinking`](EffectRecord#variant.Chat.field.thinking), an [`Option`] of [`bool`], is the frozen thinking switch from the binding's invocation, when the binding declared one.
-- [`EffectRecord::ToolCall`]: one call to a bound tool, recorded from an [`Effect::ToolCall`] with all four fields cloned.
-  - [`EffectRecord::ToolCall::tool`](EffectRecord#variant.ToolCall.field.tool), a [`ToolId`](crate::tools::ToolId), is the tool's stable identity. It serializes as its `namespace/pack/name` string and is validated when deserialized.
-  - [`EffectRecord::ToolCall::alias`](EffectRecord#variant.ToolCall.field.alias), a [`String`], is the prompt-local alias named in the call.
-  - [`EffectRecord::ToolCall::args`](EffectRecord#variant.ToolCall.field.args), a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), holds the call's arguments.
-  - [`EffectRecord::ToolCall::origin`](EffectRecord#variant.ToolCall.field.origin), a [`ToolCallOrigin`], is who made the call and where. It serializes as an object with `execution`, `section`, and `caller` keys, for example `{"execution":"echoer","section":"Only","caller":"script"}`.
-- [`EffectRecord::Store`]: one store operation, recorded from an [`Effect::Store`] without its store view.
-  - [`EffectRecord::Store::op`](EffectRecord#variant.Store.field.op), a [`StoreOp`](crate::vfs::StoreOp), is the validated operation. It serializes through its own serde form.
-- [`EffectRecord::Timer`]: one sleep, recorded from an [`Effect::Timer`].
-  - [`EffectRecord::Timer::seconds`](EffectRecord#variant.Timer.field.seconds), an [`f64`], is the duration in seconds.
-- [`EffectRecord::TaskEvents`]: one read of a task's reported history, recorded from an [`Effect::TaskEvents`].
-  - [`EffectRecord::TaskEvents::task`](EffectRecord#variant.TaskEvents.field.task), a [`TaskId`](crate::ids::TaskId), is the task whose events were read. It serializes as its dot-separated path string, for example `"0.2"`.
-  - [`EffectRecord::TaskEvents::last`](EffectRecord#variant.TaskEvents.field.last), an [`Option`] of [`u32`], is the highest sequence number already seen by the reader, or [`None`] when it had seen none.
-
-## ToolCallOrigin
-
-[`ToolCallOrigin`] says who made one tool call and where. [`Effect::ToolCall::origin`](Effect#variant.ToolCall.field.origin) and [`EffectRecord::ToolCall::origin`](EffectRecord#variant.ToolCall.field.origin) each hold one. The run fills it when it issues the effect, so a host only needs to read it. All three fields are public, so a struct literal can also build one, for example in a test. It serializes as a JSON object with one key per field, named exactly as the fields below.
-
-- [`ToolCallOrigin::execution`], a [`String`], is the run's execution identifier, the `name` the host passed to [`RunContext::new`](crate::RunContext::new). It is the same for every tool call of a run.
-- [`ToolCallOrigin::section`], a [`String`], is the name of the section whose Lua was running when the call was made. For a call made in the prompt's H1, it is the prompt's title.
-- [`ToolCallOrigin::caller`], a [`ToolCaller`], says whether the section's script or a model round asked for the call.
-
-## ToolCaller
-
-[`ToolCaller`] names which kind of code asked for one tool call. It is `#[non_exhaustive]`, so more kinds may be added later, and a host's `match` on it needs a wildcard arm. It serializes as a snake case string, `"script"` or `"model"`.
-
-- [`ToolCaller::Script`] means the section's own Lua called the tool through `tools.call`, by a frontmatter alias or by the tool's full id.
-- [`ToolCaller::Model`] means a model round inside `models.loop` requested the call.
-
-## AnswerRecord
-
-[`AnswerRecord`] is an [`EffectAnswer`] as a run log stores it, with one variant per answer kind. The host gets one from [`EffectAnswer::record`], or deserializes one from a stored log. Every variant can also be built directly. The three variants that hold a [`Result`] put the failure's [`Display`](std::fmt::Display) text in [`Err`] as a [`String`].
-
-- [`AnswerRecord::Chat`] holds a [`Result`] of a [`ChatAnswerRecord`] or the [`CompletionError`](crate::model::CompletionError)'s text. It is recorded from an [`EffectAnswer::Chat`].
-- [`AnswerRecord::ToolCall`] holds a [`Result`] of a [`ToolAnswerRecord`] or the [`ToolError`](crate::tools::ToolError)'s text. It is recorded from an [`EffectAnswer::ToolCall`]. The text is the model-safe message only, so a cause attached with [`ToolError::with_source`](crate::tools::ToolError::with_source) is not recorded.
-- [`AnswerRecord::Store`] holds a [`Result`] of a [`StoreOutcome`](crate::vfs::StoreOutcome) or the [`VfsError`](crate::vfs::VfsError)'s text. It is recorded from an [`EffectAnswer::Store`]. The success payload's JSON is byte-identical to the retired store answer record's shape: the outcome serializes through serde's externally tagged form.
-- [`AnswerRecord::Timer`] carries no data. It records that the timer fired.
-- [`AnswerRecord::TaskEvents`] holds a [`Vec`] of [`Event`](crate::event::Event) values, a clone of the answered events.
-- [`AnswerRecord::Dropped`] carries no data. It records that the host dropped the effect without performing it.
-
-## ChatAnswerRecord
-
-[`ChatAnswerRecord`] is a completed model round as a run log records it: the serving model, the finish reason, and either the reply text or the names of the requested tools. It is the success payload of [`AnswerRecord::Chat`]. The request and response bodies, the metrics, and the tool-call ids and arguments are not recorded. The host usually gets one from [`EffectAnswer::record`]. It can also convert a [`Completion`](crate::model::Completion) reference with [`From`], write a struct literal, since all four fields are public, or deserialize one from a stored log. It serializes as a JSON object with one key per field, named exactly as the fields below.
-
-- [`ChatAnswerRecord::model`], a [`String`], is the model that served the round, as named in the response body, copied from [`Completion::model`](crate::model::Completion::model). It is empty when the body named none.
-- [`ChatAnswerRecord::finish_reason`], an [`Option`] of [`String`], is the provider's finish reason when it sent one, such as `"stop"` or `"tool_calls"`. It is [`None`] for a completion built with [`Completion::from_result`](crate::model::Completion::from_result).
-- [`ChatAnswerRecord::reply`], an [`Option`] of [`String`], is the reply text when the round's result was [`CompletionResult::Text`](crate::model::CompletionResult::Text). It is [`None`] when the round requested tools.
-- [`ChatAnswerRecord::tool_calls`], a [`Vec`] of [`String`], holds the names of the tools requested by the model, in call order, when the round's result was [`CompletionResult::ToolCalls`](crate::model::CompletionResult::ToolCalls). It is empty for a text round.
-
-A [`CompletionResult`](crate::model::CompletionResult) variant that this build does not know records with [`ChatAnswerRecord::reply`] as [`None`] and an empty [`ChatAnswerRecord::tool_calls`].
+- [`get`](EffectId::get): the raw number, for keying your log or task table within one run; a replay matches effects by their records, not by id.
 
 ## ToolAnswerRecord
 
-[`ToolAnswerRecord`] is a tool's own output as a run log records it. It is the success payload of [`AnswerRecord::ToolCall`]. The host usually gets one from [`EffectAnswer::record`], and it can also write a struct literal, since both fields are public, or deserialize one from a stored log. It serializes as a JSON object with one key per field, named exactly as the fields below.
+[`ToolAnswerRecord`] records a tool's successful output in your log, as the success payload of [`AnswerRecord::ToolCall`]. [Log effects and answers](#log-effects-and-answers) shows what it keeps.
 
-- [`ToolAnswerRecord::text`], a [`String`], is the output text before the run's trust rule applies, so untrusted output appears here without its envelope.
-- [`ToolAnswerRecord::trusted`], a [`bool`], is `true` when the tool built its output with [`ToolOutput::trusted`](crate::tools::ToolOutput::trusted), and `false` otherwise.
+- `text`: the tool's raw output, before the run's trust rules apply, not what the model or script saw.
+- `trusted`: `true` only when the tool declared its output [`OutputTrust::Trusted`](crate::tools::OutputTrust::Trusted); every other trust level records `false`.
 
+## ToolCallOrigin
+
+[`ToolCallOrigin`] says who made one tool call: the run's execution, the section whose Lua was running, and whether its script or a model round asked. Read it from the `origin` of [`Effect::ToolCall`] to attribute a call in your log, or to apply a different policy to the same tool by caller. [`EffectRecord::ToolCall`] copies it unchanged. [Answer every kind of effect](#answer-every-kind-of-effect) introduces it.
+
+- `execution`: the run's execution identifier, a plain string the type does not check.
+- `section`: the section that made the call, a plain string the type does not check.
+
+## AnswerRecord
+
+[`AnswerRecord`] stores one [`EffectAnswer`] in your log, one variant per answer kind, with every failure turned into its display text. Get one from [`EffectAnswer::record`]. A stored failure cannot be turned back into a [`CompletionError`](crate::model::CompletionError), [`ToolError`](crate::tools::ToolError), or [`VfsError`](crate::vfs::VfsError), so act on the live answer when you need the error's kind. [Log effects and answers](#log-effects-and-answers) teaches it.
+
+| Variant | What it holds |
+|---|---|
+| `Chat` | the round's [`ChatAnswerRecord`] or its failure text, recorded as `{ "Chat": { "Ok": { ... } } }` |
+| [`ToolCall`](AnswerRecord::ToolCall) | the tool's [`ToolAnswerRecord`] or its failure text |
+| `Store` | the [`StoreOutcome`](crate::vfs::StoreOutcome) or the failure text; a successful write records as `{ "Store": { "Ok": "Unit" } }` |
+| `Timer` | nothing; the timer fired |
+| `TaskEvents` | the task's full events after the read's `last`, in sequence order |
+| `Dropped` | nothing; you dropped the effect without performing it |
+
+## Effect
+
+An [`Effect`] is one piece of outside work a run asks your program to perform; the run never performs it itself. When [`Run::step`](crate::Run::step) returns [`Step::Pending`](crate::Step::Pending), perform each `(EffectId, Provenance, Effect)` and answer it through [`Run::resume`](crate::Run::resume). An `Effect` cannot be cloned, compared, or serialized, because it may hold a live store handle, so log [`Effect::record`] instead. [Answer every kind of effect](#answer-every-kind-of-effect) teaches it.
+
+| Variant | What it asks for |
+|---|---|
+| `Chat` | one model round over `messages` with `tools` advertised, under the binding's frozen `options` |
+| [`ToolCall`](Effect::ToolCall) | one bound tool call; `tool` is the identity you resolve against your activated capabilities, and `alias` the name the prompt used |
+| `Store` | one store operation under the chain's store view |
+| `Timer` | one sleep of `seconds`, the timeout behind a timed wait |
+| `TaskEvents` | one read of a task's reported history |
+
+- `record`: the request minus its live handles; it keeps only tool names, and leaves out `stream`, `options`, and the store access.
+- `Chat.stream`: when `true`, forward the round's live pieces to your streaming callback; a `models.infer` round sets `false` and sends none.
+- `Store.access`: the chain's permission to the store; use it exactly as given, and it refuses every operation once the run reaches `Done` or is dropped.
+- `Timer.seconds`: the sleep length, documented as non-negative and finite.
+- `TaskEvents`: answer with every event whose provenance names `task` and comes after `last`, or all of them when `last` is `None`.
+
+## EffectAnswer
+
+An [`EffectAnswer`] answers one [`Effect`] with the variant of its own kind, or with `Dropped`; every effect takes exactly one answer. Pass it to [`Run::resume`](crate::Run::resume) for each issued effect. Answer an effect you abandon, as for a cancelled run or a task that ended first, with `Dropped`, because a drop counts as its one answer. A chain still waiting on a dropped effect resumes with a cancelled error. [Answer every kind of effect](#answer-every-kind-of-effect) teaches it.
+
+| Variant | What it answers with |
+|---|---|
+| `Chat` | the round's boxed [`Completion`](crate::model::Completion) or its [`CompletionError`](crate::model::CompletionError) |
+| [`ToolCall`](EffectAnswer::ToolCall) | the tool's own output or failure, before the run's trust and count rules apply |
+| `Store` | the operation's [`StoreOutcome`](crate::vfs::StoreOutcome) or the store's structured failure |
+| `Timer` | nothing; the timer fired |
+| `TaskEvents` | the task's events after the read's `last`, in sequence order, as your log holds them |
+| `Dropped` | nothing; you dropped the effect without performing it |
+
+- `record`: returns the [`AnswerRecord`] your log keeps, with each failure as display text, and a completion without its bodies or metrics.
+- `TaskEvents`: answer from your own log, adding each step's events before performing its effects, so a task sees everything reported before its read.
+
+## EffectRecord
+
+An [`EffectRecord`] is an [`Effect`] minus its live handles, in the form a run log stores and a replay compares. Get one from [`Effect::record`]. The record holds no id, so keep the [`EffectId`] beside it when you need one. [Log effects and answers](#log-effects-and-answers) teaches it.
+
+| Variant | What it records |
+|---|---|
+| `Chat` | the round's model name, alias, wire-form messages, tool names, and frozen invocation settings |
+| [`ToolCall`](EffectRecord::ToolCall) | the effect's tool identity, alias, arguments, and origin, copied unchanged |
+| `Store` | the validated operation, such as `{ "Store": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } }` |
+| `Timer` | the sleep length in seconds |
+| `TaskEvents` | the read's task and the highest sequence number the reader had already seen |
+
+- `Chat.model`: the bound model's name, which can differ from the served model that [`ChatAnswerRecord`] records.
+- `Chat.messages`: one wire-form JSON value per request message.
+- `Chat.tools`: the advertised tool names only, in schema order; a round with no tools records `[]`.
+- `Chat.temperature`: the frozen sampling temperature, or `None` when the binding declared none; `max_tokens` and `thinking` work the same way.
+- `TaskEvents.last`: the highest sequence number the reader had already seen, or `None` for a read of the whole history.
+
+## ToolCaller
+
+[`ToolCaller`] says which kind of code asked for one tool call: `Script` when the section's own Lua called the tool through `tools.call`, and `Model` when a model round requested it. Read it from the `caller` of a [`ToolCallOrigin`] to attribute a call or choose a policy. It serializes in snake case, as `"script"` or `"model"`. The enum is non-exhaustive, so your `match` needs a wildcard arm. [Answer every kind of effect](#answer-every-kind-of-effect) introduces it.

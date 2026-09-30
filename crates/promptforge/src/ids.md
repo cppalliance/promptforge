@@ -1,293 +1,370 @@
-The ids that name a run's chains and tasks, the provenance stamped on every effect and event, and the records of who started a task and why it was abandoned.
+Group a run's log by task, and follow each task from its start to how it ended.
 
-This module gives a host the keys for its log. Every effect and event carries a [`Provenance`], which says which task produced it and where it falls in that task's sequence. With it, a host can split a log by task, put each task's items in order, answer a prompt that reads a task's history, and match a replayed run against its record. The ids behind it are plain text paths such as `0.2.1`, so they read as the hierarchy they name in a log line or a UI, and they parse and serialize as that same text. By the end of this page you can compute, render, parse, sort, and persist every id a run reports, and read the task origin and abandon reason on task events.
+You need this when you store a log you will search later, or when you show a run's tasks to a person.
 
 # Where this fits
 
-[`Run::step`](crate::Run::step) returns [`Step::Pending`](crate::Step::Pending), where each effect is a tuple of an [`EffectId`](crate::effect::EffectId), a [`Provenance`], and an [`Effect`](crate::effect::Effect). The host answers through [`Run::resume`](crate::Run::resume) under the [`EffectId`](crate::effect::EffectId), which is an in-flight handle local to the run. It logs the effect under the [`Provenance`], which is the stable key for matching a replay against its record. The run ends with [`Step::Done`](crate::Step::Done). Every [`Event`](crate::event::Event) exposes its [`Provenance`] through [`Event::provenance`](crate::event::Event::provenance), so the host fills a record's task and sequence columns without matching on the variant.
+From the [crate overview](crate), you know that a run hands you effects and reports events as it goes. The [event page](crate::event) shows that every event carries a provenance, and each effect arrives with one too. This page explains the task id inside that provenance, and the task events that start and end each task.
 
-Task events name their task with a [`TaskId`]. [`Event::TaskStarted`](crate::event::Event::TaskStarted) adds a [`TaskOrigin`] in [`origin`](crate::event::Event#variant.TaskStarted.field.origin), and [`Event::TaskAbandoned`](crate::event::Event::TaskAbandoned) adds an [`AbandonReason`] in [`reason`](crate::event::Event#variant.TaskAbandoned.field.reason).
+# Group a log by task
 
-The log feeds back into the run through [`Effect::TaskEvents`](crate::effect::Effect::TaskEvents). The run issues it when the author's `tasks.events` or the model's `task_events` built-in reads a task's history. The host answers with [`EffectAnswer::TaskEvents`](crate::effect::EffectAnswer::TaskEvents), holding the logged events whose [`Provenance::task`] matches. When the effect names the reader's last sequence number, the host keeps only events whose [`Provenance::seq`] is past it. The [`effect`](crate::effect) page gives the exact filter.
+Your program stores each run's effects and events, and later you want to search them by task, or show a run's tasks side by side.
 
-Parse events and run events share one provenance space. [`Prompt::parse`](crate::Prompt::parse) stamps its events under task `0` with sequence numbers from zero. A host that logs them in the same stream as the run passes their count to [`RunContext::provenance_start`](crate::RunContext::provenance_start), so every key in the log stays unique.
+A section can start another section to run beside it, and the started one is a *task*.
 
-# Provenance
+Each walk over sibling sections is a *chain*: the main walk, each task, and each `call`. In a section's Lua, `call('## Target')` runs that section on a new chain and waits for its result, while `tasks.spawn` returns at once and lets the task run alongside.
 
-A [`Provenance`] has two public fields. [`Provenance::task`] is the [`TaskId`] of the task that produced the item. A task id is written as a dot-separated path of numbers, such as `0` for the main walk and `0.1` for a task it started. [`Provenance::seq`] is a [`u32`], the item's position within that task. The counter is local to the task and shared by its effects and its events, so the two kinds order against each other within one task.
+Every effect and event records the task whose chain made it, plus a counter local to that task. That pair is its *provenance*.
 
-This example keeps a small log keyed by provenance, puts it in order, reads one task's items after a known sequence number, and writes one key as JSON and back:
-
-````
-use promptforge::ids::{Provenance, TaskId};
-
-let main: TaskId = "0".parse()?;
-let worker: TaskId = "0.1".parse()?;
-
-let mut log = vec![
-    Provenance { task: worker.clone(), seq: 1 },
-    Provenance { task: main.clone(), seq: 4 },
-    Provenance { task: worker.clone(), seq: 0 },
-];
-log.sort();
-assert_eq!(log[0], Provenance { task: main, seq: 4 });
-assert_eq!(log[1], Provenance { task: worker.clone(), seq: 0 });
-
-let after_first: Vec<&Provenance> = log
-    .iter()
-    .filter(|key| key.task == worker && key.seq > 0)
-    .collect();
-assert_eq!(after_first, [&Provenance { task: worker, seq: 1 }]);
-
-let line = serde_json::to_string(&log[1])?;
-assert_eq!(line, r#"{"task":"0.1","seq":0}"#);
-let back: Provenance = serde_json::from_str(&line)?;
-assert_eq!(back, log[1]);
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-Here is what each part does.
-
-1. **Parse the task ids.** A [`TaskId`] parses from its path text with [`str::parse`]. The [Id text](#id-text) section gives the exact rules.
-2. **Sort.** [`Provenance`] orders by task path first, then by sequence number. The main walk's task `0` sorts before its child `0.1`, and within task `0.1`, sequence `0` comes before `1`.
-3. **Filter.** Comparing [`Provenance::task`] and [`Provenance::seq`] is all a host needs to slice a log by task. This is the same filter that answers an [`Effect::TaskEvents`](crate::effect::Effect::TaskEvents).
-4. **Persist.** A [`Provenance`] serializes as a JSON object with the key `"task"` holding the path string and the key `"seq"` holding a number, and it reads back to an equal value.
-
-**Which task an item reports under.** The main walk reports as task `0`. A `call` child reports under its parent's task. That is unambiguous because a `call` blocks its parent, so the two never interleave. A spawned task reports under its own task id.
-
-**Provenance is stable across runs.** Two runs of the same prompt with the same inputs and answers allocate the same ids and stamp the same provenance on the same items, however their chains interleave, because every counter is local to the chain or task that advances it. The [`EffectId`](crate::effect::EffectId) need not reproduce, so a host matches effects across runs by [`Provenance`].
-
-# Chain ids and task ids
-
-A [`ChainId`] names one chain: the main walk, a `call` child, or a spawned task. The [crate page](crate) defines chains. The engine reports ids as [`TaskId`] values, and a host uses [`ChainId`] to compute or predict ids and to parse them.
+Grouping by task feels like grouping log lines by thread id. Unlike a thread id, a task id is a path from the root chain `0`, and the same run gives the same ids every time.
 
 ````
-use promptforge::ids::{ChainId, TaskId};
-
-let root = ChainId::root();
-assert_eq!(root.to_string(), "0");
-
-let research = root.child(2);
-let nested = research.child(1);
-assert_eq!(nested.to_string(), "0.2.1");
-assert_eq!(TaskId::from(nested.clone()).to_string(), "0.2.1");
-
-assert_eq!(root.child(3).entry(7), "0.3.7");
-assert_ne!(root.entry(3), root.child(3).entry(0));
-
-let mut owned = vec![root.child(10), root.child(0), root.child(9)];
-owned.sort();
-assert_eq!(owned, [root.child(0), root.child(9), root.child(10)]);
-assert!(root < research && research < nested);
-````
-
-**The root.** [`ChainId::root`] returns the main walk's id, the single component `0`.
-
-**Children.** [`ChainId::child`] appends one index to a path. A chain keeps one child counter, and `call` children and spawned tasks share it, so if a chain's first two children are a `call` and then a spawned task, they get `0` and `1` under it. Both ids in the example above are built this way: `0.2` is the root's child with index `2`, and `0.2.1` is that chain's child with index `1`.
-
-**Task ids.** A task's id is the same path as the id of the chain that runs it. [`TaskId`] implements [`From`] of [`ChainId`], so `TaskId::from(chain)` converts a chain id into a task id to key a task table. The conversion wraps the path unchanged. The separate type keeps a task-keyed table from accepting an arbitrary chain id by accident. The conversion goes one way only. A [`TaskId`] has no accessor back to its [`ChainId`].
-
-**Section entry ids.** Each time a chain enters a section, the entry gets an id, which the section's Lua reads as `sys.id`. [`ChainId::entry`] computes it by extending the chain's path with the chain's local entry index. It returns a [`String`], not a [`ChainId`], because a section entry is not a chain. The text has the same shape as a chain path and would parse as one, but it names an entry. A parent's entry id and its child chain's entry id never collide, because the paths differ in length.
-
-**Ordering.** Ids sort as paths. A chain sorts before its descendants, and siblings sort by child index as numbers, so `0.9` comes before `0.10`. The tasks owned by one chain are its direct children, so sorting their ids recovers their spawn order. Sort the ids themselves, not their text, because text sorting puts `0.10` before `0.9`.
-
-# Id text
-
-A [`ChainId`] and a [`TaskId`] render with [`Display`](std::fmt::Display) as their decimal components joined by `.`, with no prefix, suffix, or padding: `0`, `0.2`, `0.2.0`, `0.2.1`. A [`TaskId`] renders exactly as its chain id does. Both implement [`FromStr`](std::str::FromStr) with [`ParseIdError`] as the error, so they parse back from that text with [`str::parse`], and a rendered id parses back to an equal value.
-
-Parsing accepts text that follows these rules:
-
-- The text holds one or more components separated by `.`. The empty string is rejected.
-- Each component is non-empty and made only of the ASCII digits `0` to `9`. A `-` or `+` sign, or whitespace, is rejected.
-- Each component fits in a [`u32`]. So `99999999999` is rejected.
-- The first component need not be `0`. A path such as `7.1` parses.
-- Leading zeros are accepted and dropped on render. `0.007` parses equal to `0.7` and renders back as `0.7`.
-
-Malformed text fails with a [`ParseIdError`]. [`ParseIdError::input`] returns the exact rejected text, and the [`Display`](std::fmt::Display) message is ``invalid chain id `{input}`: required a dot-separated path of decimal components``. The message says "chain id" even when a [`TaskId`] failed to parse.
-
-````
-use promptforge::ids::{ChainId, ParseIdError, TaskId};
-
-let chain: ChainId = "0.12.0".parse()?;
-assert_eq!(chain, ChainId::root().child(12).child(0));
-assert_eq!(chain.to_string().parse::<ChainId>()?, chain);
-
-let task: TaskId = "0.12.0".parse()?;
-assert_eq!(task, TaskId::from(chain));
-
-let padded: ChainId = "0.007".parse()?;
-assert_eq!(padded.to_string(), "0.7");
-assert!("7.1".parse::<ChainId>().is_ok());
-
-for bad in ["", ".", "0.", ".0", "0..1", "a", "0.-1", "0.+1", "0. 1", "99999999999"] {
-    let error: ParseIdError = bad.parse::<ChainId>().err().ok_or("the text is rejected")?;
-    assert_eq!(error.input(), bad);
-}
-
-let error = "0..1".parse::<TaskId>().err().ok_or("the text is rejected")?;
-assert_eq!(
-    error.to_string(),
-    "invalid chain id `0..1`: required a dot-separated path of decimal components",
+# use std::collections::BTreeMap;
+# use std::error::Error;
+# use std::num::NonZeroU32;
+# use std::sync::Arc;
+# use promptforge::effect::{Effect, EffectAnswer};
+# use promptforge::event::Event;
+# use promptforge::ids::{Provenance, TaskId};
+# use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
+# use promptforge::timestamp::Timestamp;
+# use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+# fn start(source: &str) -> Result<(Run, Vec<Event>), Box<dyn Error>> {
+#     let (parsed, parse_events) = Prompt::parse(source, "greeter");
+#     let prompt = parsed?;
+#     let window = NonZeroU32::new(8_192).ok_or("a context window is never zero")?;
+#     let model = ModelDescriptor::new(ModelId::gateway("canned")?, "Always replies hi there", window, ThinkingMode::Never);
+#     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
+#         .provenance_start(u32::try_from(parse_events.len())?)
+#         .model(model);
+#     let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+#     if let Some(refusal) = requirements.refusal() {
+#         return Err(refusal.into());
+#     }
+#     Ok((Run::new(Arc::new(prompt), "", ctx), parse_events))
+# }
+# fn drive(
+#     mut run: Run,
+#     mut answer: impl FnMut(Effect) -> Option<EffectAnswer>,
+# ) -> (RunResult, Vec<Event>, Vec<Provenance>) {
+#     let (mut events, mut effects, mut held) = (Vec::new(), Vec::new(), Vec::new());
+#     loop {
+#         match run.step() {
+#             Step::Pending { effects: batch, events: reported } => {
+#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this host holds");
+#                 events.extend(reported);
+#                 for (id, provenance, effect) in batch {
+#                     effects.push(provenance);
+#                     match answer(effect) {
+#                         Some(reply) => run.resume(id, reply),
+#                         None => held.push(id),
+#                     }
+#                 }
+#                 if run.decided() {
+#                     for id in held.drain(..) {
+#                         run.resume(id, EffectAnswer::Dropped);
+#                     }
+#                 }
+#             }
+#             Step::Done { result, events: reported } => {
+#                 events.extend(reported);
+#                 return (result, events, effects);
+#             }
+#         }
+#     }
+# }
+# fn reply(result: CompletionResult) -> EffectAnswer {
+#     EffectAnswer::Chat(Completion::from_result(result, "canned").map(Box::new).map_err(Into::into))
+# }
+# fn canned(effect: Effect) -> Option<EffectAnswer> {
+#     match effect {
+#         Effect::Chat { .. } => Some(reply(CompletionResult::Text("hi there".to_owned()))),
+#         _ => Some(EffectAnswer::Dropped),
+#     }
+# }
+// 1. The greeter's section starts two tasks on `## Reply`, waits for both, and joins their replies.
+const GREETER: &str = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Greets through tasks.\n",
+#     "promptforge: 0\n",
+#     "models:\n",
+#     "  writer: {}\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+    "local first = tasks.spawn('## Reply', { input = 'hello' })\n",
+    "local second = tasks.spawn('## Reply', { input = 'bye' })\n",
+    "local results = tasks.join({ first, second })\n",
+    "return results[1].result .. ' ' .. results[2].result\n",
+#     "```\n\n",
+#     "## Reply\n\n",
+#     "```lua\n",
+#     "models.use('writer')\n",
+#     "return models.infer(args)\n",
+#     "```\n",
 );
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
 
-# Task origins and abandon reasons
-
-A [`TaskOrigin`] says who started a task. [`TaskOrigin::Author`] means the prompt's author started it with `tasks.spawn`. [`TaskOrigin::Model`] means the model started it with its `task` tool. The host reads it from the [`origin`](crate::event::Event#variant.TaskStarted.field.origin) field of [`Event::TaskStarted`](crate::event::Event::TaskStarted).
-
-What happens to a task still running when its owner chain ends depends on its origin. An author task still live when its owner ends normally is the author's bug, and it fails the owner's chain. A model task that outlives its owner is abandoned and reported with [`Event::TaskAbandoned`](crate::event::Event::TaskAbandoned).
-
-An [`AbandonReason`] says how the owner ended while the task was live. The host reads it from the [`reason`](crate::event::Event#variant.TaskAbandoned.field.reason) field of [`Event::TaskAbandoned`](crate::event::Event::TaskAbandoned). Abandoned is kept apart from cancelled, reported as [`Event::TaskCancelled`](crate::event::Event::TaskCancelled), because "lost its owner" and "was stopped on purpose" are different facts for the log, the UI, and the model notice. When the run itself ends, every task still live is abandoned before [`Event::RunSucceeded`](crate::event::Event::RunSucceeded) or [`Event::RunFailed`](crate::event::Event::RunFailed) is reported. A task stranded directly by the run's end gets [`AbandonReason::RunTerminated`], and a task nested under one gets [`AbandonReason::OwnerAborted`].
-
-Neither enum implements [`Display`](std::fmt::Display) or [`FromStr`](std::str::FromStr). For text, use [`TaskOrigin::tag`] and [`TaskOrigin::from_tag`] for an origin, and [`AbandonReason::why`] for a reason. Both enums are `#[non_exhaustive]`, so a `match` on either needs a wildcard arm.
-
-````
-use promptforge::ids::{AbandonReason, TaskOrigin};
-
-assert_eq!(TaskOrigin::Author.tag(), "author");
-assert_eq!(TaskOrigin::from_tag("model"), Some(TaskOrigin::Model));
-assert_eq!(TaskOrigin::from_tag("Author"), None);
-
-fn on_owner_end(origin: TaskOrigin) -> &'static str {
-    match origin {
-        TaskOrigin::Author => "fails the owner's chain",
-        TaskOrigin::Model => "is abandoned and reported",
-        _ => "unknown origin",
+// 2. Run the greeter with a canned reply for each task, group every effect and event by its provenance's task, sort each group by provenance, and list the started tasks.
+fn run_greeter() -> Result<(Vec<TaskId>, BTreeMap<TaskId, Vec<Provenance>>), Box<dyn Error>> {
+    let (run, parse_events) = start(GREETER)?;
+    let (result, run_events, effects) = drive(run, canned);
+    assert!(matches!(result, RunResult::Ok(text) if text == "hi there hi there"));
+    let events: Vec<Event> = parse_events.into_iter().chain(run_events).collect();
+    let mut groups: BTreeMap<TaskId, Vec<Provenance>> = BTreeMap::new();
+    for provenance in effects.into_iter().chain(events.iter().map(|event| event.provenance().clone())) {
+        groups.entry(provenance.task.clone()).or_default().push(provenance);
     }
+    groups.values_mut().for_each(|records| records.sort());
+    let started = events.iter().filter_map(|event| match event {
+        Event::TaskStarted { task, .. } => Some(task.clone()),
+        _ => None,
+    }).collect();
+    Ok((started, groups))
 }
-assert_eq!(on_owner_end(TaskOrigin::Model), "is abandoned and reported");
 
-let reason = AbandonReason::ToolLoopExhausted;
-let line = format!("task 0.1 was abandoned: {}", reason.why());
-assert_eq!(line, "task 0.1 was abandoned: the tool loop was exhausted");
-````
+// 3. Print each task's group, in task id order, with the sequence numbers its records carry.
+let (started, groups) = run_greeter()?;
+for (task, records) in &groups {
+    let seqs: Vec<u32> = records.iter().map(|record| record.seq).collect();
+    println!("task {task}: {seqs:?}");
+}
 
-# Serde shapes
+// 4. The main task and the two started tasks each get a group, the started ids sort in start order, and a second run gives the same groups.
+assert_eq!(groups.len(), 3);
+let mut sorted = started.clone();
+sorted.sort();
+assert_eq!(sorted, started);
+assert_eq!(started, ["0.0".parse::<TaskId>()?, "0.1".parse::<TaskId>()?]);
+assert_eq!(run_greeter()?.1, groups);
 
-Every type on this page except [`ParseIdError`] implements serde's [`Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) and [`Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html). The shapes hold in JSON and in any other serde format. In JSON they look like this:
-
-| Type | JSON shape | Example |
-|---|---|---|
-| [`ChainId`] | a string holding the path text | `"0.2"` |
-| [`TaskId`] | a string holding the path text | `"0.2"` |
-| [`Provenance`] | an object with `"task"` as a path string, then `"seq"` as a number | `{"task":"0.2","seq":7}` |
-| [`TaskOrigin`] | a lowercase string, the same text as [`TaskOrigin::tag`] | `"author"`, `"model"` |
-| [`AbandonReason`] | a snake_case string | `"owner_returned"`, `"owner_failed"`, `"tool_loop_exhausted"`, `"owner_aborted"`, `"run_terminated"` |
-
-An id deserializes by reading a string and parsing it with the rules in [Id text](#id-text). Malformed text such as `"0.x"` fails with a serde error that carries the [`ParseIdError`] message.
-
-````
-use promptforge::ids::{AbandonReason, ChainId, Provenance, TaskId, TaskOrigin};
-
-let chain = ChainId::root().child(2);
-assert_eq!(serde_json::to_string(&chain)?, r#""0.2""#);
-assert!(serde_json::from_str::<ChainId>(r#""0.x""#).is_err());
-
-let task: TaskId = serde_json::from_str(r#""0.2""#)?;
-assert_eq!(task, TaskId::from(chain));
-
-let key = Provenance { task, seq: 7 };
-assert_eq!(serde_json::to_string(&key)?, r#"{"task":"0.2","seq":7}"#);
-assert_eq!(serde_json::from_str::<Provenance>(r#"{"task":"0.2","seq":7}"#)?, key);
-
-assert_eq!(serde_json::to_string(&TaskOrigin::Model)?, r#""model""#);
-assert_eq!(serde_json::from_str::<TaskOrigin>(r#""author""#)?, TaskOrigin::Author);
-assert_eq!(
-    serde_json::to_string(&AbandonReason::RunTerminated)?,
-    r#""run_terminated""#,
-);
+// 5. Parsed ids compare as values, and a damaged id reports its whole text.
+assert_eq!("0.01".parse::<TaskId>()?, "0.1".parse::<TaskId>()?);
+let error = "0..1".parse::<TaskId>().err().ok_or("0..1 is not a task id")?;
+assert_eq!(error.input(), "0..1");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
+
+1. `## Greet` starts two tasks on `## Reply` with `tasks.spawn`, and waits for both with `tasks.join`. `## Reply` asks the model, so each task asks on its own.
+2. `run_greeter` drives the greeter offline with the hidden `start`, `drive`, and `canned`. [`Prompt::parse`](crate::Prompt::parse) stamps its events under task `0` from `seq` 0, and so does a run by default, which would repeat `(task, seq)` pairs in one log. `start` passes the parse event count to [`RunContext::provenance_start`](crate::RunContext::provenance_start), so the run's task `0` counts on after the parse events. Started tasks still count from 0. It groups every record by [`Provenance::task`], a [`TaskId`], in a [`BTreeMap`](std::collections::BTreeMap), and sorts each group by [`Provenance`], which orders by task path, then by `seq`.
+3. The loop prints task `0`, the main walk, then `0.0` and `0.1`. A task's effects and events share one `seq` counter, so they interleave in the order the task made them. When the log keeps parse events out, or the run uses `provenance_start` as here, no two records share a `(task, seq)` pair. Key your log table on it, and store each effect's answer under that effect's provenance.
+4. The asserts show three groups. A `call` reports under its caller's task, so it never gets a group of its own. Each chain numbers its children with one counter shared by `call` children and started tasks, so spawn, call, spawn gives tasks `.0` and `.2`. Sorting one chain's task ids gives their start order, and a gap is a `call`, not a missing task. A second run gives the same groups, but the [`EffectId`](crate::effect::EffectId) need not repeat, so diff runs by provenance.
+5. Store a task id as its dotted text, which is how it serializes, and read it back with `parse::<TaskId>()`. Parsing accepts leading zeros, so compare parsed ids, not text: `"0.01"` equals `0.1`. `"0..1"` fails with a [`ParseIdError`], whose [`input`](ParseIdError::input) is the whole rejected text. Parsing accepts paths off the root, such as `5.3`, so check the root yourself.
+
+This run's task tree, with a `call` from `## Greet` added after the spawns:
+
+````text
+┌─ task 0: the main walk, ## Greet ───────────────────────┐
+│                                                          │
+│  ┌─ a `call` from ## Greet after the spawns ──────────┐  │
+│  │ its chain is 0.2, but its records say task 0       │  │
+│  └────────────────────────────────────────────────────┘  │
+└───────┬─────────────────────────────┬────────────────────┘
+        │ tasks.spawn                 │ tasks.spawn
+        v                             v
+┌─ task 0.0 ─────────────┐   ┌─ task 0.1 ─────────────┐
+│ ## Reply, input hello  │   │ ## Reply, input bye    │
+└────────────────────────┘   └────────────────────────┘
+````
+
+The `call` takes chain `0.2` from the shared counter, yet its records say task `0`, because it blocks its caller. A task's id is its chain's path, and `TaskId` wraps that chain id so a task-keyed map cannot take any chain by mistake. Build the main task's as `TaskId::from(ChainId::root())`.
+
+You might expect task ids to sort like their text, so that `0.10` comes before `0.2`. Instead, `TaskId` compares each component as a number, so `0.2` comes first, and a task sorts right before the tasks it started.
+
+Group by the provenance's task, order by the provenance itself, and the same run gives the same groups every time. Next, [Follow a task's life](#follow-a-tasks-life) shows who started each task and how it ended.
+
+# Follow a task's life
+
+You show a run's tasks to a person. For each one, you want to say who started it and how it ended.
+
+The chain that started a task owns it: the main walk, a `call` child, or another task. A task ends only when its owner chain ends, not when the walk leaves its section by falling through or `jump`.
+
+A task that runs reports [`TaskStarted`](crate::event::Event::TaskStarted) when it first runs, possibly after waiting for a slot under a concurrency limit, and one *terminal event*: [`TaskSucceeded`](crate::event::Event::TaskSucceeded), [`TaskFailed`](crate::event::Event::TaskFailed), [`TaskCancelled`](crate::event::Event::TaskCancelled), or [`TaskAbandoned`](crate::event::Event::TaskAbandoned). A task cancelled or abandoned while waiting reports neither.
+
+Following a task feels like joining a spawned thread. Unlike dropping a [`JoinHandle`](std::thread::JoinHandle), which leaves the thread running, a task whose owner ends without waiting is ended and reported.
+
+````
+# use std::error::Error;
+# use std::num::NonZeroU32;
+# use std::sync::Arc;
+# use promptforge::effect::{Effect, EffectAnswer};
+# use promptforge::event::Event;
+# use promptforge::ids::Provenance;
+# use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
+# use promptforge::timestamp::Timestamp;
+# use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
+# fn start(source: &str) -> Result<(Run, Vec<Event>), Box<dyn Error>> {
+#     let (parsed, parse_events) = Prompt::parse(source, "greeter");
+#     let prompt = parsed?;
+#     let window = NonZeroU32::new(8_192).ok_or("a context window is never zero")?;
+#     let model = ModelDescriptor::new(ModelId::gateway("canned")?, "Always replies hi there", window, ThinkingMode::Never);
+#     let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH)
+#         .provenance_start(u32::try_from(parse_events.len())?)
+#         .model(model);
+#     let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+#     if let Some(refusal) = requirements.refusal() {
+#         return Err(refusal.into());
+#     }
+#     Ok((Run::new(Arc::new(prompt), "", ctx), parse_events))
+# }
+# fn drive(
+#     mut run: Run,
+#     mut answer: impl FnMut(Effect) -> Option<EffectAnswer>,
+# ) -> (RunResult, Vec<Event>, Vec<Provenance>) {
+#     let (mut events, mut effects, mut held) = (Vec::new(), Vec::new(), Vec::new());
+#     loop {
+#         match run.step() {
+#             Step::Pending { effects: batch, events: reported } => {
+#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this host holds");
+#                 events.extend(reported);
+#                 for (id, provenance, effect) in batch {
+#                     effects.push(provenance);
+#                     match answer(effect) {
+#                         Some(reply) => run.resume(id, reply),
+#                         None => held.push(id),
+#                     }
+#                 }
+#                 if run.decided() {
+#                     for id in held.drain(..) {
+#                         run.resume(id, EffectAnswer::Dropped);
+#                     }
+#                 }
+#             }
+#             Step::Done { result, events: reported } => {
+#                 events.extend(reported);
+#                 return (result, events, effects);
+#             }
+#         }
+#     }
+# }
+# fn reply(result: CompletionResult) -> EffectAnswer {
+#     EffectAnswer::Chat(Completion::from_result(result, "canned").map(Box::new).map_err(Into::into))
+# }
+use promptforge::ids::{AbandonReason, TaskOrigin};
+use promptforge::model::ToolCall;
+
+// 1. The greeter lets its model start tasks on `## Wait`, runs one model loop, and returns without waiting.
+let source = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Greets through tasks.\n",
+#     "promptforge: 0\n",
+#     "models:\n",
+#     "  writer: {}\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+    "models.use('writer')\n",
+    "tools.allow_tasks({ '## Wait' })\n",
+    "local msgs = messages.new()\n",
+    "msgs:user('hello')\n",
+    "models.loop(msgs)\n",
+    "return 'done'\n",
+    "```\n\n",
+    "## Wait\n\n",
+    "```lua\n",
+    "return store.read('note.md')\n",
+    "```\n",
+);
+
+// 2. The canned model calls its `task` tool, then says bye; the task's store read is held, so it still waits.
+let call = ToolCall::from_parts("call_1", "task", serde_json::json!({ "target": "## Wait" }))?;
+let mut replies = vec![CompletionResult::Text("bye".to_owned()), CompletionResult::ToolCalls(vec![call])];
+let (run, _parse_events) = start(source)?;
+let (result, events, _effects) = drive(run, |effect| match effect {
+    Effect::Chat { .. } => replies.pop().map(reply),
+    _ => None,
+});
+assert!(matches!(result, RunResult::Ok(text) if text == "done"));
+
+// 3. Read who started the task, find its end by the task id in the payload, and print both.
+let (task, origin) = events.iter().find_map(|event| match event {
+    Event::TaskStarted { task, origin, .. } => Some((task, *origin)),
+    _ => None,
+}).ok_or("the model starts a task")?;
+let end = events.iter().find(|event| matches!(event,
+    Event::TaskSucceeded { task: t, .. } | Event::TaskFailed { task: t, .. }
+        | Event::TaskCancelled { task: t, .. } | Event::TaskAbandoned { task: t, .. } if t == task
+)).ok_or("the task ends")?;
+let Event::TaskAbandoned { reason, .. } = end else { panic!("the task ended as {end:?}") };
+println!("task {task}: started by {}, abandoned because {}", origin.tag(), reason.why());
+
+// 4. The model started the task, and its owner's return abandoned it.
+assert_eq!((origin, origin.tag()), (TaskOrigin::Model, "model"));
+assert_eq!(*reason, AbandonReason::OwnerReturned);
+assert_eq!(reason.why(), "the section ended");
+# Ok::<(), Box<dyn std::error::Error>>(())
+````
+
+1. `## Greet` offers the model the `task` tool for `## Wait` with `tools.allow_tasks`, runs one model loop, and returns `done` without waiting, ending the main walk, which owns the still-live task.
+2. `replies` is listed last-first because `pop` takes from the end. `drive` holds the task's store read until [`Run::decided`](crate::Run::decided) shows the run has reported its end, then answers held effects with [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) so `step` can return `Done`. So the task still waits when `## Greet` returns.
+3. Match a start to its end by the `task` field, not by section. [`Event::section`](crate::event::Event::section) names the H2 heading or agent a record was reported under, and `TaskStarted` reports under the starting section, the terminal event under the task's own. Grouping by provenance splits them too, since `TaskStarted` carries the starting chain's task, so a task's group from [Group a log by task](#group-a-log-by-task) holds its end but not its start.
+4. The asserts show [`TaskOrigin::Model`] and [`AbandonReason::OwnerReturned`], whose [`why`](AbandonReason::why) is `the section ended`. A model's task that outlives its starting chain, not merely its section, is abandoned, and the run does not fail.
+
+Read who started a task from `TaskStarted`'s `origin`: [`TaskOrigin::Author`] for `tasks.spawn` or `fanout`, `TaskOrigin::Model` for the model's `task` tool. `fanout('### Worker', items)` starts one task per item, each reading its own `item`, and cancels the rest when one fails. Store an origin as [`TaskOrigin::tag`], `author` or `model`, its serialized form, and read it back with [`TaskOrigin::from_tag`], which accepts only those exact strings.
+
+When the starting chain ends normally, by returning or walking past its last section, with a task still live, both kinds end `TaskAbandoned` with `OwnerReturned`. An author's task also turns the owner chain's result into the `tasks_live` error, listing leaked task ids in spawn order: the run's error at the main walk, or the `call`'s error. A chain that already failed keeps its own. Wait on or cancel every task first.
+
+Keep `TaskCancelled`, a deliberate stop by the owner reported once, apart from `TaskAbandoned`, the owner ending while the task was live. Show a person `why`; the reason serializes in snake_case, such as `owner_returned`. Each other reason points at a different thing to fix:
+
+- [`OwnerFailed`](AbandonReason::OwnerFailed): the owner failed.
+- [`ToolLoopExhausted`](AbandonReason::ToolLoopExhausted): the model's tool loop ran past its round cap.
+- [`OwnerAborted`](AbandonReason::OwnerAborted): the owner was ended from outside, by its own owner ending first or by `fanout` cancelling it when another of its tasks failed; that owner ends `TaskCancelled`.
+- [`RunTerminated`](AbandonReason::RunTerminated): the run ended, including by your cancel, and stranded this task directly.
+
+You might expect cancelling a run to report its live tasks as cancelled. Instead, tasks it strands directly end `TaskAbandoned` with `RunTerminated`, and their own tasks with `OwnerAborted`, because only an owner stopping a task on purpose counts as cancelled.
+
+`TaskStarted` says who, the terminal event says how, and abandoned means the owner went away, not that anyone stopped the task. The [Reference](#reference) covers each type.
 
 # Reference
 
-This part covers every item in the module, in dependency order: the two id types, the parse error, provenance, and the two task enums. Every method here is infallible and `#[must_use]`.
-
 ## ChainId
 
-[`ChainId`] is the hierarchical id of one chain, a path of child indices from the root chain. No other facade item carries one, because the engine reports tasks as [`TaskId`] everywhere. A host uses it to compute or predict ids and to parse them.
+[`ChainId`] names one chain of a run, the main walk, a `call` child, or a started task, as a path of child indices from the root `0`. The same inputs give the same ids on every run. It orders by numeric path, never as text, and serializes as its dotted text. Parsing fails with [`ParseIdError`]; check that the text is a dotted decimal path, such as `0.2.0`. [Group a log by task](#group-a-log-by-task) teaches it.
 
-The host gets one from [`ChainId::root`] and [`ChainId::child`], by parsing path text with [`str::parse`], or by deserializing it. It has no [`Default`], and its inner path is private.
-
-- [`ChainId::root`] takes no arguments and returns the main walk's id, which renders as `"0"`.
-- [`ChainId::child`] takes `&self` and `index`, a [`u32`], and returns a new [`ChainId`] with `index` appended. `self` is unchanged. The `index` is the child's zero-based position in this chain's child counter, which `call` children and spawned tasks share. Any [`u32`] is valid. For example, `ChainId::root().child(2)` is `0.2`.
-- [`ChainId::entry`] takes `&self` and `index`, a [`u32`], and returns a [`String`] holding this path with `.{index}` appended. The `index` is the zero-based position of a section entry in this chain's entry counter. The result is the section entry's `sys.id` value in Lua. For example, `ChainId::root().child(3).entry(7)` is `"0.3.7"`. [Chain ids and task ids](#chain-ids-and-task-ids) explains why it returns text.
-
-Trait impls:
-
-- [`Display`](std::fmt::Display) and [`FromStr`](std::str::FromStr) use the path text described in [Id text](#id-text). The parse error is [`ParseIdError`].
-- serde uses the same path text as a string, for example JSON `"0.2"`.
-- [`Ord`] compares the component lists in order: a chain before its descendants, siblings by child index.
-
-## TaskId
-
-[`TaskId`] is the id of one task, the same path as the id of the chain that runs it. It keys task tables, and its separate type keeps an arbitrary [`ChainId`] out of them.
-
-The host receives one on task events, on effects, and in every [`Provenance`]. It can also build one from a [`ChainId`] through [`From`], parse path text such as `"0.2"` with [`str::parse`], or deserialize one. It has no [`Default`], and there is no accessor back to its [`ChainId`].
-
-A [`TaskId`] appears in these places:
-
-- the task events [`Event::TaskStarted`](crate::event::Event::TaskStarted), [`Event::TaskSucceeded`](crate::event::Event::TaskSucceeded), [`Event::TaskFailed`](crate::event::Event::TaskFailed), [`Event::TaskCancelled`](crate::event::Event::TaskCancelled), [`Event::TaskAbandoned`](crate::event::Event::TaskAbandoned), [`Event::TaskNote`](crate::event::Event::TaskNote), [`Event::TaskNotice`](crate::event::Event::TaskNotice), and [`Event::TaskResumed`](crate::event::Event::TaskResumed)
-- [`Effect::TaskEvents`](crate::effect::Effect::TaskEvents) and [`EffectRecord::TaskEvents`](crate::effect::EffectRecord::TaskEvents)
-- [`Provenance::task`]
-
-Two of those events are not currently emitted. [`Event::TaskNote`](crate::event::Event::TaskNote) is declared, but the `tasks.note` handler stores the note on the chain without reporting the event. [`Event::TaskResumed`](crate::event::Event::TaskResumed) is reserved, and nothing emits it until resume lands. A host should accept both when it reads a log, but the current engine never sends them.
-
-Trait impls:
-
-- [`From`] of [`ChainId`] wraps the chain id unchanged.
-- [`Display`](std::fmt::Display), [`FromStr`](std::str::FromStr), and serde are identical to [`ChainId`]'s, so task `0.2` renders as `0.2` and serializes as JSON `"0.2"`. The main walk is task `0`.
-- [`Ord`] orders as the chain id does, as described under [Chain ids and task ids](#chain-ids-and-task-ids).
+- [`ChainId::root`] returns the main walk's id, `0`.
+- [`ChainId::child`] extends this id by `index`, without checking that the index was ever allocated.
+- [`ChainId::entry`] returns `"{self}.{index}"` as text, the `sys.id` a section reads on each entry; entries count apart from child chains, so it is no chain id.
 
 ## ParseIdError
 
-[`ParseIdError`] is the error returned when text fails to parse as a [`ChainId`] or [`TaskId`]. The host receives it from [`str::parse`] and never builds one. [Id text](#id-text) lists what is rejected.
+[`ParseIdError`] reports that text did not parse as a [`ChainId`] or [`TaskId`] path. You get one when you parse an id read back from a log, for example with `?`. Only parsing makes one, so you cannot reuse it for your own errors. Report the rejected text beside its record, and treat that record as damaged or written by something other than a run. [Group a log by task](#group-a-log-by-task) shows one.
 
-- [`ParseIdError::input`] takes `&self` and returns the exact rejected text as a [`&str`](str), for example `"0..1"`. Use it to report which value was bad.
-
-It implements [`Display`](std::fmt::Display) with the message ``invalid chain id `{input}`: required a dot-separated path of decimal components``, the same for both id types. It implements [`std::error::Error`] with no [`source`](std::error::Error::source). It has no serde and no [`Default`], and its `input` field is private.
+- [`ParseIdError::input`] returns the whole rejected text, not the offending component.
 
 ## Provenance
 
-[`Provenance`] is the replay key stamped on every effect and event: the nearest enclosing task plus the item's position within that task. The host receives it from [`Event::provenance`](crate::event::Event::provenance) and as the middle element of each tuple in [`Step::Pending::effects`](crate::Step#variant.Pending.field.effects). It can also build one with a struct literal, because both fields are public, or deserialize one. It has no [`Default`].
+[`Provenance`] stamps every effect and event with the nearest enclosing task and the item's place in that task. It is the same on every run of the same prompt with the same inputs and answers, unlike the run-wide [`EffectId`](crate::effect::EffectId), so key replay and cross-run comparison on it. It orders by task path, then by `seq`. Group records by `task`, and sort each group by `seq`. [Group a log by task](#group-a-log-by-task) teaches it.
 
-- [`Provenance::task`], a [`TaskId`], is the task whose chain produced the item. The main walk is task `0`, and a `call` child reports under its parent's task.
-- [`Provenance::seq`], a [`u32`], is the item's position among the task's effects and events. The counter is local to the task and shared by both kinds. Parse events start at `0` under task `0`, and [`RunContext::provenance_start`](crate::RunContext::provenance_start) moves the run's root counter past them.
+- [`Provenance::task`] is the task whose chain emitted the item. The main walk is task `0`, and a `call` child reports its caller's task.
+- [`Provenance::seq`] counts effects and events per task, so events alone skip numbers. Parse events start task `0` at 0; the run continues only with [`RunContext::provenance_start`](crate::RunContext::provenance_start).
 
-Trait impls:
+## TaskId
 
-- serde gives a JSON object with its keys in declaration order, `"task"` as the path string, then `"seq"` as a number: `{"task":"0.2","seq":7}`.
-- [`Ord`] compares [`Provenance::task`] first, then [`Provenance::seq`]. So task `0.2` at sequence `7` sorts before task `0.3` at sequence `0`.
+[`TaskId`] names one task by the id of the chain that runs it, wrapped so a task-keyed table cannot take an arbitrary chain by mistake. Use it to key tables or APIs by task, such as fetching one task's events. It displays, serializes, and orders exactly as its chain id does. Parsing fails with [`ParseIdError`] under the same rules as [`ChainId`]; check that the text is a dotted path such as `0.2`. [Group a log by task](#group-a-log-by-task) teaches it.
 
-## TaskOrigin
-
-[`TaskOrigin`] is the principal that started a task. The host receives it in [`Event::TaskStarted::origin`](crate::event::Event#variant.TaskStarted.field.origin). It can also name a variant, convert a tag with [`TaskOrigin::from_tag`], or deserialize one. It is `#[non_exhaustive]` and has no [`Default`].
-
-- [`TaskOrigin::Author`]: the prompt's author started the task with `tasks.spawn`, or with `fanout` over it. If the task is still live when its owner ends normally, the owner's chain fails with the `tasks_live` error. Treat that failure as a defect in the prompt.
-- [`TaskOrigin::Model`]: the model started the task with its `task` tool. If the task outlives its owner, it is abandoned and reported with an [`AbandonReason`], and the owner's chain does not fail.
-- [`TaskOrigin::tag`] takes `self` and returns the tag as a [`&'static str`](str): `"author"` for [`TaskOrigin::Author`] and `"model"` for [`TaskOrigin::Model`]. The Lua shims and the `tasks.pending` filter use these strings.
-- [`TaskOrigin::from_tag`] takes `tag`, a [`&str`](str) such as one read from a filter or a config file, and returns an [`Option`] of [`TaskOrigin`]. It returns [`Some`] for exactly `"author"` or `"model"`, and [`None`] for anything else. Matching is case-sensitive, so `"Author"` gives [`None`].
-
-It serializes as a lowercase string, the same text as [`TaskOrigin::tag`]. It has no [`Display`](std::fmt::Display) and no [`FromStr`](std::str::FromStr).
+- There is no `root` constructor. Build the main task's id as `TaskId::from(ChainId::root())`, or parse `"0"`.
+- The `From<ChainId>` conversion goes one way only, so keep the chain id yourself if you need it later.
 
 ## AbandonReason
 
-[`AbandonReason`] says how a task's owner ended while the task was still live. The host receives it in [`Event::TaskAbandoned::reason`](crate::event::Event#variant.TaskAbandoned.field.reason) and never builds one, though it can deserialize one. It is `#[non_exhaustive]` and has no [`Default`]. In every case the host logs the event, and it can show [`AbandonReason::why`] to a person.
+[`AbandonReason`] says how a task's owner ended while the task was still live. Abandoned is kept apart from cancelled, because losing an owner and being stopped on purpose are different facts. Show [`AbandonReason::why`] to a person, since the type has no `Display`, and match the variant in code. It is `#[non_exhaustive]`, so a match outside the crate needs a wildcard arm. [Follow a task's life](#follow-a-tasks-life) teaches it.
 
-- [`AbandonReason::OwnerReturned`]: the owner ended normally, with a scalar return or an exhausted walk, without waiting on or cancelling the task. For an author task this case is the `tasks_live` error, and a model task is abandoned quietly. It serializes as `"owner_returned"`.
-- [`AbandonReason::OwnerFailed`]: the owner chain failed while the task was live. It serializes as `"owner_failed"`.
-- [`AbandonReason::ToolLoopExhausted`]: the owner's model and tool loop ran past its round cap. It is a failure kept apart from [`AbandonReason::OwnerFailed`] because the model notice must say that the model's own task outlived the loop that started it. It serializes as `"tool_loop_exhausted"`.
-- [`AbandonReason::OwnerAborted`]: the owner was aborted from outside, by a fatal sibling's fail-fast or by its own owner ending first. It serializes as `"owner_aborted"`.
-- [`AbandonReason::RunTerminated`]: the run itself ended while the task was live, because the host cancelled it or supplied a fatal answer. It serializes as `"run_terminated"`.
+| Variant | Stored as | The task was live when |
+|---|---|---|
+| [`OwnerReturned`](AbandonReason::OwnerReturned) | `owner_returned` | its owner ended normally without waiting on or cancelling it, because a section returned a value or the walk ran past the prompt's last section; an author's task is abandoned this way too, and its owner chain also fails with `tasks_live` |
+| [`OwnerFailed`](AbandonReason::OwnerFailed) | `owner_failed` | its owner failed |
+| [`ToolLoopExhausted`](AbandonReason::ToolLoopExhausted) | `tool_loop_exhausted` | its owner's model-tool loop ran past its round cap |
+| [`OwnerAborted`](AbandonReason::OwnerAborted) | `owner_aborted` | its owner was ended from outside before it finished, because its own owner ended first, or because the owner was a `fanout` task that `fanout` cancelled when another of its tasks failed |
+| [`RunTerminated`](AbandonReason::RunTerminated) | `run_terminated` | the run itself ended, cancelled by the host or ended by a fatal answer, and the run's end stranded it directly; a task started by a stranded task ends with `OwnerAborted` |
 
-[`AbandonReason::why`] takes `self` and returns a [`&'static str`](str) phrase for a trace line or notice:
+- `why` returns the short phrase the task-abandoned trace line renders, such as `the section ended`.
 
-- [`AbandonReason::OwnerReturned`] gives `"the section ended"`.
-- [`AbandonReason::OwnerFailed`] gives `"the owner failed"`.
-- [`AbandonReason::ToolLoopExhausted`] gives `"the tool loop was exhausted"`.
-- [`AbandonReason::OwnerAborted`] gives `"the owner was aborted"`.
-- [`AbandonReason::RunTerminated`] gives `"the run ended"`.
+## TaskOrigin
 
-The engine's model-facing notice uses the same phrase, as `Task id={task} (## {target}) was abandoned: {why}`. [`AbandonReason`] has no [`Display`](std::fmt::Display) and no [`FromStr`](std::str::FromStr).
+[`TaskOrigin`] names who started a task, beside the task's id wherever the task is reported: [`Author`](TaskOrigin::Author), through `tasks.spawn` and `fanout`, or [`Model`](TaskOrigin::Model), through the model's `task` tool. Both are abandoned with `TaskAbandoned` when they outlive their owner, but only an author's task also turns the owner chain's result into the `tasks_live` error. It has no `FromStr` or `Display`, and is `#[non_exhaustive]`, so add a wildcard arm. [Follow a task's life](#follow-a-tasks-life) teaches it.
 
+- [`TaskOrigin::tag`] returns `author` or `model`, the same strings it serializes as.
+- [`TaskOrigin::from_tag`] returns `None` for anything but those exact lowercase strings, without trimming, so pass the exact tag.

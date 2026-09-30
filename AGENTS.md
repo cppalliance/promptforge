@@ -75,6 +75,7 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - Docs: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`; user guide: `cargo xtask site --books-only`. Rustdoc lints are not covered by clippy; never skip the docs gate.
 - Facade docs: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`, without `--all-features`, so the facade's docs build with default features.
 - Facade surface: `cargo +<pinned nightly> xtask api --check`, where the pinned nightly is the one named in `crates/build-xtask/src/api/toolchain.rs`; on any other toolchain it fails at once, naming the nightly it needs. It checks that every path a surface item's signature, fields, bounds, impls, or doc links name is a facade re-export (or std, core, alloc, or an allowlisted crate), that no surface doc text names an internal crate, and that the surface listing matches the committed `crates/promptforge/public-api.txt`.
+- Facade pages: a change that adds, moves, renames, or removes a public item of a facade crate (`promptforge` or `harness`) runs `tools/cicerone.md` in update mode for that crate before merge. A plan never defers a facade's pages to later work.
 - Boundary and structural harness: `cargo test -p build-xtask`.
 
 ## Structural Rules
