@@ -5,6 +5,9 @@ use gateway_config::WhisperBackend;
 use super::{ArchiveKind, ArchiveRef, WhisperAsset};
 
 pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
+    // The sha256 pin is filled in once the whisper-lib-b4938 release holds
+    // the archive; until then the row is fail-closed (the pin can never
+    // match, so the download is refused rather than trusted).
     WhisperAsset {
         os: "windows",
         arch: "x86_64",
@@ -75,6 +78,9 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         },
         library_name: "libwhisper.so",
     },
+    // The sha256 pin is filled in once the whisper-lib-b4938 release holds
+    // the archive; until then the row is fail-closed (the pin can never
+    // match, so the download is refused rather than trusted).
     WhisperAsset {
         os: "linux",
         arch: "x86_64",
