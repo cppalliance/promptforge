@@ -2599,6 +2599,7 @@ dependencies = [
  "harness-runner",
  "harness-sessions",
  "promptforge",
+ "tokio",
  "workspace-hack",
 ]
 

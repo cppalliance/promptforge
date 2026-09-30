@@ -45,6 +45,7 @@ pub mod log {
 pub mod vfs {
     #![doc = include_str!("vfs.md")]
 
+    pub use promptforge::vfs::Origin;
     pub use promptforge::vfs::VfsError;
     pub use promptforge::vfs::VfsRef;
 }

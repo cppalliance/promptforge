@@ -20,5 +20,10 @@ harness-sessions.workspace = true
 promptforge.workspace = true
 workspace-hack.workspace = true
 
+# The doc examples run a host on tokio, as a real host does; the facade's
+# own items name no tokio type.
+[dev-dependencies]
+tokio = { workspace = true, features = ["signal"] }
+
 [lints]
 workspace = true
