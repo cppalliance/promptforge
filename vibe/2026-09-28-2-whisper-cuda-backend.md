@@ -533,7 +533,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - Nothing else in the code changes. The plan's re-export, which moves the pins after merge, rides in this step's commit.
 - Checks: the seven-row coverage test and the selection tests pass unchanged, because the comments change no behavior. As the last step of its component, it runs the full suite.
 
-### Step 9: Require the CUDA runtime DLLs in the Windows CUDA package
+### Step 9: Require the CUDA runtime DLLs in the Windows CUDA package [completed]
 
 - In `.github/workflows/whisper-lib.yml`, the `windows-x86_64-cuda` branch of `Package Windows runtime` checks, after it copies the CUDA runtime DLLs, that the bundle holds a `cudart64_*.dll`, a `cublas64_*.dll`, and a `cublasLt64_*.dll`. A missing one throws `<pattern> missing from the runtime bundle`, the message the step's `ggml*.dll` check already uses.
 - The copy still searches the toolkit with `-ErrorAction SilentlyContinue`, so the check is what turns a missing DLL into a failed row instead of a bundle without it.

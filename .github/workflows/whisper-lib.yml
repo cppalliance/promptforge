@@ -146,11 +146,13 @@ jobs:
               Split-Path ($compiler -split "=", 2)[1] -Parent
             }
             $cudaRoot = Split-Path $cudaBin -Parent
-            @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll") |
-              ForEach-Object {
-                Get-ChildItem $cudaRoot -Recurse -Filter $_ -File -ErrorAction SilentlyContinue |
-                  ForEach-Object { Copy-Item $_.FullName package -Force }
+            foreach ($runtime in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+              Get-ChildItem $cudaRoot -Recurse -Filter $runtime -File -ErrorAction SilentlyContinue |
+                ForEach-Object { Copy-Item $_.FullName package -Force }
+              if (-not (Get-ChildItem package -Filter $runtime)) {
+                throw "$runtime missing from the runtime bundle"
               }
+            }
           }
           Copy-Item whisper.cpp\include\whisper.h package
           Copy-Item whisper.cpp\LICENSE package
