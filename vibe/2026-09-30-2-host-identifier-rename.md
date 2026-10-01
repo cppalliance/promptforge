@@ -28,7 +28,7 @@ todos:
     status: completed
   - id: s9-final
     content: "Step 9: full gates plus the headless gateway check, identifier residual and sense checks, push, update the PR #104 description"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -267,7 +267,7 @@ Commit: "Rename DOM container and test-helper names in the UIs".
   - `crates/harness-internal/log/src/error.rs`: the local `engine` (`:126-128`, `:158-160`, a `turso::Error`) becomes `database`; "its engine cause" (`:130`) and "the engine cause" (`:134`) say "database cause"; the test names become `the_database_variant_reaches_the_database_error_through_the_log_wrapper` (`:125`) and `the_database_wrapper_hands_back_the_database_error_it_wraps` (`:157`).
   - `crates/workshop/workspace/src/workspace_file/tests.rs`: the test name `the_database_variant_reaches_the_engine_error_through_the_shared_wrapper` (`:15`) becomes `the_database_variant_reaches_the_database_error_through_the_shared_wrapper`; "its engine cause" (`:20`), "the engine cause" (`:23`), "an engine failure" (`:79`) and "the engine failure" (`:298`) say "its database cause", "the database cause", "a database failure" and "the database failure".
   - `crates/gateway/app/tests/it/realtime_stt.rs:251` "native engine loads" becomes "the native speech engine loads" (leave `:183`, `base64::engine::`).
-- Retired seeds: in [crates/build-xtask/src/engine_guards.rs](promptforge/crates/build-xtask/src/engine_guards.rs) `RETIRED_SEEDS: [&str; 8]` becomes `[&str; 17]` with `"HostBackend"`, `"HostAccess"`, `"HostRoot"`, `"identity_to_host"`, `"inject_host"`, `"inject_host_with_var"`, `"install_host_apis"`, `"host_injected"`, `"HostGlobal"` added; its doc comment says the list holds the sans-I/O plan's retired names and the names the terminology rename replaced. The existing seed test iterates the array, so no test edit is needed.
+- Retired seeds: in [crates/build-xtask/src/engine_guards.rs](promptforge/crates/build-xtask/src/engine_guards.rs) `RETIRED_SEEDS: [&str; 8]` becomes `[&str; 17]` with `"HostBackend"`, `"HostAccess"`, `"HostRoot"`, `"identity_to_host"`, `"inject_host"`, `"inject_host_with_var"`, `"install_host_apis"`, `"host_injected"`, `"HostGlobal"` added; its doc comment says the list holds the sans-I/O plan's retired names and the names the terminology rename replaced. The seed test `every_seed_is_caught_and_a_seed_confined_to_test_code_passes` iterates the array, but it maps each violation back to a seed with a substring match, so `inject_host` shadows `inject_host_with_var`; its `find` now matches the text `retired symbol {seed} ` (one test line changes).
 - Root `AGENTS.md`, Using the terms (inside `## Definitions`, which the rulebook guard skips): in the "Names defined outside this repository" bullet, "Cargo's host triple" becomes "Cargo's host and target vocabulary"; in the next bullet, drop the sentence "Identifiers that use "host" in another sense, such as `HostBackend`, `RunHost`, and `inject_host`, keep their old names until a rename lands." and end the bullet with "Code names follow the same terms."
 
 Checks: `XTASK`; `CLIPPY-WS`; `cargo nextest run --locked -p gateway-cloud-providers -p build-llama-cuda -p harness-log -p workshop-workspace --all-features`; `npm test` in `crates/workshop` (rulebook guard). Method item 4 for this commit adds the root `AGENTS.md` to its search and covers every old name from Steps 2 to 8.

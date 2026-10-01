@@ -1295,7 +1295,7 @@ fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
 /// ignored.
 fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
     config.workshop().is_some().then_some(
-        "the [workshop] section is deprecated: the gateway hosts no workshop listener \
+        "the [workshop] section is deprecated: the gateway runs no workshop listener \
          (the desktop shell embeds the workshop server itself); its bind and open_browser \
          settings are ignored",
     )
