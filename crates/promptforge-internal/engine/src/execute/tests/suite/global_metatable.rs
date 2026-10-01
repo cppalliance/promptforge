@@ -144,7 +144,7 @@ assert(not (a or b or c or d), 'every assignment is refused')\n\
 assert(captured.argv == nil and captured.prose == nil, 'the author hook never sees argv or prose')\n\
 plain = 'y'\n\
 assert(captured.plain == 'y', 'the author hook sees other globals')\n\
-assert(argv.query == 'x' and prose == 'First.', 'both still read as the host set them')\n\
+assert(argv.query == 'x' and prose == 'First.', 'both still read as the Engine set them')\n\
 ```\n\n\
 Second.\n\n\
 ```lua\n\

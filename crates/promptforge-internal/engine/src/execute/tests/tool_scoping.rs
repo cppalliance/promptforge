@@ -119,8 +119,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     // The H2 `tools.add` lands in the section's tool runtime; the scope
     // snapshot over it includes the added alias.

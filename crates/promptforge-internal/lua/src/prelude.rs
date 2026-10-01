@@ -197,7 +197,7 @@ fn check_collision(
         globals.raw_get::<Value>(name).map_err(Error::lua)?,
         Value::Nil
     ) {
-        "which is already a host global".to_owned()
+        "which is already an Engine global".to_owned()
     } else {
         return Ok(());
     };

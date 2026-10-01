@@ -59,7 +59,7 @@ impl SectionVm {
     /// blocks; the scheduler drives blocks through
     /// [`start_block_coro`](Self::start_block_coro) instead. Store and
     /// `log` reports go to the emitter captured by
-    /// [`install_host_apis`](Self::install_host_apis); a nil or absent
+    /// [`install_engine_globals`](Self::install_engine_globals); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
     /// the chunk may call `call`, `jump`, or `fanout`, those must
     /// already be installed by `install_control_globals`.
@@ -78,8 +78,8 @@ impl SectionVm {
         section: &str,
     ) -> Result<LuaBlockResult> {
         emitter.report(section, lifecycle::LUA_CHUNK_STARTED);
-        if !self.host_injected {
-            let error = Error::Lua("section VM host values have not been injected".to_owned());
+        if !self.values_injected {
+            let error = Error::Lua("section VM Engine values have not been injected".to_owned());
             emitter.report(section, lifecycle::LUA_CHUNK_FAILED);
             return Err(error);
         }
@@ -384,8 +384,8 @@ pub(crate) fn run_chunk(
     section: &str,
 ) -> Result<LuaOutcome> {
     let mut vm = SectionVm::new(&GuardNonce::from_seed(0), emitter, section)?;
-    vm.inject_host(args, sys, access)?;
-    vm.install_host_apis(emitter, section)?;
+    vm.inject_values(args, sys, access)?;
+    vm.install_engine_globals(emitter, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;
     let returned = scalar_return(returned)?;
     let var = vm.var()?;

@@ -19,11 +19,11 @@ fn logs_are_correlated_and_ordered_across_chunks() {
     );
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Gather")
         .expect("section VM must install captured bindings");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Gather")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Gather")
+        .expect("Engine globals must install");
     run_scalar(
         &vm,
         &program("log('prologue checkpoint')"),
@@ -88,7 +88,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
 }
 
 #[test]
-fn compatibility_chunk_logs_interleave_with_host_operations() {
+fn compatibility_chunk_logs_interleave_with_engine_operations() {
     let recorder = Arc::new(Recorder::for_execution("compatibility-run"));
     let observer = recorder.emitter().clone();
     run_chunk(
@@ -218,12 +218,12 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 4)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host injects");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values inject");
     let recorder = Arc::new(Recorder::default());
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Budget")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Budget")
+        .expect("Engine globals must install");
     let program = program(
         "log(string.rep('é', 200))\n\
              log(string.rep('é', 200))\n\
@@ -300,16 +300,16 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
 
 #[test]
 fn installed_log_persists_across_chunks() {
-    // `log` is installed once per section by `install_host_apis`, so a saved
+    // `log` is installed once per section by `install_engine_globals`, so a saved
     // reference stays live for every later chunk in the same VM.
     let recorder = Arc::new(Recorder::default());
     let observer = recorder.emitter().clone();
     let mut vm =
         SectionVm::new(&test_nonce(), &null_emitter(), "Section").expect("VM must construct");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
-    vm.install_host_apis(&observer, "Section")
-        .expect("host APIs must install");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
+    vm.install_engine_globals(&observer, "Section")
+        .expect("Engine globals must install");
     run_scalar(
         &vm,
         &program("saved_log = log; log('first chunk')"),

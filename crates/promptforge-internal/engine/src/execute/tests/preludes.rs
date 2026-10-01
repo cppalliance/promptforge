@@ -169,14 +169,14 @@ fn a_prelude_global_named_like_a_frontmatter_model_alias_fails_the_run() {
 }
 
 #[test]
-fn a_prelude_defining_ui_or_item_collides_on_a_host_that_binds_neither() {
+fn a_prelude_defining_ui_or_item_collides_on_a_run_that_binds_neither() {
     for name in ["ui", "item"] {
         assert_fails_before_any_effect(
             EFFECT_FIRST,
             vec![prelude("acme/reserved", &format!("{name} = {{}}"))],
             &[
                 &format!("capability `acme/reserved`: its prelude defines the global `{name}`"),
-                "which is reserved as a host global",
+                "which is reserved as an Engine global",
             ],
         );
     }

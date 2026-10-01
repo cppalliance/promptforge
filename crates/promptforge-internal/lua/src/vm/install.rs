@@ -69,7 +69,7 @@ impl SectionVm {
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. `log` and `store` are installed once for
     /// the section's whole lifecycle by
-    /// [`install_host_apis`](Self::install_host_apis), which captures a
+    /// [`install_engine_globals`](Self::install_engine_globals), which captures a
     /// clone of the emitter rather than a per-chunk borrow.
     ///
     /// # Errors
@@ -89,12 +89,12 @@ impl SectionVm {
     ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &access)?;
+    /// vm.inject_values("input", &serde_json::json!({ "id": 1 }), &access)?;
     /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn inject_host(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
-        self.inject_host_with_var(args, sys, access, None, Argv::Frozen(None))
+    pub fn inject_values(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
+        self.inject_values_with_var(args, sys, access, None, Argv::Frozen(None))
     }
 
     /// Installs Engine values while seeding `var` from an earlier VM.
@@ -119,7 +119,7 @@ impl SectionVm {
         clippy::similar_names,
         reason = "args and argv are the spec'd global names; the pair is intentional"
     )]
-    pub fn inject_host_with_var(
+    pub fn inject_values_with_var(
         &mut self,
         args: &str,
         sys: &Json,
@@ -127,9 +127,9 @@ impl SectionVm {
         initial_var: Option<&Json>,
         argv: Argv<'_>,
     ) -> Result<()> {
-        if self.host_injected {
+        if self.values_injected {
             return Err(Error::Lua(
-                "section VM host values were already injected".to_owned(),
+                "section VM Engine values were already injected".to_owned(),
             ));
         }
 
@@ -167,14 +167,14 @@ impl SectionVm {
         install_messages(&self.lua, &globals)?;
         install_compactors(&self.lua, &globals)?;
         self.access = Some(Arc::clone(access));
-        self.host_injected = true;
+        self.values_injected = true;
         Ok(())
     }
 
     /// Installs `log` and `store` as persistent globals for the section's
     /// whole lifecycle.
     ///
-    /// Called once after [`inject_host_with_var`](Self::inject_host_with_var).
+    /// Called once after [`inject_values_with_var`](Self::inject_values_with_var).
     /// The closures capture owned strings, a clone of the emitter, and Arc
     /// clones of the log budget counters and the store view, so they stay
     /// valid across every chunk this VM runs without a live [`mlua::Scope`].
@@ -186,9 +186,9 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if Engine values have not been injected or the
     /// globals cannot be installed, or [`Error::Store`] if the handle
     /// declares no store.
-    pub fn install_host_apis(&self, emitter: &Emitter, section: &str) -> Result<()> {
+    pub fn install_engine_globals(&self, emitter: &Emitter, section: &str) -> Result<()> {
         let access = self.access.as_ref().ok_or_else(|| {
-            Error::Lua("section VM host values have not been injected".to_owned())
+            Error::Lua("section VM Engine values have not been injected".to_owned())
         })?;
         install_log(
             &self.lua,
@@ -344,9 +344,9 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if Engine values have not been injected or the
     /// sealed table cannot be installed.
     pub fn re_seal_sys(&self, sys: &Json) -> Result<()> {
-        if !self.host_injected {
+        if !self.values_injected {
             return Err(Error::Lua(
-                "section VM host values were not injected".to_owned(),
+                "section VM Engine values were not injected".to_owned(),
             ));
         }
         let globals = self.lua.globals();

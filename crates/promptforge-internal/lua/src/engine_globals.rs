@@ -1,6 +1,6 @@
 //! Engine globals installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
 
-#[path = "host-store.rs"]
+#[path = "engine_globals-store.rs"]
 mod store;
 
 use std::fmt::Write as _;

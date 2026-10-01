@@ -139,8 +139,8 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
 /// names: a guarded Engine global, an Engine table, a Lua base function, and a
 /// Lua keyword (quoted so YAML keeps `true` a string).
 const RESERVED_SAMPLES: [(&str, &str); 5] = [
-    ("argv", "a host global"),
-    ("store", "a host global"),
+    ("argv", "an Engine global"),
+    ("store", "an Engine global"),
     ("pairs", "a Lua standard-library global"),
     ("end", "a Lua keyword"),
     ("true", "a Lua keyword"),

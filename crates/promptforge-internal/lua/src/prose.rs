@@ -97,7 +97,7 @@ where
             })?;
             guard.clone().ok_or_else(|| {
                 mlua::Error::external(Error::Lua(
-                    "section VM host values have not been injected".to_owned(),
+                    "section VM Engine values have not been injected".to_owned(),
                 ))
             })?
         };

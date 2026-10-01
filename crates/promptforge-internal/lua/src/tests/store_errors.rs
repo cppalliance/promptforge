@@ -16,10 +16,10 @@ fn shared_load_store_failure_caught_by_pcall_carries_the_reason_tag() {
     );
     let access = fresh_access();
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &access)
-        .expect("host values must inject");
-    vm.install_host_apis(&null_emitter(), "Test")
-        .expect("host APIs must install");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
+    vm.install_engine_globals(&null_emitter(), "Test")
+        .expect("Engine globals must install");
     vm.install_coro_shims(1).expect("coro shims must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("the shared library must load");

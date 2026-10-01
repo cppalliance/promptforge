@@ -19,8 +19,8 @@ fn argv_vm(argv: Option<&Json>, writable: bool) -> SectionVm {
     } else {
         Argv::Frozen(argv)
     };
-    vm.inject_host_with_var("", &json!({}), &fresh_access(), None, argv)
-        .expect("host must inject");
+    vm.inject_values_with_var("", &json!({}), &fresh_access(), None, argv)
+        .expect("values must inject");
     vm
 }
 

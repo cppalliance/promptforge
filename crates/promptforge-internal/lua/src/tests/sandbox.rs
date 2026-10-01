@@ -15,8 +15,8 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("section VM must not expose direct output");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(
         &vm,
         &program("assert(print == nil); assert(warn == nil)"),

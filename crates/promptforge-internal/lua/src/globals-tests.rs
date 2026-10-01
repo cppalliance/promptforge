@@ -46,10 +46,10 @@ fn section_vm(argv: Argv<'_>) -> SectionVm {
             .acquire(promptforge_vfs::Origin::new("globals test fixture"))
             .expect("the stock backend acquires"),
     );
-    vm.inject_host_with_var("", &json!({ "id": 1 }), &access, None, argv)
-        .expect("host values inject");
-    vm.install_host_apis(&emitter, SECTION)
-        .expect("the host APIs install");
+    vm.inject_values_with_var("", &json!({ "id": 1 }), &access, None, argv)
+        .expect("Engine values inject");
+    vm.install_engine_globals(&emitter, SECTION)
+        .expect("the Engine globals install");
     vm.install_scheduler_control_globals(|_| {
         Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
     })
@@ -92,7 +92,7 @@ fn assert_guards_hold(vm: &SectionVm, after: &str) {
     assert_eq!(
         (query.as_str(), prose.as_str()),
         ("papers", PROSE),
-        "argv and prose read as the host set them after {after}"
+        "argv and prose read as the Engine set them after {after}"
     );
     let (argv_refusal, prose_refusal) = assignment_refusals(vm);
     assert_eq!(
@@ -398,7 +398,7 @@ return table.concat(out, '\\n')";
 }
 
 #[test]
-fn sealed_host_values_keep_their_metatable_protection() {
+fn sealed_engine_values_keep_their_metatable_protection() {
     let vm = frozen_vm();
     let (sys_label, argv_label, sys_refusal, var_refusal): (String, String, String, String) = eval(
         &vm,
@@ -441,7 +441,7 @@ fn the_compiler_refuses_each_reserved_keyword_as_a_name_and_takes_every_other_en
                 assert!(compiles("global declared"), "`global` opens a declaration");
             }
             Reserved::LuaKeyword => assert!(!as_local, "`{name}` is a keyword"),
-            Reserved::HostGlobal | Reserved::LuaGlobal => {
+            Reserved::EngineGlobal | Reserved::LuaGlobal => {
                 assert!(as_local, "`{name}` is an ordinary Lua name");
             }
         }
@@ -450,7 +450,7 @@ fn the_compiler_refuses_each_reserved_keyword_as_a_name_and_takes_every_other_en
 
 #[test]
 fn reserved_name_classifies_whole_case_sensitive_names_only() {
-    assert_eq!(reserved_name("store"), Some(Reserved::HostGlobal));
+    assert_eq!(reserved_name("store"), Some(Reserved::EngineGlobal));
     assert_eq!(reserved_name("pairs"), Some(Reserved::LuaGlobal));
     assert_eq!(reserved_name("end"), Some(Reserved::LuaKeyword));
     for name in ["Store", "stores", "input", "search", ""] {

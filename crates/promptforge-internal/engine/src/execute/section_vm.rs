@@ -100,7 +100,7 @@ pub(crate) struct SectionVmSetup<'a> {
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
 /// The sequence is fixed and shared: Engine injection with the driver's
-/// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
+/// [`VmSeed`], [`SectionVm::install_engine_globals`], the `item` global when the
 /// seed includes one, the control surface
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
 /// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
@@ -136,8 +136,8 @@ where
     } else {
         crate::lua::Argv::Frozen(setup.argv)
     };
-    vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
-    vm.install_host_apis(setup.emitter, setup.section_name)?;
+    vm.inject_values_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
+    vm.install_engine_globals(setup.emitter, setup.section_name)?;
     if let Some(snapshot) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(snapshot))?;
     }

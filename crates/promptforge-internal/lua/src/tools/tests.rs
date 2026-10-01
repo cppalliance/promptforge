@@ -279,8 +279,8 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
     let observer = crate::tests::recording::null_emitter();
     let mut vm =
         SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host injection cannot fail");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("value injection cannot fail");
     vm.install_coro_shims(24)
         .expect("the shim prelude installs");
     let (call_is_function, bare_is_nil): (bool, bool) = vm

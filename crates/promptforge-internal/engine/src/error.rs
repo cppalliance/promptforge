@@ -195,7 +195,7 @@ pub(crate) enum Error {
 
     /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
-    /// (for example "host values have not been injected" or a poisoned mutex).
+    /// (for example "Engine values have not been injected" or a poisoned mutex).
     ///
     /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
     /// retains that cause as a private source. The message is the specific

@@ -46,7 +46,7 @@ fn builder_vm() -> SectionVm {
         SECTION,
     )
     .expect("the bench VM builds");
-    vm.inject_host(
+    vm.inject_values(
         "",
         &json!({}),
         &std::sync::Arc::new(
@@ -55,7 +55,7 @@ fn builder_vm() -> SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("host injection installs the messages namespace");
+    .expect("value injection installs the messages namespace");
     vm
 }
 

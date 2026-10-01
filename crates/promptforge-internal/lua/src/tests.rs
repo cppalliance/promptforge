@@ -274,8 +274,8 @@ fn section_vm_with_shared(
     section: &str,
 ) -> Result<SectionVm> {
     let mut vm = SectionVm::new(&test_nonce(), emitter, section)?;
-    vm.inject_host(args, &json!({}), access)?;
-    vm.install_host_apis(emitter, section)?;
+    vm.inject_values(args, &json!({}), access)?;
+    vm.install_engine_globals(emitter, section)?;
     vm.replay_shared(shared, emitter, section)?;
     Ok(vm)
 }
@@ -285,10 +285,10 @@ fn section_vm_with_shared(
 fn shim_vm(cancel: Option<promptforge_types::cancel::CancelHandle>) -> SectionVm {
     let emitter = null_emitter();
     let mut vm = SectionVm::new(&test_nonce(), &emitter, "Loop").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
-    vm.install_host_apis(&emitter, "Loop")
-        .expect("host APIs must install");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
+    vm.install_engine_globals(&emitter, "Loop")
+        .expect("Engine globals must install");
     vm.install_scheduler_control_globals(|_| {
         Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
     })

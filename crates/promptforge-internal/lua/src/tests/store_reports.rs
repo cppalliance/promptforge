@@ -18,11 +18,11 @@ fn store_exists_reports_its_pair_from_the_shared_library() {
     let recorder = Arc::new(Recorder::default());
     let mut vm =
         SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
-    vm.inject_host("", &json!({}), &access)
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Shared")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Shared")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, recorder.emitter(), "Shared")
         .expect("the shared library must load");
     vm.teardown(recorder.emitter(), "Shared");
@@ -48,11 +48,11 @@ fn store_exists_reports_its_pair_from_the_shared_library() {
     let recorder = Arc::new(Recorder::default());
     let mut vm =
         SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
-    vm.inject_host("", &json!({}), &failing_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &failing_access())
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Shared")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Shared")
+        .expect("Engine globals must install");
     vm.replay_shared(&failing_shared, recorder.emitter(), "Shared")
         .expect("the pcall-caught failure must not abort the load");
     vm.teardown(recorder.emitter(), "Shared");

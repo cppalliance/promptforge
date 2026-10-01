@@ -67,9 +67,9 @@ fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
     let outcome = (|| {
         let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Loop")?;
         vm.set_cancel(handle);
-        vm.inject_host("", &json!({}), &fresh_access())?;
+        vm.inject_values("", &json!({}), &fresh_access())?;
         let observer = null_emitter();
-        vm.install_host_apis(&observer, "Loop")?;
+        vm.install_engine_globals(&observer, "Loop")?;
         let result = run_scalar(&vm, &program("while true do end"), &null_emitter(), "Loop");
         vm.teardown(&null_emitter(), "Loop");
         result

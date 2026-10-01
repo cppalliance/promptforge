@@ -23,8 +23,8 @@ fn two_fresh_section_vms_yield_the_same_key_order() {
     let order = |section: &str| -> Vec<String> {
         let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), section)
             .expect("section VM construction cannot fail");
-        vm.inject_host("", &json!({}), &fresh_access())
-            .expect("host values must inject");
+        vm.inject_values("", &json!({}), &fresh_access())
+            .expect("Engine values must inject");
         let keys: Vec<String> = vm
             .lua()
             .load(source)
@@ -63,10 +63,10 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         .write("seed.txt", b"seeded")
         .expect("the memory store can seed a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("input", &json!({ "id": 7 }), &access)
-        .expect("host values must inject");
-    vm.install_host_apis(&null_emitter(), "Test")
-        .expect("host APIs must install");
+    vm.inject_values("input", &json!({ "id": 7 }), &access)
+        .expect("Engine values must inject");
+    vm.install_engine_globals(&null_emitter(), "Test")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("shared program must run with the full environment");
 
@@ -98,25 +98,25 @@ fn section_vm_preserves_one_environment_across_all_phases() {
 }
 
 #[test]
-fn section_vm_requires_delayed_single_host_injection() {
+fn section_vm_requires_delayed_single_value_injection() {
     let no_op = program("return args");
     let access = fresh_access();
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
 
     let error = run_scalar(&vm, &no_op, &null_emitter(), "Test")
-        .expect_err("programs cannot run before host injection");
+        .expect_err("programs cannot run before value injection");
     assert!(error.to_string().contains("not been injected"));
 
-    vm.inject_host("first", &json!({}), &access)
+    vm.inject_values("first", &json!({}), &access)
         .expect("first injection must succeed");
     let error = vm
-        .inject_host("second", &json!({}), &access)
-        .expect_err("host values cannot be replaced");
+        .inject_values("second", &json!({}), &access)
+        .expect_err("Engine values cannot be replaced");
     assert!(error.to_string().contains("already injected"));
 }
 
 #[test]
-fn section_vm_host_injection_bypasses_shared_global_metatables() {
+fn section_vm_value_injection_bypasses_shared_global_metatables() {
     // Engine values inject before the shared replay, and the captured alias
     // globals raw-set after it, so a metatable the shared library installs on
     // `_G` intercepts neither.
@@ -143,11 +143,11 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("private input", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("private input", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("shared program must run");
     vm.install_captured_bindings()
@@ -167,11 +167,11 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     let read = program("return store.read('state.txt')");
     let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Gather").expect("VM must build");
-    vm.inject_host("private input", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("private input", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Gather")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Gather")
+        .expect("Engine globals must install");
 
     run_scalar(&vm, &write, recorder.emitter(), "Gather").expect("first chunk write must run");
     run_scalar(&vm, &read, recorder.emitter(), "Gather").expect("second chunk read must run");
@@ -206,8 +206,8 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         ("return nil", None),
     ] {
         let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-        vm.inject_host("", &json!({}), &access)
-            .expect("host values must inject");
+        vm.inject_values("", &json!({}), &access)
+            .expect("Engine values must inject");
         assert_eq!(
             run_scalar(&vm, &program(source), &null_emitter(), "Test")
                 .expect("scalar return must work")
@@ -217,8 +217,8 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
     }
 
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &access)
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
     let error = run_scalar(&vm, &program("return {}"), &null_emitter(), "Test")
         .expect_err("table returns must be refused");
     assert!(error.to_string().contains("cannot return a table"));
@@ -262,11 +262,11 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let recorder = Arc::new(Recorder::default());
     let mut vm =
         SectionVm::new(&test_nonce(), recorder.emitter(), "Gather").expect("VM must build");
-    vm.inject_host("private input", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("private input", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Gather")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Gather")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, recorder.emitter(), "Gather")
         .expect("shared program must run");
     run_scalar(&vm, &prologue, recorder.emitter(), "Gather").expect("prologue must run");
@@ -301,11 +301,11 @@ fn section_lifecycle_failures_report_their_phase() {
     let failing_shared = program("error('private shared failure')");
     let mut vm =
         SectionVm::new(&test_nonce(), recorder.emitter(), "Shared").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Shared")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Shared")
+        .expect("Engine globals must install");
     vm.replay_shared(&failing_shared, recorder.emitter(), "Shared")
         .expect_err("shared execution must fail");
     vm.teardown(recorder.emitter(), "Shared");

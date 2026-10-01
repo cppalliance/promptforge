@@ -25,7 +25,7 @@ const STORE_SOURCE: &str = include_str!("__impl_store.lua");
 /// The registry key of the store dispatchers' phase table, kept by
 /// [`install_store_table`] so [`route_store_to_shims`] can switch every
 /// dispatcher to the yield shims once the shared library has loaded.
-const STORE_PHASE_REGISTRY: &str = "promptforge.host.store_phase";
+const STORE_PHASE_REGISTRY: &str = "promptforge.engine.store_phase";
 
 /// The store dispatcher program, compiled once and loaded per VM under the
 /// shim programs' failure contract: compiling the bundled source fails

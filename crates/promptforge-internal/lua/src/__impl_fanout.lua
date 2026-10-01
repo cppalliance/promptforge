@@ -9,7 +9,7 @@
 -- `var` data table as a plain deep copy, `helpers` is the prelude's shared
 -- trio (`raise(kind, fields)` builds and raises the structured error
 -- table, `fail(result)` raises an envelope's failure value, and
--- `host_type(value)` names a value's type as the protocol parse would),
+-- `engine_type(value)` names a value's type as the protocol parse would),
 -- `collection_members(collection)` enumerates a collection as `(members)`
 -- or `(nil, message)` - the array part in order, then the hash part as
 -- `{ key, value }` pairs sorted by key - and `render_item(item)` renders a

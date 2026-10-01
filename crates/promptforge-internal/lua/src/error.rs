@@ -47,7 +47,7 @@ impl std::error::Error for SharedSource {
 pub enum Error {
     /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
-    /// (for example "host values have not been injected" or a poisoned mutex).
+    /// (for example "Engine values have not been injected" or a poisoned mutex).
     ///
     /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
     /// retains that cause as a private source. The message is the specific
@@ -209,7 +209,7 @@ impl Error {
     /// the model-facing message with the operation for its wording.
     pub(crate) fn store(op: &crate::protocol::StoreOp, source: promptforge_vfs::VfsError) -> Error {
         Error::Store {
-            message: crate::host::store_error_message(op, &source),
+            message: crate::engine_globals::store_error_message(op, &source),
             source,
         }
     }

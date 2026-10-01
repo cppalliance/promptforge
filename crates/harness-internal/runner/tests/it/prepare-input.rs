@@ -385,7 +385,7 @@ async fn an_alias_named_like_the_user_input_prelude_global_fails_the_run_before_
 }
 
 #[tokio::test]
-async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_host_globals() {
+async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_engine_globals() {
     let dir = tempfile::tempdir().unwrap();
     let log = log().await;
     let declaration = format!("{REQUIRED}tools:\n  ask: promptforge/user-input/ask\n");
@@ -402,7 +402,7 @@ async fn a_normal_alias_for_the_ask_tool_runs_beside_the_untouched_host_globals(
     assert_eq!(
         completed(outcome),
         "hello|ask|function|function|function",
-        "the alias global is the ask tool, and input, store, and tools are the host's"
+        "the alias global is the ask tool, and input, store, and tools are the Engine's"
     );
 }
 

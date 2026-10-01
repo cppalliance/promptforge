@@ -39,16 +39,16 @@ fn section_vm_with_var(var: Option<&serde_json::Value>) -> SectionVm {
     let mut vm =
         SectionVm::new(&GuardNonce::from_seed(7), &emitter, SECTION).expect("the VM builds");
     let argv = json!({ "mode": "argv" });
-    vm.inject_host_with_var(
+    vm.inject_values_with_var(
         "",
         &json!({ "id": 1 }),
         &fresh_access(),
         var,
         Argv::Frozen(Some(&argv)),
     )
-    .expect("host values inject");
-    vm.install_host_apis(&emitter, SECTION)
-        .expect("the host APIs install");
+    .expect("Engine values inject");
+    vm.install_engine_globals(&emitter, SECTION)
+        .expect("the Engine globals install");
     vm.install_scheduler_control_globals(|_| {
         Ok::<Vec<String>, std::convert::Infallible>(Vec::new())
     })
@@ -207,14 +207,14 @@ fn a_prelude_that_assigns_no_global_installs_nothing() {
 }
 
 #[test]
-fn a_global_that_collides_with_a_host_global_fails_naming_both_sides() {
+fn a_global_that_collides_with_an_engine_global_fails_naming_both_sides() {
     let vm = section_vm();
     let message = install_failure(&vm, &[prelude("acme/kit", "store = {}")]);
     assert!(
         message.contains("capability `acme/kit`")
             && message.contains("`store`")
-            && message.contains("host global"),
-        "the collision names the capability, the global, and the host global: {message}"
+            && message.contains("Engine global"),
+        "the collision names the capability, the global, and the Engine global: {message}"
     );
 }
 
@@ -227,7 +227,7 @@ fn a_global_named_tools_store_or_models_is_refused_and_leaves_the_namespace_in_p
         assert!(
             message.contains(&format!(
                 "capability `acme/kit`: its prelude defines the global `{name}`, \
-                 which is reserved as a host global"
+                 which is reserved as an Engine global"
             )),
             "the collision names the capability, the global, and the reservation: {message}"
         );

@@ -300,11 +300,11 @@ fn installed_store_read_honors_line_bounds() {
         .write("a.txt", b"one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &access)
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
 
     let sliced = run_scalar(
         &vm,
@@ -336,11 +336,11 @@ fn installed_store_read_numbered_honors_line_bounds() {
         .write("a.txt", b"one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &access)
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
 
     let numbered = run_scalar(
         &vm,

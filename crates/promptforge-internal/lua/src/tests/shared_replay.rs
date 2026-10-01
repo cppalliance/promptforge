@@ -10,11 +10,11 @@ fn jump_during_shared_replay_is_a_hard_error() {
     // recorded jump fails the replay outright.
     let shared = program("jump('## Anywhere')");
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.install_control_globals(
         |_, _, _| Err(Error::Lua("call is not needed here".to_owned())),
         |_| {
@@ -42,11 +42,11 @@ fn call_with_a_non_string_target_errors() {
     // `resolve_section_target` boundary as the Engine: a number is not a
     // heading, and the error says so.
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.install_control_globals(
         |target, _, _| resolve_section_target(target).map_err(Error::lua),
         |_| {
@@ -97,11 +97,11 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("the tools table must work during the shared replay");
     vm.install_captured_bindings()
@@ -128,7 +128,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
 }
 
 #[test]
-fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
+fn shared_functions_resolve_engine_globals_when_called_from_a_later_chunk() {
     // A shared function body resolves `tools`/`var` through the real globals
     // at call time, so a later chunk can mutate Engine state through it.
     let bindings = ToolSet::for_test(
@@ -154,11 +154,11 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
         "Test",
     )
     .expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.replay_shared(&shared, &null_emitter(), "Test")
         .expect("shared library must load");
     vm.install_captured_bindings()
@@ -171,7 +171,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
             &null_emitter(),
             "Test",
         )
-        .expect("the shared function must mutate host state when called")
+        .expect("the shared function must mutate Engine state when called")
         .as_deref(),
         Some("search")
     );
@@ -189,11 +189,11 @@ fn absent_shared_library_replays_an_empty_chunk_on_the_same_path() {
     // chunk, and reports the same load boundary.
     let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(&test_nonce(), recorder.emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
-    vm.install_host_apis(&observer, "Test")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Test")
+        .expect("Engine globals must install");
     vm.replay_shared(
         &LuaProgram::empty().expect("the empty chunk compiles"),
         recorder.emitter(),

@@ -89,10 +89,10 @@ fn every_global_section_setup_leaves_in_g_is_a_reserved_name() {
             assert!(
                 matches!(
                     reserved_name(&name),
-                    Some(Reserved::HostGlobal | Reserved::LuaGlobal)
+                    Some(Reserved::EngineGlobal | Reserved::LuaGlobal)
                 ),
                 "section setup (argv writable: {argv_writable}) installs the global `{name}`, \
-                 which RESERVED_NAMES does not list as a host or Lua global; list it there"
+                 which RESERVED_NAMES does not list as an Engine or Lua global; list it there"
             );
         }
     }

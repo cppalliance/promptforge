@@ -90,7 +90,7 @@ fn a_failure_envelope_raises_a_table_holding_the_kind_and_fields() {
 }
 
 #[test]
-fn a_host_callback_failure_caught_by_pcall_is_the_same_error_table() {
+fn an_engine_callback_failure_caught_by_pcall_is_the_same_error_table() {
     // An Engine call that fails directly from Rust - no envelope, no shim
     // raise - reaches the author's `pcall` as the same `{ kind, message }`
     // table: `kind` is readable at every call site, and `tostring` is the

@@ -15,8 +15,8 @@ fn filled_slots_record_exact_aliases_descriptions_identities_and_always_scope() 
     ));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
         .expect("the section VM builds over the shared set");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(
         &vm,
         &program("tools.always('web_search')"),
@@ -52,8 +52,8 @@ fn always_records_a_model_description_override() {
     ));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
         .expect("the section VM builds over the shared set");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(
         &vm,
         &program("tools.always('web_fetch2', 'always override')"),
@@ -76,8 +76,8 @@ fn tool_handles_are_frozen() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     let error = run_scalar(
         &vm,
         &program("search.description = 'x'"),
@@ -97,8 +97,8 @@ fn bound_slot_globals_are_inspectable_tool_objects() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("section install must expose the inspectable Tool object");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(
         &vm,
         &program(
@@ -127,8 +127,8 @@ fn scoping_validates_aliases_exactly() {
         let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
         let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
             .expect("captured bindings must install");
-        vm.inject_host("", &json!({}), &fresh_access())
-            .expect("host must inject");
+        vm.inject_values("", &json!({}), &fresh_access())
+            .expect("values must inject");
         let error = run_scalar(
             &vm,
             &program(&format!("tools.add({alias:?})")),
@@ -147,8 +147,8 @@ fn scoping_validates_aliases_exactly() {
         let bindings = fixture_set(&[(valid, "a capability", "search")], &[]);
         let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
             .expect("captured bindings must install");
-        vm.inject_host("", &json!({}), &fresh_access())
-            .expect("host must inject");
+        vm.inject_values("", &json!({}), &fresh_access())
+            .expect("values must inject");
         run_scalar(
             &vm,
             &program(&format!("tools.add({valid:?})")),
@@ -165,8 +165,8 @@ fn tools_bind_is_gone_from_every_section() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     let gone = run_scalar(
         &vm,
@@ -195,8 +195,8 @@ fn always_rejects_an_unbound_alias_and_is_idempotent() {
     let set = shared_set(fixture_set(&[("search", "search the web", "search")], &[]));
     let mut vm = section_vm_with_set(&set, &null_emitter(), "Section")
         .expect("the section VM builds over the shared set");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     let error = run_scalar(
         &vm,
         &program("tools.always('missing')"),
@@ -239,8 +239,8 @@ fn section_scope_closes_to_always_then_added() {
     let prologue = program("tools.add({'fetch', 'search'})");
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section").expect("section additions must record");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
@@ -267,8 +267,8 @@ fn tools_add_accepts_tool_objects_and_arrays() {
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
@@ -298,8 +298,8 @@ fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("caught failed add must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
@@ -332,8 +332,8 @@ fn add_rejects_misshapen_override_arguments() {
     );
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     run_scalar(&vm, &prologue, &null_emitter(), "Section")
         .expect("rejected override forms must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
@@ -357,8 +357,8 @@ fn unknown_scoped_alias_fails_before_scope_closure() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Section")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     let error = run_scalar(
         &vm,
         &program("tools.add('missing')"),
@@ -388,8 +388,8 @@ fn captured_bindings_are_installed_without_payload_reports() {
     let recorder = Recorder::default();
     let mut vm = section_vm_with_bindings(&bindings, recorder.emitter(), "Section")
         .expect("captured binding installation must succeed");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
     let trace = format!("{:?}", recorder.observations());
     assert!(!trace.contains("private_alias"));
     assert!(!trace.contains("private capability"));
@@ -409,8 +409,8 @@ fn add_without_declarations_fails_as_unbound_in_a_chunk() {
 #[test]
 fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let error = run_scalar(
         &vm,
         &program("tools.add('web_search')"),
@@ -430,8 +430,8 @@ fn add_with_empty_frozen_bindings_fails_as_unbound() {
     let bindings = ToolSet::default();
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Test")
         .expect("empty captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let error = run_scalar(
         &vm,
         &program("tools.add('web_search')"),
@@ -451,8 +451,8 @@ fn add_with_an_override_argument_records_the_model_description() {
     let bindings = fixture_set(&[("search", "search the web", "search")], &[]);
     let mut vm = section_vm_with_bindings(&bindings, &null_emitter(), "Test")
         .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     run_scalar(
         &vm,
         &program("tools.add('search', 'Search the web for pages matching a query.')"),
@@ -473,8 +473,8 @@ fn add_with_an_override_argument_records_the_model_description() {
 #[test]
 fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host values must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("Engine values must inject");
     let (bindings, runtime) = vm.tool_bag_handles().expect("the bag snapshots");
     let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
     assert!(scope.is_empty());

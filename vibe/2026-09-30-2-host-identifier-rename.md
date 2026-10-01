@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: s4-lua
     content: "Step 4: rename the Lua Engine-globals names (inject_values, install_engine_globals, EngineGlobal, engine_globals module, engine_type helper, registry key), messages, Lua-sense test names, strings and fixture names, and the guide quote"
-    status: pending
+    status: completed
   - id: s5-test-harness
     content: "Step 5: rename RunHost, run_with_host, run_host, test_support/host.rs, the host locals across the engine crate (scripted, with a keep list), the Harness-sense test names and strings, and the Harness-sense facade doctest lines"
     status: pending

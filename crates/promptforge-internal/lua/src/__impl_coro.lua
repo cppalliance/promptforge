@@ -39,7 +39,7 @@ local math_type = math.type
 -- Lua folds integers and floats into "number", while the Engine names an
 -- integer "integer" and a float "number", so a shim-raised argument error
 -- reads exactly as the parse-raised one for the same value.
-local function host_type(value)
+local function engine_type(value)
   if math_type(value) == "integer" then return "integer" end
   return type(value)
 end
@@ -272,7 +272,7 @@ local function models_loop(...)
   if compactor == nil then
     compactor = compactors.fail
   elseif type(compactor) ~= "function" then
-    raise("lua", { message = "compactor must be a function, got " .. host_type(compactor) })
+    raise("lua", { message = "compactor must be a function, got " .. engine_type(compactor) })
   end
   -- Answered dispatches: any call that received a result record, a tool's
   -- own failure included, counts toward the clean-exit rule.
@@ -405,7 +405,7 @@ return {
   -- The failure helpers, handed to the `tasks` and `fanout` chunks
   -- (`__impl_tasks.lua`, `__impl_fanout.lua`) so their shims raise the one
   -- error shape this prelude defines.
-  helpers = { raise = raise, fail = fail, host_type = host_type },
+  helpers = { raise = raise, fail = fail, engine_type = engine_type },
   infer = infer,
   loop = models_loop,
   model_tool_call = tools_call_as_model,

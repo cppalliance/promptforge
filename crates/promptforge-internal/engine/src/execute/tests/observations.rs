@@ -321,7 +321,7 @@ async fn an_erroring_section_tears_down_exactly_once_without_finishing() {
 }
 
 #[tokio::test]
-async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
+async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
     // mlua accepts the one-byte ceiling itself, then the first Engine
     // allocation fails. Engine injection is inside the section's teardown
     // boundary, unlike the preceding bare apply_lua_limits call.
@@ -349,7 +349,7 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
                 "Only".to_owned(),
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string()
             )),
-        "host injection failure must fire both teardown observations: {observed:?}"
+        "value injection failure must fire both teardown observations: {observed:?}"
     );
 }
 

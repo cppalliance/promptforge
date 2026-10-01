@@ -122,9 +122,11 @@ pub(crate) use iteration::install_deterministic_iteration;
 mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
-mod host;
-pub use host::install_ui;
-pub(crate) use host::{install_log, install_store_table, install_untrusted, route_store_to_shims};
+mod engine_globals;
+pub use engine_globals::install_ui;
+pub(crate) use engine_globals::{
+    install_log, install_store_table, install_untrusted, route_store_to_shims,
+};
 mod tools;
 pub(crate) use tools::{LuaToolHandle, install_tool_call_counts, install_tools};
 mod handles;
@@ -151,9 +153,9 @@ pub use coro::{install_section_loop_shim, install_store_shims};
 pub use dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
+pub use engine_globals::{run_store_op, store_error_message};
 pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
 pub use handles::{LuaBlockResult, ToolBinding, ToolOutputKind, ToolSet, ToolView};
-pub use host::{run_store_op, store_error_message};
 pub use models::ModelRuntime;
 pub use prelude::install_preludes;
 pub use projection::project_messages;

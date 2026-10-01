@@ -96,7 +96,7 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_non_function_compactor_is_the_calls_error_in_the_hosts_type_names() {
+async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names() {
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.

@@ -181,7 +181,7 @@ fn builder_output_parses_through_the_protocol_like_a_raw_array() {
 }
 
 #[test]
-fn host_validation_still_rejects_a_bad_builder_record() {
+fn engine_validation_still_rejects_a_bad_builder_record() {
     // The builders validate nothing: a record missing its content fails in
     // the protocol parse, exactly as the same hand-written array does.
     let lua = lua_with_messages();
@@ -207,8 +207,8 @@ fn the_builders_run_under_the_hardened_section_sandbox() {
     let observer = crate::tests::recording::null_emitter();
     let mut vm =
         SectionVm::new(&nonce, &observer, "Test").expect("section VM construction cannot fail");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host injection cannot fail");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("value injection cannot fail");
     let json: serde_json::Value = vm
         .lua()
         .load("return messages.new():system('s'):user('u')")

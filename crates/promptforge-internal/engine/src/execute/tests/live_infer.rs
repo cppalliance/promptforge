@@ -89,9 +89,9 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_function_resolves_host_globals_when_called() {
-    let source = "---\nname: shared-host\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Host\n\n\
+async fn shared_function_resolves_engine_globals_when_called() {
+    let source = "---\nname: shared-globals\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Shared Globals\n\n\
         ```lua shared\n\
         function read_args() return args end\n\
         ```\n\n\
@@ -99,21 +99,22 @@ async fn shared_function_resolves_host_globals_when_called() {
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "later host value", to_context(silent())).await
+    let RunResult::Ok(out) =
+        env_run(&env, &prompt, "later canned value", to_context(silent())).await
     else {
-        panic!("shared function must resolve host globals when called");
+        panic!("shared function must resolve Engine globals when called");
     };
 
-    assert_eq!(out, "later host value");
+    assert_eq!(out, "later canned value");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_library_calls_host_apis_at_load_time() {
+async fn shared_library_calls_engine_globals_at_load_time() {
     // The shared library replays as each section's first chunk with every
     // Engine global installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
-    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Host Load\n\n\
+    let source = "---\nname: shared-globals-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Shared Globals Load\n\n\
         ```lua shared\n\
         store.write('loaded.txt', args)\n\
         log('shared loaded')\n\
@@ -135,7 +136,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     let RunResult::Ok(out) =
         crate::test_support::run_host(&prompt, "load-time args", ctx, RunHost::new()).await
     else {
-        panic!("top-level shared host calls must succeed");
+        panic!("top-level shared Engine calls must succeed");
     };
 
     assert_eq!(out, "load-time args");

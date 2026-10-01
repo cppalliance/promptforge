@@ -372,7 +372,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     if raw_ids {
         vm.allow_raw_model_ids();
     }
-    vm.inject_host(
+    vm.inject_values(
         "",
         &serde_json::json!({}),
         &std::sync::Arc::new(
@@ -381,7 +381,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("host injection installs the models table");
+    .expect("value injection installs the models table");
     vm
 }
 

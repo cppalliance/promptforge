@@ -129,7 +129,7 @@ fn refusal(lua: &Lua, message: &'static str) -> Result<Function> {
 pub enum Reserved {
     /// A global the Engine installs: on every section VM, or only on some
     /// (`ui` with a Host-state snapshot, `item` in a spawned chain).
-    HostGlobal,
+    EngineGlobal,
     /// A Lua standard-library global the sandbox keeps.
     LuaGlobal,
     /// A Lua 5.5 keyword.
@@ -139,7 +139,7 @@ pub enum Reserved {
 impl fmt::Display for Reserved {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Reserved::HostGlobal => "a host global",
+            Reserved::EngineGlobal => "an Engine global",
             Reserved::LuaGlobal => "a Lua standard-library global",
             Reserved::LuaKeyword => "a Lua keyword",
         })
@@ -154,25 +154,25 @@ impl fmt::Display for Reserved {
 /// section setup tests compare this list against a set-up VM's globals in
 /// both directions.
 pub const RESERVED_NAMES: [(&str, Reserved); 60] = [
-    ("args", Reserved::HostGlobal),
-    ("argv", Reserved::HostGlobal),
-    ("call", Reserved::HostGlobal),
-    ("compactors", Reserved::HostGlobal),
-    ("fanout", Reserved::HostGlobal),
-    ("item", Reserved::HostGlobal),
-    ("jump", Reserved::HostGlobal),
-    ("list_from_section", Reserved::HostGlobal),
-    ("log", Reserved::HostGlobal),
-    ("messages", Reserved::HostGlobal),
-    ("models", Reserved::HostGlobal),
-    ("prose", Reserved::HostGlobal),
-    ("store", Reserved::HostGlobal),
-    ("sys", Reserved::HostGlobal),
-    ("tasks", Reserved::HostGlobal),
-    ("tools", Reserved::HostGlobal),
-    ("ui", Reserved::HostGlobal),
-    ("untrusted", Reserved::HostGlobal),
-    ("var", Reserved::HostGlobal),
+    ("args", Reserved::EngineGlobal),
+    ("argv", Reserved::EngineGlobal),
+    ("call", Reserved::EngineGlobal),
+    ("compactors", Reserved::EngineGlobal),
+    ("fanout", Reserved::EngineGlobal),
+    ("item", Reserved::EngineGlobal),
+    ("jump", Reserved::EngineGlobal),
+    ("list_from_section", Reserved::EngineGlobal),
+    ("log", Reserved::EngineGlobal),
+    ("messages", Reserved::EngineGlobal),
+    ("models", Reserved::EngineGlobal),
+    ("prose", Reserved::EngineGlobal),
+    ("store", Reserved::EngineGlobal),
+    ("sys", Reserved::EngineGlobal),
+    ("tasks", Reserved::EngineGlobal),
+    ("tools", Reserved::EngineGlobal),
+    ("ui", Reserved::EngineGlobal),
+    ("untrusted", Reserved::EngineGlobal),
+    ("var", Reserved::EngineGlobal),
     ("_G", Reserved::LuaGlobal),
     ("_VERSION", Reserved::LuaGlobal),
     ("assert", Reserved::LuaGlobal),

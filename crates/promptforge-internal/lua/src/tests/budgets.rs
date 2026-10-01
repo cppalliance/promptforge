@@ -24,11 +24,11 @@ fn shared_replay_consumes_the_configured_log_budget() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 1)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host injects");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Budget")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Budget")
+        .expect("Engine globals must install");
     let error = vm
         .replay_shared(
             &program("log('one')\nlog('two')"),
@@ -55,11 +55,11 @@ fn the_memory_budget_error_stays_reachable() {
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Budget").expect("VM builds");
     vm.apply_lua_limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
         .expect("limits apply");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host injects");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values inject");
     let observer = null_emitter();
-    vm.install_host_apis(&observer, "Budget")
-        .expect("host APIs must install");
+    vm.install_engine_globals(&observer, "Budget")
+        .expect("Engine globals must install");
     let error = run_scalar(
         &vm,
         &program(

@@ -102,7 +102,7 @@ pub struct SectionVm {
     /// load returns via
     /// [`take_store_conflict`](Self::take_store_conflict).
     store_conflicts: Arc<Mutex<Option<String>>>,
-    host_injected: bool,
+    values_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
     /// Remaining cumulative `log()` message bytes this VM may emit. Bounds total
@@ -266,7 +266,7 @@ impl SectionVm {
     ///
     /// The VM shares the run's (possibly empty) tool and model sets, so the
     /// validating `tools.add` installed by
-    /// [`inject_host_with_var`](Self::inject_host_with_var) rejects every
+    /// [`inject_values_with_var`](Self::inject_values_with_var) rejects every
     /// alias as unbound until prepare's filled slots arrive with the sets.
     ///
     /// # Errors
@@ -312,7 +312,7 @@ impl SectionVm {
             sys_live: Arc::new(Mutex::new(None)),
             access: None,
             store_conflicts: Arc::new(Mutex::new(None)),
-            host_injected: false,
+            values_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
@@ -340,7 +340,7 @@ impl SectionVm {
     ///
     /// The sets are the run's own handles, not snapshots: the frontmatter's
     /// filled slots back the validating `tools`/`models` tables that
-    /// [`inject_host_with_var`](Self::inject_host_with_var) installs and the
+    /// [`inject_values_with_var`](Self::inject_values_with_var) installs and the
     /// bare alias globals that
     /// [`install_captured_bindings`](Self::install_captured_bindings)
     /// installs after the shared replay, and the prompt-wide facts a section
@@ -374,7 +374,7 @@ impl SectionVm {
     /// passes a Host-state snapshot (`RunContext::ui`): `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
     ///
-    /// Must be called before [`inject_host_with_var`](Self::inject_host_with_var),
+    /// Must be called before [`inject_values_with_var`](Self::inject_values_with_var),
     /// whose H2 `models` table install reads the flag. A run without a
     /// snapshot never calls it, so it keeps strict declared-alias
     /// resolution.

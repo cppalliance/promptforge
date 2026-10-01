@@ -72,8 +72,8 @@ fn tool_description_override_appears_in_model_schema() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     // tools.add(alias) with no override keeps the bound tool's catalog text.
     let add_default = LuaProgram::compile(
@@ -146,8 +146,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     let add_plain = LuaProgram::compile(
         "tools.add('echo')",

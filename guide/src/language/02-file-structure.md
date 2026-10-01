@@ -337,7 +337,7 @@ These are exactly the globals of a section VM before any capability adds its own
 {kind} `{key}` in `{map}` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name
 ````
 
-Here `{kind}` is `tool alias` or `model role label`, `{map}` is `tools` or `models`, and `{category}` is `a host global`, `a Lua standard-library global`, or `a Lua keyword`. So `store: promptforge/web/fetch` under `tools:` fails with ``tool alias `store` in `tools` is reserved (a host global): ...``. Arg names are not checked against this list, because they name fields of `argv` rather than globals: `args:` may declare `prose` or `store`.
+Here `{kind}` is `tool alias` or `model role label`, `{map}` is `tools` or `models`, and `{category}` is `an Engine global`, `a Lua standard-library global`, or `a Lua keyword`. So `store: promptforge/web/fetch` under `tools:` fails with ``tool alias `store` in `tools` is reserved (an Engine global): ...``. Arg names are not checked against this list, because they name fields of `argv` rather than globals: `args:` may declare `prose` or `store`.
 
 One name also cannot be both a tool alias and a model role label, because both would install the same global. Such a pair fails the parse with parse error kind `Frontmatter` and this message, which names the first shared name in sorted order. Unlike the errors above, it reports no line or column:
 

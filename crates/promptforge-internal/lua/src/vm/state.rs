@@ -34,15 +34,15 @@ impl SectionVm {
     ///     vfs.acquire(promptforge_vfs::Origin::new("vm example"))?,
     /// );
     /// let mut vm = SectionVm::new(&nonce, &emitter, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &access)?;
+    /// vm.inject_values("", &serde_json::json!({}), &access)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&emitter, "Example");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn var(&self) -> Result<Json> {
-        if !self.host_injected {
+        if !self.values_injected {
             return Err(Error::Lua(
-                "section VM host values have not been injected".to_owned(),
+                "section VM Engine values have not been injected".to_owned(),
             ));
         }
         var_to_json(&self.lua)
