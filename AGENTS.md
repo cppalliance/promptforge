@@ -22,6 +22,7 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 - Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host triple and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
 - Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Identifiers that use "host" in another sense, such as `HostBackend`, `RunHost`, and `inject_host`, keep their old names until a rename lands.
 - Quotations of people stay verbatim.
+- `crates/workshop/ui/test/docs-claims.mjs` enforces these rules in every `AGENTS.md`, every `## Invariants` crate doc, and every `.cursor/rules` file.
 
 ## Principles
 
