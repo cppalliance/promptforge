@@ -291,7 +291,7 @@ fn mkdir_creates_directories_and_rejects_existing_paths() -> Result<(), VfsError
 fn mkdir_without_recursive_requires_an_existing_parent() -> Result<(), VfsError> {
     let mut access = seeded(&[])?;
     // The error names the target path, not a sentence about its
-    // parent, matching the host backend's own NotFound spelling.
+    // parent, matching the real-filesystem backend's own NotFound spelling.
     assert_eq!(
         access.mkdir(&path("/a/b")?, false),
         Err(VfsError::NotFound {

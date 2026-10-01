@@ -41,7 +41,7 @@ isProject: false
 - Success criteria:
   - Only four approved structural rules remain: Gateway cannot depend on Workshop, PromptForge cannot depend on Gateway or Workshop, Gateway cannot depend on PromptForge, and Workshop cannot depend on Gateway.
   - Product and behavior suites remain green after structural enforcement is removed.
-  - The Gateway build script passes warnings-denied Clippy on non-Windows hosts without a lint exemption.
+  - The Gateway build script passes warnings-denied Clippy on non-Windows machines without a lint exemption.
   - Direct-launch races produce one process owner and no losing-process canonical log mutation.
   - Reconnect accepts same-item-ID reuse while rejecting stale-generation work.
   - Supervisor shutdown returns `Joined`, `Panicked`, or `Detached` within one absolute deadline and prevents late publication.
@@ -147,11 +147,11 @@ isProject: false
 - `crates/workshop/AGENTS.md`: keep bridge unsafe confinement, boot failure behavior, degraded runtime handling, detached Gateway launch, shell ownership limits, quit semantics, and programmatic window capability.
 - `crates/workshop/icons/AGENTS.md`: keep master-to-derived icon synchronization and protection of hand-crafted installer assets; remove regeneration recipes.
 - `crates/workshop-server/AGENTS.md`: keep two-zone errors, embedding hygiene, loopback binding, opaque Realtime relay, socket ownership, durable and ephemeral delivery, disconnect cleanup, typed state, asset behavior, and bounded shutdown; remove ceilings, file-layout rules, test topology, and stale asset claims.
-- `crates/workshop-server/ui/AGENTS.md`: keep one-way layer ownership, composition-root state injection, and the Workshop-specific Cursor surface target; remove walker enumeration, source pinning, test discovery, and harness instructions.
+- `crates/workshop-server/ui/AGENTS.md`: keep one-way layer ownership, composition-root state injection, and the Workshop-specific Cursor surface target; remove walker enumeration, source pinning, test discovery, and test-support instructions.
 - `crates/shared-ui/AGENTS.md`: keep token ownership, base-layer direction, cross-product primitive criteria, component lifecycle, focus behavior, and third-party notices; remove package narration and enforcement references.
 - `crates/shared-sidecar/AGENTS.md`: keep sole connection-file ownership, synchronous runtime independence, unsafe confinement, loopback probe authority, and stale-deletion ownership.
 - `crates/shared-protocol/AGENTS.md`: keep OpenAI wire and upstream abstraction ownership apart from local inference, routing, handlers, and Gateway-local concepts.
-- `crates/shared-progress/AGENTS.md`: keep bottom-of-graph placement, host-owned forwarding, producer and renderer separation, lossy intermediate versus terminal delivery, time-based weights, and additive serialization.
+- `crates/shared-progress/AGENTS.md`: keep bottom-of-graph placement, caller-owned forwarding, producer and renderer separation, lossy intermediate versus terminal delivery, time-based weights, and additive serialization.
 - `crates/promptforge/AGENTS.md`: keep the facade-only dependency and API vocabulary boundary.
 - `crates/promptforge-core/AGENTS.md`: keep verbatim historical re-exports, provider ownership, private write scope, and dependency direction.
 - `crates/promptforge-core-support/AGENTS.md`: keep report-only observation, explicit read-side history, bottom-of-graph placement, byte-identical run envelopes, and closed control-markup inventory.
@@ -178,7 +178,7 @@ isProject: false
   - Winner termination followed by relaunch proves operating-system dead-owner recovery.
 - Logging changes are limited to `crates/gateway-logging/src/redact.rs` and duplicated fault support in `queue.rs`, `worker.rs`, and `writer.rs`:
   - Preserve pre-format field classification, final-output redaction, queue and shutdown accounting, bounded settlement, detached loss, stall handling, rename rotation, crash recovery, segment naming, pruning, and disk limits.
-  - Any consolidated harness must retain direct write, flush, rename, sync, crash, recovery, and release injection.
+  - Any consolidated fault-injection support must retain direct write, flush, rename, sync, crash, recovery, and release injection.
 - Native runner provisioning is external to the repository:
   - One checked-in PowerShell script validates only `PROMPTFORGE_RUST_1_89_0_BIN`; it performs no discovery or installation.
   - The workflow invokes the script before cache restoration.
@@ -320,7 +320,7 @@ isProject: false
   - Rust: `cargo test -p <crate> <test-name-filter>`. Integration suites are named by their crate test target and expose module and test-name filters, so a focused plan step should name both the package and behavior filter.
   - JavaScript and TypeScript: run `node <path-to-test.mjs>` for one test module, or `npm test` from the owning UI directory for that UI's complete Node test set.
 - Full-suite test command:
-  - No single repository command covers every supported product and platform. `cargo test -p '*'` is the full Rust workspace test command on a host with the Workshop prerequisites and staged sidecar, while each UI additionally requires `npm run typecheck`, `npm run build`, and `npm test` in its own directory.
+  - No single repository command covers every supported product and platform. `cargo test -p '*'` is the full Rust workspace test command on a machine with the Workshop prerequisites and staged sidecar, while each UI additionally requires `npm run typecheck`, `npm run build`, and `npm test` in its own directory.
   - The authoritative full suite is the CI job matrix: `check`, `ui`, `check-workshop`, `check-workshop-linux`, `msrv`, `supply-chain`, and the STT Miri and package lanes named in this plan. Root `cargo test` alone covers only the default Gateway member.
 - Linter and formatter commands:
   - Rust formatting uses `cargo fmt`; CI and the pre-commit hook check all workspace files.
@@ -328,7 +328,7 @@ isProject: false
   - UI static checks use `npm run typecheck`. The current Workshop UI typecheck also runs its layer checker, while the config UI runs that checker before tests. No separate JavaScript or TypeScript formatter command is configured.
 - Test placement and naming conventions:
   - Rust unit tests live beside production code in `src`, commonly in `tests.rs`, a `tests` module directory, or an inline conditional test module.
-  - Rust integration tests live under `crates/<crate>/tests`. Larger crates use one harness such as `tests/it/main.rs` or `tests/suite/main.rs`, with behavior-area modules beneath it; smaller crates use descriptive top-level files such as `engine_contract.rs` and `startup_cleanup.rs`.
+  - Rust integration tests live under `crates/<crate>/tests`. Larger crates use one test root such as `tests/it/main.rs` or `tests/suite/main.rs`, with behavior-area modules beneath it; smaller crates use descriptive top-level files such as `engine_contract.rs` and `startup_cleanup.rs`.
   - Shared integration fixtures live in `tests/common`; opt-in native and hardware proofs use ignored tests or feature and platform gates.
   - UI tests are Node ESM modules. Workshop UI tests are primarily `ui/test/*.mjs` with some source-adjacent `*.test.mjs`; config UI tests are source-adjacent `ui/src/**/*.test.mjs`.
 - Directory map:
@@ -348,7 +348,7 @@ isProject: false
   - Store: `promptforge-store` owns the run-scoped virtual filesystem boundary and has no product dependency.
   - Executor and library: the `promptforge-*` crates parse Markdown, run sandboxed Lua and model turns, dispatch tools, observe runs, and expose the `promptforge` facade. They consume store and shared abstractions and remain independent of Gateway and Workshop product crates.
   - Gateway: the `gateway*` crates form a separate server process that owns credentials, configuration, routing, remote providers, local inference, logging, speech, and Gateway UI serving. Gateway product crates do not depend on PromptForge or Workshop product crates.
-  - Workshop: `workshop` is the Tauri shell, `workshop-server` hosts the in-process API, and `crates/workshop-server/ui` is the authoring UI. Workshop attaches to the Gateway through shared protocol and sidecar facilities; Workshop product crates do not depend on Gateway product crates.
+  - Workshop: `workshop` is the Tauri shell, `workshop-server` serves the in-process API, and `crates/workshop-server/ui` is the authoring UI. Workshop attaches to the Gateway through shared protocol and sidecar facilities; Workshop product crates do not depend on Gateway product crates.
   - UI substrate: `crates/shared-ui` supplies TypeScript and CSS primitives to both embedded UIs without becoming a Rust workspace member.
   - Build tooling: `build-*` crates and `tools/` support compilation, guide generation, sidecar staging, packaging, and CI and are linked into no shipped runtime except during build.
   - Dependency direction is therefore build tooling into build outputs, product crates into shared substrate, and product-specific shells into their internal components, with the four cross-product prohibitions defined by this plan.
@@ -466,7 +466,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 
 - Limit production edits to `crates/gateway-logging/src/redact.rs` and shared fault support used by `queue.rs`, `worker.rs`, and `writer.rs`. Do not split modules, redesign queue ownership, change the public API, or add dependencies.
 - Keep structured credential classification before formatting and the bounded final-output pass. Preserve queue ordering, byte accounting, exact loss, bounded settlement, detached loss, stall handling, rotation rename and sync behavior, crash recovery, segment naming, pruning, and disk limits.
-- Consolidate only duplicated test fault injection when the resulting harness still reaches direct write, flush, rename, sync, crash, recovery, and release boundaries.
+- Consolidate only duplicated test fault injection when the resulting test support still reaches direct write, flush, rename, sync, crash, recovery, and release boundaries.
 - Run focused `gateway-logging` redaction, queue, worker, writer, rotation, recovery, disk-budget, and shutdown tests, including every retained fault boundary. Commit the characterized simplification without unrelated cleanup.
 
 </step-5>
@@ -481,7 +481,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Extend `crates/shared-sidecar/src/lock.rs`, `crates/shared-sidecar/tests/it/main.rs`, `crates/gateway/src/main/logging_tests.rs`, `crates/gateway/tests/it/support.rs`, `crates/gateway/tests/it/boot.rs`, and fixtures under `crates/workshop-server/src/test_gateway`.
 - Add deterministic real-process cases for direct versus direct, Workshop launch versus direct, dead-owner relaunch, and bounded cleanup. Prove one owner, no losing-process log mutation, no `LaunchLock` deadlock, and operating-system dead-owner recovery on Windows and Linux.
 - Run focused shared-sidecar, Gateway boot, relaunch, handoff, diagnostics, logging, and process-race tests.
-- Component boundary: run the Gateway and shared-sidecar focused suites on Windows and a Unix host, including all real-process races. Do not run the complete repository suite. Commit the lease API, startup integration, fixtures, and race proof together without directly editing either architecture record.
+- Component boundary: run the Gateway and shared-sidecar focused suites on Windows and a Unix machine, including all real-process races. Do not run the complete repository suite. Commit the lease API, startup integration, fixtures, and race proof together without directly editing either architecture record.
 
 </step-6>
 

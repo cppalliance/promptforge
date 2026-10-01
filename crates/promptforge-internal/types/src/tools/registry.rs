@@ -1,4 +1,4 @@
-//! The host-supplied [`ToolCatalog`] of tool descriptors and the catalog's
+//! The Harness-supplied [`ToolCatalog`] of tool descriptors and the catalog's
 //! construction error.
 
 use std::sync::Arc;
@@ -6,10 +6,10 @@ use std::sync::Arc;
 use super::descriptor::ToolDescriptor;
 use super::ids::{ToolId, validate_identifier};
 
-/// The host-supplied catalog of the tools a run may bind, as descriptors.
+/// The Harness-supplied catalog of the tools a run may bind, as descriptors.
 ///
-/// The host assembles the catalog from its activated capabilities and keeps
-/// the implementations in a table of its own: the engine fills its tool
+/// The Harness assembles the catalog from its activated capabilities and
+/// keeps the implementations in a table of its own: the Engine fills its tool
 /// slots against the descriptors and never holds an implementation.
 /// Construction rejects a repeated [`ToolId`] or a transport-illegal wire
 /// name, so the bind-phase [`get`](Self::get) lookup trusts the invariant

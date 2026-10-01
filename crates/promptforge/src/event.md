@@ -4,11 +4,11 @@ You need this page when you keep a run log, show a transcript, or debug a model'
 
 # Where this fits
 
-The host loop in [Run a prompt](crate#run-a-prompt) already receives events from [`Prompt::parse`](crate::Prompt::parse) and [`Run::step`](crate::Run::step), and sets them aside. This page shows what to do with them. An [event](crate) is a record of something that happened during a run, for your log. Recording every event, or none, never changes what a run does.
+The Harness loop in [Run a prompt](crate#run-a-prompt) already receives events from [`Prompt::parse`](crate::Prompt::parse) and [`Run::step`](crate::Run::step), and sets them aside. This page shows what to do with them. An [event](crate) is a record of something that happened during a run, for your log. Recording every event, or none, never changes what a run does.
 
 # Log a run's events
 
-Your host runs prompts, and you want a log of everything that happened in each parse and run, one JSON line per event.
+Your Harness runs prompts, and you want a log of everything that happened in each parse and run, one JSON line per event.
 
 Events feel like [`tracing`](https://docs.rs/tracing/latest/tracing/) events: records you can keep or drop without touching your program's logic. Unlike `tracing`, there is no global subscriber. The parse and every step hand the events back to you as values. Each one reports something that already happened, and the run never reads it back. That report is an [`Event`], and every event carries three coordinates: `execution`, the run's name; `section`, the scope that reported it; and `provenance`, its [task](crate::ids) and its position, `seq`, in that task's order.
 
@@ -84,7 +84,7 @@ assert!(matches!(quiet, RunResult::Ok(text) if text == "hello world"));
 ````
 
 1. This is the store-only greeter from the crate page, whose Lua writes `hello ` joined with the run's argument and returns what it reads back. It needs no model or tool, so every event here comes from parsing, the `## Greet` section and its Lua, and the store. [`Prompt::parse`](crate::Prompt::parse) returns its events even when parsing fails, and then they include [`ParseFailed`](Event::ParseFailed). So start the log with them before `parsed?` checks the result, and a failed parse still leaves a record of what was tried.
-2. [`RunContext::new`](crate::RunContext::new) takes the run's name, `"greeter"`, which run events carry as `execution`. Its `7` seeds the marker that wraps untrusted text, so a live host draws it from a secure random source, and its last value is the start time sections read as `sys.when`. Parse events number under task `0` from zero, and so does the run's main walk, so its first events would reuse the parse's `(0, 0)`, `(0, 1)`, and on. Pass the parse's event count to [`RunContext::provenance_start`](crate::RunContext::provenance_start) to prevent that. It moves only task `0`'s start; other tasks count from zero under their own ids. The hidden `drive` helper is the step and answer loop from [Run a prompt](crate#run-a-prompt), handing every step's events to your closure.
+2. [`RunContext::new`](crate::RunContext::new) takes the run's name, `"greeter"`, which run events carry as `execution`. Its `7` seeds the marker that wraps untrusted text, so a live Harness draws it from a secure random source, and its last value is the start time sections read as `sys.when`. Parse events number under task `0` from zero, and so does the run's main walk, so its first events would reuse the parse's `(0, 0)`, `(0, 1)`, and on. Pass the parse's event count to [`RunContext::provenance_start`](crate::RunContext::provenance_start) to prevent that. It moves only task `0`'s start; other tasks count from zero under their own ids. The hidden `drive` helper is the step and answer loop from [Run a prompt](crate#run-a-prompt), handing every step's events to your closure.
 3. [`serde_json::to_string`](https://docs.rs/serde_json/latest/serde_json/fn.to_string.html) writes one event as one flat JSON object. Its `kind` field holds the variant name in snake_case, and the three coordinates, `execution`, `section`, and `provenance`, sit beside the payload fields instead of nested under the variant name. So each event becomes one log line you can filter by `kind`. Reading the line back with [`serde_json::from_str`](https://docs.rs/serde_json/latest/serde_json/fn.from_str.html) gives an event equal to the one you wrote, metrics floats included. The log is a faithful copy you can load into tests and tools.
 4. [`Event::provenance`] works on any event without a match on its variant, and so do [`Event::execution`] and [`Event::section`], because every variant has all three. Your log's task and `seq` columns come from one code path. The set proves that no two lines share a task and `seq` pair across the parse and the run. The second run passes `drop` as its recorder, logs nothing, and still returns `hello world`. Log every event, some, or none, as you like: the run's outputs, errors, and ordering stay the same either way.
 
@@ -304,7 +304,7 @@ Turn capture on only to debug, and guard the bodies like the private text they a
 
 [`DebugMode`] says whether a run captures each model round's raw request and response bodies as [`Event::Request`] and [`Event::Response`]. Use it when you want those bodies in the event stream to debug a model's traffic, and pass it to [`RunContext::report_debug`](crate::RunContext::report_debug). With capture on, treat the bodies as private, since they hold the full prompt unredacted. [Capture raw model traffic](#capture-raw-model-traffic) teaches it.
 
-- `Off`: the default, so most hosts never set it; model rounds emit no `Request` or `Response` events.
+- `Off`: the default, so most Harnesses never set it; model rounds emit no `Request` or `Response` events.
 - `On`: every model round emits its raw request and response bodies.
 
 ## Event
@@ -390,5 +390,5 @@ Turn capture on only to debug, and guard the bodies like the private text they a
 [`ReplyOrigin`] says which path produced one [`Event::AssistantReply`]: a chat turn or an inference round. Read it to tell a user-facing chat turn from a programmatic inference round you may keep out of the conversation. It serializes as a bare snake_case string, `"chat"` or `"infer"`. A stored string this version does not know fails to deserialize, with no fallback; read that log with a version that knows it. [Show a transcript](#show-a-transcript) teaches it.
 
 - `Chat`: the default, filled in when `origin` is missing, so older logs read back as chat replies; the reply belongs in the conversation.
-- `Infer`: a programmatic round from `models.infer`, reported as the same `AssistantReply` variant; the host may treat it apart.
+- `Infer`: a programmatic round from `models.infer`, reported as the same `AssistantReply` variant; the Host may treat it apart.
 

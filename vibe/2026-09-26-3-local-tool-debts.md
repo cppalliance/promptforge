@@ -22,7 +22,7 @@ All paths are relative to the `promptforge` repository root.
   - Analysis limits:
     - No repository code was executed; every consequence is traced from reading code.
     - The 1,662-entry commit log was searched by keyword rather than read end to end.
-    - Of the hosts in this repository, only the workshop host was checked.
+    - Of the Hosts in this repository, only Workshop was checked.
 - Cleanup goals:
   - Remove DEBT-LTC-C1, the one debt the target introduced.
   - Remove DEBT-LTC-X1 and DEBT-LTC-X2.
@@ -55,7 +55,7 @@ All paths are relative to the `promptforge` repository root.
     - Line 399 says to scope ids by turn, because providers recycle ids.
     - The target plan's own rationale for the frame stack was to keep the reported turn correct when a handler runs model rounds.
   - Impact:
-    - A host that pairs results with requests by turn and id, as the event contract instructs, cannot find later results under turn N. It either misses them or attaches them to the wrong request when a nested loop reused an id.
+    - A Host that pairs results with requests by turn and id, as the event contract instructs, cannot find later results under turn N. It either misses them or attaches them to the wrong request when a nested loop reused an id.
     - The workshop server forwards the wrong turn (`crates/workshop/server/src/agents/wire.rs` lines 268-276). The workshop UI appends result rows in arrival order and never pairs by turn (`crates/workshop/ui/src/services/agent-session.ts` lines 321-327), so it shows a wrong turn stamp but nothing visibly breaks.
     - The model-facing message list is unaffected.
   - Reversal cost: small and internal. The protocol types live in the unpublished `promptforge-lua` crate, they do not appear in `crates/promptforge/public-api.txt`, and nothing about them is persisted.
@@ -63,7 +63,7 @@ All paths are relative to the `promptforge` repository root.
 - DEBT-LTC-X1 (exposed pre-existing, in scope at the operator's request): a handler can still jump by saving a reference to `jump` first.
   - Mechanism:
     - `run_local_tool` withholds `jump` only by swapping the global name through `swap_jump` (`crates/promptforge-internal/lua/src/__impl_coro.lua` lines 119-135; `crates/promptforge-internal/lua/src/coro.rs` lines 267 onward).
-    - The real `jump` is one Rust host function that resolves the target, writes the VM's `jump_slot`, and raises the transfer marker, with no check for a running handler (`crates/promptforge-internal/lua/src/vm.rs` lines 595-609).
+    - The real `jump` is one Rust Engine function that resolves the target, writes the VM's `jump_slot`, and raises the transfer marker, with no check for a running handler (`crates/promptforge-internal/lua/src/vm.rs` lines 595-609).
     - `step_block_coro` honors a recorded slot whenever the block finishes, and `start_block_coro` clears it only when a block starts.
   - Consequence:
     - After `local j = jump` at block level, `j('## Other')` inside a handler records a jump. The event log reports it as `TOOL_CALL_FAILED`.
@@ -202,15 +202,15 @@ All paths are relative to the `promptforge` repository root.
     - Consequence: one more shim-produced field, in the same style as `call_id`. Nested loops and `call` children report correctly with no restore step.
     - Verification: the main regression test and its variants.
   - DEBT-LTC-C1: script calls keep reading the live counter, because no round requested them. A missing `turn` also falls back to the live counter, so the test-only `tools.call_as_model` hook keeps working.
-  - DEBT-LTC-X1: the refusal is a plain host error, not a structured error kind. The caller sees it the same way as any other handler failure: `TOOL_CALL_FAILED`, and the value raised again at the call site.
+  - DEBT-LTC-X1: the refusal is a plain Engine-call error, not a structured error kind. The caller sees it the same way as any other handler failure: `TOOL_CALL_FAILED`, and the value raised again at the call site.
 - User-resolved architecture choices:
   - Bring DEBT-LTC-X1 and DEBT-LTC-X2 into scope. User's words: "I think you should add them both in. unless you have a good reason not to?"
   - DEBT-LTC-X1: make `jump` throw while a handler runs. User's words: "jump should be handled by temporarily replacing it with a version that throws an error."
-    - Adopted as the behavior, with one change: the throw lives inside the real `jump` host function, gated by `local_handler_depth`, instead of in a stand-in placed on the global.
+    - Adopted as the behavior, with one change: the throw lives inside the real `jump` Engine function, gated by `local_handler_depth`, instead of in a stand-in placed on the global.
     - Reason: a stand-in on the global misses any reference saved before the handler runs, and a saved reference is exactly the bypass. Guarding the one real function covers the global and every saved reference, and lets `swap_jump` be deleted.
   - DEBT-LTC-X2: fix the contract doc rather than the behavior. This was the recommended option, and the operator put X2 in scope without choosing a different one.
-    - It keeps the decision recorded on 2026-09-18 and changes nothing hosts observe.
-    - Switch to the behavior change listed below if hosts need a result for every call.
+    - It keeps the decision recorded on 2026-09-18 and changes nothing Hosts observe.
+    - Switch to the behavior change listed below if Hosts need a result for every call.
 - Rejected alternatives:
   - DEBT-LTC-C1: a frame-level "batch turn" slot that the chat arm sets and each closing local call restores from `LocalCall.report`.
     - Rejected because it adds mutable frame state whose correctness depends on the order of restores, and it would break silently if a future suspending call ran rounds without restoring.
@@ -225,8 +225,8 @@ All paths are relative to the `promptforge` repository root.
   - DEBT-LTC-X1: a documentation-only fix.
     - Rejected because it leaves a rule with a known bypass.
   - DEBT-LTC-X2: emitting a `ToolResult` with failure text for failed model-issued local calls.
-    - Rejected because it reverses the 2026-09-18 decision and changes the event stream every host sees.
-    - Revisit if a host needs a result for every call.
+    - Rejected because it reverses the 2026-09-18 decision and changes the event stream every Host sees.
+    - Revisit if a Host needs a result for every call.
 - Assumptions and risks:
   - Every consequence was traced from code, never executed. The new regression tests are the first things that run them.
   - Hosts outside this repository were not inspected. Their exposure is inferred from the facade event contract.
@@ -252,7 +252,7 @@ All paths are relative to the `promptforge` repository root.
   - Workshop trio: `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, then `cargo nextest run --locked -p workshop-server --features headless`, then `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`.
   - A UI package (`crates/workshop/ui` or `crates/gateway/config-ui/ui`): `npm run typecheck`, `npm run build`, then `npm test`, in that order, because the jsdom tests read the `dist/` bundle the build writes.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then the three workshop trio commands above.
-  - The workspace run includes `build-xtask`, the boundary and structural harness (alone: `cargo test -p build-xtask`), which checks the tier graph, the `## Invariants` marker, lint inheritance, the 500-line ceiling, and the product-boundary matrix.
+  - The workspace run includes `build-xtask`, the boundary and structural checks (alone: `cargo test -p build-xtask`), which checks the tier graph, the `## Invariants` marker, lint inheritance, the 500-line ceiling, and the product-boundary matrix.
   - UI partition, when TypeScript or CSS changes: the three npm commands in both UI directories.
   - `tools/*.test.mjs` use `node:test` and no workflow runs them; run one with `node --test tools/<script>.test.mjs` when that script changes. `tools/gateway-tts-live.mjs` itself is a dev-only live probe that builds the gateway and needs `TOGETHER_API_KEY`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop trio: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`.
@@ -286,7 +286,7 @@ All paths are relative to the `promptforge` repository root.
   - Root files: `Cargo.toml` (members, `[workspace.dependencies]`, lints), `AGENTS.md` (repository policy and verification gates), `deny.toml`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml` (stable), `dist-workspace.toml` (cargo-dist, gateway Linux installers only), `gateway.local.example.toml`, `LICENSE` (BSL-1.0).
   - Local only and gitignored: `local/` (operator profiles, prompts, stores, gateway config, STT fixtures), `target/`, `target-msrv/`.
 - Component boundaries:
-  - Runtime shape: the executor (`promptforge-engine`) is a sans-I/O state machine with no I/O and no clock, driven through `Run::new`, `step`, `resume`, and `cancel`. The harness is its only production host and owns the tokio runtime, the effect performers, sessions, and the Turso run log. The gateway is a separate server process that owns model routing and vendor credentials. The Workshop drives sessions through `harness-api` and attaches over the gateway protocol. `vibe/archdoc.md` also lists a CLI component, but no CLI crate or binary exists in the workspace.
+  - Runtime shape: the executor (`promptforge-engine`) is a sans-I/O state machine with no I/O and no clock, driven through `Run::new`, `step`, `resume`, and `cancel`. The Harness, its only production caller, steps it and owns the tokio runtime, the effect performers, sessions, and the Turso run log. The gateway is a separate server process that owns model routing and vendor credentials. The Workshop drives sessions through `harness-api` and attaches over the gateway protocol. `vibe/archdoc.md` also lists a CLI component, but no CLI crate or binary exists in the workspace.
   - PromptForge: `promptforge` is the one public crate, a facade over `crates/promptforge-internal/` whose surface is committed in `crates/promptforge/public-api.txt`. Inside, the engine depends on lua, parser, store, model-client, types, and vfs; parser on lua and types; lua on store, model-client, and types; store on vfs; model-client on types; types and vfs on nothing. The family depends on no gateway, workshop, or harness crate.
   - Harness: `harness-api` is the only public surface over `crates/harness/`. Harness crates may depend on `promptforge`, the gateway public pair, and shared-* crates, never on workshop or private gateway crates, and spawn tasks only through `harness-runner`'s instrumented wrapper.
   - Gateway: the public pair is `gateway-api-types` (types only) and `gateway-api-discovery` (discovery file, launch lock, health probe); everything else is private under `crates/gateway/`, and the STT subsystem exposes only `gateway-stt` to the rest of the family. Gateway crates depend on no promptforge, workshop, or harness crate.
@@ -370,7 +370,7 @@ All paths are relative to the `promptforge` repository root.
 - Piece: one piece. The counter, the guard, the new captures, and the removal of `swap_jump` cannot compile or behave correctly apart, so they are built jointly.
 - Artifacts:
   - `SectionVm` in `crates/promptforge-internal/lua/src/vm.rs` gains `local_handler_depth: Arc<AtomicU32>`, next to `jump_slot` (field near line 88), shared with its closures.
-  - `install_jump_global` (`vm.rs` lines 595-609) checks the counter first. While it is above zero, the function returns a plain host error without resolving the target or writing `jump_slot`. The message is written for a model to read: "jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns".
+  - `install_jump_global` (`vm.rs` lines 595-609) checks the counter first. While it is above zero, the function returns a plain Engine-call error without resolving the target or writing `jump_slot`. The message is written for a model to read: "jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns".
   - In `crates/promptforge-internal/lua/src/coro.rs` (lines 148, 182, 196, 267 onward), the `swap_jump` capture is replaced by `enter_local_handler` and `leave_local_handler`. `SectionVm::install_coro_shims` builds them over the same counter and passes them into `install_shim_prelude`.
   - `run_local_tool` in `__impl_coro.lua` calls `enter_local_handler()`, then `raw_pcall(handler, args)`, then `leave_local_handler()`, and never touches the global `jump`. Update the prelude header comments that describe `swap_jump`.
   - Guide: extend the handler sentence in `guide/src/language/07-tools.md` line 66 to say that calling `jump` from a handler raises an error, even through a saved reference. Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`, never by hand.

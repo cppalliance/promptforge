@@ -7,7 +7,7 @@ use super::*;
 
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope includes them
-/// without an H1 pass; the implementations go to the driver's host table.
+/// without an H1 pass; the implementations go to the Harness's tool table.
 fn arm_tool_set(
     ctx: &RunState,
     host: RunHost,

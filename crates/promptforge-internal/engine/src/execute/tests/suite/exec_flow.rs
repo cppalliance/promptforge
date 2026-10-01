@@ -1,9 +1,9 @@
-//! Section walk control flow over the offline harness: `call`, `jump`,
+//! Section walk control flow over the offline fixtures: `call`, `jump`,
 //! `fanout`, `list_from_section`, and `var`. The in-crate cases reached the
 //! private `run`/`fixture`/`TestStore`/`silent`/`run_offline` helpers through
 //! `use super::*`; the moved cases keep their assertions and are rebuilt on
-//! the suite's `run_fixture` runner through the thin offline harness below.
-//! Each submodule holds one topic and reaches that harness through `super`.
+//! the suite's `run_fixture` runner through the thin fixture support below.
+//! Each submodule holds one topic and reaches that support through `super`.
 
 use std::sync::{Arc, Mutex};
 

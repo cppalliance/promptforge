@@ -9,7 +9,7 @@ use rustdoc_types::{
 
 use super::super::items::target;
 
-/// The `core` markers whose impls the listing leaves out: no host can
+/// The `core` markers whose impls the listing leaves out: no consumer can
 /// depend on them, and the nightly-only `TrivialClone` and `UnsafeUnpin`
 /// would churn whenever the pinned nightly moves.
 const OMITTED: [&str; 3] = ["StructuralPartialEq", "TrivialClone", "UnsafeUnpin"];

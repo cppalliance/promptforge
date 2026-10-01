@@ -94,7 +94,7 @@ This is the litmus test for every step here and for the work in section 6: can i
 
 7. **A prompt named after a built-in still fails at boot.** Nothing shadows a tool name any more, so the collision is no longer structural, but "run `check_run`" is ambiguous to a human and to a model, and a boot refusal naming the file is the only version of that a prompt author can act on.
 
-8. **The crate is `promptforge-mcp-server` and the binary matches.** The old name described a protocol; the new one describes a process, which is what it is and what the design documents already call it in prose. The rename reaches the library name (`promptforge_mcp_server`), the binary, `serverInfo.name` (which derives from `CARGO_PKG_NAME`), the test harness's `CARGO_BIN_EXE_*` variable, and the design document's filename.
+8. **The crate is `promptforge-mcp-server` and the binary matches.** The old name described a protocol; the new one describes a process, which is what it is and what the design documents already call it in prose. The rename reaches the library name (`promptforge_mcp_server`), the binary, `serverInfo.name` (which derives from `CARGO_PKG_NAME`), the test support's `CARGO_BIN_EXE_*` variable, and the design document's filename.
 
 9. **Every design document in both repositories says the same true thing when this is done.** A corpus where three documents argue for model selection and the code does the opposite is worse than either position; the argument for rejecting the dispatcher has to be replaced by the argument for accepting it, not merely deleted.
 

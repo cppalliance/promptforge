@@ -116,7 +116,7 @@ Pure mechanical, no route moves, verified by the existing suite.
 ## Step 6 (optional): AppState builder (Finding 8) - GATED
 
 - Same gate as Step 5; their Step 4 edits 12 progress sites in `runner.rs`.
-- Only if the test harness churn from Steps 2 and 4 multiplies `from_parts` calls. Confidence low; `runner.rs` is mostly the serve loop, not assembly.
+- Only if the test fixture churn from Steps 2 and 4 multiplies `from_parts` calls. Confidence low; `runner.rs` is mostly the serve loop, not assembly.
 - Decision: not done. `AppState::from_parts` still has exactly two callers (`runner.rs` and `test_support::state_over`); Steps 2 and 4 added none. The builder would be machinery with no second consumer.
 
 ## Outcome

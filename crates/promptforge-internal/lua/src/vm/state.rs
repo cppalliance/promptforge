@@ -18,7 +18,7 @@ impl SectionVm {
     /// table behind the guarded proxy (not the proxy, which stays empty).
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or `var`
+    /// Returns [`Error::Lua`] if Engine values have not been injected or `var`
     /// cannot be represented as JSON.
     ///
     /// # Examples
@@ -90,7 +90,7 @@ impl SectionVm {
     /// Sets a global in the VM to the Lua form of a JSON value, overwriting
     /// any existing value.
     ///
-    /// Used by fanout to inject `item` after host injection; the conversion
+    /// Used by fanout to inject `item` after Engine injection; the conversion
     /// is the same `LuaSerdeExt` bridge that seeds `var`.
     ///
     /// # Errors

@@ -56,7 +56,7 @@ pub struct BuildOutcome {
 /// Runs the full release build against the real environment and toolchain.
 ///
 /// # Errors
-/// Returns an error when the host is not Windows x86-64, the checkout is
+/// Returns an error when the machine is not Windows x86-64, the checkout is
 /// absent or unrecognized, the CUDA Toolkit is missing or too old, any
 /// build command fails, the dependency closure is incomplete, a CUDA
 /// runtime DLL cannot be found in the toolkit, or the smoke check finds no
@@ -390,7 +390,7 @@ fn pack(
     Ok((zip_path, checksum_path))
 }
 
-/// Full pipeline, with the command seam, environment, and host identity
+/// Full pipeline, with the command seam, environment, and machine identity
 /// injected for tests.
 pub(crate) fn build_with(
     probe: &impl Probe,
@@ -516,7 +516,7 @@ mod tests {
                                   \n\
                                   \x20 Summary\n";
 
-    /// A synthetic Windows host: a llama.cpp checkout, an output directory
+    /// A synthetic Windows machine: a llama.cpp checkout, an output directory
     /// pre-seeded with the tree a real cmake build would emit, and a tool
     /// directory holding fake `nvcc.exe`/`cmake.exe` plus the CUDA runtime
     /// DLL the closure names.

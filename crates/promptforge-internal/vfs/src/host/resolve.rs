@@ -8,18 +8,18 @@ use super::map_io;
 use crate::error::VfsError;
 use crate::path::VfsPath;
 
-/// How virtual paths reach host paths: verbatim, or contained under a
+/// How virtual paths reach real paths: verbatim, or contained under a
 /// canonicalized root.
 #[derive(Debug, Clone)]
 pub(super) enum HostRoot {
-    /// The virtual path is the host path (modulo the Windows drive
+    /// The virtual path is the real path (modulo the Windows drive
     /// letter spelling).
     Identity,
-    /// Chroot-style: the virtual root is this canonical host directory.
+    /// Chroot-style: the virtual root is this canonical real directory.
     Rooted(PathBuf),
 }
 
-/// Translates an identity-mode virtual path to a host path. On Windows
+/// Translates an identity-mode virtual path to a real path. On Windows
 /// the virtual spelling of `C:\Users\x` is `/C:/Users/x`: a leading
 /// slash before a drive letter is stripped.
 #[cfg(windows)]
@@ -31,13 +31,13 @@ pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
     PathBuf::from(virtual_path)
 }
 
-/// Translates an identity-mode virtual path to a host path.
+/// Translates an identity-mode virtual path to a real path.
 #[cfg(not(windows))]
 pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
     PathBuf::from(virtual_path)
 }
 
-/// Translates a host path back to its identity-mode virtual spelling:
+/// Translates a real path back to its identity-mode virtual spelling:
 /// forward slashes, and on Windows a leading slash before a drive
 /// letter (`C:\Users\x` becomes `/C:/Users/x`).
 #[cfg(windows)]
@@ -50,13 +50,13 @@ pub(super) fn identity_to_virtual(host: &Path) -> String {
     spelled
 }
 
-/// Translates a host path back to its identity-mode virtual spelling.
+/// Translates a real path back to its identity-mode virtual spelling.
 #[cfg(not(windows))]
 pub(super) fn identity_to_virtual(host: &Path) -> String {
     host.to_string_lossy().into_owned()
 }
 
-/// Joins a canonical virtual path onto a host root. The virtual path is
+/// Joins a canonical virtual path onto a real directory. The virtual path is
 /// canonical (dot segments resolved at receipt, forward slashes), so
 /// the join cannot escape lexically.
 pub(super) fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
@@ -72,7 +72,7 @@ pub(super) fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
 /// the missing tail is re-appended lexically. This catches link escapes
 /// for existing paths while still resolving paths yet to be created.
 /// A dangling link on the way up is refused: its target cannot be
-/// canonicalized, and the host would follow it when creating.
+/// canonicalized, and the operating system would follow it when creating.
 pub(super) fn contain(
     root: &Path,
     candidate: &Path,

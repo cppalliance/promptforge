@@ -322,9 +322,9 @@ async fn an_erroring_section_tears_down_exactly_once_without_finishing() {
 
 #[tokio::test]
 async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
-    // mlua accepts the one-byte ceiling itself, then the first host allocation
-    // fails. Host injection is inside the section's teardown boundary, unlike
-    // the preceding bare apply_lua_limits call.
+    // mlua accepts the one-byte ceiling itself, then the first Engine
+    // allocation fails. Engine injection is inside the section's teardown
+    // boundary, unlike the preceding bare apply_lua_limits call.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());

@@ -68,7 +68,7 @@ pub struct Manifest {
     pub cmake_options: Vec<String>,
     /// Linkage policy; see [`LINKAGE_POLICY`].
     pub linkage: String,
-    /// External DLL names the runtime host must provide (Windows system
+    /// External DLL names the runtime machine must provide (Windows system
     /// DLLs only; the CUDA runtime ships in the bundle), sorted.
     pub external_dlls: Vec<String>,
     /// Runtime files in the bundle, sorted by name.

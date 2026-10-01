@@ -1,6 +1,6 @@
 # The Lua Environment
 
-Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
+Every `lua` fence in a prompt runs real Lua 5.5, with the Harness's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the Harness without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
 
 ## The sandbox and its globals
 
@@ -40,9 +40,9 @@ The run result is:
 HELLO
 ````
 
-### Host globals
+### Engine globals
 
-On top of the sandbox, the runtime installs host globals in every section VM, with nothing to import. These are always present:
+On top of the sandbox, the runtime installs Engine globals in every section VM, with nothing to import. These are always present:
 
 - `args`, `argv`, `sys`, `var`, and `prose`
 - `log`
@@ -51,7 +51,7 @@ On top of the sandbox, the runtime installs host globals in every section VM, wi
 - `call`, `jump`, `fanout`, and `list_from_section`
 - `tasks`
 
-Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. None of those ever replaces a host global or a sandbox library global: a label or alias that names one fails the parse ([Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels)), and a capability global that names one fails the run before it does anything. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
+Four more appear only when they apply. `ui` is present when the Host supplies a Host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. None of those ever replaces an Engine global or a sandbox library global: a label or alias that names one fails the parse ([Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels)), and a capability global that names one fails the run before it does anything. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
 
 ### Blocks, sections, and section VMs
 
@@ -59,7 +59,7 @@ A section VM is the fresh Lua instance a section runs in ([How the shared librar
 
 That gives you two rules to write by:
 
-- All blocks of one section run in the same section VM, so state set in one block is still there in every later block of that section. That covers globals you define, `var` fields, and saved references to host globals, including anything set while the shared library loaded.
+- All blocks of one section run in the same section VM, so state set in one block is still there in every later block of that section. That covers globals you define, `var` fields, and saved references to Engine globals, including anything set while the shared library loaded.
 - A plain global set in one section reads as nil in the next. Of all the Lua values, only `var` passes from one section to the next.
 
 This prompt shows both rules. The two blocks of `## First` share a plain global, and `## Second` sees only what went through `var`:
@@ -113,7 +113,7 @@ A saved reference works the same way. A first block can run `saved_log = log` an
 
 ## Calls that wait and errors that raise
 
-Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
+Some Engine globals ask the Harness to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
 
 ````lua
 local reply = models.infer(prose)
@@ -146,11 +146,11 @@ return answer
 
 The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
 
-### Failed host calls raise
+### Failed Engine calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
+An Engine call returns its result directly when it succeeds. When it fails, it raises the Engine's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
-Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
+Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a Harness request that failed, such as a model round, and for an Engine function that fails on the spot:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -163,7 +163,7 @@ return result
 
 [Catching and inspecting errors](#catching-and-inspecting-errors) teaches error values in full.
 
-## Standard Lua and host calls
+## Standard Lua and Engine calls
 
 The standard functions and operators work inside blocks as they do in any Lua 5.5 program: `assert`, `error`, `pcall`, `tostring`, `type`, `setmetatable`, `string.upper`, `string.find`, string methods such as `s:match(pattern)`, `table.concat`, the length operator `#`, and `..` concatenation.
 
@@ -181,7 +181,7 @@ That block returns `ALPHA, BETA, GAMMA (3 words)`.
 
 `table.concat(list, sep, i, j)` joins the elements `list[i]` through `list[j]`. `i` defaults to `1`, `j` defaults to `#list`, and `sep` defaults to the empty string, so `table.concat(list)` joins the whole list with nothing between the elements.
 
-Strings and numbers join as they are. `table.concat` also joins any value that renders through `__tostring`, converting each such element with `tostring` first. That covers the host's own values, such as fanout results, which are one table per arm ([Results](14-fanout.md#results)), and model handles, the Lua values that stand for a model role ([Model handles](10-models.md#model-handles)). It also covers a table of your own with a `__tostring` metamethod:
+Strings and numbers join as they are. `table.concat` also joins any value that renders through `__tostring`, converting each such element with `tostring` first. That covers the Engine's own values, such as fanout results, which are one table per arm ([Results](14-fanout.md#results)), and model handles, the Lua values that stand for a model role ([Model handles](10-models.md#model-handles)). It also covers a table of your own with a `__tostring` metamethod:
 
 ````lua
 local point = setmetatable({ x = 1, y = 2 }, {
@@ -201,9 +201,9 @@ invalid value ({type}) at index {k} in table for 'concat'
 
 The first is for a nil slot in the range. The second is for a boolean, a function, or a table without `__tostring`, and `{type}` names it. A `j` past `#list` reaches a nil slot, so it gives the nil message at index `#list + 1`. The error is an ordinary Lua runtime error: `pcall` can catch it, and left uncaught it ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
 
-### Host calls in every section
+### Engine calls in every section
 
-The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `tasks` functions work in every section's Lua, the H1 pass and fanout arms included, because every section VM's setup installs them. A block pauses only at one of the host's suspending calls; it never yields on its own.
+The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `tasks` functions work in every section's Lua, the H1 pass and fanout arms included, because every section VM's setup installs them. A block pauses only at one of the Engine's suspending calls; it never yields on its own.
 
 `models.infer` takes an optional leading model handle and then the prompt, and a call with three or more arguments raises `models.infer takes (handle?, prompt)`. `models.infer` and `models.loop` both take an optional leading model handle. When the first argument is userdata but not a model handle, the call raises `{call} handle must be a model handle`, where `{call}` is `models.infer` or `models.loop`. For `models.infer` called with a handle and a prompt, any other non-nil value in the handle position raises `models.infer handle must be a model handle, got {type}`, naming the type; `models.loop` treats only a userdata first argument as its handle. Both are `lua`-kind errors raised at the call site, where `pcall` catches them.
 
@@ -460,7 +460,7 @@ The read-back runs at the end of a section, when prose renders, and when `call`,
 | `sys.id` | string | The current section entry's id, such as `0.1` |
 | `sys.taskid` | string | The id of the nearest enclosing task, such as `0` |
 | `sys.section_name` | string | The heading name of the section whose Lua is running |
-| `sys.execution` | string | The run's name, which the host assigns |
+| `sys.execution` | string | The run's name, which the Harness assigns |
 | `sys.section_count` | number | The number of top-level sections in the prompt |
 
 ````markdown
@@ -485,7 +485,7 @@ The run result is:
 Only 0.1 of 1
 ````
 
-`sys.when`, `sys.execution`, and `sys.section_count` are run-wide: every section, the H1 pass included, reads the same values. Fanout arms and chains started by `call` see the same `sys.section_count` as the run. `sys.section_name` is the heading name of the running section ([Sections and nesting](02-file-structure.md#sections-and-nesting)); in the H1 pass it is the prompt's title ([The H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). `sys.execution` is the execution identity the host gives the run, the same string in every section.
+`sys.when`, `sys.execution`, and `sys.section_count` are run-wide: every section, the H1 pass included, reads the same values. Fanout arms and chains started by `call` see the same `sys.section_count` as the run. `sys.section_name` is the heading name of the running section ([Sections and nesting](02-file-structure.md#sections-and-nesting)); in the H1 pass it is the prompt's title ([The H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). `sys.execution` is the execution identity the Harness gives the run, the same string in every section.
 
 ### The start instant in sys.when
 
@@ -508,7 +508,7 @@ It always has the UTC shape `YYYY-MM-DDTHH:MM:SS[.fff]Z`: a four-digit year, a t
 - The year is four zero-padded digits for start instants from year 0000 through 9999.
 - Any standard RFC 3339 parser reads `sys.when`, because it matches a standard RFC 3339 rendering byte for byte.
 
-The host, not the prompt, supplies the start instant, together with a seed, when it creates the run. `sys.when` does not depend on the seed: a different seed changes the run's seeded values but leaves `sys.when` unchanged. With the same seed, the same start instant, and the same host answers, a prompt produces the same `sys.when` and the same seeded values, so its text result matches byte for byte ([Waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
+The Harness, not the prompt, supplies the start instant, together with a seed, when it creates the run. `sys.when` does not depend on the seed: a different seed changes the run's seeded values but leaves `sys.when` unchanged. With the same seed, the same start instant, and the same Harness answers, a prompt produces the same `sys.when` and the same seeded values, so its text result matches byte for byte ([Waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
 
 ### Section entry ids in sys.id
 
@@ -582,9 +582,9 @@ unknown sys field '{name}'
 
 ## Host state with ui
 
-Some hosts hand the run a host-state snapshot: a JSON object describing the host's state when the run started, such as the model currently selected in the host. `ui()` returns that snapshot as a Lua table whose fields are the snapshot's JSON fields as Lua values, for example `ui().selected_model`. Which fields a snapshot holds is up to the host.
+Some Hosts hand the run a Host-state snapshot: a JSON object describing the Host's state when the run started, such as the model currently selected in the Host. `ui()` returns that snapshot as a Lua table whose fields are the snapshot's JSON fields as Lua values, for example `ui().selected_model`. Which fields a snapshot holds is up to the Host.
 
-The `ui` global exists only when the host supplies a snapshot. A run without one has no `ui` global at all, so test for it before calling it:
+The `ui` global exists only when the Host supplies a snapshot. A run without one has no `ui` global at all, so test for it before calling it:
 
 ````markdown
 ---
@@ -612,10 +612,10 @@ return 'no host state'
 
 - A JSON null field in the snapshot reads as nil, the same as an absent field, never as a special null value. With the snapshot `{ "selected_model": "m-1", "workspace_root": null }`, `ui().selected_model .. '/' .. tostring(ui().workspace_root)` gives `m-1/nil`.
 - Each `ui()` call builds a new table. You can change the returned table freely, and the next call never sees the change.
-- `ui()` shows the host state as the host captured it at run start, identically in every section. A change on the host takes effect on the next run.
+- `ui()` shows the Host state as the Host captured it at run start, identically in every section. A change on the Host takes effect on the next run.
 - `ui` is installed before the shared library loads, so shared code can call it too.
 
-When the host supplies a snapshot, `models.get` also accepts a model id taken from it that no role declares, as in `models.get(ui().selected_model)`, which returns a model handle for that model ([Model handles](10-models.md#model-handles)); without a snapshot there is no `ui` global, and `models.get` resolves only declared role labels.
+When the Host supplies a snapshot, `models.get` also accepts a model id taken from it that no role declares, as in `models.get(ui().selected_model)`, which returns a model handle for that model ([Model handles](10-models.md#model-handles)); without a snapshot there is no `ui` global, and `models.get` resolves only declared role labels.
 
 ## Checkpoints with log
 
@@ -676,7 +676,7 @@ A `log` message is recorded verbatim, with no redaction. Keep it to your own sta
 
 ### Log quotas
 
-Each section VM records up to 1024 `log` checkpoints by default, within a log byte quota of 256 bytes per allowed checkpoint, 262,144 bytes by default. The host can change the checkpoint count, and the byte quota follows it.
+Each section VM records up to 1024 `log` checkpoints by default, within a log byte quota of 256 bytes per allowed checkpoint, 262,144 bytes by default. The Harness can change the checkpoint count, and the byte quota follows it.
 
 - Every one-argument call spends one checkpoint from the log event quota before the other checks run, so only an argument-count error costs nothing. A message that passes the checks then spends its UTF-8 byte length from the log byte quota.
 - The shared library's load-time `log` calls spend the same section quotas.
@@ -693,7 +693,7 @@ lua log cumulative byte budget exceeded
 
 ## Asking the operator with input.ask
 
-The operator is the person the host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
+The operator is the person the Host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
 
 ````markdown
 ---
@@ -714,7 +714,7 @@ return 'Topic: ' .. text
 ```
 ````
 
-`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the host has someone to ask. If the operator types `lighthouses`, the run result is:
+`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the Host has someone to ask. If the operator types `lighthouses`, the run result is:
 
 ````text
 Topic: lighthouses
@@ -724,16 +724,16 @@ Topic: lighthouses
 
 The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
 
-Asking needs an input broker: the part of the host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a host without one.
+Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
 
-A plain entry, as in the prompt above, declares the capability required. On a host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
 
 ````text
 the environment cannot satisfy this prompt:
 - promptforge/user-input needs an input broker, and this host provides none
 ````
 
-An entry with `optional: true` always runs. On a host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
+An entry with `optional: true` always runs. On a Host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
 
 ````yaml
 capabilities:
@@ -743,7 +743,7 @@ capabilities:
 
 ### Checking for an operator
 
-`input.connected()` returns `true` when the host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the host for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
+`input.connected()` returns `true` when the Host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the Harness for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
 
 ````markdown
 ---
@@ -768,7 +768,7 @@ return 'Topic: ' .. text
 ```
 ````
 
-When nobody is there, `input.ask()` still asks the host, so the host sees every question, and it returns this fixed sentence with `available` set to `false`:
+When nobody is there, `input.ask()` still asks the Harness, so the Host sees every question, and it returns this fixed sentence with `available` set to `false`:
 
 ````text
 User input is unavailable in this host; continue without it.
@@ -783,7 +783,7 @@ That is a normal return, not an error: the section keeps running. `available` is
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
 - A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
 ### Letting the model ask
 
@@ -796,7 +796,7 @@ tools:
   ask: promptforge/user-input/ask
 ````
 
-Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. A tool slot requires its capability, so the slot needs the required declaration shown above: declaring `promptforge/user-input` with `optional: true` beside the slot fails the parse ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). A host with no broker refuses the required declaration before the run starts.
+Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. A tool slot requires its capability, so the slot needs the required declaration shown above: declaring `promptforge/user-input` with `optional: true` beside the slot fails the parse ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). When the Host has no broker, the Harness refuses the required declaration before the run starts.
 
 Choose any alias except `input`. A tool alias or model role label named `input` collides with the capability's `input` global, and the run fails before it does anything, with run error kind `Lua` and this message:
 
@@ -806,7 +806,7 @@ capability `promptforge/user-input`: its prelude defines the global `input`, whi
 
 ### When an ask fails or is cancelled
 
-When the host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
+When the Host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the Host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
 
 ````lua
 local ok, text = pcall(input.ask)
@@ -867,7 +867,7 @@ assert(false)
 ```
 ````
 
-The frontmatter takes lines 1 to 5, the title is line 6, `## Check` is line 8, the prose is line 10, and the fence opens on line 12. The region's first Lua line is 13, and `assert(false)` is on line 2 of the block, so the error is reported at line 13 + 2 - 1 = 14. The message opens with a `{location}:{line}: ` tag taken from the first rewritten line, which a host can show next to the file name:
+The frontmatter takes lines 1 to 5, the title is line 6, `## Check` is line 8, the prose is line 10, and the fence opens on line 12. The region's first Lua line is 13, and `assert(false)` is on line 2 of the block, so the error is reported at line 13 + 2 - 1 = 14. The message opens with a `{location}:{line}: ` tag taken from the first rewritten line, which a Host can show next to the file name:
 
 ````text
 section `Check` epilog:14: [string "section `Check` epilog"]:14: assertion failed!
@@ -885,13 +885,13 @@ Had that block failed to compile instead, the compile error would read ``lua com
 
 Runtime errors and tracebacks always show region names and real line numbers, never `?:` placeholders.
 
-- A failed block's traceback is taken where the error was raised, so it shows your own frames, mapped to prompt lines, rather than the host's wrapper around the block.
+- A failed block's traceback is taken where the error was raised, so it shows your own frames, mapped to prompt lines, rather than the Engine's wrapper around the block.
 - An error raised in a fanout arm or a called section traces back through its caller, and each frame's line points at its own region's prompt line, because only the current region's own markers are rewritten. A caller's frame such as ``[string "section `Main` prologue"]:3: in main chunk`` maps to the caller's own file line, and the arm's already-mapped line is left intact.
-- Some host functions, such as `fanout` and the `tasks` functions, are written in Lua inside PromptForge. A failure that unwinds through them shows frames naming a built-in helper file and an exact line in it. Those frames are never rewritten, while your own frames still map to absolute prompt lines.
+- Some Engine functions, such as `fanout` and the `tasks` functions, are written in Lua inside PromptForge. A failure that unwinds through them shows frames naming a built-in helper file and an exact line in it. Those frames are never rewritten, while your own frames still map to absolute prompt lines.
 
 ## Catching and inspecting errors
 
-`pcall` catches every failure a host call or host function raises as an error value: a Lua table whose `kind` field is its error kind and whose `message` field is its text, plus any fields that kind carries. `type(err)` is `'table'`, and branching on `err.kind` is the way to decide what to do:
+`pcall` catches every failure an Engine call or Engine function raises as an error value: a Lua table whose `kind` field is its error kind and whose `message` field is its text, plus any fields that kind carries. `type(err)` is `'table'`, and branching on `err.kind` is the way to decide what to do:
 
 ````markdown
 ---
@@ -942,16 +942,16 @@ not an arm: runtime error: unknown sys field 'index'
 | `lua` | none | This chapter |
 | `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
 
-`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
+`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. An Engine function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed error from Harness work, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
 ### Message, fields, and tostring
 
 - `err.message` is always a string. When the raiser gave no message, the message is the kind tag itself.
-- `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught host error shows exactly the host's message.
+- `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught error from an Engine call shows exactly its message.
 - A caught error value joins with a string using `..` on either side, as `'prefix: ' .. err` or `err .. ' suffix'`, exactly as if it were its message string.
 - A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. A `store` value carries `reason`, `path`, and either `anchor` with `count` or `rule`. Every such field is a string except `count`, which is a number, and kinds without fields have only `kind` and `message`.
 
-A caught host-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the host's message verbatim from `tostring(err)`:
+A caught Harness-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the Harness's message verbatim from `tostring(err)`:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -969,7 +969,7 @@ A `models.loop` failure works the same way: catch it with `pcall` and read `err.
 
 ### Catching at the call site
 
-An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
+An argument error from an Engine call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
 
 Every string-argument failure has one of two shapes:
 
@@ -980,7 +980,7 @@ Every string-argument failure has one of two shapes:
 
 `{name}` is the argument's name: `prompt`, `input`, `path`, `contents`, `old`, `new`, or `pattern`. The first shape is for a value of the wrong type, and a missing required argument reads `got nil`. The second is for a Lua string holding invalid bytes. Type names tell integers from floats: an integer reads as `integer` and a float as `number`, so `3` reports `got integer` and `2.5` reports `got number`.
 
-Host functions that fail on the spot, such as `models.get`, `tools.add`, a `sys` field read, or the `var` guard, also give error values under `pcall`, so `err.kind` works on them like on any other error value.
+Engine functions that fail on the spot, such as `models.get`, `tools.add`, a `sys` field read, or the `var` guard, also give error values under `pcall`, so `err.kind` works on them like on any other error value.
 
 Suspending calls work inside `pcall`. The block still pauses inside the `pcall` and resumes there, so a successful call makes `pcall` return `true` and the result:
 
@@ -1006,11 +1006,11 @@ return tostring(count)
 
 That block returns `4`: a successful `pcall` returns `true` and then every value the function returned, nils included.
 
-Only error values the host builds take a kind out of a block. A table you build and raise, even one whose `kind` matches a PromptForge kind, ends the block as an ordinary Lua runtime error.
+Only error values the Engine builds take a kind out of a block. A table you build and raise, even one whose `kind` matches a PromptForge kind, ends the block as an ordinary Lua runtime error.
 
 ### Raising a caught error again
 
-When a failed host call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
+When a failed Engine call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
 
 - Raised again with `error(err)` before any other suspending call, an error value ends the run exactly as if it had never been caught, with the same run error kind.
 - Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Store`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
@@ -1024,9 +1024,9 @@ An uncaught Lua failure, a runtime error in your code or an error you raise your
 
 Every section, the H1 pass, and every fanout arm gets its own fresh section VM ([Inside an arm](14-fanout.md#inside-an-arm) shows the arm's side). The runtime sets each one up in the same fixed order:
 
-1. The host values: `args`, `argv`, `sys`, and `var`.
-2. The host functions: `log`, `store`, `tools`, and `models`.
-3. `ui`, when the host supplied a snapshot.
+1. The Engine values: `args`, `argv`, `sys`, and `var`.
+2. The Engine functions: `log`, `store`, `tools`, and `models`.
+3. `ui`, when the Host supplied a snapshot.
 4. `item`, in a fanout arm.
 5. `jump` and `list_from_section`.
 6. The suspending calls.

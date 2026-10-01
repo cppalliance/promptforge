@@ -1,5 +1,5 @@
 //! The session run's environment: the bindings a client pushes through
-//! the public API (the gateway, the chat catalog, the host snapshot), the
+//! the public API (the gateway, the chat catalog, the Host snapshot), the
 //! resources the harness builds from one gateway generation (the
 //! capability registry of first-party capabilities and the model client),
 //! and the launch-time resolution of the client's selected model into the
@@ -77,7 +77,7 @@ pub struct CatalogBinding {
     pub models: Vec<serde_json::Value>,
 }
 
-/// The host state a run reads at launch: what the `ui()` global serves
+/// The Host state a run reads at launch: what the `ui()` global serves
 /// and the model the prompt's roles bind to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HostSnapshot {
@@ -324,12 +324,12 @@ impl Bindings {
         self.catalog_generation.subscribe()
     }
 
-    /// Replaces the host snapshot; the next launch reads it.
+    /// Replaces the Host snapshot; the next launch reads it.
     pub fn set_host(&self, host: HostSnapshot) {
         *self.host.write().unwrap_or_else(PoisonError::into_inner) = host;
     }
 
-    /// The current host snapshot.
+    /// The current Host snapshot.
     #[must_use]
     pub fn host(&self) -> HostSnapshot {
         self.host

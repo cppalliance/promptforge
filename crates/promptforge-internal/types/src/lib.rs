@@ -1,15 +1,15 @@
-//! Small shared host-support primitives for the PromptForge runtime.
+//! Small shared run-support primitives for the PromptForge runtime.
 //!
 //! [`untrusted`] wraps untrusted external data in a nonce-guarded envelope
 //! and [`cancel`] is the polled `AtomicBool` cancellation tree the engine
 //! observes. [`event`] is the value form of a run's reports, the
-//! [`Event`](event::Event) enum a host appends to its log, with the
+//! [`Event`](event::Event) enum the Harness appends to its log, with the
 //! payload-free boundaries' constructors in [`event::lifecycle`];
 //! [`emitter`] is the provenance-stamping [`Emitter`](emitter::Emitter)
 //! every engine crate reports through and the [`EventSink`](emitter::EventSink)
 //! a run drains; and [`metrics`] is the model-call metrics vocabulary those
-//! events embed. [`models`] is the host-facing model vocabulary (identity,
-//! catalog, descriptor) and [`wire`] the streaming delta a host's `on_delta`
+//! events embed. [`models`] is the public model vocabulary (identity,
+//! catalog, descriptor) and [`wire`] the streaming delta the Harness's `on_delta`
 //! callback observes. [`tools`] is the runtime-agnostic tool vocabulary:
 //! the implementation-free [`ToolDescriptor`](tools::ToolDescriptor), the
 //! caller-provided [`ToolCatalog`](tools::ToolCatalog), trusted output, and

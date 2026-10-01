@@ -30,14 +30,14 @@ pub enum RunErrorKind {
     Determinism,
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
-    /// A Lua host resource quota (log events, log bytes, or instructions) was
+    /// A Lua resource quota (log events, log bytes, or instructions) was
     /// exhausted.
     Quota,
     /// The selected compactor exhausted the model's context window.
     ContextExhausted,
     /// A `{{ }}` prose substitution failed.
     Substitution,
-    /// The host cancelled the run.
+    /// The Host cancelled the run.
     Cancelled,
     /// An unexpected internal invariant failure.
     Internal,
@@ -56,7 +56,7 @@ pub struct SourceLocation {
     /// The prompt's frontmatter name when parse got that far, or the Rust
     /// source file (from `file!()`) for an internal fault. A frontmatter
     /// YAML failure predates the name, so its path is a placeholder the
-    /// host replaces with its own label for the source.
+    /// Host replaces with its own label for the source.
     pub path: String,
     /// The 1-based line, when known.
     pub line: Option<u32>,
@@ -130,7 +130,7 @@ impl RunError {
         }
     }
 
-    /// Returns `true` when the run failed because the host cancelled it.
+    /// Returns `true` when the run failed because the Host cancelled it.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self.inner, Error::Interrupted)

@@ -197,9 +197,9 @@ fn register_sessions(
     backoff: &ReconnectBackoff,
     omit: Option<Omit>,
 ) {
-    // Agent sessions run in the harness, the engine's production host,
-    // built here like every other subsystem and reached through the
-    // registry; `agents` pushes the server's state through its public API.
+    // Agent sessions run in the Harness, built here like every other
+    // subsystem and reached through the registry; `agents` pushes the
+    // server's state through its public API.
     let harness = agents::harness_for(config, registry);
     let agents = AgentSessions::new(registry.clone(), backoff.clone());
     let sessions = SessionsState::new(registry.clone(), crate::cross_site::origin_allowed);

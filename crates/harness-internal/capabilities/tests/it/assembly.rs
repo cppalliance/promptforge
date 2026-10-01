@@ -364,7 +364,7 @@ fn an_exact_slot_fills_against_the_activated_catalog() {
     let bindings = ctx.tool_bindings();
     assert_eq!(bindings.len(), 1);
     // Handles resolve alias -> id -> descriptor; the implementation is the
-    // host's, in the activation's table under the same id.
+    // Harness's, in the activation's table under the same id.
     assert_eq!(bindings.alias_id("fetch"), Some(&id));
     assert_eq!(
         bindings.resolve("fetch").map(|tool| tool.id.clone()),

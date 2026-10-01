@@ -7,7 +7,7 @@
 //! slot backed by an optional capability, the closed model-keyword
 //! vocabulary, arg name and type sanity - and exposes the FULL declaration
 //! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
-//! against the host environment is prepare's job, never the parser's.
+//! against the Harness's environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
 //! capability and tool-slot shapes plus the map deserializer all four keys
@@ -163,7 +163,7 @@ fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
 /// A capability declaration: a plain id string (a required capability) or a
 /// `ref` map holding the `optional` flag and prompt-side `config` data.
 ///
-/// User-specific configuration (credentials, server lists) is host-supplied
+/// User-specific configuration (credentials, server lists) is Host-supplied
 /// through the run services and never named in the prompt; `config` is
 /// prompt-side data only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,7 +278,7 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
 /// One tool slot's filling posture: an exact global path filled by identity
 /// against the assembled catalog (every fill is journaled).
 ///
-/// `#[non_exhaustive]`: the open host-offered posture is deferred and joins
+/// `#[non_exhaustive]`: the open Harness-offered posture is deferred and joins
 /// this enum when it lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -323,7 +323,7 @@ impl Visitor<'_> for ToolSlotVisitor {
 /// the alias, never the global path. The reserved `open` key (the deferred
 /// open toolset posture) is rejected at parse, so a prompt cannot silently
 /// half-declare the posture. Each alias installs as a section VM global,
-/// so an alias that names a host global, a Lua standard-library global the
+/// so an alias that names an Engine global, a Lua standard-library global the
 /// sandbox keeps, or a Lua keyword is rejected too, as is an alias that is
 /// also a model role label.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

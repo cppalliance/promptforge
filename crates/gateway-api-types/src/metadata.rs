@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// How a model exposes chain-of-thought / thinking tokens to callers.
 ///
-/// Catalogued on each `[[model]]` so hosts can filter bindings before a
+/// Catalogued on each `[[model]]` so a Host can filter bindings before a
 /// request is built. `never` and `always` mean the backend ignores a
 /// per-call switch; `switchable` means the client may emit
 /// `chat_template_kwargs.enable_thinking`.

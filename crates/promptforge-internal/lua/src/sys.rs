@@ -6,7 +6,7 @@ use crate::proxy::read_only_proxy;
 /// The registry key holding the `var` proxy's hidden data table.
 ///
 /// The registry is unreachable from sandboxed author code (no `debug`
-/// library), so only host code holding a `&Lua` can read or replace the data
+/// library), so only Engine code holding a `&Lua` can read or replace the data
 /// table behind the guarded global.
 const VAR_DATA_REGISTRY: &str = "promptforge.var_data";
 
@@ -227,7 +227,7 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
         return Err(Error::Internal("guarded var data table was missing"));
     };
     // The named registry entries keep the data table alive and reachable for
-    // host read-back, and the proxy reachable for the reassignment check in
+    // Engine read-back, and the proxy reachable for the reassignment check in
     // `var_to_json`.
     lua.set_named_registry_value(VAR_DATA_REGISTRY, data)
         .map_err(Error::lua)?;
@@ -276,7 +276,7 @@ pub(crate) fn var_snapshot_table(lua: &Lua) -> Result<mlua::Table> {
 /// Reads the hidden `var` data table back as JSON.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the data table is absent (host values were
+/// Returns [`Error::Lua`] if the data table is absent (Engine values were
 /// never injected), if the author reassigned the `var` global (the proxy is
 /// no longer reachable, so the hidden table no longer reflects it), or if
 /// the data cannot be represented as JSON.

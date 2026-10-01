@@ -1,6 +1,6 @@
-﻿//! The `POST /admin/reveal` route: opens the host OS file manager at a
-//! cache or profile path, for the UI's "reveal in folder" button on model
-//! files and config files.
+﻿//! The `POST /admin/reveal` route: opens the operating system's file
+//! manager at a cache or profile path, for the UI's "reveal in folder"
+//! button on model files and config files.
 //!
 //! The endpoint launches a process, so it is guarded three ways. The
 //! caller must be on the loopback interface: `build_router` places the

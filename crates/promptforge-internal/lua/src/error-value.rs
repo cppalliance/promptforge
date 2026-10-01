@@ -2,7 +2,7 @@
 //!
 //! A failure that crosses into author code - a shim's own argument error,
 //! a Rust-raised error answered through the `(ok, result)` envelope, a
-//! host callback's own failure (`tools.add`, `models.get`, a `sys` or `var`
+//! Engine function's own failure (`tools.add`, `models.get`, a `sys` or `var`
 //! guard) caught by `pcall`, or a shim raise such as a future
 //! `tool_loop_exhausted` - is one Lua table `{ kind, message, ... }` under
 //! a shared metatable whose `__tostring` returns `message`. A `pcall`
@@ -63,15 +63,15 @@ pub enum ErrorKind {
     TaskConsumed,
     /// A section ended while author-origin tasks it owns were still live.
     TasksLive,
-    /// The host cancelled the run.
+    /// The Host cancelled the run.
     Cancelled,
     /// A store operation's own failure; includes `reason` and the
     /// [`VfsError`](promptforge_vfs::VfsError) variant's fields.
     Store,
     /// A Lua authoring or runtime failure: a compile error, a runtime error
-    /// in author code, a shim's argument error, or an exhausted host quota.
+    /// in author code, a shim's argument error, or an exhausted Engine quota.
     Lua,
-    /// An internal invariant was violated, or a host-side failure the
+    /// An internal invariant was violated, or a failure outside the prompt the
     /// author cannot act on (transport, backend, store, configuration).
     Internal,
 }

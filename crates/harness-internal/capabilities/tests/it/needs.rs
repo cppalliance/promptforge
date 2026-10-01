@@ -1,5 +1,5 @@
 //! Declared service needs at activation: a capability that needs the
-//! input service, declared required or optional, on a host that has or
+//! input service, declared required or optional, on a Host that has or
 //! lacks a broker.
 
 use std::sync::Arc;
@@ -102,8 +102,8 @@ fn registry_with_asker() -> (CapabilityRegistry, Arc<AtomicUsize>) {
     (registry, creates)
 }
 
-/// Activates `source` against a registry holding the asker, on a host
-/// that supplies a broker when `with_broker` is set. Returns the
+/// Activates `source` against a registry holding the asker, on a Host
+/// that has a broker when `with_broker` is set. Returns the
 /// activation and how many times the asker's `create` ran.
 fn activate_asker(source: &str, with_broker: bool) -> (Activation, usize) {
     let (registry, creates) = registry_with_asker();

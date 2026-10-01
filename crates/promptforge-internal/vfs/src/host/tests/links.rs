@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Creates a directory link, returning false when the host refuses.
+/// Creates a directory link, returning false when the OS refuses.
 /// Windows uses a junction (no privilege required, unlike
 /// `symlink_dir`); Unix uses a plain symlink.
 #[cfg(windows)]
@@ -18,7 +18,7 @@ fn make_dir_link(link: &Path, target: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Creates a directory link, returning false when the host refuses.
+/// Creates a directory link, returning false when the OS refuses.
 #[cfg(unix)]
 fn make_dir_link(link: &Path, target: &Path) -> bool {
     std::os::unix::fs::symlink(target, link).is_ok()
@@ -57,7 +57,7 @@ fn is_link(host: &Path) -> bool {
 }
 
 /// Makes `link` a dangling directory link: a link to `target`, which
-/// is then removed. A directory link needs no privilege on any host.
+/// is then removed. A directory link needs no privilege on any machine.
 fn make_dangling_dir_link(link: &Path, target: &Path) -> Result<(), VfsError> {
     fs::create_dir(target).map_err(|err| map_io("creating the link target", &err))?;
     assert!(

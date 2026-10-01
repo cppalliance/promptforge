@@ -20,7 +20,7 @@ use super::toolchain::PINNED;
 pub(crate) const FACADE: &str = "promptforge";
 
 /// The rustdoc flags every build passes. Hidden items are documented
-/// because hosts can still name them, and the transport codec is still
+/// because dependents can still name them, and the transport codec is still
 /// hidden in its defining crate. Lints are capped at warn: documenting
 /// hidden items lints docs the workspace docs gate never renders, and
 /// link integrity is that gate's to deny - an unresolved link never

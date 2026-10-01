@@ -6,7 +6,7 @@
 //! The engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
-//! are defined here, in the harness. A host builds one
+//! are defined here, in the Harness. The Harness builds one
 //! [`CapabilityRegistry`] of installed capabilities, calls [`activate`]
 //! per run to turn a prompt's declarations into the run's catalog, its
 //! preludes, and its [`ToolTable`] of implementations, hands the catalog

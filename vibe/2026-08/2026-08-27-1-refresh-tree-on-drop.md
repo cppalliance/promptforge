@@ -49,7 +49,7 @@ Dispatch only when at least one grant succeeded; failed paths already paint the 
 ### 3. Tests - extend `ui/test/workspace-drops.mjs` and `ui/test/workshop-zones.mjs`
 
 - workspace-drops: a successful grant dispatches `promptforge:workspace-granted` with exactly the succeeded paths; a fully failed drop dispatches nothing.
-- workshop-zones (or a small new test if the harness fits better): with the tree mounted, firing the event re-fetches the roots listing and renders the new root; the empty-state hint disappears; firing it twice does not duplicate rows; a disposed panel stops listening.
+- workshop-zones (or a small new test if the fixtures fit better): with the tree mounted, firing the event re-fetches the roots listing and renders the new root; the empty-state hint disappears; firing it twice does not duplicate rows; a disposed panel stops listening.
 
 ## Verification
 

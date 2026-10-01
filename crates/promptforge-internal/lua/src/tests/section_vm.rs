@@ -1,5 +1,5 @@
 //! Section VM construction and phases: one environment across the shared
-//! replay and every chunk, delayed single host injection, scalar returns,
+//! replay and every chunk, delayed single Engine injection, scalar returns,
 //! isolation between VMs, and the lifecycle reports around them.
 
 use super::*;
@@ -40,8 +40,8 @@ fn two_fresh_section_vms_yield_the_same_key_order() {
 
 #[test]
 fn section_vm_preserves_one_environment_across_all_phases() {
-    // The shared library replays as the section's first chunk with the full
-    // host environment installed, so its top level reads `args` and `store`
+    // The shared library replays as the section's first chunk with every
+    // Engine global installed, so its top level reads `args` and `store`
     // at load; the functions it defines resolve the same globals when later
     // chunks call them.
     let shared = program(
@@ -117,7 +117,7 @@ fn section_vm_requires_delayed_single_host_injection() {
 
 #[test]
 fn section_vm_host_injection_bypasses_shared_global_metatables() {
-    // Host values inject before the shared replay, and the captured alias
+    // Engine values inject before the shared replay, and the captured alias
     // globals raw-set after it, so a metatable the shared library installs on
     // `_G` intercepts neither.
     let shared = program(

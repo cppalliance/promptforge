@@ -6,7 +6,7 @@
 //! The global stays unresolved until its first runtime read, which
 //! snapshots the section state (the section's `var` table, the live
 //! `sys`, and the bare globals), renders every `{{ }}` substitution once
-//! through the host's callback, and memoizes the string for later reads.
+//! through the Engine's callback, and memoizes the string for later reads.
 //! Assigning to `prose` raises, and `{{ prose }}` inside the template is
 //! rejected as recursive.
 //!
@@ -26,7 +26,7 @@ pub(crate) const ASSIGNMENT_REFUSAL: &str =
 
 /// The section state a `prose` render snapshots at the first read.
 ///
-/// The host's render callback receives the section's `var` table and the
+/// The Engine's render callback receives the section's `var` table and the
 /// live `sys` JSON as read at render time, plus a bare-global lookup for
 /// `{{ name }}` resolution. The lookup reads the section VM's globals:
 /// `Ok(None)` when unset, the JSON form when set, and an error for a
@@ -69,7 +69,7 @@ where
 }
 
 /// Builds one install's `prose` read: the first call renders once through
-/// the host callback and memoizes, and every later call returns the memo.
+/// the Engine callback and memoizes, and every later call returns the memo.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the closure cannot be created.

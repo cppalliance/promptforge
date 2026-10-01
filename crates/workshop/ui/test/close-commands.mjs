@@ -524,7 +524,7 @@ const dispatcher = new KeybindingDispatcher({
 const contextKeys = getService(CONTEXT_KEY_SERVICE);
 const activeEditorKey = contextKeys.createKey("activeEditor", undefined);
 const textFocusKey = contextKeys.createKey("editorTextFocus", false);
-// ctrlcmd resolves against the host platform the shared registry detected.
+// ctrlcmd resolves against the platform the shared registry detected.
 const chordModifier = detectPlatform() === "mac" ? { metaKey: true } : { ctrlKey: true };
 function pressCloseChord() {
   window.document.body.dispatchEvent(

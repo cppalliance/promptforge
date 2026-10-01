@@ -16,7 +16,7 @@ pub use crate::app::test_helpers::spawn_gateway;
 #[cfg(feature = "test-fixtures")]
 pub use workshop_gateway::test_gateway::{ValidatedGateway, run_validated_gateway_fixture_process};
 
-/// Returns the host-only Gateway publisher from fixture state.
+/// Returns the embedding binary's restricted Gateway publisher from fixture state.
 #[cfg(feature = "test-fixtures")]
 #[must_use]
 pub fn gateway_updater(state: &crate::AppState) -> crate::GatewayUpdater {

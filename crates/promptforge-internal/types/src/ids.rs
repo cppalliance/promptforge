@@ -274,7 +274,7 @@ pub enum AbandonReason {
     /// The owner was aborted from outside: a fatal sibling's fail-fast,
     /// or its own owner ending first.
     OwnerAborted,
-    /// The run itself ended - cancelled by the host or ended by a fatal
+    /// The run itself ended - cancelled by the Host or ended by a fatal
     /// answer - while the task was live; the engine ended it with the run.
     RunTerminated,
 }

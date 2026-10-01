@@ -61,7 +61,7 @@ impl StorePerformer for VfsStore {
 /// sequence number the caller has already seen).
 ///
 /// A log that refuses the read, or a stored payload that no longer parses
-/// as an event, is the host's fault, not the task's: it is reported
+/// as an event, is the Harness's fault, not the task's: it is reported
 /// through `tracing` and the read answers with what it could recover (an
 /// empty slice for a refused read), since the answer's shape has no room
 /// for an error.

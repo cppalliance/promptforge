@@ -23,7 +23,7 @@ isProject: false
 
 ## Product Requirements
 
-The API firewall commits (`75245481..9eac5f3b`) left four debts that are still in the tree. They are stale Lua chunk names, a surface listing that misses compatibility-breaking edits, a test-only feature and module on the public facade, and doctest dev-dependencies that contradict the repository's dependency rule and six crate notes. The people affected are contributors and agents reading the code, reviewers of the facade surface, and the harness test suites; no outside host exists yet. When the plan is done, the facade has no test surface, the listing records what hosts rely on, and the documentation matches the dependency graph.
+The API firewall commits (`75245481..9eac5f3b`) left four debts that are still in the tree. They are stale Lua chunk names, a surface listing that misses compatibility-breaking edits, a test-only feature and module on the public facade, and doctest dev-dependencies that contradict the repository's dependency rule and six crate notes. The people affected are contributors and agents reading the code, reviewers of the facade surface, and the harness test suites; no outside Host exists yet. When the plan is done, the facade has no test surface, the listing records what dependents rely on, and the documentation matches the dependency graph.
 
 - Problem and users:
   - Scope: the promptforge repository on branch `master`.
@@ -40,11 +40,11 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
     - The renderer builds struct, union, enum, and variant lines from keyword, path, generics, where clause, and discriminant only. See `Renderer::line` around lines 62-76 and `Renderer::data` around lines 177-181 in `crates/build-xtask/src/api/render.rs`.
     - The renderer builds each line without reading `Item::attrs`, `has_stripped_fields`, or struct and variant kind, although `rustdoc-types` 0.61.0 provides all three. `crates/build-xtask/src/api/walk.rs` lines 16, 143-151, and 204-213 read the kinds, but only to enumerate fields.
     - As a result, `crates/promptforge/public-api.txt` renders `Op` (line 369, exhaustive) and `VfsError` (line 376, non-exhaustive) the same way. It also renders `AllowAll` (line 1466, a unit struct) and `ExecId` (line 1468, a private tuple field) the same way.
-    - These edits all break hosts while `cargo xtask api --check` passes with no listing change:
+    - These edits all break dependents while `cargo xtask api --check` passes with no listing change:
       - adding `#[non_exhaustive]` or a private field to `AllowAll`
       - turning `Mode::Agent` into `Agent {}`
       - adding `#[non_exhaustive]` to `Op`
-    - That contradicts `bf9d8859`'s stated purpose: every change to what hosts can reach should show up as a change to the listing.
+    - That contradicts `bf9d8859`'s stated purpose: every change to what dependents can reach should show up as a change to the listing.
   - `test-support` (made worse by `2ac1b540`, `e0c3b575`, and `57f4cf6d`):
     - `crates/promptforge/Cargo.toml` line 27 declares `test-support = ["promptforge-engine/test-support"]`. `crates/promptforge/src/lib.rs` lines 210-218 export a `test_support` module (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), documented in `crates/promptforge/src/test_support.md`.
     - The facade uses none of it, yet line 35 of its manifest gates its own test suite on the feature.
@@ -101,7 +101,7 @@ Behavior changes only where the debts touch observable output. That means traceb
   - Engine developers read Lua tracebacks. A frame from the tasks, fanout, or messages chunk names a file that exists and holds that chunk's source.
   - Reviewers read `crates/promptforge/public-api.txt` diffs. A change to a facade type's exhaustiveness, hidden fields, or kind appears there.
   - Contributors and agents read crate notes and `AGENTS.md` before adding dependencies. What they read matches the manifests.
-  - The harness-capabilities activation suite drives runs through a loop built only from items the facade exports for every host.
+  - The harness-capabilities activation suite drives runs through a loop built only from items the facade exports for every dependent.
 - Inputs and outputs:
   - In tracebacks, chunk names render as `@crates/promptforge-internal/lua/src/__impl_coro.lua` (shim), `__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua` under that same directory.
   - `cargo +nightly-2026-09-05 xtask api --check` and `--bless` read one rustdoc JSON build of the facade with default features. They write or compare listing lines in this notation:
@@ -139,7 +139,7 @@ The four fixes are independent and touch different components. They overlap in o
   - `harness-capabilities` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
   - `build-xtask` `api` module: one rustdoc build with default features, so findings carry no per-build label. The listing notation is the one in Functional Specification, documented in the module docs of `crates/build-xtask/src/api.rs`.
   - `build-xtask` facade shape check: facade items may carry only doc attributes, alongside the existing rules on modules and single-item `pub use`.
-  - Repository policy: `AGENTS.md` line 35 gains this exception text: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths hosts see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules." The six statements listed under `doctest-cycle` each name that exception and keep their meaning for every other dependency.
+  - Repository policy: `AGENTS.md` line 35 gains this exception text: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules." The six statements listed under `doctest-cycle` each name that exception and keep their meaning for every other dependency.
 - File and public API changes:
   - Removed from the facade's public API: the Cargo feature `test-support`, the module `promptforge::test_support` (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), and `crates/promptforge/src/test_support.md`. None of these appear in the committed listing today, because the listing covers only the default build.
   - `crates/promptforge/public-api.txt` is re-blessed. Only the new annotations change and the set of listed items stays the same, but the diff is large. Nearly every struct, union, and variant line gains a kind suffix, and non-exhaustive lines move into one block at the top of the file.
@@ -203,10 +203,10 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Decisions:
   - `doctest-cycle`:
     - The call: record a doctest-only exception in `AGENTS.md` and correct the six statements. The five dev-dependencies and the per-item examples stay.
-    - Rationale: the harm shown so far is false documentation, which this fully fixes. Moving 77 examples would strip per-item examples from host-facing facade pages, and the build cost is unmeasured.
+    - Rationale: the harm shown so far is false documentation, which this fully fixes. Moving 77 examples would strip per-item examples from public facade pages, and the build cost is unmeasured.
     - The user's words, choosing between moving the examples and recording the exception: "I think B for the first one".
   - `test-support`:
-    - The call: remove the facade feature and module now, and drive the activation suite with a test-local host loop.
+    - The call: remove the facade feature and module now, and drive the activation suite with a test-local effect loop.
     - Rationale: removing the feature leaves zero test surface on the facade, whether the tests use a local loop or move crates. The local loop changes one function, keeps the tests in their crate, and only has to answer store effects.
     - The user's words: "for the second one which choice minimizes the public API surface of the promptforge facade?"
     - Earlier user words recorded in `vibe/2026-09-23-1-promptforge-api-firewall.md`: "I want ZERO public API surface growth just for tests." (line 303), and the deferral "no. we will deal with it later." (line 373). That deferral's revisit condition, "after this plan lands", has been met.
@@ -289,7 +289,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Status: complete
 - Build command: `cargo build --locked -p gateway` (the workspace default member; plain `cargo build` builds only the gateway). Desktop app: `cargo build --locked -p workshop`, after staging the gateway sidecar with `node tools/stage-gateway-sidecar.mjs stage --target <triple> --source <gateway exe>`; the full desktop release flow is the `cargo workshop` alias. The workshop-server and gateway-config-ui build scripts bundle their `ui/` with esbuild, so run `npm ci --prefix crates/workshop/ui` and `npm ci --prefix crates/gateway/config-ui/ui` before any cargo build.
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. Integration tests are one binary per crate, so add `--test it` (the `promptforge` facade uses `--test suite`). One crate's doctests: `cargo test --locked -p <crate> --all-features --doc`. Gateway process-race tests: `cargo test --locked -p gateway --no-default-features --features test-fixtures --test it <test-name>`. One UI test file: `node --test <path>` from the UI package directory.
-- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` then `cargo test --locked -p <crate> --all-features --doc` (workshop trio without `--all-features`; `workshop-server` also runs `cargo nextest run --locked -p workshop-server --features headless`). Any change touching crate boundaries, manifests, lib.rs markers, or file sizes also runs the structural harness `cargo test -p build-xtask`. UI packages: `npm test --prefix crates/workshop/ui` and `npm test --prefix crates/gateway/config-ui/ui`.
+- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` then `cargo test --locked -p <crate> --all-features --doc` (workshop trio without `--all-features`; `workshop-server` also runs `cargo nextest run --locked -p workshop-server --features headless`). Any change touching crate boundaries, manifests, lib.rs markers, or file sizes also runs the structural checks `cargo test -p build-xtask`. UI packages: `npm test --prefix crates/workshop/ui` and `npm test --prefix crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The facade surface gate runs on the pinned nightly named in `crates/build-xtask/src/api/toolchain.rs` (currently `nightly-2026-09-05`): `cargo +nightly-2026-09-05 xtask api --check` and `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`; it compares against the committed `crates/promptforge/public-api.txt`. UI: `npm test` in each UI package.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless feature gate `cargo check -p gateway --no-default-features` (the only permitted standalone `cargo check`; never run `cargo check --workspace`). UI: `npm run typecheck` in each UI package. Supply chain: `cargo deny check` and `cargo audit`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook). No TypeScript formatter is configured.
@@ -424,7 +424,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Component: doctest-cycle
 - Component placement: third, after `test-support`. Step 2 gave the graph its end state, so the `cargo tree` review here checks the final graph. It edits `AGENTS.md` line 35, above lines 55-56 that Step 2 changed in place, so line numbers stay exact.
 - Piece: policy and notes, built jointly. The exception text and the six statements must agree with each other and with one `cargo tree` output, so they land together.
-- `AGENTS.md` line 35 gains this text verbatim: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths hosts see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules."
+- `AGENTS.md` line 35 gains this text verbatim: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules."
 - Amend each of these statements so it names that exception and keeps its meaning for every other dependency:
   - `crates/promptforge-internal/engine/AGENTS.md` line 8
   - `crates/promptforge-internal/model-client/AGENTS.md` line 10

@@ -1,5 +1,5 @@
 //! Prepare-pass tests that reach engine-only items: the per-run store
-//! mount's claims isolation, and the host's prepare-run path refusing an
+//! mount's claims isolation, and the Harness's prepare-run path refusing an
 //! unsatisfiable prompt with today's model-readable notice or running a
 //! satisfiable one. The rest of the prepare suite runs against the
 //! `promptforge` facade.
@@ -80,8 +80,8 @@ const DECLARES_ANALYST: &str = concat!(
     "```\n",
 );
 
-/// Builds the host's one current model with the given context window and
-/// thinking capability.
+/// Builds the one current model the Host chose, with the given context
+/// window and thinking capability.
 fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway("current").expect("the id is valid"),
@@ -110,7 +110,7 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
     let notice = error.to_string();
     // The notice is written to be read by a model: it names the role,
     // each failed check, and required versus actual - today's text,
-    // unchanged by the catalog moving to the host.
+    // unchanged by the catalog moving to the Harness.
     assert!(
         notice.starts_with("the environment cannot satisfy this prompt:"),
         "the notice opens with the standing refusal line: {notice}"

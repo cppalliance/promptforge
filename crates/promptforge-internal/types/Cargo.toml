@@ -22,9 +22,9 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 # Surface items' doc examples name `promptforge::` paths, the only paths
-# hosts see; only this crate's doctest run executes them.
+# other crates see; only this crate's doctest run executes them.
 promptforge.workspace = true
-# The property tests' adversarial content and host-style random seeds;
+# The property tests' adversarial content and Harness-style random seeds;
 # the engine itself reads no RNG.
 rand.workspace = true
 # The reference the std-only `Timestamp::to_rfc3339` formatter is checked

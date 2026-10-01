@@ -1,5 +1,5 @@
 // The focus-trapped modal dialog shared by both UIs: an overlay inside a
-// host element, a role="dialog" (or "alertdialog") surface, an optional
+// container element, a role="dialog" (or "alertdialog") surface, an optional
 // labeled text field, a Tab focus trap, Escape dismissal, optional
 // backdrop dismissal, and focus return to the invoker. Merged from the
 // gateway's confirm-modal and the workshop's editor-dialog so the two
@@ -74,7 +74,7 @@ export interface ModalHandle {
 /**
  * Opens the dialog and focuses its field when it has one, its first
  * button otherwise. A second call while the same dialog kind is open in
- * the same host is a no-op and returns an already-closed handle. Escape
+ * the same container is a no-op and returns an already-closed handle. Escape
  * and backdrop dismissal return focus to the element that was focused
  * when the dialog opened.
  */

@@ -21,7 +21,7 @@ isProject: false
 
 ## What it does
 
-`models.always("writer")` in the H1 shared library makes that model binding the prompt-wide default. A section that omits `models.use` gets the `always` binding instead of the host default. A section that calls `models.use("other")` overrides it for that section.
+`models.always("writer")` in the H1 shared library makes that model binding the prompt-wide default. A section that omits `models.use` gets the `always` binding instead of the Harness default. A section that calls `models.use("other")` overrides it for that section.
 
 Parallel to `tools.always` - same H1-only constraint, same must-be-declared-first rule.
 
@@ -75,7 +75,7 @@ In `SectionVm::new_with_shared_bindings` replay path: `models.always` must repla
 
 ### 3. Scope closure
 
-In `close_scopes` / `close_model_scope`: when no `models.use` was called in the section, check if `ModelBindings::always` is set. If so, use that binding as the section's selected model. If not, keep `None` (host default).
+In `close_scopes` / `close_model_scope`: when no `models.use` was called in the section, check if `ModelBindings::always` is set. If so, use that binding as the section's selected model. If not, keep `None` (Harness default).
 
 Current behavior: `close_scopes` returns `ClosedScopes { model: None }` when no `models.use` was called. Change: return `ClosedScopes { model: Some(always_binding) }` when always is set and no explicit `models.use` was called.
 
@@ -92,7 +92,7 @@ Current behavior: `close_scopes` returns `ClosedScopes { model: None }` when no 
 ### 5. Docs
 
 - README model selection section: document `models.always`
-- design-core.md: update principle 10 ("omitting `models.use` keeps the host default client model" becomes "keeps the prompt-wide always binding, or the host default when none is declared")
+- design-core.md: update principle 10 ("omitting `models.use` keeps the Harness default client model" becomes "keeps the prompt-wide always binding, or the Harness default when none is declared")
 
 ## One commit
 

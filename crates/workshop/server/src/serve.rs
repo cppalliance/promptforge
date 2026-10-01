@@ -2,13 +2,13 @@
 //!
 //! [`spawn`] builds the shared state, binds the listener, and serves on its
 //! own thread with its own tokio runtime, so an embedding binary (the
-//! desktop app) keeps its main thread. The
-//! call blocks until the listener is bound - that bind is the readiness
-//! signal - and the returned [`ServerHandle`] holds the base URL and a
-//! graceful-shutdown switch. The stop side is bounded: a watchdog gives
-//! in-flight connections a grace window to drain and then tears the runtime
-//! down anyway, and a stopped barrier reports [`Termination`] back through
-//! [`ServerHandle::shutdown`], so a held socket can never park the host.
+//! desktop app) keeps its main thread. The call blocks until the listener
+//! is bound - that bind is the readiness signal - and the returned
+//! [`ServerHandle`] holds the base URL and a graceful-shutdown switch. The
+//! stop side is bounded: a watchdog gives in-flight connections a grace
+//! window to drain and then tears the runtime down anyway, and a stopped
+//! barrier reports [`Termination`] back through [`ServerHandle::shutdown`],
+//! so a held socket can never park the embedding binary.
 
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -21,14 +21,14 @@ use workshop_support::Config;
 /// How long a signaled shutdown waits for in-flight connections to drain
 /// before the watchdog abandons the graceful path. axum's drain waits on
 /// every connection it still tracks - a request wedged mid-body never
-/// drains - so this bound keeps one stuck client from parking the host's
-/// join forever. (Held WebSockets detach from the drain at upgrade.)
+/// drains - so this bound keeps one stuck client from parking the embedding
+/// binary's join forever. (Held WebSockets detach from the drain at upgrade.)
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// How long either ending waits for the runtime to tear down. Cancelled
 /// async tasks collapse at their next yield, but a wedged blocking task
-/// would otherwise hold the runtime's drop - and with it the host's join -
-/// open indefinitely.
+/// would otherwise hold the runtime's drop - and with it the embedding
+/// binary's join - open indefinitely.
 const RUNTIME_TEARDOWN: Duration = Duration::from_secs(1);
 
 /// How a [`ServerHandle::shutdown`] ended.
@@ -65,7 +65,7 @@ impl ServerHandle {
     }
 
     /// Returns the restricted local-Gateway handle used by an embedding
-    /// desktop host to replace a sidecar atomically and request shutdown from
+    /// desktop app to replace a sidecar atomically and request shutdown from
     /// the current validated generation.
     #[must_use]
     pub fn gateway_updater(&self) -> GatewayUpdater {
@@ -316,14 +316,14 @@ fn serve_thread(
         state.close_gateway_publication();
         outcome
     });
-    // The barrier reports before teardown: the host's join is then bounded
-    // by RUNTIME_TEARDOWN, not by whatever the abandoned tasks still hold.
+    // The barrier reports before teardown: the embedding binary's join is
+    // bounded by RUNTIME_TEARDOWN, not by what abandoned tasks still hold.
     let _ = stopped.send(outcome);
     // A graceful serve-return is not quiescence: sessions that detached at
     // upgrade can still be running, so both endings take the bounded
     // teardown - cancelled tasks collapse at their next yield, and a wedged
-    // blocking task is abandoned rather than allowed to park the host.
-    // Never `process::exit` here - this crate runs inside host binaries.
+    // blocking task is abandoned so it cannot park the embedding binary.
+    // Never `process::exit` here - this crate runs inside embedding binaries.
     runtime.shutdown_timeout(RUNTIME_TEARDOWN);
     result
 }

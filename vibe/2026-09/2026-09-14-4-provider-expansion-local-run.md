@@ -147,7 +147,7 @@ Every new provider file proves its normalization against fixtures drawn from the
 - Status: complete
 - Build: `cargo build` (default-members builds only the gateway; desktop app is explicit via `cargo build -p workshop`)
 - Focused test command: `cargo nextest run -p <crate> [test-name-filter]`
-- Component test command: `cargo nextest run -p <crate>`; boundary/structural harness: `cargo test -p build-xtask`
+- Component test command: `cargo nextest run -p <crate>`; boundary/structural checks: `cargo test -p build-xtask`
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`, then doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; workshop crates separately: `cargo nextest run --locked -p workshop -p workshop-server`
 - Linter: `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (workshop: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`)
 - Formatter check: `cargo fmt --all --check`

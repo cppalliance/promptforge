@@ -1,6 +1,6 @@
 ---
 name: Internal crates fix batch
-overview: Fix the cancellation, host-backend, claims-ledger, and validation defects left in the six promptforge-internal crates with the smallest change that satisfies each finding, verified against HEAD a05d5cbd; record findings that turned out to be intended behavior as non-changes; then split every Rust file in the six crates under the 500-line ceiling and turn on its enforcement.
+overview: Fix the cancellation, real-filesystem backend, claims-ledger, and validation defects left in the six promptforge-internal crates with the smallest change that satisfies each finding, verified against HEAD a05d5cbd; record findings that turned out to be intended behavior as non-changes; then split every Rust file in the six crates under the 500-line ceiling and turn on its enforcement.
 todos:
   - id: types
     content: "Types: Cancelled deregisters on drop; fold ModelCatalog::from_validated; event test gaps"
@@ -15,7 +15,7 @@ todos:
     content: "Lua cleanup: pin var.k = nil; delete the unreachable Rust placeholder behind models.infer (models.infer itself stays); correct the run_store_op doc; crate docs"
     status: pending
   - id: vfs-host
-    content: "VFS host: refuse dangling symlinks in contain; README sentence; tests"
+    content: "VFS real-filesystem backend: refuse dangling symlinks in contain; README sentence; tests"
     status: pending
   - id: vfs-claims
     content: "VFS claims: close the three verified gaps (nested subtrees, subtree vs parent listing, created ancestors vs listings and globs); both-order tests"
@@ -74,7 +74,7 @@ isProject: false
 
 ## Product Requirements
 
-The six crates in `crates/promptforge-internal/` have places where a cancelled run can keep running, where a host backend can create a file outside its root, and where the VFS claims ledger misses real races, plus a set of smaller defects. This plan fixes each with the smallest change that satisfies it, and every fact it relies on was checked against commit `a05d5cbd` on `master`. The complete list of what to change is under Technical Design; nothing outside this document is needed to carry it out. Candidate changes that turned out to be documented behavior are recorded as non-changes, and changes that would have committed to design choices nobody made were put to the user and settled. The plan then splits every Rust file in the six crates under the 500-line ceiling and turns the ceiling check on for them. All paths are relative to the root of the promptforge repository, and line numbers are at `a05d5cbd`.
+The six crates in `crates/promptforge-internal/` have places where a cancelled run can keep running, where the real-filesystem backend can create a file outside its root, and where the VFS claims ledger misses real races, plus a set of smaller defects. This plan fixes each with the smallest change that satisfies it, and every fact it relies on was checked against commit `a05d5cbd` on `master`. The complete list of what to change is under Technical Design; nothing outside this document is needed to carry it out. Candidate changes that turned out to be documented behavior are recorded as non-changes, and changes that would have committed to design choices nobody made were put to the user and settled. The plan then splits every Rust file in the six crates under the 500-line ceiling and turns the ceiling check on for them. All paths are relative to the root of the promptforge repository, and line numbers are at `a05d5cbd`.
 
 - Problem and users:
   - Host operators, cancellation. An author `xpcall` whose message handler loops keeps a cancelled run alive.
@@ -86,7 +86,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - Hosts that mount `HostBackend`. `append` through a dangling symlink creates a file outside the root.
     - `contain` (`crates/promptforge-internal/vfs/src/host.rs`, lines 130 to 159) walks up with `Path::exists()`, which follows links. A dangling link therefore looks absent and is re-appended lexically.
     - `append` (lines 535 to 551) then opens it with `create(true)`. `write` is safe because `atomic_write` (lines 191 to 226) renames a temp file over the link.
-    - No production host mounts `HostBackend`: the harness launches with `VfsRef::default()`, a memory store at `/` (`crates/harness-internal/sessions/src/runtime.rs`, lines 49 to 59). The backend is public on the facade.
+    - No production Host mounts `HostBackend`: the Harness launches with `VfsRef::default()`, a memory store at `/` (`crates/harness-internal/sessions/src/runtime.rs`, lines 49 to 59). The backend is public on the facade.
   - Engine contributors, claims. Three claims-ledger gaps in `crates/promptforge-internal/vfs/src/handle.rs` let a real cross-task race pass undetected. No claims test covers any of them.
   - Host implementers, completions. `Completion::from_result` and `ToolCall::from_parts` (`crates/promptforge-internal/model-client/src/client/wire-canned.rs`, lines 16 to 47) are infallible constructors on the facade. They skip every check the live normalizer applies (`normalize.rs`, lines 125 to 177 and 187 to 268).
   - Contributors, file size. None of the six crates carries `//! ## Invariants`, so `cargo test -p build-xtask` never checks them against the 500-line ceiling (`crates/build-xtask/src/tidy.rs`: `INVARIANT_MARKER` at line 56, `file_ceiling_violations` at lines 177 to 198). 35 Rust files are over. Together they hold 35,092 lines, 17,592 of them beyond the ceiling, counted as `text.lines().count()`, the check's own count.
@@ -97,7 +97,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - Each of the three claims gaps conflicts in both operation orders.
   - A frontmatter tool slot that names an optional capability is refused at parse time.
   - A capability declared more than once under frontmatter `capabilities:` is refused at parse time.
-  - Host-built completions and tool calls are validated.
+  - Harness-built completions and tool calls are validated.
   - Two dead public facade items leave: grep, and `Environment::max_depth`.
   - `ClientError` becomes `#[non_exhaustive]`.
   - The smaller fixes listed under Technical Design land.
@@ -111,7 +111,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - Everything under Deferred and Out of Scope.
 - Success criteria:
   - A looping `xpcall` handler around a looping body ends as `RunResult::Cancelled` once the cancel flag is set, and `setmetatable` refuses any metatable carrying `__gc`, so no author finalizer can run.
-  - `append` through a dangling symlink inside a mounted host root is refused, and no file appears at the link's target.
+  - `append` through a dangling symlink inside a mounted real directory is refused, and no file appears at the link's target.
   - Each claims gap has a test with two unordered tasks, in both orders, that ends in a claims conflict.
   - A prompt that binds a tool of an optional capability fails to parse with the message in Functional Specification.
   - A prompt that lists one capability twice under `capabilities:` fails to parse with the message in Functional Specification.
@@ -128,7 +128,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
 
 ## Functional Specification
 
-Authors see cancellation hold in two more constructs and two new refusals from `setmetatable`. A frontmatter tool slot that names an optional capability no longer parses. Hosts that mount `HostBackend` see dangling links refused, and host implementers see validating constructors. Contributors see the ceiling check fail on oversized files. Everything else is internal.
+Authors see cancellation hold in two more constructs and two new refusals from `setmetatable`. A frontmatter tool slot that names an optional capability no longer parses. Hosts that mount `HostBackend` see dangling links refused, and Host implementers see validating constructors. Contributors see the ceiling check fail on oversized files. Everything else is internal.
 
 - Actors and workflows:
   - Prompt author:
@@ -154,7 +154,7 @@ Authors see cancellation hold in two more constructs and two new refusals from `
   - Cancellation: in `protected_xcall`, the wrapper around a function handler checks `cancel_requested()` first. When it is set, the wrapper returns the failure unchanged without calling the author handler, and `xpcall_outcome` re-raises it.
     - A non-function handler already goes to the raw `xpcall`, which refuses it with its own argument error before any author code runs.
     - `run_local_tool` (`__impl_coro.lua`, lines 140 to 151) and `compact` (lines 221 to 231) call author functions through `raw_pcall`. That installs no message handler, and both already re-raise under cancellation.
-    - The block guard's `raw_xpcall` (lines 343 to 355) uses the host's own `guard_handler`, not author code.
+    - The block guard's `raw_xpcall` (lines 343 to 355) uses the Engine's own `guard_handler`, not author code.
   - `__gc` is checked with `rawget(mt, "__gc") ~= nil` at `setmetatable` time. This matches Lua's rule that a table is marked for finalization only if its metatable has `__gc` when it is set.
   - Dangling link: while `contain` walks up, an entry for which `symlink_metadata` succeeds but `exists()` is false is a dangling link, and the operation is refused.
   - Claims: each new conflict uses the same happens-before comparison the neighboring checks apply to a recorded claim, so ordered accesses from the same task or across a join never conflict.
@@ -165,7 +165,7 @@ Authors see cancellation hold in two more constructs and two new refusals from `
   - A write to a dangling symlink, which today replaces the link with a regular file through `atomic_write`, is refused.
   - The validating constructors return the same `ClientError` variant the live normalizer raises for the same rule.
 - Security and privacy behavior:
-  - No new host-visible capability is added.
+  - No new facade-visible capability is added.
   - Cancellation still cannot interrupt a single long-running C library call, such as a pathological Lua string pattern match; see Deferred and Out of Scope.
 - Acceptance criteria:
   - Every Success criterion holds, and every Testing Plan item passes.
@@ -339,7 +339,7 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
     - `var.k = nil` removes `k` from `var` and from its snapshot.
     - `the_models_namespace_has_no_bind` (`crates/promptforge-internal/lua/src/models-tests.rs`) is updated for the removed Rust placeholder.
     - Every engine test that calls `models.infer` passes unchanged. That is about 130 call sites across 23 test files, including `crates/promptforge-internal/engine/src/execute/tests/live_infer.rs` and `tests/scheduler/live_h1.rs`, which cover sections and the live H1 pass. This is the guard that removing the placeholder does not remove `models.infer`.
-  - VFS host, skipping with a logged reason where the host lacks symlink privilege:
+  - VFS real-filesystem backend, skipping with a logged reason where the machine lacks symlink privilege:
     - A dangling link inside the root refuses `append`, `write`, `read`, and `list`, and no file appears at the link's target.
     - `remove` and `exists` still act on the dangling link itself.
     - The Windows escape test (`crates/promptforge-internal/vfs/src/host.rs`, lines 875 to 907) logs a skip instead of passing silently, and also covers `append`.
@@ -415,29 +415,29 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - The Project Survey is carried over from the previous plan in this repository (`vibe/2026-09-28-4-internal-crates-critical-fixes.md`), with the facts that plan's run changed brought up to date, so the run does not re-survey.
   - Cancellation: the `xpcall` handler is skipped under cancellation, and `__gc` is refused outright. Lua 5.5.0 runs both with hooks disabled, so no cancel check can interrupt them. `__close` needs nothing, because hooks are restored before it runs.
   - Dangling links are refused rather than resolved and contained. It is the smallest change, and it is consistent with the README's rule that containment denies a link that resolves outside the root.
-  - Parser spans get a documentation fix only. Production hosts use `line()` and `column()`, which already locate errors in the original file (`crates/workshop/server/src/error.rs` uses `line()`), and nothing outside the parser's tests reads `span()`.
+  - Parser spans get a documentation fix only. Production Hosts use `line()` and `column()`, which already locate errors in the original file (`crates/workshop/server/src/error.rs` uses `line()`), and nothing outside the parser's tests reads `span()`.
   - The store closures get a documentation fix only. They are not duplicates of `run_store_op`: they add lifecycle reporting, conflict recording, and error wrapping.
   - `from_result` and `from_parts` keep their argument types and gain only validation and a `Result`. Text results are not validated.
   - The two wire-name rules stay as they are: `ToolCatalog::new` keeps its documented rule, and `tool_schema_new` keeps its stricter one. User's choice: "Drop it from this batch and record it as a rejected alternative; Steps 1 and 2 lose that item (Recommended)".
   - The id error messages stay as they are. User's choice: "Drop it from this batch and record it as a rejected alternative; frontmatter errors already name the id, and hosts calling ModelId::new hold their inputs (Recommended)".
   - `var.k = nil` is tested before it is changed, because the code path traced shows the key is already removed.
-  - Glob across nested mounts and Windows path aliasing on `HostBackend` are deferred. No production host nests mounts or mounts `HostBackend`. User's choice: "Defer both, with the evidence recorded; revisit when a host nests mounts or mounts HostBackend on Windows (Recommended)".
+  - Glob across nested mounts and Windows path aliasing on `HostBackend` are deferred. No production Host nests mounts or mounts `HostBackend`. User's choice: "Defer both, with the evidence recorded; revisit when a host nests mounts or mounts HostBackend on Windows (Recommended)".
   - Grep and `Environment::max_depth` are removed from the public surface, because both are dead. User's choice: "Remove both (Recommended)".
   - `ClientError` gains `#[non_exhaustive]` and nothing else. User's choice: "Add #[non_exhaustive] only; the engine and harness add wildcard arms where they match (Recommended)".
   - `Cancelled` deregisters through the `Drop` of a private field it holds, not through an `impl Drop for Cancelled`. `Cancelled` is on the facade as `promptforge::cancel::Cancelled` (`crates/promptforge/public-api.txt`, lines 99, 224, and 379 to 380), and the listing renders `Drop` impls (line 384, for `promptforge::vfs::Access`). An impl on `Cancelled` itself would therefore add a public trait impl and a listing line that File and public API changes does not name, in a change the plan says leaves the listing alone. The private field's `Drop` performs the same removal with no public change. Settled during decomposition on 2026-09-28, not chosen by the user.
 - Rejected alternatives:
   - `__pairs` and `__len` on guarded `var`, frozen `argv`, and sealed tables, and fanout through them. Reason: the guide documents empty iteration as intended and says to use key access or `ipairs` (`guide/src/language/05-lua-environment.md`, lines 434 to 443; `06-arguments.md`, lines 420 to 462). Revisit: if the user wants iteration over guarded tables, as a documented contract change.
   - Merging the Lua store closures into one implementation. Reason: they differ in behavior. Revisit: if the shared-library load path moves onto the yield shims.
-  - A body-to-source offset map for `ParseError::span`. Reason: no consumer. Revisit: when a host needs byte offsets into the original source.
+  - A body-to-source offset map for `ParseError::span`. Reason: no consumer. Revisit: when a Host needs byte offsets into the original source.
   - Collapsing the five harness-config `ClientError` variants. Reason: `CompletionErrorKind` distinguishes `Disabled` from `Config` (`crates/promptforge-internal/model-client/src/model/error.rs`, lines 81 to 86), and each variant has its own message, so users would lose information. Revisit: never.
   - Moving `ModelSetLock` out of `ClientError` or reclassifying it as internal. Reason: `CompletionErrorKind` has no internal kind (`model/error.rs`, lines 23 to 35), so it would add a public kind. Revisit: when a kind for internal faults is designed.
   - SSE CR-only line endings and multi-line `data:` joining. Reason: no backend or fixture uses either. Joining would also require event dispatch on blank lines, which the scanner does not implement, and would change when payloads are delivered. Revisit: when a backend sends either.
-  - Resolving a dangling link's target and containing it. Reason: more code for a case no production host has. Revisit: if a host needs appends through in-root dangling links.
+  - Resolving a dangling link's target and containing it. Reason: more code for a case no production Host has. Revisit: if a Host needs appends through in-root dangling links.
   - A parameters-schema check in `ToolCatalog::new`. Reason: it needs a new public `ToolCatalogError` variant, and `tool_schema_new` already refuses a non-object schema when the tool is advertised. Revisit: if schema errors need to surface at assembly, as a user decision on the new variant.
-  - One wire-name rule shared by `ToolCatalog::new` and `tool_schema_new`. Reason: `validate_identifier` (`crates/promptforge-internal/types/src/tools/ids.rs`, lines 194 to 216) has no caller besides the catalog's wire-name check (`tools/registry.rs`, line 62), so sharing the rule would delete it and `ToolIdError::reason` and leave `ToolIdErrorKind::Separator` produced by nothing. It would also make the catalog refuse wire names the facade documents as accepted ("Uppercase and other printable characters are accepted in a wire name", `crates/promptforge/src/tools.md`, line 373), a host contract change. A name the catalog accepts but `tool_schema_new` refuses still fails when the tool is advertised. Revisit: if hosts need that failure at catalog assembly, as a documented contract change.
-  - Naming the rejected value in `ModelIdError`, `GlobalNameError`, and `CapabilityIdError`. Reason: the facade documents their `Display` text as a fixed prefix and reason (`crates/promptforge/src/model.md`, line 431; `crates/promptforge/src/capabilities.md`, lines 317 and 361), four facade doc examples assert it exactly (`model.md`, line 124; `capabilities.md`, lines 40, 127, and 131), and the guide quotes the parser message that wraps it (`guide/src/language/12-tools.md`, line 180). That parser message already names the id, so it would print it twice. Hosts calling `ModelId::new` hold their inputs. Revisit: if a host reports an id error it cannot trace to its input.
+  - One wire-name rule shared by `ToolCatalog::new` and `tool_schema_new`. Reason: `validate_identifier` (`crates/promptforge-internal/types/src/tools/ids.rs`, lines 194 to 216) has no caller besides the catalog's wire-name check (`tools/registry.rs`, line 62), so sharing the rule would delete it and `ToolIdError::reason` and leave `ToolIdErrorKind::Separator` produced by nothing. It would also make the catalog refuse wire names the facade documents as accepted ("Uppercase and other printable characters are accepted in a wire name", `crates/promptforge/src/tools.md`, line 373), a facade contract change. A name the catalog accepts but `tool_schema_new` refuses still fails when the tool is advertised. Revisit: if the Harness needs that failure at catalog assembly, as a documented contract change.
+  - Naming the rejected value in `ModelIdError`, `GlobalNameError`, and `CapabilityIdError`. Reason: the facade documents their `Display` text as a fixed prefix and reason (`crates/promptforge/src/model.md`, line 431; `crates/promptforge/src/capabilities.md`, lines 317 and 361), four facade doc examples assert it exactly (`model.md`, line 124; `capabilities.md`, lines 40, 127, and 131), and the guide quotes the parser message that wraps it (`guide/src/language/12-tools.md`, line 180). That parser message already names the id, so it would print it twice. Hosts calling `ModelId::new` hold their inputs. Revisit: if a Host reports an id error it cannot trace to its input.
   - Making `Backend`'s body private behind a bounding constructor. Reason: the harness already caps and escapes before building it (`crates/harness-internal/models/src/transport.rs`, lines 352 to 363), and the user chose `#[non_exhaustive]` only. Revisit: when an outside transport exists.
-  - Fixing glob across nested mounts, or Windows aliasing, now. Reason: the user deferred both. Revisit: when a host nests mounts or mounts `HostBackend` on Windows.
+  - Fixing glob across nested mounts, or Windows aliasing, now. Reason: the user deferred both. Revisit: when a Host nests mounts or mounts `HostBackend` on Windows.
   - Leaving the alias unbound with a warning for an optional-capability slot, or keeping the run-time refusal with better wording. Reason: the user chose a parse-time refusal. Revisit: if prompts need optional tools, as a new frontmatter form.
   - Removing the engine's `test-support` feature and bench. Reason: the bench is the only benchmark of the model loop. Revisit: if the bench moves to the facade.
   - A separate later plan for the splits, adding all six markers first, or splitting before fixing. Reason: the user wants the splits in this batch; markers first would fail the build at once; and fixes mixed into moved code are hard to review. Revisit: never.
@@ -448,21 +448,21 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - The `Cancelled` fix keys registrations per future. Deduplicating by `will_wake` alone makes futures polled by the same task share one entry, and dropping one would silence the other.
   - The claims fixes can turn a previously passing concurrent prompt into a claims conflict. That is the intended outcome for a real race.
   - `crates/promptforge-internal/vfs/src/handle.rs` is the riskiest split: the claims ledger's internals must stay private to the VFS while becoming visible across the new modules.
-  - Three file-symlink VFS tests skip on Windows hosts without symlink privilege. Junctions cover the directory case there.
-  - `HostBackend` has no production caller, so the dangling-link fix protects outside hosts and future ones.
+  - Three file-symlink VFS tests skip on Windows machines without symlink privilege. Junctions cover the directory case there.
+  - `HostBackend` has no production caller, so the dangling-link fix protects outside Hosts and future ones.
   - Guard-nonce determinism needs no new test: `a_seeded_nonce_is_a_function_of_its_seed_alone` (`crates/promptforge-internal/types/src/untrusted-tests.rs`, line 32) and `two_runs_with_the_same_seed_and_started_at_produce_identical_nonces_and_sys_when` (`crates/promptforge-internal/engine/src/execute/tests/run_inputs.rs`, line 47) already pin it.
   - `#[non_exhaustive]` on `ClientError` breaks no facade doc example: `crates/promptforge/src/transport.md` tests variants only with `matches!`.
 
 ### Deferred and Out of Scope
 
-- Deferred: glob ignoring nested mounts, and Windows path aliasing on `HostBackend` (case, trailing dot or space, `:` streams, `C:` segments). Revisit when a host nests mounts or mounts `HostBackend` on Windows.
-  - No production host nests mounts (`crates/harness-internal/sessions/src/runtime.rs`, lines 49 to 59), and none mounts `HostBackend`.
+- Deferred: glob ignoring nested mounts, and Windows path aliasing on `HostBackend` (case, trailing dot or space, `:` streams, `C:` segments). Revisit when a Host nests mounts or mounts `HostBackend` on Windows.
+  - No production Host nests mounts (`crates/harness-internal/sessions/src/runtime.rs`, lines 49 to 59), and none mounts `HostBackend`.
   - Store paths already refuse trailing dots, trailing spaces, and Windows device names on every platform (`crates/promptforge-internal/vfs/src/handle.rs`, lines 1246 to 1307).
 - Deferred: a long-running single C library call, such as a pathological Lua string pattern, `table.sort` over a huge array, or `string.rep`, cannot be interrupted by the instruction hook, so cancellation waits for it to return. Revisit as its own design, for example pattern limits.
 - Deferred: tool-call `id` and `name` fragments that repeat in full on every SSE delta (`crates/promptforge-internal/model-client/src/client/stream.rs`, around lines 275 to 300). Revisit when a backend is seen doing it.
 - Deferred: waking a dropped live timer's waiter, and reporting answers that arrive after the run is decided (`crates/promptforge-internal/engine/src/execute/scheduler/apply.rs`, `scheduler/drive.rs`). The timer rule is documented as deliberate.
 - Deferred: the plan-mode `.md` suffix rule in `crates/promptforge-internal/vfs/src/lib.rs`, which needs the policy to see file types.
-- Deferred: a location on the unclosed-fence error (`crates/promptforge-internal/parser/src/fence.rs`, line 148). Its callers (`split_h1`, lines 54 and 61; `split_section_blocks`, lines 266 and 287) hold the opening offset relative to the section's content, so a body-relative span needs the section's body offset threaded through. Revisit when a host reports a fence error it cannot locate.
+- Deferred: a location on the unclosed-fence error (`crates/promptforge-internal/parser/src/fence.rs`, line 148). Its callers (`split_h1`, lines 54 and 61; `split_section_blocks`, lines 266 and 287) hold the opening offset relative to the section's content, so a body-relative span needs the section's body offset threaded through. Revisit when a Host reports a fence error it cannot locate.
 - Deferred: the `unwrap_or_else(|| panic!(..))` sites in `crates/promptforge-internal/vfs/src/handle.rs` and `router.rs`. They guard invariants that hold, and replacing them needs a decision on an internal `VfsError` kind.
 - Deferred: API-shape choices without a settled answer:
   - vLLM metrics are reachable only through a detail function.
@@ -481,8 +481,8 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Status: complete
 - Build command: `cargo build --locked -p <package>`. Plain `cargo build` builds only the default member, `crates/gateway/app` (package `gateway`). The six internal crates (`promptforge-engine`, `promptforge-lua`, `promptforge-vfs`, `promptforge-model-client`, `promptforge-types`, `promptforge-parser`) and the `promptforge` facade build with no UI or native prerequisites. Crates whose build scripts bundle a UI into `OUT_DIR` (`workshop-server`, `gateway-config-ui`, and their dependents, which the workspace-wide runs include) need `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` first. Before any `-p workshop` build, CI builds `cargo build --locked -p gateway --no-default-features` and stages it with `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe` (undo with `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`). The clippy and full-suite runs build every member they check, so a separate workspace build adds nothing beside them, and a standalone `cargo check --workspace` never runs beside clippy. `.cargo/config.toml` aliases `cargo xtask` to `run -p build-xtask --` and `cargo workshop` to `run -p build-workshop --`, and links Windows builds with `rust-lld` and the static CRT.
 - Focused test command pattern: `cargo nextest run --locked -p <package> --all-features <filter>`, where `<filter>` is one or more test-name or module-path substrings (nextest runs a test matching any of them), such as `host::tests`, `model_task_notices`, or `scheduler::concurrency`. The internal crates keep every test inside `src/` as unit-test modules and have no integration target; the `promptforge` facade's integration target is `--test suite`. Drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. Nextest skips doctests, so a doc example needs `cargo test --locked --doc -p <package> --all-features`. `.config/nextest.toml` marks a test slow at 60 seconds and terminates it after three periods, 180 seconds. A crate's test count is the `test-count` field of `cargo nextest list --locked -p <package> --all-features --message-format json`.
-- Component test command pattern: `cargo nextest run --locked -p <package> --all-features`, then `cargo test --locked --doc -p <package> --all-features` (the workshop trio without `--all-features`). The structural harness alone: `cargo test -p build-xtask`; its nightly-only fixtures: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
-- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. CI adds `cargo nextest run --locked -p workshop-workspace --all-features`, `cargo nextest run --locked -p workshop-server --features headless`, the gateway process-ownership race tests, and the UI `npm test` runs. The workspace run includes `build-xtask`, the structural harness.
+- Component test command pattern: `cargo nextest run --locked -p <package> --all-features`, then `cargo test --locked --doc -p <package> --all-features` (the workshop trio without `--all-features`). The structural checks alone: `cargo test -p build-xtask`; its nightly-only fixtures: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
+- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. CI adds `cargo nextest run --locked -p workshop-workspace --all-features`, `cargo nextest run --locked -p workshop-server --features headless`, the gateway process-ownership race tests, and the UI `npm test` runs. The workspace run includes `build-xtask`, the structural checks.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features`, `cargo deny check`, and `cargo audit` (CI's `supply-chain` job; `cargo-deny` 0.20.2 and `cargo-audit` 0.22.2 are installed locally). Per-package pattern for scoped runs: `cargo clippy --locked -p <package> --all-targets --all-features -- -D warnings`. The UI typechecks (`npm run typecheck --workspaces --if-present` from `crates/workshop`, `npm run typecheck` from `crates/gateway/config-ui/ui`) apply only to UI changes. `.githooks/` holds a pre-commit hook (the formatter check) and a pre-push hook (the headless check, the workspace clippy, `cargo deny check`); neither is installed in this clone, since `core.hooksPath` is unset.
 - Formatter check command: `cargo fmt --all --check` (`rustfmt.toml` sets `style_edition = "2024"`). No UI formatter or JS linter is configured.
 - Docs command: with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the facades alone with default features, `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`, then the engine's private items, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. These are CI's `docs` job; CI's `check-workshop` job also builds `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Per-package pattern: `cargo doc --locked --no-deps --all-features -p <package>` under the same flag. The facade surface check is `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`, installed locally), compared against the committed `crates/promptforge/public-api.txt`; `cargo +nightly-2026-09-05 xtask api --bless` rewrites it. User guide: `cargo xtask site --books-only`; the combined guide regenerates with `cargo run --locked -q -p build-user-guide`.
@@ -586,7 +586,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-2>
 
-### Step 2: Validate host-built completions, fix the SSE scan, and mark `ClientError` non-exhaustive [completed]
+### Step 2: Validate Harness-built completions, fix the SSE scan, and mark `ClientError` non-exhaustive [completed]
 
 - Component: Model client
 - Piece: the `promptforge-model-client` fixes, built jointly in one commit. The validating constructors must land with every caller they break, and `#[non_exhaustive]` with every wildcard arm it forces. One test set covers the whole item: the crate's unit tests with the engine tests and facade doctests that build completions.
@@ -666,7 +666,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 
 <step-5>
 
-### Step 5: Refuse dangling symlinks in the host backend [completed]
+### Step 5: Refuse dangling symlinks in the real-filesystem backend [completed]
 
 - Component: VFS safety
 - Piece: the dangling-link refusal, the first of two pieces built sequentially. The pieces share no file (`host.rs` here, `handle.rs` in Step 6) and have separate test sets.
@@ -676,7 +676,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Build, under `crates/promptforge-internal/vfs/`:
   - `src/host.rs`, `contain` (lines 130 to 159): inside the walk-up loop, before stepping to the parent, refuse with `VfsError::PermissionDenied` and the reason `<path> passes through a dangling symbolic link` when `ancestor.symlink_metadata().is_ok()` and `!ancestor.exists()`. That covers `read`, `read_range`, `write`, `append`, `list`, `glob`, and `copy`, and, through `contain_no_follow` (lines 166 to 183), a dangling link in a no-follow operation's parent path. A final-component link is still addressed as a link.
   - `README.md` (line 9) gains: content operations refuse a path that passes through a dangling symbolic link.
-- Tests, in `host.rs`'s inline `mod tests` (from line 707). Make each dangling link with `make_dir_link` to a directory the test then removes. On Windows that is a junction, which needs no symlink privilege, so the refusal runs on every host. A case that needs a file link skips with a logged reason when Windows refuses with raw OS error 1314.
+- Tests, in `host.rs`'s inline `mod tests` (from line 707). Make each dangling link with `make_dir_link` to a directory the test then removes. On Windows that is a junction, which needs no symlink privilege, so the refusal runs on every machine. A case that needs a file link skips with a logged reason when Windows refuses with raw OS error 1314.
   - a dangling link inside the root refuses `append`, `write`, `read`, and `list`, and no file appears at the link's target;
   - `remove` and `exists` still act on the dangling link itself;
   - the Windows escape test (lines 875 to 907) logs a skip instead of passing silently, and also covers `append`;
@@ -806,7 +806,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Read: Technical Design, the engine Surface and `Cargo.toml` bullets; Project Survey.
 - Build, under `crates/promptforge-internal/engine/`:
   - `src/lib.rs`: `pub mod model` and `pub mod parser` (lines 8 and 9) become `pub(crate)`. The root re-exports of `CompletionError`, `CompletionErrorKind`, `ParseError`, `ParseErrorKind`, `Prompt`, and `promptforge_version` (lines 29 and 30) stop being public: `pub(crate) use` where engine code imports them through the crate root, deleted otherwise. `StoreOp` and `StoreOutcome` leave the public `pub use crate::execute::{..}` list (lines 22 to 28).
-  - `src/execute.rs` (line 71): `pub use promptforge_lua::{StoreOp, StoreOutcome}` becomes `pub(crate) use`, and its comment (lines 68 to 70) no longer says a host names them here. `perform_store_op` stays public, and the facade already takes both types from `promptforge_lua` (`crates/promptforge/src/lib.rs`, lines 140 to 142).
+  - `src/execute.rs` (line 71): `pub use promptforge_lua::{StoreOp, StoreOutcome}` becomes `pub(crate) use`, and its comment (lines 68 to 70) stops saying the Harness names them here. `perform_store_op` stays public, and the facade already takes both types from `promptforge_lua` (`crates/promptforge/src/lib.rs`, lines 140 to 142).
   - Lint fallout: once the modules are `pub(crate)`, `unreachable_pub` reports the `pub use` lists in `src/model.rs` (lines 23 to 35) and `src/parser.rs` (lines 23 to 29). Each becomes `pub(crate) use`, and any name `unused_imports` then reports is deleted.
   - Doc fallout: the crate docs in `src/lib.md` link `parser::Prompt`, `parser`, `model`, `promptforge_version`, and `Prompt` (lines 3, 5, and 9), which become private intra-doc links that the docs gate refuses. Each is pointed at its home crate, such as `promptforge_parser::Prompt`, or unlinked, and so is any other public doc link into the narrowed items that the docs gate reports.
   - `src/lib.md` doctests (lines 12 and 26): use `promptforge::` paths through the doctest-only facade dev-dependency.

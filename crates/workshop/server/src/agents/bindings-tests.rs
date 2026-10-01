@@ -1,4 +1,4 @@
-//! Host binding tests: the host snapshot serves the selection and the granted roots.
+//! Host binding tests: the Host snapshot serves the selection and the granted roots.
 
 use std::sync::Arc;
 

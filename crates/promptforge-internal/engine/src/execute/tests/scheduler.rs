@@ -30,13 +30,13 @@ pub(super) fn writer_models() -> ModelSet {
     }
 }
 
-/// Builds the run context and its silent host for a scheduler test: the
+/// Builds the run context and its silent Harness for a scheduler test: the
 /// parsed prompt, an empty shared library, and the model set pre-filled.
 fn scheduler_context(prompt: &Prompt) -> (RunState, RunHost) {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
-/// Builds the run context and its observing host on the given store and
+/// Builds the run context and its observing Harness on the given store and
 /// observer, so a walk test can inspect the store's contents and the
 /// observation stream afterward.
 pub(super) fn scheduler_context_on(

@@ -1,13 +1,13 @@
-//! The input broker: the host service a capability waits on for the
-//! operator's next message.
+//! The input broker: the part of the Host that carries a question to a
+//! person; a capability waits on it for the operator's next message.
 //!
-//! A host with a person at the other end supplies an [`InputBroker`] in
-//! the run's [`RunServices`](crate::RunServices); a host without one (a
-//! batch or eval host) supplies none, and a capability reads that absence
-//! as "there is nobody to ask". Each run gets a broker bound to the
-//! session that launched it, so a wait reaches the right operator without
-//! naming the run or the section. A broker that is present stays present
-//! for the whole run.
+//! When the Host has an operator, the Harness supplies an [`InputBroker`]
+//! in the run's [`RunServices`](crate::RunServices); for a Host without
+//! one (a batch or eval Host) it supplies none, and a capability reads
+//! that absence as "there is nobody to ask". Each run gets a broker bound
+//! to the session that launched it, so a wait reaches the right operator
+//! without naming the run or the section. A broker that is present stays
+//! present for the whole run.
 
 use std::fmt;
 
@@ -42,13 +42,13 @@ pub trait InputBroker: Send + Sync {
     ///
     /// # Errors
     /// Returns an [`InputError`] when the wait ends without an answer, for
-    /// example because the host withdrew it.
+    /// example because the Host withdrew it.
     async fn wait(&self) -> Result<String, InputError>;
 }
 
 /// A broker's failure to produce the operator's message.
 ///
-/// The `Display` message is host-authored and safe to hand to a model; any
+/// The `Display` message is broker-authored and safe to hand to a model; any
 /// underlying cause hides behind [`std::error::Error::source`].
 #[derive(Debug)]
 #[non_exhaustive]

@@ -11,15 +11,15 @@ use super::config::RunContext;
 use super::fill::{fill_model_bindings, fill_tool_bindings};
 use super::requirements::Requirements;
 
-/// What exists in this deployment: the catalog of tools the host has
+/// What exists in this deployment: the catalog of tools the Harness has
 /// made available and the preludes its activated capabilities
 /// contributed.
 ///
 /// Safe to share across concurrent runs (`Sync`): everything that can
 /// change per run sits on the [`RunContext`], and the tool implementations
-/// stay with the host (the harness's activation, in
-/// `harness-capabilities`). Model-free: the gateway's model list is a
-/// host-UI concern and never crosses this interface.
+/// stay with the Harness, which activates them in
+/// `harness-capabilities`. Model-free: the gateway's model list serves the
+/// Host's model selection, and the run's model arrives on the context.
 ///
 /// [`prepare`](Environment::prepare) fills the prompt's tool slots by
 /// identity against the catalog and fills the model bindings from the
@@ -27,11 +27,11 @@ use super::requirements::Requirements;
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Environment {
-    /// The tools a run may bind, as descriptors: assembled by the host from
+    /// The tools a run may bind, as descriptors: assembled by the Harness from
     /// its activated capabilities. The default is empty, so every exact
     /// slot's capability is reported missing.
     tools: ToolCatalog,
-    /// The Lua source the host's activated capabilities contributed, in
+    /// The Lua source the Harness's activated capabilities contributed, in
     /// install order: every section VM of a run installs each one before
     /// the shared library replays. The default is empty.
     preludes: Vec<Prelude>,
@@ -47,11 +47,11 @@ impl Environment {
         }
     }
 
-    /// Sets the catalog of tools a run may bind: the descriptors the host
+    /// Sets the catalog of tools a run may bind: the descriptors the Harness
     /// assembled from its activated capabilities.
     /// [`prepare`](Environment::prepare) fills the prompt's exact slots
-    /// against it by identity. A host that activates a registry (the
-    /// harness's `activate`) installs the activated catalog here before
+    /// against it by identity. The Harness activates its registry (the
+    /// `activate` function) and installs the activated catalog here before
     /// preparing.
     #[must_use]
     pub fn tools(mut self, tools: ToolCatalog) -> Environment {
@@ -59,15 +59,15 @@ impl Environment {
         self
     }
 
-    /// Sets the preludes a run installs: the Lua source the host's
+    /// Sets the preludes a run installs: the Lua source the Harness's
     /// activated capabilities contributed, in install order (the order the
     /// prompt declares the capabilities). [`prepare`](Environment::prepare)
     /// copies them onto the context, and every section VM of the run
-    /// installs each one after the host globals and before the shared
+    /// installs each one after the Engine globals and before the shared
     /// library replays, so the shared library can call what they define.
     ///
     /// A prelude that fails to load, or that defines a global another
-    /// prelude, a host global, a reserved name, or a frontmatter tool or
+    /// prelude, an Engine global, a reserved name, or a frontmatter tool or
     /// model alias already holds, fails the run as
     /// [`RunErrorKind::Lua`](super::RunErrorKind::Lua) when the first
     /// section VM is set up, before the run issues any effect.
@@ -81,8 +81,8 @@ impl Environment {
     /// declarations: installs the catalog and the preludes and fills the
     /// tool slots and model bindings - reporting what the caller must
     /// still satisfy. The
-    /// context's VFS is used as given: the run's whole filesystem, host
-    /// roots and the declared store included, is the host's to build.
+    /// context's VFS is used as given: the Harness builds the run's whole
+    /// filesystem, real directories and the declared store included.
     ///
     /// Tool slot filling runs against the catalog: exact slots fill by
     /// identity - an exact path's first two segments name its capability,
@@ -92,8 +92,8 @@ impl Environment {
     /// warned and left unfilled (advertising an unfilled alias fails at
     /// run time). Every fill is journaled into the context's tool
     /// bindings. Capability resolution, co-activation conflicts, and
-    /// activation itself happen before prepare in the host (the harness's
-    /// `activate`), which merges that report into this one.
+    /// activation itself happen before prepare, in the Harness's
+    /// `activate`, and the Harness merges that report into this one.
     ///
     /// Model satisfaction is a fill function over the declared roles, and
     /// v1's fill is deliberately trivial: every role binds to the

@@ -1,6 +1,6 @@
 # Limits and Errors
 
-This chapter is the map for when a prompt runs long or goes wrong. It gathers every limit a run observes in one table, shows what happens when Lua code runs into each one, and gives the full classification of failures: the parse error kinds a file can fail with before it runs, the error kinds `pcall` sees inside Lua, and the run error kind a failed run reports. It ends with the host cancel, the one way a run stops without failing. With it, any failure message from any chapter tells you what broke and where to look.
+This chapter is the map for when a prompt runs long or goes wrong. It gathers every limit a run observes in one table, shows what happens when Lua code runs into each one, and gives the full classification of failures: the parse error kinds a file can fail with before it runs, the error kinds `pcall` sees inside Lua, and the run error kind a failed run reports. It ends with the Host cancel, the one way a run stops without failing. With it, any failure message from any chapter tells you what broke and where to look.
 
 ## Limits at a glance
 
@@ -8,16 +8,16 @@ Every run observes six limits. These are their defaults:
 
 | Limit | Default | Applies to | Set by |
 |---|---|---|---|
-| Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the host |
-| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the host, lowered by `tasks.concurrency` |
-| Response cap | 16 MiB (16,777,216 bytes) | each model reply | the host |
-| Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the host |
-| Log event quota | 1024 `log` calls | each section VM | the host |
-| Receive timeout | 120 seconds | each wait for the next piece of a model reply | the host |
+| Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the Harness |
+| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the Harness, lowered by `tasks.concurrency` |
+| Response cap | 16 MiB (16,777,216 bytes) | each model reply | the Harness |
+| Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the Harness |
+| Log event quota | 1024 `log` calls | each section VM | the Harness |
+| Receive timeout | 120 seconds | each wait for the next piece of a model reply | the Harness |
 
 The log byte quota follows from the log event quota: 256 bytes for each call the log event quota allows, so 262,144 bytes by default. No limit counts Lua instructions.
 
-One set of limits applies to the whole run, the H1 pass and every section included. A run uses the defaults unless the host that runs it sets its own values, so the limits a given run observes can differ from this table.
+One set of limits applies to the whole run, the H1 pass and every section included. A run uses the defaults unless the Harness that runs it sets its own values, so the limits a given run observes can differ from this table.
 
 From inside a prompt, only the round cap can change. The frontmatter key `max_tool_iterations` takes a whole number from 1 to 1000 and caps each `models.loop` call separately ([The round cap](11-conversations.md#the-round-cap)):
 
@@ -37,7 +37,7 @@ max_tool_iterations must be a positive integer (>= 1), got {raw}
 max_tool_iterations must be <= 1000, got {raw}
 ````
 
-No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
+No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the Harness and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
 
 ## How failures are reported
 
@@ -50,7 +50,7 @@ Failures fall into four families, each with its own vocabulary:
 | Parse failure | before anything runs | one of five parse error kinds |
 | Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
 | Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of twelve run error kinds |
-| Cancelled outcome | when the host cancels | no error kind at all |
+| Cancelled outcome | when the Host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
 
@@ -68,11 +68,11 @@ end
 return reply
 ````
 
-Here an `internal` failure, such as a model call the host could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
+Here an `internal` failure, such as a model call the Harness could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
 
-A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
+A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The Host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
 
-A run the host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the host, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
+A run the Host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the Harness, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The Host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
 
 ## Lua block budgets
 
@@ -106,11 +106,11 @@ Its run result:
 8000000
 ````
 
-Even an endless loop such as `while true do end` is legal. Only a host cancel stops it, within about 10,000 instructions ([Cancelling a run](#cancelling-a-run)).
+Even an endless loop such as `while true do end` is legal. Only a Host cancel stops it, within about 10,000 instructions ([Cancelling a run](#cancelling-a-run)).
 
 ### The memory ceiling
 
-Each section VM may use up to 64 MiB of Lua heap by default, or the host's value. An allocation past the memory ceiling is refused as an ordinary Lua error whose message mentions memory. It is not a quota:
+Each section VM may use up to 64 MiB of Lua heap by default, or the Harness's value. An allocation past the memory ceiling is refused as an ordinary Lua error whose message mentions memory. It is not a quota:
 
 - Caught with `pcall`, it is an error value of kind `lua`.
 - Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` in the H1 pass, where the Lua error text becomes the requirements notice.
@@ -130,7 +130,7 @@ end
 
 [`log`](05-lua-environment.md#checkpoints-with-log) records author checkpoints, and each section VM has two quotas for it:
 
-- The log event quota: 1024 `log` calls by default, or the host's value.
+- The log event quota: 1024 `log` calls by default, or the Harness's value.
 - The log byte quota: the log event quota times 256, so 262,144 bytes by default, counted in UTF-8 bytes across all of the section VM's `log` calls. Multibyte text uses it up faster: 256 copies of `é` cost 512 bytes.
 
 Every `log` call counts, calls made while the shared library loads included. Each call is checked in this order:
@@ -181,11 +181,11 @@ With the default quota, the 1025th call is refused, and the run result is:
 lua: lua log event budget exceeded
 ````
 
-Two host-set quotas show the other cases. With a log event quota of 4, the log byte quota is 1024 bytes, so three `log(string.rep('é', 200))` calls of 400 bytes each fail on the third with the log byte quota refusal. Exactly two checkpoints are recorded, and left uncaught the failure ends the run as `Quota` before the block's later `return` runs. With a log event quota of 1, a shared library that calls `log('one')` and then `log('two')` fails on the second call, which left uncaught ends the run with `lua log event quota exceeded`.
+Two Harness-set quotas show the other cases. With a log event quota of 4, the log byte quota is 1024 bytes, so three `log(string.rep('é', 200))` calls of 400 bytes each fail on the third with the log byte quota refusal. Exactly two checkpoints are recorded, and left uncaught the failure ends the run as `Quota` before the block's later `return` runs. With a log event quota of 1, a shared library that calls `log('one')` and then `log('two')` fails on the second call, which left uncaught ends the run with `lua log event quota exceeded`.
 
 ## Model reply size and wait time
 
-Two limits guard every model call. Both apply to every round in the run, [`models.infer`](10-models.md#running-a-round-with-modelsinfer) rounds (nested ones included) and [`models.loop`](11-conversations.md#a-first-conversation) rounds alike, so an oversized or stalled reply ends that round with an error instead of hanging the run. Only the host changes either one.
+Two limits guard every model call. Both apply to every round in the run, [`models.infer`](10-models.md#running-a-round-with-modelsinfer) rounds (nested ones included) and [`models.loop`](11-conversations.md#a-first-conversation) rounds alike, so an oversized or stalled reply ends that round with an error instead of hanging the run. Only the Harness changes either one.
 
 ### The response cap
 
@@ -281,13 +281,13 @@ Every Lua block, whether the shared library, an H1 block, or a section block, is
 
 ## Finding where a parse failed
 
-A parse failure comes with a location when the parser can point at the problem. The host reports it beside the message as a path, a line, a column, and a byte span, each when known. Lines are 1-based and count from the top of the file, the frontmatter included, with the opening `---` as line 1.
+A parse failure comes with a location when the parser can point at the problem. The Host reports it beside the message as a path, a line, a column, and a byte span, each when known. Lines are 1-based and count from the top of the file, the frontmatter included, with the opening `---` as line 1.
 
 ### Frontmatter failures
 
 A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker. The exceptions are the checks that span entries, which give neither a line nor a column: a name declared both under `tools:` and under `models:`, a capability declared twice, and a tool slot whose capability is declared optional.
 
-A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the host may label the failure with its own name for the file instead.
+A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the Host may label the failure with its own name for the file instead.
 
 ### Body failures
 
@@ -357,17 +357,17 @@ An ordinary failed `store` call is kind `store`, not `internal`. Its message tex
 
 ### The cancelled kind
 
-`kind == 'cancelled'` covers a host cancel and a cancelled task. For a host cancel the message is `interrupted by Ctrl-C` ([Calls waiting during a cancel](#calls-waiting-during-a-cancel)). For a cancelled task, `err.task` holds the task id ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
+`kind == 'cancelled'` covers a Host cancel and a cancelled task. For a Host cancel the message is `interrupted by Ctrl-C` ([Calls waiting during a cancel](#calls-waiting-during-a-cancel)). For a cancelled task, `err.task` holds the task id ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
 
 ### Error kinds and run error kinds
 
-An error kind is what Lua sees at the call. A run error kind is what the host reports when a failure ends the run. They are separate vocabularies, and one error kind can lead to different run error kinds depending on its source. An uncaught failure ends the run with its kind, message, and fields intact, never flattened to a message string, so the run is classified the same as the original error: an uncaught `context_exhausted` ends the run as `ContextExhausted` with a message starting `context exhausted: `.
+An error kind is what Lua sees at the call. A run error kind is what the Host reports when a failure ends the run. They are separate vocabularies, and one error kind can lead to different run error kinds depending on its source. An uncaught failure ends the run with its kind, message, and fields intact, never flattened to a message string, so the run is classified the same as the original error: an uncaught `context_exhausted` ends the run as `ContextExhausted` with a message starting `context exhausted: `.
 
 | `err.kind` | Its own fields | Uncaught, ends the run as |
 |---|---|---|
 | `lua` | none | `Lua`, or `Quota` for a refused `log` call |
 | `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an engine fault |
-| `cancelled` | `task`, for a cancelled task | the cancelled outcome for a host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
+| `cancelled` | `task`, for a cancelled task | the cancelled outcome for a Host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
 | `context_exhausted` | `reason` | `ContextExhausted` |
 | `empty_model_reply` | `finish_reason`, only when the backend gave one | `Completion` |
 | `tool_loop_exhausted` | none | `Tool` |
@@ -399,7 +399,7 @@ A value missing its kind's fields also ends the run as `Lua`, or as `Requirement
 
 ## How a failed run is classified
 
-A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A host cancel is not among them, because a cancelled run has not failed.
+A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A Host cancel is not among them, because a cancelled run has not failed.
 
 | Run error kind | The run failed because | Message |
 |---|---|---|
@@ -426,11 +426,11 @@ Nothing reruns a failed run automatically. [Model call and environment failures]
 
 ### Model, tool, and input failures
 
-- `Binding`: a section sends prose to a model, or calls `models.infer` without a handle, while neither `models.use` nor a prompt-wide `models.default` is in effect ([Choosing a section's model](10-models.md#choosing-a-sections-model)). Caught with `pcall`, the same error is kind `internal`. The kind also covers a host tool whose schema the host cannot offer to the model, which nothing in a prompt causes.
+- `Binding`: a section sends prose to a model, or calls `models.infer` without a handle, while neither `models.use` nor a prompt-wide `models.default` is in effect ([Choosing a section's model](10-models.md#choosing-a-sections-model)). Caught with `pcall`, the same error is kind `internal`. The kind also covers a Harness tool whose schema the Harness cannot offer to the model, which nothing in a prompt causes.
 - `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, missing or invalid environment variables, invalid client configuration, and a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
 - `Tool`: a dispatched tool fails ([Tool failures](12-tools.md#tool-failures)), a tool call is out of the section's scope ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), a call names a tool not bound in the run ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)), or a `models.loop` call does not finish within the round cap ([The round cap](11-conversations.md#the-round-cap)), and the prompt does not catch it.
 - `ContextExhausted`: the selected compactor runs out of the model's context window and the prompt does not catch it ([Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion)).
-- A failed operator ask is a tool failure: when the host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
+- A failed operator ask is a tool failure: when the Host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
 
 The four `Tool` messages are these, where `{name:?}` and the other `:?` placeholders show the value in double quotes with escapes:
 
@@ -451,7 +451,7 @@ tool-call loop did not converge
 
 - An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
 - `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
-- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
+- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the Host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
 - `Internal`: an engine invariant broke, a fault in the engine rather than a mistake in the prompt. Its location names an engine source file and line.
 
 ### The H1 pass hard gate
@@ -492,12 +492,12 @@ Everything else keeps its own classification in the H1 pass:
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
 - Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, and `ContextExhausted` keep their kinds.
 - A failed store call stays `Store`, and a claims conflict stays `Determinism`.
-- A host cancel stays the cancelled outcome.
+- A Host cancel stays the cancelled outcome.
 - A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
 
 ## Model call and environment failures
 
-A model call that fails on the host's side reaches Lua as an error value of kind `internal` with no extra fields. Its message never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
+A model call that fails on the Harness's side reaches Lua as an error value of kind `internal` with no extra fields. Its message never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
 
 | Failure | Message |
 |---|---|
@@ -505,7 +505,7 @@ A model call that fails on the host's side reaches Lua as an error value of kind
 | non-success status from the gateway | `non-success backend status {status}` |
 | oversized or undecodable reply | `malformed response: {message}` |
 | error reply whose body cannot be read | `unreadable backend error body (status {status})` |
-| gateway disabled by the host | `gateway access is disabled` |
+| gateway disabled by the Host | `gateway access is disabled` |
 | environment variable not set | `missing environment variable: {name}` |
 | environment variable not valid Unicode | `environment variable is set but not valid Unicode: {name}` |
 
@@ -529,7 +529,7 @@ A backend answering with status 503 makes this block return `skipped: non-succes
 
 ### Environment variables
 
-The host's model connection reads two environment variables. A prompt never reads them; it only sees the error when one is missing or invalid.
+The Harness's model connection reads two environment variables. A prompt never reads them; it only sees the error when one is missing or invalid.
 
 - `PROMPTFORGE_GATEWAY_URL` is always required.
 - `PROMPTFORGE_GATEWAY_API_KEY` is required unless the URL's host is loopback: `127.0.0.1`, `::1`, or `localhost`. An empty key counts as unset.
@@ -549,7 +549,7 @@ A status below 500 is not transient, and neither is any other failure.
 
 ## Cancelling a run
 
-A host cancel stops a run from outside, for example when the person running it presses Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome. The run ends with the cancelled outcome, a clean stop rather than a failure, so it has no run error kind.
+A Host cancel stops a run from outside, for example when the person running it presses Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome. The run ends with the cancelled outcome, a clean stop rather than a failure, so it has no run error kind.
 
 A cancel reaches running Lua promptly, even a tight endless loop:
 
@@ -570,13 +570,13 @@ while true do n = n + 1 end
 ```
 ````
 
-Nothing in this prompt ends the loop, and no limit does either. When the host cancels, the loop is aborted and the run ends with the cancelled outcome.
+Nothing in this prompt ends the loop, and no limit does either. When the Host cancels, the loop is aborted and the run ends with the cancelled outcome.
 
 ### How a cancel reaches running Lua
 
 - Every 10,000 Lua instructions, running Lua checks the run's cancel flag. The check covers each section VM's main code and every block coroutine, so it reaches every block of every section, the H1 pass included. The engine also checks the flag between steps.
 - Every section VM and every activated capability share the same cancel flag.
-- Once the flag is set, the running block fails with the interrupted error: kind `cancelled`, message `interrupted by Ctrl-C` whatever the host's actual trigger was, and no source location. It never appears as an ordinary Lua runtime error, and it wins over any error value the block had raised.
+- Once the flag is set, the running block fails with the interrupted error: kind `cancelled`, message `interrupted by Ctrl-C` whatever the Host's actual trigger was, and no source location. It never appears as an ordinary Lua runtime error, and it wins over any error value the block had raised.
 - The cancel stops every block in the run, not only the first. After a cancel, a block with a bounded loop such as `for i = 1, 100000 do end` followed by `return "done"` never returns `done`.
 - A running `models.loop` stays cancellable, because the loop runs as Lua inside your block and the check keeps running while it does.
 
@@ -584,7 +584,7 @@ Left uncaught, the interrupted error ends the run with the cancelled outcome.
 
 ## Calls waiting during a cancel
 
-A cancel also reaches every call that is waiting on the host. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
+A cancel also reaches every call that is waiting on the Harness. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
 
 - `models.infer`, and each `models.loop` round
 - `tools.call`, `input.ask()` included, and tool calls the model makes
@@ -608,7 +608,7 @@ return out
 
 A cancel during the tool call gives `ok == false`, `out.kind == 'cancelled'`, and `tostring(out) == 'interrupted by Ctrl-C'`. A `models.loop` round cut short the same way raises an error value whose `kind` is `cancelled` and whose `message` is `interrupted by Ctrl-C`, so `tostring(err)` gives exactly that message.
 
-Catching a cancel does not keep the run going. Once the host cancels, running Lua is stopped by the instruction check and the engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
+Catching a cancel does not keep the run going. Once the Host cancels, running Lua is stopped by the instruction check and the engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
 
 ### Work in flight
 

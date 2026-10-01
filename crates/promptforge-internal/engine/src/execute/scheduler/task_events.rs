@@ -1,12 +1,12 @@
 //! The task history read: the author's `tasks.events(task, opts?)` and the
 //! model's `task_events { id, last? }` built-in, one arm behind both.
 //!
-//! Every event the engine reports leaves through `step` and is the host's
-//! to keep, so a read of a task's events is a leaf effect like any other:
+//! Every event the Engine reports leaves through `step` and the Harness keeps
+//! it, so a read of a task's events is a leaf effect like any other:
 //! the arm checks who may read what, issues a `TaskEvents` effect naming
-//! the task and the reader's high-water mark, and the host answers from
+//! the task and the reader's high-water mark, and the Harness answers from
 //! its log with the events after that mark, in the task's sequence order.
-//! The host commits a step's events before it performs the step's effects,
+//! The Harness commits a step's events before it performs the step's effects,
 //! so a task reading its own history sees everything reported before the
 //! read was issued.
 //!
@@ -166,7 +166,7 @@ impl Scheduler {
     /// Applies a history read's answer: the shim's sequence, or the
     /// model's text - the events nonce-wrapped as untrusted under the
     /// reader's run nonce, reported under the model's call id, or the
-    /// trusted nothing-new sentence when the host returned no event.
+    /// trusted nothing-new sentence when the Harness returned no event.
     pub(super) fn accept_task_events(
         &self,
         chain: ChainIndex,

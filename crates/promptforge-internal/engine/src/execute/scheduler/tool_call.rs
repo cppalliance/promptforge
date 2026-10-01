@@ -9,7 +9,7 @@
 //! model-issued call to the first three is answered by the `builtins`
 //! module over the task arena, `await_tasks` by its own module (answered
 //! at once or parked on the chain's model tasks), `task_events` by its
-//! own module (issued as a `TaskEvents` effect the host answers from its
+//! own module (issued as a `TaskEvents` effect the Harness answers from its
 //! log), and a script call to any of them answers as unbound; a local Lua
 //! tool is answered with its handler; a bound tool resolves against the
 //! run's full bound catalog (a script call may also name any catalog tool
@@ -50,7 +50,7 @@ use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation};
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
 /// them. A model-issued call to any of them is answered over the task
-/// arena (`task_events` through a host-answered effect); a script call
+/// arena (`task_events` through a Harness-answered effect); a script call
 /// to any of them is unbound.
 const RESERVED_TOOL_NAMES: [&str; 5] = [
     "task",

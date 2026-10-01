@@ -20,8 +20,8 @@
 //!
 //! The sleep is a `Timer` effect issued under the owner: keyed in the
 //! pending table under the owner so the stall check and the abort paths
-//! see it as the in-flight effect it is, and performed by the host (a
-//! tokio host sleeps on its timer wheel).
+//! see it as the in-flight effect it is, and performed by the Harness (a
+//! tokio-based Harness sleeps on its timer wheel).
 
 use std::time::Duration;
 

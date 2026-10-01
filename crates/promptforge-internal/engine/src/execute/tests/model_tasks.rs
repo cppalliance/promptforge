@@ -24,7 +24,7 @@ pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// The run context and host for a model-task test: the parsed prompt, the
+/// The run context and Harness for a model-task test: the parsed prompt, the
 /// shared model set pre-filled, no bound tools, the recorder as observer,
 /// and the never-completing tool in the catalog so a parked child stays
 /// parked.

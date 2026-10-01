@@ -15,7 +15,7 @@ installers = ["shell"]
 # only, Intel/AMD and ARM 64-bit. Windows and macOS users get the gateway
 # inside the workshop installer.
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
-# Where to host releases
+# Where to publish releases
 hosting = "github"
 # Only gateway-v* tags start a release.
 tag-namespace = "gateway-v"

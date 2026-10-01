@@ -30,7 +30,7 @@ The repository publishes one GitHub Pages site today: the combined mdBook user g
 
 - Problem and users:
   - Readers land on one combined user guide at the site root. The `promptforge` rustdoc is built only locally (the owner's command: `cargo doc -p promptforge --no-deps --all-features --open`) and in CI checks. It is never published.
-  - Readers: prompt authors, agent-program authors, host developers embedding PromptForge, Gateway operators, and Workshop users.
+  - Readers: prompt authors, agent-program authors, Host developers embedding PromptForge, Gateway operators, and Workshop users.
   - Maintainers: the repository owner, who writes chapter content with separate custom tooling, plus CI.
 - Goals:
   - Each product (PromptForge, Harness, Gateway, Workshop) has its own separate, self-contained documentation site with its own navigation and search.
@@ -143,7 +143,7 @@ const BOOKS: &[(&str, &[(&str, &str)])] = &[
     3. For each folder `stage` produced (read the directory; do not hardcode book names), run `$MDBOOK build <root>/target/site-books/<book> -d <root>/target/site/<book>`. `MDBOOK` is an environment variable that defaults to `mdbook`.
     4. For `(promptforge, promptforge)` and `(harness, harness-api)`:
        - Run `cargo clean --doc --target-dir <root>/target/site-doc`.
-       - Run `cargo doc -p <crate> --no-deps --target-dir <root>/target/site-doc` with default features, the facade as hosts read it.
+       - Run `cargo doc -p <crate> --no-deps --target-dir <root>/target/site-doc` with default features, the facade as its dependents read it.
        - Pass the banner through `CARGO_ENCODED_RUSTDOCFLAGS` as `--html-before-content`, the `0x1f` separator, and the banner's absolute path. Never use `RUSTDOCFLAGS`, which splits on spaces and breaks on a checkout path that contains one.
        - Copy `target/site-doc/doc` to `target/site/<dir>/`, and write a redirect `index.html` there pointing to `<crate_underscored>/index.html`.
     5. Copy `guide/landing/*` to `target/site/`.
@@ -253,7 +253,7 @@ The copy below is written in full and ships verbatim.
 >
 > That ordering follows from scarcity. Human judgment is scarce and model output is abundant, so models advise and compare while people decide. PromptForge protects the judgment you invest in two ways. The structure of your method lives in the prompt file itself, where the runtime enforces it: the sections, the control flow, and the models and tools the prompt may use. A rule written there cannot be forgotten when a model's context fills up. And every run is recorded, so the reasoning that built a pipeline is never lost.
 >
-> A PromptForge prompt is a Markdown file. The prose says what you want, and small Lua blocks decide what happens next: which model to ask, which tool to call, which section runs, and what fans out in parallel. The control flow belongs to you, not to the model. Runs are deterministic: replaying a recorded run with the same answers reproduces the same steps, so a run can be tested and audited. And because the program hosting a run performs all of its outside work, that program can stop a run cleanly at any point.
+> A PromptForge prompt is a Markdown file. The prose says what you want, and small Lua blocks decide what happens next: which model to ask, which tool to call, which section runs, and what fans out in parallel. The control flow belongs to you, not to the model. Runs are deterministic: replaying a recorded run with the same answers reproduces the same steps, so a run can be tested and audited. And because the Harness performs all of a run's outside work, it can stop a run cleanly at any point.
 >
 > The system has four components, and each one has its own documentation. They connect in one direction. The Workshop sits on the Harness, the Harness runs PromptForge programs, and every model call leaves through the Gateway. Each also stands on its own: you can embed PromptForge in your own Rust program, or run the Gateway as a standalone service for any OpenAI-compatible client.
 >
@@ -261,9 +261,9 @@ The copy below is written in full and ships verbatim.
 
 **Table rows** (left cell; the right cell is the image slot in every row):
 
-- **PromptForge** - The library at the center. It parses PromptForge prompt files and runs them as a sans-I/O state machine. A run never opens a socket, touches a file, or reads the clock. It hands your program each model call, tool call, and timer as an *effect*, and it reports what happened as *events*. Every piece of outside work stays under the host's control. Links: [API reference](promptforge/index.html) and [Prompt Language guide](language/language/index.html).
+- **PromptForge** - The library at the center. It parses PromptForge prompt files and runs them as a sans-I/O state machine. A run never opens a socket, touches a file, or reads the clock. It hands your program each model call, tool call, and timer as an *effect*, and it reports what happened as *events*. Every piece of outside work stays under the Harness's control. Links: [API reference](promptforge/index.html) and [Prompt Language guide](language/language/index.html).
 - **Harness** - The runtime that puts PromptForge to work. It drives runs on an async runtime and performs their effects: model calls through the Gateway, web fetch and web search tools, and run-scoped files. It also supervises agent sessions and writes every run's effects, answers, and events to an append-only log. Clients like the Workshop reach it through one public API. Links: [API reference](harness/index.html) and [Agent Programs guide](language/agent/index.html).
-- **Workshop** - The desktop application. It hosts the Harness in-process and opens a window onto your workspace, where you write and run prompts and agents with every run on the record. On startup it attaches to a running Gateway, or launches one if none is running. Links: [Workshop guide](workshop/index.html).
+- **Workshop** - The desktop application. It runs the Harness in-process and opens a window onto your workspace, where you write and run prompts and agents with every run on the record. On startup it attaches to a running Gateway, or launches one if none is running. Links: [Workshop guide](workshop/index.html).
 - **Gateway** - The one process that talks to model backends. It serves an OpenAI-compatible API (chat completions, embeddings, rerank, speech, and transcription), holds every credential, and routes each request to a configured remote provider or a local model on your own hardware. Nothing above it ever holds a vendor key. Links: [Gateway guide](gateway/index.html).
 
 Copy sources:
@@ -327,7 +327,7 @@ The owner chose one assembled Pages site with a separate site per product and a 
   - The PR-time check is path-filtered, books-only, in its own cancelable concurrency group, and not required. Owner: "a PR-time check sounds reasonable as long as it doesn't slow down regular code commits".
   - Steps 1 and 3 of the first decomposition (static configs, back-link, Workshop stub, and landing page) are one step. Rationale: they are static files with no Rust tests, and each step costs a full code, review, fix, and message cycle. Owner selected: "Merge Steps 1 and 3 into one scaffolding step".
   - `cargo xtask site` checks every landing link automatically and fails on a broken one. Rationale: it replaces a manual click-through and catches drift in the staged URL shape. Owner selected: "Add the automated landing link check".
-  - Rustdoc builds use default features. Rationale: the published facade should read as hosts see it, as the `ci.yml` "Facade docs" step does, and a future test-only feature must not leak into published docs.
+  - Rustdoc builds use default features. Rationale: the published facade should read as its dependents see it, as the `ci.yml` "Facade docs" step does, and a future test-only feature must not leak into published docs.
   - The rustdoc builds use a separate `target/site-doc` rather than `target/`. Rationale: the banner flag and `cargo clean --doc` must not wipe or invalidate the developer's normal `target/doc`.
   - Retired files move to `c:\Users\Vinnie\cursor\cabinet\_trash\promptforge2\` and keep their repository-relative paths. Rationale: moving them flat would make the three per-set `index.md` files overwrite each other, which cannot be undone. This falls under the owner's delegation of review fixes.
 - Rejected alternatives:
@@ -341,7 +341,7 @@ The owner chose one assembled Pages site with a separate site per product and a 
   - An mdBook-based landing page. Reason: mdBook cannot do a custom two-column layout with images without fighting its theme. Revisit never.
   - Alternating CSS-grid rows for the landing page. Reason: superseded by the owner's table request. Revisit never.
   - Passing the banner through `RUSTDOCFLAGS`. Reason: it splits on spaces and breaks on checkout paths that contain one. Revisit never.
-  - Rustdoc with `--all-features`. Reason: a future test-only feature would be published. Revisit if a feature is added that hosts are meant to see.
+  - Rustdoc with `--all-features`. Reason: a future test-only feature would be published. Revisit if a feature is added that dependents are meant to see.
   - One `--target-dir` per product as the primary design. Reason: it doubles the check build. Kept as the fallback if `cargo clean --doc` does not isolate sites.
   - Updating `documentation =` in all ~30 manifests. Reason: every crate is `publish = false`, so the field is never displayed. Revisit if any crate is published.
   - Full rustdoc in the PR check. Reason: it duplicates the `ci.yml` docs steps and slows docs PRs. Revisit if the rustdoc steps leave `ci.yml`.
@@ -372,7 +372,7 @@ The owner chose one assembled Pages site with a separate site per product and a 
 - Status: complete
 - Build command: `cargo build --locked -p gateway` (the workspace default member); the desktop app is built explicitly with `cargo build --locked -p workshop`; the two TypeScript UIs build with `npm ci && npm run build` inside `crates/workshop/ui` and `crates/gateway/config-ui/ui`
 - Focused test command pattern: `cargo nextest run --locked -p <crate> <test-name-filter>` (add `--all-features` for non-workshop crates); doctests with `cargo test -p <crate> --doc`; a single UI or tools test file with `node --test <path>.test.mjs`
-- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` for non-workshop crates, `cargo nextest run --locked -p <crate>` for workshop crates; `npm test` inside `crates/workshop/ui` or `crates/gateway/config-ui/ui`; boundary and structural harness with `cargo test -p build-xtask`
+- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` for non-workshop crates, `cargo nextest run --locked -p <crate>` for workshop crates; `npm test` inside `crates/workshop/ui` or `crates/gateway/config-ui/ui`; boundary and structural checks with `cargo test -p build-xtask`
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`; plus `cargo check -p gateway --no-default-features` for the headless gateway shape; UI type checks with `npm run typecheck` in each UI package
 - Formatter check command: `cargo fmt --all --check` (rustfmt `style_edition = "2024"`)

@@ -1,12 +1,12 @@
 //! The `_G` guard: the one metatable on a section VM's globals table.
 //!
-//! The guard owns the two host-owned globals, and no metatable author code
+//! The guard owns the two Engine-owned globals, and no metatable author code
 //! sets on `_G` ever sees either key. `argv` outside H1 ([`crate::argv`])
 //! is never a raw global: reads return the frozen value and writes raise
 //! the freeze refusal. In the H1 pass it behaves as a plain global, so the
 //! repair always lands in `_G`. `prose`, each block's lazily rendered text
 //! ([`crate::prose`]), is never a raw global either: reads render through
-//! the host and writes raise the read-only refusal. Every other global
+//! the Engine and writes raise the read-only refusal. Every other global
 //! read or write goes to the author metatable's `__index` or `__newindex`,
 //! looked up live on each access, and otherwise behaves as on a table with
 //! no metatable.
@@ -23,7 +23,7 @@
 //! route to the guard, to a raw `prose` global, or to a raw `argv` global
 //! outside H1.
 //!
-//! The Lua side lives in `__impl_globals.lua`; the host's side is the slot
+//! The Lua side lives in `__impl_globals.lua`; the Rust side is the slot
 //! table the chunk reads, held in the registry.
 //!
 //! [`RESERVED_NAMES`] is the other half of `_G`'s contract: every name the
@@ -118,7 +118,7 @@ fn state(lua: &Lua) -> Result<Table> {
     lua.named_registry_value(STATE_REGISTRY).map_err(Error::lua)
 }
 
-/// A host function that raises `message` as a runtime error.
+/// An Engine function that raises `message` as a runtime error.
 fn refusal(lua: &Lua, message: &'static str) -> Result<Function> {
     lua.create_function(move |_, ()| -> mlua::Result<()> { Err(mlua::Error::runtime(message)) })
         .map_err(Error::lua)
@@ -127,8 +127,8 @@ fn refusal(lua: &Lua, message: &'static str) -> Result<Function> {
 /// Why a name is reserved in a section VM's global namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reserved {
-    /// A global the host installs: on every section VM, or only on some
-    /// (`ui` with a host-state snapshot, `item` in a spawned chain).
+    /// A global the Engine installs: on every section VM, or only on some
+    /// (`ui` with a Host-state snapshot, `item` in a spawned chain).
     HostGlobal,
     /// A Lua standard-library global the sandbox keeps.
     LuaGlobal,

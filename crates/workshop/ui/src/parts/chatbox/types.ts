@@ -1,15 +1,15 @@
 // The chat box contract: what the isolated component takes in (props),
 // gives out (events), and exposes (the handle), plus the chip model and
-// the persisted draft shape. Everything the host and the component
+// the persisted draft shape. Everything the owning part and the component
 // share is declared here and nowhere else. `chatbox/` imports only
-// `@workshop/platform/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two host types
+// `@workshop/platform/lifecycle`, `@workshop/look/icons`, and `@tiptap/*`; the two outside types
 // this file mirrors - the text-control adapter and dictation's input
 // target - are declared structurally so neither side imports the other.
 
 import type { JSONContent } from "@tiptap/core";
 import type { IDisposable } from "@workshop/platform/lifecycle";
 
-/** Any JSON value: the shape of a chip's opaque host payload. */
+/** Any JSON value: the shape of the opaque payload the owning part puts on a chip. */
 export type JsonValue =
   | string
   | number
@@ -20,8 +20,8 @@ export type JsonValue =
 
 /**
  * One chip: an inline mention pill, a typeahead row, or an attachment.
- * The host owns the vocabulary of `kind` and everything inside `data`;
- * the component draws from the rest and round-trips `data` untouched.
+ * The owning part owns the vocabulary of `kind` and everything inside
+ * `data`; the component draws from the rest and round-trips `data` untouched.
  */
 export interface ChipRef {
   readonly id: string;
@@ -38,11 +38,11 @@ export interface ChipRef {
   readonly group?: string;
   /** A named icon; the component falls back to an extension map, then a generic glyph. */
   readonly icon?: string;
-  /** A host-issued URL for a thumbnail (deferred). */
+  /** A thumbnail URL the owning part issues (deferred). */
   readonly preview?: string;
   /** Display state (expired and uploading are deferred). */
   readonly tone?: "default" | "expired" | "uploading";
-  /** Opaque host payload, round-tripped untouched. */
+  /** The owning part's opaque payload, round-tripped untouched. */
   readonly data: JsonValue;
 }
 
@@ -75,8 +75,8 @@ export interface ChatBoxProps {
   /**
    * The send button's state; default "send". `send`: enabled.
    * `send-blocked`: aria-disabled but still clickable and still emits
-   * `send`, so the host can name the blocker. `idle`: disabled. `stop`:
-   * reserved.
+   * `send`, so the owning part can name the blocker. `idle`: disabled.
+   * `stop`: reserved.
    */
   readonly action?: "send" | "send-blocked" | "stop" | "idle";
   /** The mic button's state; default "idle". */
@@ -97,9 +97,9 @@ export interface ChatBoxProps {
   /** Initial content, parsed as HTML (`<p>` per paragraph). */
   readonly content?: string;
   /**
-   * A host-owned toolbar element placed after the editor; the box
-   * appends its mic and send buttons to its end. Absent, the buttons go
-   * directly on the bar.
+   * A toolbar element the owning part supplies, placed after the editor;
+   * the box appends its mic and send buttons to its end. Absent, the
+   * buttons go directly on the bar.
    */
   readonly controls?: HTMLElement;
   /** The `@` provider; default: the built-in three-item stub. */
@@ -115,16 +115,16 @@ export interface ChatBoxProps {
    * paste is ProseMirror's default.
    */
   readonly onPasteFiles?: (files: File[]) => Promise<ChipRef[]>;
-  /** The host's text-control registrar; replaces the service-registry lookup. */
+  /** The owning part's text-control registrar; replaces the service-registry lookup. */
   readonly textControls?: TextControlRegistrar;
 }
 
 /**
- * The edit surface the box registers with the host's text-control
+ * The edit surface the box registers with the owning part's text-control
  * service. Declared structurally: it mirrors `TextControl` in
- * `@workshop/platform/text-control-service` field for field so the host's
- * bound `register` type-checks here without an import across the
- * boundary.
+ * `@workshop/platform/text-control-service` field for field so the
+ * owning part's bound `register` type-checks here without an import
+ * across the boundary.
  */
 export interface ChatBoxTextControl {
   readonly kind: string;
@@ -138,7 +138,7 @@ export interface ChatBoxTextControl {
 /** Registers `control` for `root`'s subtree; disposing unregisters it. */
 export type TextControlRegistrar = (root: HTMLElement, control: ChatBoxTextControl) => IDisposable;
 
-/** Everything the box tells its host. */
+/** Everything the box tells its owning part. */
 export type ChatBoxEvent =
   | { readonly type: "send"; readonly text: string; readonly mentions: ChipRef[]; readonly attachments: ChipRef[] }
   | { readonly type: "command"; readonly command: ChipRef; readonly args: string }
@@ -147,7 +147,7 @@ export type ChatBoxEvent =
   | { readonly type: "mic-press" }
   | { readonly type: "mic-release" };
 
-/** The host's event sink. */
+/** The owning part's event sink. */
 export type ChatBoxEventSink = (event: ChatBoxEvent) => void;
 
 /**

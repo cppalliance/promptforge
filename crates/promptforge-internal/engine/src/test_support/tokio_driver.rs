@@ -32,9 +32,9 @@
 //! determinism suites sweep across seeds. The performers all post
 //! independently of the run, so the hold cannot deadlock.
 //!
-//! This is a test host: the engine's own suites drive runs through it,
-//! and a companion crate's suite enables the `test-support` feature for
-//! it. The harness is the production host.
+//! This driver plays the Harness's part in tests: the Engine's own suites
+//! drive runs through it, and a companion crate's suite enables the
+//! `test-support` feature for it. In production the Harness steps the run.
 
 use std::collections::HashMap;
 #[cfg(test)]
@@ -135,7 +135,7 @@ type AnswerSender = mpsc::UnboundedSender<(EffectId, EffectAnswer)>;
 pub(crate) struct TokioDriver<'a> {
     /// The run being driven.
     run: Run,
-    /// The host's performers for the kinds it performs.
+    /// The caller's performers for the kinds it performs.
     performers: Performers,
     /// Where every drained event goes.
     sink: EventSink<'a>,
@@ -168,9 +168,9 @@ pub(crate) struct TokioDriver<'a> {
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
     /// and replaying its events through the `host` the suite assembled
-    /// itself. The host supplies the observer, chat client, tools, delta
+    /// itself. The bundle supplies the observer, chat client, tools, delta
     /// hook, and debug capture; `client` is the run's mock-gateway client
-    /// when the suite supplies one, overriding any on the host.
+    /// when the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
@@ -369,7 +369,7 @@ impl<'a> TokioDriver<'a> {
             }
             Effect::Store { access, op } => {
                 // spawn_blocking, not a plain task: the Vfs is sync by
-                // design, and the blocking pool keeps a slow host-backend
+                // design, and the blocking pool keeps a slow real-filesystem
                 // op from stalling the loop. Aborting the handle detaches
                 // rather than interrupts, so a dropped op completes before
                 // its join returns.
@@ -416,7 +416,7 @@ impl std::fmt::Debug for TokioDriver<'_> {
 }
 
 /// Aborts every performer still out when the driver is dropped
-/// mid-run - a host tearing the run down without driving it to its end.
+/// mid-run - a suite tearing the run down without driving it to its end.
 /// Dropping a bare `JoinHandle` detaches the task, which would strand a
 /// tool call or model round forever, so the drop applies the same
 /// abort the run's end does.

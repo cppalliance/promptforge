@@ -77,7 +77,7 @@ impl ModelRole {
 ///
 /// Labels are prompt-local (the alias grammar); the model never sees a
 /// concrete model id in the declaration. Each label installs as a section
-/// VM global, so a label that names a host global, a Lua standard-library
+/// VM global, so a label that names an Engine global, a Lua standard-library
 /// global the sandbox keeps, or a Lua keyword is rejected at parse, as is
 /// a label that is also a tool alias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

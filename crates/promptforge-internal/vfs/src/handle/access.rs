@@ -138,7 +138,7 @@ impl Access {
     }
 
     /// Consults the handle's policy. v1 maps `Ask` to `PermissionDenied`:
-    /// the approval dialog is a host concern above this layer, and the
+    /// the approval dialog is a Host concern above this layer, and the
     /// reason string still names what was asked and which rule fired.
     fn check_policy(&self, op: Op, path: &VfsPath) -> Result<(), VfsError> {
         match self.policy.check(op, path) {

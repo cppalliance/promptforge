@@ -206,7 +206,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 /// error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
-    // A host without a client performs every `Chat` against the disabled
+    // A Harness without a client performs every `Chat` against the disabled
     // gateway: the round fails with that error and nothing reaches the
     // network, however the process environment is configured.
     let md = [

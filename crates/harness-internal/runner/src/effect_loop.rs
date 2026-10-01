@@ -1,4 +1,4 @@
-//! The effect loop: the harness's production host for an engine `Run`.
+//! The effect loop: the Harness steps an Engine `Run` and performs its effects.
 //!
 //! The loop is `step -> record -> perform -> await an answer -> record ->
 //! resume`. Every step's events are appended to the run log before any of
@@ -77,7 +77,7 @@ pub enum DriveError {
 /// row with its outcome and returns it.
 ///
 /// The future is boxed internally: the step machinery is large, and the
-/// caller's own future stays small. It is `Send` when `sink` is, so a host
+/// caller's own future stays small. It is `Send` when `sink` is, so the Harness
 /// can hold it in a task of its own; the driver never borrows itself
 /// shared across an await.
 ///
@@ -268,7 +268,7 @@ impl<'a> Driver<'a> {
                 Err(join) if join.is_cancelled() => {}
                 // A performer that panicked before the drop reached it.
                 // Its effect is dropped either way, but the panic is the
-                // host's bug and is not swallowed.
+                // Harness's bug and is not swallowed.
                 Err(join) => tracing::error!(
                     effect = %id,
                     task = %in_flight.provenance.task,
@@ -408,7 +408,7 @@ impl<'a> Driver<'a> {
 }
 
 /// Aborts every performer still out when the driver is dropped mid-run -
-/// a log failure, or a host tearing the loop down. Dropping a bare
+/// a log failure, or the Harness tearing the loop down. Dropping a bare
 /// `JoinHandle` detaches the task, which would strand a tool call waiting
 /// on the operator or a model round forever, so the drop applies the same
 /// abort the run's end does.

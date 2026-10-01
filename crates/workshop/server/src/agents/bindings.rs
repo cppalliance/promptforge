@@ -1,14 +1,14 @@
 //! The bindings the server pushes through the harness's public API as
 //! data: the gateway endpoint and bearer, the chat-capable model
-//! catalog, and the host snapshot a run's `ui()` and model resolution
+//! catalog, and the Host snapshot a run's `ui()` and model resolution
 //! read (the menu's selected model and the workspace's granted roots).
 //!
 //! The harness never resolves a gateway, reads a menu, or names a
 //! workspace crate; it observes generation changes through the values
 //! pushed here. [`push_bindings`] reads every source through the
-//! registry's collections and pushes all three, host first, so the
-//! binding that triggers a relaunch never finds a stale selection behind
-//! it. [`forward`] is the long-lived half: it wakes on the gateway
+//! registry's collections and pushes all three, the Host snapshot first,
+//! so the binding that triggers a relaunch never finds a stale selection
+//! behind it. [`forward`] is the long-lived half: it wakes on the gateway
 //! binding's replacement watch, the catalog's chat-generation watch, the
 //! menu's snapshot bus, and the workspace's grant-set generation watch,
 //! and pushes again.
@@ -20,10 +20,10 @@ use workshop_menu::{CatalogBus, MenuHandles};
 use workshop_registry::{Registry, WorkspaceRoots};
 use workshop_support::recv_or_pending;
 
-/// Pushes the server's current host snapshot, chat catalog, and gateway
+/// Pushes the server's current Host snapshot, chat catalog, and gateway
 /// binding into `harness`, each read through `registry` at this moment.
 /// An unregistered subsystem leaves its binding at whatever the harness
-/// last saw (the host snapshot's absent parts read as `null`).
+/// last saw (the Host snapshot's absent parts read as `null`).
 pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     harness.set_host(host_snapshot(registry));
     if let Some(menu) = registry.state::<MenuHandles>() {
@@ -34,7 +34,7 @@ pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     }
 }
 
-/// The host snapshot: `selected_model` from the menu's retained workbench
+/// The Host snapshot: `selected_model` from the menu's retained workbench
 /// state and the granted workspace roots from the registry's roots slot,
 /// so this crate reads the workspace through the slot the workspace
 /// subsystem registered, as the sessions did before the harness.

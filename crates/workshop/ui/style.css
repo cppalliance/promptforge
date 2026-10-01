@@ -21,8 +21,8 @@
    a transparent track, so the bar reads as an overlay on whatever surface
    scrolls. WebView2 is Chromium, so the ::-webkit-scrollbar pseudoelements
    are the styled surface; the standard `scrollbar-width`/`scrollbar-color`
-   pair applies the same intent to any future non-Chromium host. Widths and
-   colors are variables so a skin can retune them from the token sheet.
+   pair applies the same intent to any future non-Chromium webview. Widths
+   and colors are variables so a skin can retune them from the token sheet.
    -------------------------------------------------------------------------- */
 * {
   scrollbar-width: thin;

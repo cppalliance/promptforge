@@ -4,8 +4,8 @@
 use super::{Error, join_task_ids};
 
 /// The internal type's rendering into the Lua error table: the kind an author
-/// branches on and the kind's fields. Host-side failures the author cannot
-/// act on (transport, backend, configuration, input) render as
+/// branches on and the kind's fields. Failures outside the prompt
+/// (transport, backend, configuration, input) render as
 /// `internal`; every Lua-phase failure renders as `lua`; a store
 /// operation's own failure renders as `store` with its `reason` and the
 /// structured variant's fields.

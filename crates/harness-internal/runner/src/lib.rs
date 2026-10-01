@@ -1,5 +1,5 @@
 //! harness-runner - the harness effect loop: prepares an engine `Run`
-//! from a prompt file (drawing the host inputs the engine refuses to draw
+//! from a prompt file (drawing the inputs the Engine refuses to draw
 //! itself, putting the declared input file in place, activating
 //! capabilities, opening the run's row), steps it,
 //! performs each effect on tokio through one performer per effect kind,
@@ -27,11 +27,6 @@
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
 //! - The loop never reads an event to decide anything; control comes
 //!   from the run's own word (`Step`, `Run::decided`) and the cancel flag.
-//! - [`cancel::CancelHandle`] is the awaitable token a host selects over;
-//!   the engine observes only the polled flag in
-//!   `promptforge::cancel`, and a host bridges the one to the
-//!   other when it launches a run. The `harness` facade re-exports the
-//!   module.
 
 pub mod cancel;
 mod display_chain;

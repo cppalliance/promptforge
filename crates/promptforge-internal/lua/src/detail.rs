@@ -1,7 +1,7 @@
 //! Operations on the Lua boundary's types that only the engine performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host.
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it.
 
 use crate::SharedSource;
 

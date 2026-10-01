@@ -3,7 +3,7 @@
 //! walked section or the H1 pass leaves in `_G` is a reserved name, and
 //! every reserved global reads non-nil once the VM binds its conditional
 //! ones (`ui`, `item`, `prose`). No capability prelude and no frontmatter
-//! alias installs here, so what `_G` holds is exactly the host's.
+//! alias installs here, so what `_G` holds is exactly what the Engine installs.
 
 use std::sync::{Arc, Mutex};
 
@@ -19,7 +19,7 @@ use crate::test_support::recording::null_emitter;
 use crate::untrusted::GuardNonce;
 
 /// Builds a section VM through the real setup path with every conditional
-/// host global bound: a host-state snapshot (`ui`), a collection member
+/// Engine global bound: a Host-state snapshot (`ui`), a collection member
 /// (`item`), a non-nil `argv` (writable as in the H1 pass, or frozen as in
 /// every other section), and a block's lazy `prose`.
 fn fully_bound_vm(argv_writable: bool) -> SectionVm {

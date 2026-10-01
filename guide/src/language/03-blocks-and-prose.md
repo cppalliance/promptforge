@@ -661,7 +661,7 @@ A prompt that needs no shared code leaves the `lua shared` fence out. Every sect
 
 ### What top-level library code can use
 
-The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
+The Engine installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the Harness are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
 
 | In the library's top-level code | What happens |
 |---|---|
@@ -722,7 +722,7 @@ captured = {}
 setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })
 ````
 
-The host sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
+The Engine sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
 
 In a fanout arm, `item` is installed before the replay, so the library's top-level code sees the arm's member and can set globals the worker section reads. With a library line `captured_by_shared = item`, a worker section that returns `tostring(captured_by_shared) .. '|' .. tostring(item)` gives `alpha|alpha` for the member `alpha`.
 

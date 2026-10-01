@@ -121,7 +121,7 @@ async fn mock_gateway() -> (GatewayClient, Seen) {
     (client, seen)
 }
 
-/// The host's current model: what every declared role binds to.
+/// The Host's current model: what every declared role binds to.
 fn current_model() -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway("m").expect("the model id is valid"),

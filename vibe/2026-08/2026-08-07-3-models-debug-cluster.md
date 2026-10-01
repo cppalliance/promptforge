@@ -12,7 +12,7 @@ todos:
     content: Extend ModelConfig and add bearer-authed GET /v1/models; update gateway.toml
     status: completed
   - id: models-language
-    content: Implement models.need / models.use bind+execute+client CompletionOptions; wire CLI/MCP/dev hosts
+    content: Implement models.need / models.use bind+execute+client CompletionOptions; wire CLI/MCP/dev Hosts
     status: completed
   - id: docs-fixture
     content: User-facing docs (README, design-core, crate READMEs) and example prompt using models.need/use
@@ -51,7 +51,7 @@ Keep the vibe loop (one testable commit per step, fresh-context review, amend un
 4. Scenario suite byte contracts are unchanged unless the step explicitly changes them.
 5. Dev stdout remains result-only; status, traces, and dump announcements go to stderr.
 6. Gateway chat passthrough via `rest` is preserved; catalog is additive.
-7. Prompts without `models.*` keep today's host-default behavior.
+7. Prompts without `models.*` keep today's Harness-default behavior.
 8. User-facing docs match the shipped grammar and gateway fields; no staging-path references in output docs.
 9. Every new public item has docs including `# Errors` where fallible.
 10. Tests would fail if the step's behavior were removed.
@@ -60,12 +60,12 @@ Keep the vibe loop (one testable commit per step, fresh-context review, amend un
 
 | Decision | Choice | Falsifier |
 |---|---|---|
-| Debug vs Observer | Separate `DebugCapture` on `RunOptions`; Observer stays payload-free | Any host needs payloads through Observer alone |
+| Debug vs Observer | Separate `DebugCapture` on `RunOptions`; Observer stays payload-free | Any Host needs payloads through Observer alone |
 | H1 / H2 API | `models.need(alias, description, opts?)` and `models.use(alias)` | Authors cannot express per-section model choice |
 | Constraint vs invocation | `context` and `thinking` capability filter the catalog; `temperature`, `max_tokens`, and switchable `thinking` ride per request | Backend rejects a field that was advertised as supported |
 | Same weights, different params | Legal - identity is alias to binding (ModelId + invocation), not to weights | Two aliases collide incorrectly as Duplicate |
-| No `models.use` | Host default client model (today's behavior) | Existing prompts break |
-| Gateway role | Catalog metadata + `GET /v1/models`; request body stays passthrough via `rest` | Hosts invent model metadata out of band |
+| No `models.use` | Harness default client model (today's behavior) | Existing prompts break |
+| Gateway role | Catalog metadata + `GET /v1/models`; request body stays passthrough via `rest` | The Harness invents model metadata out of band |
 | Thinking dialect (v0) | Client emits OpenAI-shaped `chat_template_kwargs.enable_thinking` when binding requests it; backends that ignore it are catalogued `thinking = "never"` or `"always"` so bind filters them | A hybrid model cannot turn thinking off |
 | MCP catalog fetch | Soft-fail to empty catalog + warn at boot (offline stdio); bind surfaces `ModelAbsent` only when a prompt declares models. CLI hard-fails fetch when a token is present. Forced by MCP offline boot. | Offline MCP cannot start without a gateway |
 
@@ -102,11 +102,11 @@ flowchart LR
 
 ## Step 1 - DebugCapture seam
 
-**Goal:** hosts can opt into raw request/response capture without widening `Observer`.
+**Goal:** Hosts can opt into raw request/response capture without widening `Observer`.
 
 In [promptforge-core](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core):
 
-- Add `DebugCapture: Send + Sync` trait with a single method that receives `(execution, section, turn_index, event)` where `event` is an owned enum carrying request body and/or response body as `serde_json::Value` (and finish_reason / reasoning_content when present). `NullDebugCapture` or `Option<&dyn DebugCapture>` on `RunOptions` - prefer `Option` so production hosts pay zero.
+- Add `DebugCapture: Send + Sync` trait with a single method that receives `(execution, section, turn_index, event)` where `event` is an owned enum carrying request body and/or response body as `serde_json::Value` (and finish_reason / reasoning_content when present). `NullDebugCapture` or `Option<&dyn DebugCapture>` on `RunOptions` - prefer `Option` so production runs pay zero.
 - Extend `RunOptions` with `debug: Option<&'a dyn DebugCapture>`.
 - In [client.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\client.rs) / the tool loop in [execute.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\execute.rs): after building the request body and after parsing the response, call the capture when `Some`. Parsing must surface `finish_reason` and optional `reasoning_content` alongside today's `CompletionResult` (internal fields or a richer result type) so later steps can observe them; still do not put those payloads on the Observer.
 - Dev runner in [promptforge-core-tests](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core-tests): implement a capture that writes `turn-N-request.json` and `turn-N-response.json` under `<prompt-stem>.store/.trace/` (same dump directory as store files; announce on stderr). Wire it in `run_once` always for dev mode.
@@ -136,7 +136,7 @@ Emit from the tool loop when binding final text: empty `content` after a success
 
 ## Step 3 - Gateway model catalog
 
-**Goal:** hosts fetch authoritative model metadata instead of inventing it.
+**Goal:** the Harness fetches authoritative model metadata from the gateway.
 
 In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-gateway):
 
@@ -162,7 +162,7 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 
 - `ModelId` - stable identity (`server` + `name`, or single gateway-facing name; match ToolId shape if a server namespace helps multi-gateway later - for v0 use one namespace `"gateway"` + model name).
 - `ModelDescriptor` - id, description, context, thinking mode.
-- `ModelCatalog` / `ModelRegistry` - complete live set for the run (host-built).
+- `ModelCatalog` / `ModelRegistry` - complete live set for the run (Harness-built).
 - `ModelNeedOpts` from Lua table: optional `thinking` (bool), `context` (integer min), `temperature` (number), `max_tokens` (integer).
 - `ModelBinding` - alias + resolved `ModelId` + frozen invocation (`temperature`, `max_tokens`, `thinking: Option<bool>`).
 - `ModelBindings` - frozen H1 declarations; parallel to `ToolBindings`.
@@ -171,7 +171,7 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 
 - H1 binding VM: `models.need(alias, description, opts?)` - resolve as below; `models.use` forbidden.
 - H1 replay: exact declaration replay like tools.
-- H2: `models.use(alias)` - at most once before scope close; `models.need` forbidden. Closing records `Option<ModelBinding>` for the section (None = host default).
+- H2: `models.use(alias)` - at most once before scope close; `models.need` forbidden. Closing records `Option<ModelBinding>` for the section (None = Harness default).
 
 ### Resolve
 
@@ -182,7 +182,7 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 
 ### Bind / execute
 
-- Extend `bind_prompt` (or a sibling that hosts call once) to accept `ModelCatalog` + picker and freeze `ModelBindings` into `BoundPrompt`.
+- Extend `bind_prompt` (or a sibling that the Harness calls once) to accept `ModelCatalog` + picker and freeze `ModelBindings` into `BoundPrompt`.
 - Section execution: after H2 close, if `models.use` selected a binding, build per-call fields for every `complete` in that section; else use `RunOptions.client`'s model with no extra sampling fields (compat).
 - Extend `GatewayClient::complete` to accept optional `CompletionOptions { model override, temperature, max_tokens, thinking }` merged into the JSON body (`chat_template_kwargs` when thinking is `Some`).
 
@@ -221,4 +221,4 @@ Reviewers use the `<project-review>` block under Lean Vibe execution protocol ab
 
 ## Data-flow note
 
-Step 1 produces the capture seam execute needs. Step 2 consumes finish_reason/content emptiness from step 1's richer parse. Step 3 produces catalog JSON hosts need. Step 4 consumes catalog + picker + client options; DebugCapture already records the new per-call fields. Step 5 documents the shipped surface. No step waits on undocumented chat context.
+Step 1 produces the capture seam execute needs. Step 2 consumes finish_reason/content emptiness from step 1's richer parse. Step 3 produces catalog JSON the Harness needs. Step 4 consumes catalog + picker + client options; DebugCapture already records the new per-call fields. Step 5 documents the shipped surface. No step waits on undocumented chat context.

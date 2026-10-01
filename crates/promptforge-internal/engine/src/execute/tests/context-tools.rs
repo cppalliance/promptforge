@@ -1,13 +1,13 @@
 //! Fixture tool sets: a binding beside its implementation, a run's tool
-//! set beside the host table behind it, and the helpers that arm a run
-//! state with them.
+//! set beside the Harness's tool table behind it, and the helpers that
+//! arm a run state with them.
 
 use super::*;
 
 /// A binding for a fixture tool beside its implementation: the binding
-/// goes into the run's tool set, the implementation into the host table
-/// [`arm_tools`] hands the driver, so a script or model call on the alias
-/// resolves through the same id the binding journals.
+/// goes into the run's tool set, the implementation into the Harness's
+/// tool table [`arm_tools`] hands the driver, so a script or model call on
+/// the alias resolves through the same id the binding journals.
 pub(in super::super) fn fixture_binding(
     alias: &str,
     description: &str,
@@ -19,7 +19,7 @@ pub(in super::super) fn fixture_binding(
 
 /// A run's tool set beside the implementations behind it: the set goes to
 /// the run state (what the engine advertises and journals), the table to
-/// the state's test host (what the driver performs a `ToolCall` with).
+/// this test's Harness (what the driver performs a `ToolCall` with).
 /// A bare [`ToolSet`](crate::lua::ToolSet) converts into a fixture with no
 /// implementations, for the tests whose tools are never called.
 #[derive(Clone, Default)]
@@ -100,7 +100,7 @@ pub(in super::super) fn arm_tools_scoped(
     FixtureTools::new(bindings, always).install(ctx, host)
 }
 
-/// The test's tools as the two halves a host assembles from its
+/// The test's tools as the two halves the Harness assembles from its
 /// activated capabilities: the catalog of descriptors the run's
 /// frontmatter tool slots (under `tests/tools`) fill against at prepare,
 /// and the table of implementations the driver's tool performer resolves

@@ -76,7 +76,7 @@ alpha-1
 beta-2
 ````
 
-The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and host calls](05-lua-environment.md#standard-lua-and-host-calls)).
+The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and Engine calls](05-lua-environment.md#standard-lua-and-engine-calls)).
 
 Results land in collection order no matter which arm finishes first, so a join or merge built from them is the same on every run. In this worker section, which sends prompts with [`models.infer`](10-models.md#running-a-round-with-modelsinfer), the arm for `a` makes a second model call and so finishes after the arms for `b` and `c`:
 
@@ -485,7 +485,7 @@ Conversations overlap the same way. With `models.loop` in every arm, all the arm
 
 ### The concurrency limit
 
-The host running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
+The Harness running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
 
 `fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). It spawns every arm up front and then collects them, and an arm that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` ([Checking on tasks](15-tasks.md#checking-on-tasks)). The scheduler admits the waiting arms in spawn order as slots free up, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
 
@@ -738,7 +738,7 @@ UNKNOWN
 
 When an arm is cancelled because a sibling failed, everything under it stops too: a chain it started with `call` stops, a nested fanout's arms stop with it, and so on down, and anything that had not yet run its block never runs it. What a cancelled arm had started is abandoned with the reason `owner_aborted`, which [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) explains.
 
-If the host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
+If the Host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
 
 ## Addressing from an arm
 

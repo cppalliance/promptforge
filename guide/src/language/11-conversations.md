@@ -126,7 +126,7 @@ models.loop(msgs)
 return msgs[#msgs].content
 ````
 
-A built list stays plain data: its length, its numeric indexes, and its conversion to JSON contain only the records, because the builder methods live on the list's metatable, never as fields. Message lists are also the only values the host provides that have colon-call methods. [Model handles](10-models.md#model-handles) have read-only fields and no methods, and no other handle the host provides has methods either, so you pass handles to functions instead, as in `models.infer(handle, prompt)`.
+A built list stays plain data: its length, its numeric indexes, and its conversion to JSON contain only the records, because the builder methods live on the list's metatable, never as fields. Message lists are also the only values the Engine provides that have colon-call methods. [Model handles](10-models.md#model-handles) have read-only fields and no methods, and no other handle the Engine provides has methods either, so you pass handles to functions instead, as in `models.infer(handle, prompt)`.
 
 ## Message records
 
@@ -272,7 +272,7 @@ tool_call_succeeded
 model_turn_completed
 ````
 
-When the host shows live output, each text fragment of a loop round reaches the host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A host that stops listening does not fail the round.
+When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
 
 ## How the list reaches the model
 
@@ -429,7 +429,7 @@ A compactor is the policy for a round that overflows the model's context window.
 
 | Reason | What happened |
 |---|---|
-| `precheck` | The estimated request size exceeded the model's context window, and no request left the host |
+| `precheck` | The estimated request size exceeded the model's context window, and the round stopped before its request reached the Harness |
 | `provider` | The provider rejected the request as too large for its context window |
 
 `pcall` catches context exhaustion as an error value whose `kind` is `context_exhausted` and whose `reason` field is `"precheck"` or `"provider"`:
@@ -444,7 +444,7 @@ end
 return msgs[#msgs].content
 ````
 
-When the prose is far longer than the model's context window, the round is refused before any request leaves the host, and the result is:
+When the prose is far longer than the model's context window, the round is refused before any request reaches the Harness, and the result is:
 
 ````text
 context_exhausted: precheck
@@ -485,7 +485,7 @@ A refused round appends nothing. A bad compactor argument is refused before any 
 
 ### The precheck
 
-Before each round is sent, a precheck compares the estimated request size with the model's context window. Only an estimate larger than the window is refused, with reason `"precheck"` and before anything leaves the host, so an estimate equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
+Before each round is sent, a precheck compares the estimated request size with the model's context window. Only an estimate larger than the window is refused, with reason `"precheck"` and before anything reaches the Harness, so an estimate equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
 
 The estimate is the conversation's total text length in UTF-8 bytes, divided by 4 with the remainder dropped, plus 4 tokens for each record sent. The division runs once over the whole conversation, and records are counted after they merge as [How the list reaches the model](#how-the-list-reaches-the-model) describes, so merged records pay the per-record overhead once. One 396-character record estimates to 103 tokens, 99 for the text plus 4, so a 103-token window admits it and a 102-token window refuses it. Non-ASCII text weighs more per visible character, because each such character takes more than one byte.
 
@@ -508,7 +508,7 @@ promptforge: 0
 max_tool_iterations: 5
 ````
 
-The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the host running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
+The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the Harness running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
 
 Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
 
@@ -559,7 +559,7 @@ The loop raises these error kinds:
 | `context_exhausted` | A round overflows under `compactors.fail`; `reason` is `"precheck"` or `"provider"` | `ContextExhausted` |
 | `tool_loop_exhausted` | The round cap runs out; there are no extra fields | `Tool` |
 | `out_of_scope_tool` | The model calls a tool that is not [in scope](12-tools.md#advertising-tools-to-the-model) for the round; `name` holds the requested name | `Tool` |
-| `internal` | A backend, transport, or other host-side failure, the missing-model error included | `Completion` for backend and transport failures, `Binding` for the missing-model error |
+| `internal` | A backend, transport, or other failure outside the prompt, the missing-model error included | `Completion` for backend and transport failures, `Binding` for the missing-model error |
 
 An `out_of_scope_tool` message begins `tool "{name}" is not in this section's scope; in-scope aliases: [{aliases}]`, where `{aliases}` lists the aliases in scope, each in double quotes, as in `["echo"]`, and none of that round's calls run, so the round appends nothing. An error raised inside a [local tool](12-tools.md#local-tools) handler during the loop reaches the call with its own kind.
 

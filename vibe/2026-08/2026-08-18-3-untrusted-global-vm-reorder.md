@@ -1,6 +1,6 @@
 ---
 name: untrusted global and VM reorder
-overview: "Seven steps, one commit each: (1-5) add a global `untrusted(s)`, extend `store.read` with optional line bounds, add `store.read_numbered` with the same bounds, and remove `store.inject` and `store.read_lines`; (6) reorder section VM startup so the full host environment is installed before the shared library replays as the section's first chunk; (7) generate the design document."
+overview: "Seven steps, one commit each: (1-5) add a global `untrusted(s)`, extend `store.read` with optional line bounds, add `store.read_numbered` with the same bounds, and remove `store.inject` and `store.read_lines`; (6) reorder section VM startup so every Engine global is installed before the shared library replays as the section's first chunk; (7) generate the design document."
 todos:
   - id: step-1-untrusted-global
     content: "Step 1: untrusted() global - install site, tests, docs"
@@ -30,7 +30,7 @@ isProject: false
 
 ## Target
 
-PromptForge's Lua surface gains a global `untrusted(s)` that guard-wraps any string for model-facing injection. The store gains bounded reads - `store.read(path[, start[, end]])` verbatim and `store.read_numbered(path[, start[, end]])` with absolute line numbers - and loses the two fused methods `store.inject` and `store.read_lines`. Section VM startup becomes one linear sequence with the full host environment installed before the shared library replays as the section's first chunk, fixing in passing the bug that shared replay ran under default rather than configured limits.
+PromptForge's Lua surface gains a global `untrusted(s)` that guard-wraps any string for model-facing injection. The store gains bounded reads - `store.read(path[, start[, end]])` verbatim and `store.read_numbered(path[, start[, end]])` with absolute line numbers - and loses the two fused methods `store.inject` and `store.read_lines`. Section VM startup becomes one linear sequence with every Engine global installed before the shared library replays as the section's first chunk, fixing in passing the bug that shared replay ran under default rather than configured limits.
 
 ## Decisions
 
@@ -38,7 +38,7 @@ PromptForge's Lua surface gains a global `untrusted(s)` that guard-wraps any str
 2. **`store.inject` is removed.** One way to wrap: `untrusted(store.read(p))`. Accepted as a prompt-facing break; the engine frontmatter stays `promptforge: 1` because everything else is additive.
 3. **Line numbering stays in the store as `read_numbered`.** Numbering a range needs the range's origin, and the store holds that provenance at slice time. Rejected: a `numbered(text, start)` global - it forced either repeating the start literal at call sites or reading a whole file to slice 400 lines. A pure `numbered` global can still be added later if numbering non-store strings shows up in practice.
 4. **Bounds are 1-based inclusive (start, end), clamping.** Matches the dissect schema (`start_line`/`end_line` in papergate's `add_section`) and citation usage ("lines 22-82"). Rejected: (start, count) - it forces `end - start + 1` arithmetic at every call site, the documented small-model failure mode; with numbered text, start and end are extractive copies while count is always computed.
-5. **Section startup order: build VM, apply limits, inject host values, install host APIs, install control globals, replay shared, install captured bindings, run chunks.** One linear path replaces the two-phase construction. Fixes the latent bug that shared replay ran under default limits, because `apply_lua_limits` currently lands after `new_for_section` replays.
+5. **Section startup order: build VM, apply limits, inject Engine global values, install Engine functions, install control globals, replay shared, install captured bindings, run chunks.** One linear path replaces the two-phase construction. Fixes the latent bug that shared replay ran under default limits, because `apply_lua_limits` currently lands after `new_for_section` replays.
 6. **Replay runs with the full environment.** Shared top-level code is the section's first chunk in every respect: `log`, `store`, `args`, `sys`, `var`, `reply`, `tools`, `models`, `untrusted`, `execute`, `fanout` all available. Footguns possible; tighten later with evidence - the gated-environment sketch under Out of scope is the tightening path. Rejected: gating now (roughly 130 lines and a flag protocol with no observed confusion to justify it yet); rejected: status quo (blocks `log`/`store`/`args` at load, the asymmetry that prompted this rework).
 7. **`jump` during replay is a hard error.** Delivered by mapping the chunk path's `LuaBlockResult::Jump` outcome to "jump is not available during shared library load". Rejected: following the jump - load-time control transfer has no coherent meaning.
 8. **Captured bindings install after replay.** Preserves today's collision semantics: a declared tool/model alias wins over a same-named shared global. Consequence: during replay the `tools`/`models` tables are fully functional, but the bare alias userdata globals (e.g. `echo`, `analyst`) do not exist yet.

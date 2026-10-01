@@ -15,7 +15,7 @@
 //! ````
 //!
 //! A prompt that does not declare the capability has no `input` global.
-//! By the end of this page you know what your host supplies for the
+//! By the end of this page you know what the Harness supplies for the
 //! capability, what the script receives with and without an operator,
 //! how a failed wait reaches the script, and how a prompt lets its model
 //! ask.
@@ -25,12 +25,12 @@
 //! The capability contributes one tool, the ask tool, under the full id
 //! [`USER_INPUT_ASK_TOOL`], and a prelude: the Lua source that defines
 //! `input` in every section of the run. `input.ask()` calls the ask tool
-//! by its full id, so every ask reaches the host as an ordinary
-//! `ToolCall` effect that the harness's tool performer runs. The ask tool
-//! waits on the run's [`InputBroker`], the host service in
-//! [`RunServices::input`]. Each run gets a broker bound to the session
-//! that launched it, so the question reaches the right operator without
-//! naming the run or the section.
+//! by its full id, so every ask reaches the Harness as an ordinary
+//! `ToolCall` effect that its tool performer runs. The ask tool waits
+//! on the run's [`InputBroker`] in [`RunServices::input`], the part of
+//! the Host that carries a question to a person. Each run gets a broker
+//! bound to the session that launched it, so the question reaches the
+//! right operator without naming the run or the section.
 //!
 //! Whether a broker is present is fixed when the capability activates: a
 //! broker that is present stays present for the whole run. The prelude
@@ -39,7 +39,7 @@
 //!
 //! # Answering with operator text
 //!
-//! A host with a person at the other end puts a broker in the run's
+//! When the Host has an operator, the Harness puts a broker in the run's
 //! services with [`RunServices::with_input`]. Each `input.ask()` waits on
 //! [`InputBroker::wait`], and the script receives the operator's text
 //! byte-exact with `available` set to `true`. Operator input is trusted,
@@ -55,7 +55,7 @@
 //! use promptforge::cancel::CancelHandle;
 //! use promptforge::tools::OutputTrust;
 //!
-//! /// Stands in for the host's own way of reaching a person.
+//! /// Stands in for the Host's own way of reaching a person.
 //! struct Operator;
 //!
 //! #[async_trait::async_trait]
@@ -82,9 +82,9 @@
 //!
 //! # Answering without an operator
 //!
-//! A host with nobody to ask, such as a batch or eval host, supplies no
-//! broker. What happens then depends on how the prompt declared the
-//! capability.
+//! For a Host with nobody to ask, such as a batch or eval Host, the
+//! Harness supplies no broker. What happens then depends on how the
+//! prompt declared the capability.
 //!
 //! - A required declaration is refused before the run starts. The
 //!   capability's [`needs`](Capability::needs) names
@@ -95,7 +95,7 @@
 //! - An optional declaration activates anyway, and the activation
 //!   records a [`ServiceGap`](crate::ServiceGap). `input.connected()`
 //!   returns `false`. Each `input.ask()` still issues the tool call, so
-//!   the host sees every ask, and returns the fixed sentence "User input
+//!   the Host sees every ask, and returns the fixed sentence "User input
 //!   is unavailable in this host; continue without it." with `available`
 //!   set to `false`.
 //!
@@ -152,7 +152,7 @@ mod tests;
 /// binds under an alias of its own to let its model ask the operator.
 pub const USER_INPUT_ASK_TOOL: &str = "promptforge/user-input/ask";
 
-/// What the ask tool answers on a host with nobody to ask.
+/// What the ask tool answers on a Host with nobody to ask.
 const FALLBACK: &str = "User input is unavailable in this host; continue without it.";
 
 /// The first-party `promptforge/user-input` capability.

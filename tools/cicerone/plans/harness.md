@@ -2,13 +2,13 @@
 
 <plan-reader>
 
-A Rust developer building a program that hosts PromptForge agents for a person at a screen: a chat server, a desktop app, or a command-line tool. They know async Rust, tokio channels, `Arc`, and `Result`. They have read what a PromptForge prompt is, but they have never hosted one.
+A Rust developer building a program that runs agents through the Harness for a person at a screen: a chat server, a desktop app, or a command-line tool. They know async Rust, tokio channels, `Arc`, and `Result`. They have read what a PromptForge prompt is, but they have never run one from their own program.
 
 </plan-reader>
 
 <plan-example>
 
-`desk`, a small host that runs the built-in `chat` agent for one operator. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost gives canned replies, so each example runs offline.
+`desk`, a small Host that runs the built-in `chat` agent for one operator. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost gives canned replies, so each example runs offline.
 
 </plan-example>
 
@@ -34,7 +34,7 @@ A Rust developer building a program that hosts PromptForge agents for a person a
 
 <page-lib>
 
-Purpose: Teach a Rust developer to host PromptForge agents as long-running sessions an operator talks to.
+Purpose: Teach a Rust developer to run PromptForge agents through the Harness as long-running sessions an operator talks to.
 Core idea: Your program tells the harness where models live, launches agents by name, and relays what each session says and asks.
 Need this when: always; start here.
 Builds on: none
@@ -76,11 +76,11 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 - Diagram: none
 
 ### Tour: The complete program
-- How: How do the pieces from every tour fit into one host?
+- How: How do the pieces from every tour fit into one Host?
 - What if: What happens when my program never answers an open question?
 - Why: Why does the harness take its model server and model choice as values you push in, rather than reading them itself?
-- Example: the whole `desk` host, every line visible.
-- Diagram: the host loop, from launch to streaming, answering, and closing.
+- Example: the whole `desk` Host, every line visible.
+- Diagram: the Host loop, from launch to streaming, answering, and closing.
 
 Owns:
 - item: harness::CatalogBinding
@@ -188,8 +188,8 @@ Primer sources: guide/src/language/09-the-store.md
 - How: How do I guard and watch the files my program shares with a running session?
 - What if: What happens when my program's access and the run's access touch the same path?
 - Why: Why does the store hold claims on the paths a run reads and writes?
-- Example: build the `desk` store with a policy and an operation sink, label each host access with an `Origin`, tell the host's operations from the run's in the sink, and handle the conflict when both touch the notes file.
-- Diagram: one path claimed by the run's access and then touched by a host access, ending in a conflict.
+- Example: build the `desk` store with a policy and an operation sink, label each Host access with an `Origin`, tell the Host's operations from the run's in the sink, and handle the conflict when both touch the notes file.
+- Diagram: one path claimed by the run's access and then touched by a Host access, ending in a conflict.
 
 Owns:
 - item: harness::vfs::Origin

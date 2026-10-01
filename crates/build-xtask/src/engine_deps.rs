@@ -7,7 +7,7 @@
 //! not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in
 //! `[dependencies]`, `[build-dependencies]`, or the target-specific forms
 //! of either. `[dev-dependencies]` are outside the guard: the engine's own
-//! suites drive it from a tokio test harness against a mock gateway.
+//! suites drive it from the tokio test driver against a mock gateway.
 //!
 //! Exemption: an entry marked `optional = true` that only the
 //! `test-support` feature enables is exempt, so the tokio test driver can

@@ -1,4 +1,4 @@
-//! Tests for the preflight report's missing host services.
+//! Tests for the preflight report's missing Host services.
 
 use promptforge_types::capabilities::CapabilityId;
 

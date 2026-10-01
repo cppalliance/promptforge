@@ -43,7 +43,7 @@ pub(super) fn loop_models() -> ModelSet {
     }
 }
 
-/// Builds the run context and its observing host for a loop test: the
+/// Builds the run context and its observing Harness for a loop test: the
 /// parsed prompt, an empty shared library, and the shared model and tool
 /// sets pre-filled (the scheduler tests bypass the live H1 pass that would
 /// fill them).

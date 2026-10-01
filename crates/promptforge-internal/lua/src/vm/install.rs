@@ -1,5 +1,5 @@
-//! Section VM setup: the captured alias globals, the host values and
-//! persistent host APIs, the control globals and yield shims, and the
+//! Section VM setup: the captured alias globals, the Engine values and
+//! persistent Engine globals, the control globals and yield shims, and the
 //! `sys` and `prose` globals.
 
 use super::{SectionVm, pack_sequence};
@@ -19,7 +19,7 @@ impl SectionVm {
     /// The engine calls this after [`replay_shared`](Self::replay_shared), so
     /// a declared alias wins over a same-named shared global; the raw install
     /// also bypasses any metatable the shared library set on `_G`. The raw
-    /// install never replaces a host global only because the parser refuses
+    /// install never replaces an Engine global only because the parser refuses
     /// an alias on [`RESERVED_NAMES`](crate::RESERVED_NAMES) and one name
     /// under both `tools` and `models`.
     ///
@@ -64,7 +64,7 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Installs the section's host values, ahead of the shared replay.
+    /// Installs the section's Engine values, ahead of the shared replay.
     ///
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. `log` and `store` are installed once for
@@ -73,7 +73,7 @@ impl SectionVm {
     /// clone of the emitter rather than a per-chunk borrow.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values cannot be bridged or if host
+    /// Returns [`Error::Lua`] if Engine values cannot be bridged or if Engine
     /// values were already injected.
     ///
     /// # Examples
@@ -97,7 +97,7 @@ impl SectionVm {
         self.inject_host_with_var(args, sys, access, None, Argv::Frozen(None))
     }
 
-    /// Installs host values while seeding `var` from an earlier VM.
+    /// Installs Engine values while seeding `var` from an earlier VM.
     ///
     /// The `var` global is a guarded proxy (see `guarded_var`): writes are
     /// validated for JSON-representability at the assigning line, and the
@@ -113,8 +113,8 @@ impl SectionVm {
     /// every other section.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values cannot be bridged or were already
-    /// injected.
+    /// Returns [`Error::Lua`] if Engine values cannot be bridged or were
+    /// already injected.
     #[expect(
         clippy::similar_names,
         reason = "args and argv are the spec'd global names; the pair is intentional"
@@ -183,7 +183,7 @@ impl SectionVm {
     /// [`take_store_conflict`](Self::take_store_conflict).
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// Returns [`Error::Lua`] if Engine values have not been injected or the
     /// globals cannot be installed, or [`Error::Store`] if the handle
     /// declares no store.
     pub fn install_host_apis(&self, emitter: &Emitter, section: &str) -> Result<()> {
@@ -223,15 +223,15 @@ impl SectionVm {
     /// Installs `call`, `jump`, and `list_from_section` as persistent
     /// globals for the section's whole lifecycle.
     ///
-    /// Called once by the engine after host injection. The callbacks own
-    /// their run context, so the closures stay valid across every chunk this
-    /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
-    /// clone of the VM's jump slot; the slot is reset before each chunk and
-    /// read after it by the control-run path. The `call` closure snapshots
-    /// this VM's `var` at call time (reading the hidden data table through
-    /// the in-scope `&Lua`) and hands the JSON to its callback, so a
-    /// contained chain seeds from a clone and its writes never reach this
-    /// VM.
+    /// Called once by `promptforge-engine` after Engine injection. The
+    /// callbacks own their run context, so the closures stay valid across
+    /// every chunk this VM runs without a live [`mlua::Scope`]. The `jump`
+    /// closure captures a clone of the VM's jump slot; the slot is reset
+    /// before each chunk and read after it by the control-run path. The
+    /// `call` closure snapshots this VM's `var` at call time (reading the
+    /// hidden data table through the in-scope `&Lua`) and hands the JSON to
+    /// its callback, so a contained chain seeds from a clone and its writes
+    /// never reach this VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
@@ -337,11 +337,11 @@ impl SectionVm {
 
     /// Replaces the sealed Lua `sys` global after scope close.
     ///
-    /// Host injection must have run first. Used to expose `sys.model` once the
+    /// Engine injection must have run first. Used to expose `sys.model` once the
     /// section's model binding is fixed.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// Returns [`Error::Lua`] if Engine values have not been injected or the
     /// sealed table cannot be installed.
     pub fn re_seal_sys(&self, sys: &Json) -> Result<()> {
         if !self.host_injected {

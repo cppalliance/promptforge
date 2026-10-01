@@ -61,7 +61,7 @@ pub(crate) struct RunInputs {
     pub(crate) registry: Arc<CapabilityRegistry>,
     /// The catalog generation the run is frozen to.
     pub(crate) catalog: Option<CatalogBinding>,
-    /// The host snapshot read at launch.
+    /// The Host snapshot read at launch.
     pub(crate) host: HostSnapshot,
 }
 

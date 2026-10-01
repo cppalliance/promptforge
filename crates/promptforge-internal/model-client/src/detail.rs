@@ -1,8 +1,8 @@
 //! Operations on the wire types that only the engine performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host. Each function stands in for what would
-//! otherwise be an inherent method or a public field on a host-visible
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it. Each function stands in for what would
+//! otherwise be an inherent method or a public field on a facade-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
 //! a message holds, reading a tool schema's wire parts, reading the
 //! metadata diagnostics and taking the raw JSON bodies a completion holds,
@@ -57,7 +57,7 @@ pub fn message_raw_tool_calls(message: &Message) -> Option<&[Value]> {
 ///
 /// The raw [`serde_json::Value`] schema enters here only from the
 /// executor's internal tool contract, so the raw JSON never appears in a
-/// host-visible constructor.
+/// facade-visible constructor.
 ///
 /// # Errors
 /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains

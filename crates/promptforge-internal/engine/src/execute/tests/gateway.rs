@@ -25,7 +25,7 @@ pub(super) struct ScriptedGateway {
 }
 
 /// One scripted reply: either a JSON completion body (HTTP 200) or a
-/// status-coded error body, so one harness covers success and backend-failure
+/// status-coded error body, so one fixture covers success and backend-failure
 /// tests alike.
 #[derive(Clone)]
 pub(super) enum GatewayReply {

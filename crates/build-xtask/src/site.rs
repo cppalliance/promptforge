@@ -34,7 +34,7 @@ use std::process::{Command, ExitCode};
 const USAGE: &str = "usage: cargo xtask site [--books-only]";
 
 /// The rustdoc sites: the folder under `target/site/` and the crate it
-/// documents, with default features, the facade as hosts read it.
+/// documents, with default features, the facade as dependents read it.
 const RUSTDOC_SITES: [(&str, &str); 2] = [("promptforge", "promptforge"), ("harness", "harness")];
 
 /// Link targets the link check never resolves.

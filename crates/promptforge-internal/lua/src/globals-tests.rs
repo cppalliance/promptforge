@@ -29,7 +29,7 @@ const PROSE_REFUSAL: &str = "prose is read-only: assign to `var` or a section gl
 const PROSE: &str = "the block's prose";
 
 /// Builds a section VM the way section setup does up to the shared replay:
-/// frozen `argv`, the host APIs, the control globals, and the coroutine
+/// frozen `argv`, the Engine globals, the control globals, and the coroutine
 /// shims, with a block's lazy `prose` installed.
 fn frozen_vm() -> SectionVm {
     let argv = json!({ "query": "papers" });
@@ -85,7 +85,7 @@ fn assignment_refusals(vm: &SectionVm) -> (String, String) {
     )
 }
 
-/// Asserts `argv` and `prose` still read as the host set them and still
+/// Asserts `argv` and `prose` still read as the Engine set them and still
 /// refuse assignment with their unchanged refusals.
 fn assert_guards_hold(vm: &SectionVm, after: &str) {
     let (query, prose): (String, String) = eval(vm, "return argv.query, prose");

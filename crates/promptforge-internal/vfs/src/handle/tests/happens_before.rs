@@ -156,7 +156,7 @@ fn a_task_forked_after_a_write_reads_it_and_one_forked_before_conflicts() -> Res
 
 #[test]
 fn a_seeding_scope_and_the_runs_scope_do_not_conflict() -> Result<(), VfsError> {
-    // Host seeding and the run are separate scopes: the seeding
+    // Harness seeding and the run are separate scopes: the seeding
     // scope ends with its access, so the run reads freely.
     let vfs = handle(&StubFs::default());
     let seeding = vfs.acquire(test_origin())?;
@@ -169,7 +169,7 @@ fn a_seeding_scope_and_the_runs_scope_do_not_conflict() -> Result<(), VfsError> 
 
 #[test]
 fn two_live_scopes_writing_one_path_conflict() -> Result<(), VfsError> {
-    // Two concurrent runs share a host base: their scopes are both
+    // Two concurrent runs share a real-directory base: their scopes are both
     // live and nothing orders two scopes, so the second write
     // conflicts exactly as it did under the liveness model.
     let vfs = handle(&StubFs::default());

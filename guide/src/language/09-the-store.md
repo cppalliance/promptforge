@@ -1,10 +1,10 @@
 # The Store
 
-Every run comes with a store: a set of virtual files that any Lua block can write and read. With it a prompt keeps its bulk state in files, hands text from one section to a later one, and leaves finished files for the host to collect. This chapter teaches all eight `store` calls, the rules for paths, line ranges, and glob patterns, how the store behaves when several chains use it at once, what each store error says, and how to wrap text with `untrusted()` before a model sees it.
+Every run comes with a store: a set of virtual files that any Lua block can write and read. With it a prompt keeps its bulk state in files, hands text from one section to a later one, and leaves finished files for the Harness to collect. This chapter teaches all eight `store` calls, the rules for paths, line ranges, and glob patterns, how the store behaves when several chains use it at once, what each store error says, and how to wrap text with `untrusted()` before a model sees it.
 
 ## What the store is
 
-Every run has a store: a set of virtual files, each addressed by a logical string path such as `report.md` or `notes/plan.md`, where a prompt keeps its bulk state. Lua blocks write and read store files with calls such as `store.write(path, text)` and `store.read(path)`, and under the default store no real file on the host is touched. This prompt writes a store file and reads it back:
+Every run has a store: a set of virtual files, each addressed by a logical string path such as `report.md` or `notes/plan.md`, where a prompt keeps its bulk state. Lua blocks write and read store files with calls such as `store.write(path, text)` and `store.read(path)`, and under the default store no real file on the machine is touched. This prompt writes a store file and reads it back:
 
 ````markdown
 ---
@@ -29,7 +29,7 @@ The run result is the file's text:
 remember this
 ````
 
-The `store` table is always present in every Lua block of every section, with nothing to declare. It is a [host global](05-lua-environment.md#the-sandbox-and-its-globals) that needs no frontmatter entry and does not depend on which tools the prompt uses. It has eight functions:
+The `store` table is always present in every Lua block of every section, with nothing to declare. It is an [Engine global](05-lua-environment.md#the-sandbox-and-its-globals) that needs no frontmatter entry and does not depend on which tools the prompt uses. It has eight functions:
 
 | Function | What it does |
 |---|---|
@@ -42,7 +42,7 @@ The `store` table is always present in every Lua block of every section, with no
 | `store.glob(pattern)` | Lists the files that match a pattern |
 | `store.exists(path)` | Tells whether a path exists |
 
-Each run gets its own store with no setup. Unless the host supplies a store, the run starts with a fresh, empty, in-memory store that lasts only for that run, so stored files are gone when the next run starts, and two runs going at the same time can write the same path without seeing each other's content or conflicting. A host can supply its own store instead: backed by memory or by a directory, possibly seeded with files, and possibly under a host policy or read-only.
+Each run gets its own store with no setup. Unless the Host supplies a store, the run starts with a fresh, empty, in-memory store that lasts only for that run, so stored files are gone when the next run starts, and two runs going at the same time can write the same path without seeing each other's content or conflicting. A Host can supply its own store instead: backed by memory or by a directory, possibly seeded with files, and possibly under a Host policy or read-only.
 
 Every section of a run shares the one store, so a file written or appended in one section can be read and extended in any later section. That holds even though each section starts in a fresh [section VM](03-blocks-and-prose.md#how-the-shared-library-loads). This is how a prompt hands data from one section to a later one:
 
@@ -74,7 +74,7 @@ return store.read('note.txt')
 handoff text
 ````
 
-Appends from successive sections accumulate in order. Everything a prompt writes stays in the store after the block, the section, and the run end, so once the run finishes the host can read files back by path or list them by pattern. The model never reads the store on its own: store text reaches a model only when your Lua code puts it in front of one.
+Appends from successive sections accumulate in order. Everything a prompt writes stays in the store after the block, the section, and the run end, so once the run finishes the Host can read files back by path or list them by pattern. The model never reads the store on its own: store text reaches a model only when your Lua code puts it in front of one.
 
 ## Writing and reading files
 
@@ -119,7 +119,7 @@ worked
 finished
 ````
 
-A write is visible at once. A later `store.read` sees it in the same block, in later blocks of the same section, and in every section after that. Files the host seeded into the store before the run are readable the same way, from any block and from [shared library](03-blocks-and-prose.md#the-shared-library) code.
+A write is visible at once. A later `store.read` sees it in the same block, in later blocks of the same section, and in every section after that. Files the Host seeded into the store before the run are readable the same way, from any block and from [shared library](03-blocks-and-prose.md#the-shared-library) code.
 
 Both arguments of `store.write` and `store.append` are required strings. A value of another type fails the call with an [error value](05-lua-environment.md#catching-and-inspecting-errors) of kind `lua` whose message names the argument and the type received, where an integer such as `5` shows as `integer` and a float such as `2.5` as `number`. The `path` message is the same for every store call that takes a path:
 
@@ -130,14 +130,14 @@ contents must be a string, got {type}
 
 Reading a file that does not exist fails with `file not found in store: {path}`, naming the path as the prompt wrote it.
 
-A file declared under `input:` or `output:` in the frontmatter is an ordinary store file ([Input and output files](02-file-structure.md#input-and-output-files)). The host places each input file in the store before the run, and a block reads it with `store.read(path)` at the declared path. A prompt produces each promised output file by writing it with `store.write(path, contents)` at the declared path, and the host collects it from the store after the run ends. With `paper.md` declared as an input file and `report.md` as an output file, this block reads the first and writes the second:
+A file declared under `input:` or `output:` in the frontmatter is an ordinary store file ([Input and output files](02-file-structure.md#input-and-output-files)). The Harness places each input file in the store before the run, and a block reads it with `store.read(path)` at the declared path. A prompt produces each promised output file by writing it with `store.write(path, contents)` at the declared path, and the Harness collects it from the store after the run ends. With `paper.md` declared as an input file and `report.md` as an output file, this block reads the first and writes the second:
 
 ````lua
 local paper = store.read('paper.md')
 store.write('report.md', 'report on: ' .. paper)
 ````
 
-When the host seeds `paper.md` with `the paper body`, it collects `report.md` holding `report on: the paper body` once the run ends.
+When the Harness seeds `paper.md` with `the paper body`, it collects `report.md` holding `report on: the paper body` once the run ends.
 
 ## Store paths
 
@@ -496,7 +496,7 @@ Every store call returns a value of a fixed shape:
 
 Store calls work in section blocks, in blocks under the H1 during the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), and in [shared library](03-blocks-and-prose.md#the-shared-library) code while it loads. They give the same results, the same store errors, and the same line-bound rules in all three places.
 
-In a block, each store call is one [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise) answered by the host, a point where other [chains](04-how-a-prompt-runs.md#the-section-walk) may run. It suspends and interleaves the same way whatever serves the store, memory or a host backend, and an ordinary failure is raised right at the call. A prompt's store reads, writes, and globs behave the same whether the host serves the store from memory or from a directory; with a directory-backed store, each `store.write` lands as a real file under the host's directory.
+In a block, each store call is one [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise) answered by the Harness, a point where other [chains](04-how-a-prompt-runs.md#the-section-walk) may run. It suspends and interleaves the same way whatever serves the store, memory or real files, and an ordinary failure is raised right at the call. A prompt's store reads, writes, and globs behave the same whether the Harness serves the store from memory or from a directory; with a directory-backed store, each `store.write` lands as a real file in the real directory behind it.
 
 In shared library code while it loads, store calls run directly instead of suspending. One thing differs there: an argument of the wrong type fails with a generic conversion message instead of the `must be a string` and `must be an integer` messages, while a number passed where a string is expected is converted to text. A claims conflict ends the run with `Determinism` there too, exactly as in block code, as [Sharing the store across calls and tasks](#sharing-the-store-across-calls-and-tasks) explains.
 
@@ -673,9 +673,9 @@ A failing store call raises at the call and aborts the block unless caught. Ever
 | `is_a_directory` | `is a directory in store: {path}` | A call that needs a file at a directory path |
 | `not_a_directory` | `not a directory in store: {path}` | A call that needs a directory at a file path |
 | `not_utf8` | `file in store is not UTF-8: {path}` | A call that reads or edits text |
-| `already_exists` | `file already exists in store: {path}` | A host-supplied store that refuses a path that already exists |
-| `permission_denied` | `permission denied for store path {path}: {reason}` | A call the host refuses |
-| `unsupported` | `unsupported store operation on {path}: {detail}` | A host-supplied store that cannot serve the call |
+| `already_exists` | `file already exists in store: {path}` | A Host-supplied store that refuses a path that already exists |
+| `permission_denied` | `permission denied for store path {path}: {reason}` | A call the Host refuses |
+| `unsupported` | `unsupported store operation on {path}: {detail}` | A Host-supplied store that cannot serve the call |
 | `backend` | `store backend failure: {message}` | Any call, when the storage behind the store fails |
 
 The message names the path exactly as the prompt wrote it, with two exceptions: `invalid glob pattern` names the pattern and no path, and `store backend failure` names no path. Where the message points at a fix, it says how to make it: an anchor that occurs more than once says to include more surrounding text, and an invalid path names the rule the path broke. `err.rule` carries that rule's tag as `empty`, `too_long`, `absolute`, `control`, `backslash`, `empty_segment`, `traversal`, `unsafe_suffix`, or `reserved_name`, and `wildcard` for a glob pattern. An anchor error's `err.anchor` and `err.count` carry the anchor text and its match count, and `count` is a number, the one store error field that is not a string.
@@ -689,7 +689,7 @@ Four failures that once shared one fixed message now carry their own reasons, ea
 - Deleting a directory that still holds files, reason `directory_not_empty`. The directory and its files stay as they were.
 - Using a directory path as a file, reason `is_a_directory`, or a file path where a directory is required, reason `not_a_directory`. Once `notes/a.txt` exists, `notes` is a directory, so `store.read`, `store.read_numbered`, `store.str_replace`, `store.write`, or `store.append` on `notes` fails with `is a directory in store: {path}` rather than `file not found`. Writing or appending `a.txt/b.txt` while `a.txt` is a file fails with `not_a_directory`. The failed call changes nothing.
 - Reading or editing a file whose contents are not UTF-8, reason `not_utf8`. The store holds text, so `store.read`, `store.read_numbered`, and `store.str_replace` need the file's contents to be UTF-8.
-- A call the host refuses, reason `permission_denied`, such as a denial by a host policy or a write to a read-only store. The run's default store has neither, so this appears only when the host sets up such a store.
+- A call the Host refuses, reason `permission_denied`, such as a denial by a Host policy or a write to a read-only store. The run's default store has neither, so this appears only when the Host sets up such a store.
 
 ### Run error kinds
 
@@ -700,9 +700,9 @@ A store problem that ends a run is classified by one of two run error kinds ([Ho
 | `Store` | An uncaught `store.*` failure, in block code, in the H1 pass, or while the shared library loads; a caught store error raised again; a run whose handle declares no store; or the storage behind the store failing outside any `store.*` call |
 | `Determinism` | A claims conflict, from block code or while the shared library loads |
 
-When the host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
+When the Host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
 
-A host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a host-supplied store.
+A Host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a Host-supplied store.
 
 ## Wrapping untrusted text
 
@@ -782,7 +782,7 @@ The preface names the tag without angle brackets, so the envelope keeps exactly 
 
 ### The nonce
 
-The nonce is exactly 32 lowercase hex digits derived from the [seed](04-how-a-prompt-runs.md#waiting-and-reproducibility) the host supplies for the run. It differs between runs and cannot be predicted from the prompt, while a replay with the same seed reproduces every envelope byte for byte.
+The nonce is exactly 32 lowercase hex digits derived from the [seed](04-how-a-prompt-runs.md#waiting-and-reproducibility) the Harness supplies for the run. It differs between runs and cannot be predicted from the prompt, while a replay with the same seed reproduces every envelope byte for byte.
 
 Every `untrusted` call in a run shares one nonce, so identical content wraps to a byte-identical envelope anywhere in the run: in every section, in every [arm](14-fanout.md#isolation-and-the-store), and across a whole conversation loop. That keeps model cache prefixes and snapshot comparisons stable, and `untrusted('same')` returns the same text every time within a run.
 

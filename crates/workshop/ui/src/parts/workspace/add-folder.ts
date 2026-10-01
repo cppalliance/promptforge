@@ -26,7 +26,7 @@ export interface AddFolderStatusSink {
  * Starts the flow over `host`, the dialog's overlay parent in browser
  * mode. Returns the dialog's disposable in browser mode - the caller
  * owns dismissal when its own lifetime ends - and null in the desktop
- * app, where the native picker needs no host. Outcomes paint `statusBar`
+ * app, where the native picker needs no parent. Outcomes paint `statusBar`
  * when given, else the status-bar service when one is registered.
  */
 export function addFolderToWorkspace(

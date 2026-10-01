@@ -8,7 +8,7 @@ pub enum CancelOrigin {
     Operator,
     /// A usable catalog generation replaced the run's frozen bindings.
     Catalog,
-    /// The desktop host published a new Gateway generation.
+    /// The Host published a new Gateway generation.
     Gateway,
 }
 
@@ -48,7 +48,7 @@ pub enum SupervisorEvent {
         /// How it completed.
         result: RunCompletion,
     },
-    /// The host published a catalog generation.
+    /// The Host published a catalog generation.
     CatalogGeneration {
         /// The catalog bus generation.
         generation: u64,

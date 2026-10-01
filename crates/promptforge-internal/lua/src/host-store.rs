@@ -129,7 +129,7 @@ fn record_store_conflict<T>(
 /// Installed once per section with [`Lua::create_function`], so the table
 /// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
 ///
-/// The table is a deterministic host capability, present regardless of tool
+/// The table is a deterministic Engine global, present regardless of tool
 /// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
 /// nil; `read` returns the file verbatim, optionally bounded to a 1-based
 /// inclusive line range (`read(path, start)` reads to end of file,

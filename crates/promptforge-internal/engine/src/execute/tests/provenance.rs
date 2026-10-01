@@ -185,7 +185,7 @@ async fn a_call_child_reports_under_its_callers_task() {
 #[tokio::test]
 async fn the_run_forwards_every_buffered_event_to_the_host_observer_in_order() {
     // The adapter path end to end: a two-section run through `execute::run`
-    // reaches the host's observer with the exact sequence of the buffered
+    // reaches the Harness's observer with the exact sequence of the buffered
     // events, run boundaries included.
     let (result, records) = run_recorded(TWO_SECTIONS).await;
     assert_eq!(result.unwrap(), "second");

@@ -62,7 +62,7 @@ pub struct RunMeta {
     /// A content hash of the prompt file, so a transcript can be matched
     /// to the exact text that produced it.
     pub prompt_hash: String,
-    /// The host-drawn seed handed to the engine.
+    /// The Harness-drawn seed handed to the Engine.
     pub seed: u64,
     /// The engine's behavior flags, a bitset; empty until a flag exists.
     pub flags: u32,
@@ -166,7 +166,7 @@ pub enum RunOutcome {
         /// The failure's message.
         message: String,
     },
-    /// The host cancelled the run.
+    /// The Host cancelled the run.
     Cancelled,
 }
 

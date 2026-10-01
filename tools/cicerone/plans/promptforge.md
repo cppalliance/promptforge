@@ -14,7 +14,7 @@ A Rust developer writing a program that runs PromptForge prompts: a command-line
 
 <plan-terms>
 
-- host: your program, which runs prompts and does their outside work. Owner: lib.md
+- Harness: the program that steps a run, performs its outside work, and answers each effect; in production that is the `harness` crate, and in these examples your own program plays the Harness's part. Owner: lib.md
 - run: one execution of one prompt, from prepare to its result. Owner: lib.md
 - section: one heading of a prompt with the text and Lua under it; sections run in file order. Owner: lib.md
 - effect: a piece of outside work the run asks your program to do. Owner: lib.md
@@ -77,11 +77,11 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 - Diagram: none
 
 ### Tour: The complete program
-- How: How do the pieces from every tour fit into one host?
-- What if: What happens when the host answers an effect with the wrong kind of answer?
-- Why: Why does the host learn that the run is over from the run itself and never from its events?
-- Example: the whole greeter host, every line visible, now writing every parse and step event to a log.
-- Diagram: the host loop, from step to effects to answers and back to step.
+- How: How do the pieces from every tour fit into one Harness?
+- What if: What happens when the Harness answers an effect with the wrong kind of answer?
+- Why: Why does the Harness learn that the run is over from the run itself and never from its events?
+- Example: the whole greeter Harness, every line visible, now writing every parse and step event to a log.
+- Diagram: the Harness loop, from step to effects to answers and back to step.
 
 Owns:
 - item: promptforge::CapabilityConflict
@@ -106,9 +106,9 @@ Owns:
 
 <page-effect>
 
-Purpose: Teach a host to answer every kind of outside work a run can ask for, and to log what it did.
+Purpose: Teach a Rust developer to answer every kind of outside work a run can ask for, and to log what their Harness did.
 Core idea: Every effect gets exactly one answer of its own kind, and its record is what your log keeps.
-Need this when: your host answers more than store effects, or keeps a log of the work it did.
+Need this when: your Harness answers more than store effects, or keeps a log of the work it did.
 Builds on: lib.md
 Primer sources: none
 
@@ -141,7 +141,7 @@ Owns:
 
 <page-event>
 
-Purpose: Teach a host to log, show, and debug what happens during a run.
+Purpose: Teach a Rust developer to log, show, and debug what happens during a run.
 Core idea: Events are a report only: recording every event, or none, never changes what a run does.
 Need this when: you keep a run log, show a transcript, or debug a model's traffic.
 Builds on: lib.md
@@ -177,7 +177,7 @@ Owns:
 
 <page-ids>
 
-Purpose: Teach a host to group a run's log by task and to follow each task from start to end.
+Purpose: Teach a Rust developer to group a run's log by task and to follow each task from start to end.
 Core idea: Every effect and event names its task and its place in that task, the same way each time the same inputs run.
 Need this when: you store a log you will search later, or show a run's tasks.
 Builds on: event.md
@@ -209,7 +209,7 @@ Owns:
 
 <page-model>
 
-Purpose: Teach a host to describe its models, see which model each prompt role got, and answer model rounds.
+Purpose: Teach a Rust developer to describe their models, see which model each prompt role got, and answer model rounds.
 Core idea: The prompt names the roles it needs, prepare binds each role to a model you describe, and your program answers each round with that model's reply.
 Need this when: your prompts call a model.
 Builds on: lib.md, effect.md
@@ -296,7 +296,7 @@ Owns:
 
 <page-tools>
 
-Purpose: Teach a host to offer tools to a run and to answer the tool calls it makes.
+Purpose: Teach a Rust developer to offer tools to a run and to answer the tool calls it makes.
 Core idea: A run sees only descriptions of your tools; your program keeps the code and runs each call.
 Need this when: your prompts call tools.
 Builds on: lib.md, effect.md
@@ -334,7 +334,7 @@ Owns:
 
 <page-capabilities>
 
-Purpose: Teach a host to name capabilities, check which tools belong to each, and give a run the Lua that capabilities add.
+Purpose: Teach a Rust developer to name capabilities, check which tools belong to each, and give a run the Lua that capabilities add.
 Core idea: A capability's name is the first two parts of every tool name it offers.
 Need this when: you group tools into packs, or add Lua that every section of a run loads.
 Builds on: tools.md
@@ -367,7 +367,7 @@ Owns:
 
 <page-prompt>
 
-Purpose: Teach a host to read what a prompt declares before running it, and to pass it arguments.
+Purpose: Teach a Rust developer to read what a prompt declares before running it, and to pass it arguments.
 Core idea: The frontmatter is the prompt's contract with your program, and all of it is readable after parsing.
 Need this when: you list a prompt's options, build its arguments, or choose a model before a run.
 Builds on: lib.md
@@ -411,18 +411,18 @@ Owns:
 
 <page-vfs>
 
-Purpose: Teach a host to give a run its files: the store every section shares, host folders beside it, and rules about what the run may change.
+Purpose: Teach a Rust developer to give a run its files: the store every section shares, real directories beside it, and rules about what the run may change.
 Core idea: A run reaches files only through one handle your program builds, and every operation is checked before any backend sees it.
 Need this when: your prompts read or write files, or several runs share a folder.
 Builds on: lib.md
 Primer sources: none
 
 ### Tour: Give a run its files
-- How: How do I build a handle with a host folder and a store for a run?
+- How: How do I build a handle with a real directory and a store for a run?
 - What if: What happens when the handle declares no store?
-- Why: Why does a second run's write to the same host file fail instead of replacing the first run's?
+- Why: Why does a second run's write to the same real file fail instead of replacing the first run's?
 - Example: mount a temporary folder at the root and a memory store beneath it, prepare two runs over the one handle, and write the same file from each.
-- Diagram: the handle's mounts: the host folder at the root and the store beneath it.
+- Diagram: the handle's mounts: the real directory at the root and the store beneath it.
 
 ### Tour: Keep a run from changing files
 - How: How do I let a run read files but change them only when the mode allows?
@@ -473,7 +473,7 @@ Owns:
 
 <page-cancel>
 
-Purpose: Teach a host to stop runs and tasks from any thread, one at a time or all together.
+Purpose: Teach a Rust developer to stop runs and tasks from any thread, one at a time or all together.
 Core idea: A cancel handle is a shared flag in a tree, and cancelling a parent reaches every child below it.
 Need this when: you stop runs on a user's request, on a timeout, or at shutdown.
 Builds on: lib.md
@@ -501,7 +501,7 @@ Owns:
 
 <page-timestamp>
 
-Purpose: Teach a host to give each run its start time and to keep that time with the run's record.
+Purpose: Teach a Rust developer to give each run its start time and to keep that time with the run's record.
 Core idea: A run never reads a clock; your program hands it the start time.
 Need this when: you start runs, or store and compare their start times.
 Builds on: lib.md
@@ -521,7 +521,7 @@ Owns:
 
 <page-metrics>
 
-Purpose: Teach a host to read the token counts and timings of each model call.
+Purpose: Teach a Rust developer to read the token counts and timings of each model call.
 Core idea: Each model call carries what every source measured, and any source may be missing.
 Need this when: you report cost, speed, or usage.
 Builds on: model.md, event.md
@@ -546,7 +546,7 @@ Owns:
 
 <page-replay>
 
-Purpose: Teach a host to store a run's behavior flags with its record and hand them back unchanged.
+Purpose: Teach a Rust developer to store a run's behavior flags with its record and hand them back unchanged.
 Core idea: Flags are a small set of bits your program keeps with each run and passes back as they were.
 Need this when: you keep a record of each run.
 Builds on: lib.md

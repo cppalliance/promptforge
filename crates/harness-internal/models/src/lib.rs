@@ -1,7 +1,6 @@
 //! harness-models - the harness's model client: the HTTP transport that
 //! performs the engine's `Chat` effects against the bound gateway and
-//! streams deltas back to the session, and the catalog fetch a host
-//! resolves model selections against.
+//! streams deltas back to the session, and the catalog fetch.
 //!
 //! [`GatewayClient`] speaks the always-streaming `/chat/completions` SSE
 //! shape to one gateway URL with, usually, the gateway's shared bearer
@@ -10,11 +9,9 @@
 //! `data:` payload to the engine's shared SSE reassembly, invokes the
 //! caller's delta callback live, and returns the one
 //! [`Completion`](promptforge::model::Completion) the round
-//! produced. [`fetch_model_catalog`] reads the gateway's typed model list
-//! for host-side concerns (the Workshop dropdown and its selection
-//! resolution). The client holds only the gateway's URL and the shared
-//! key; the vendor credential sits in the gateway, so no host ever sees
-//! it. [`GatewayChatPerformer`] is the client as the effect loop performs
+//! produced. [`fetch_model_catalog`] reads the gateway's typed model
+//! list. The client holds only the gateway's URL and the shared key; the
+//! vendor credential sits in the gateway. [`GatewayChatPerformer`] is the client as the effect loop performs
 //! a `Chat` effect through it: one round per effect, with a section's own
 //! round streaming its deltas to a [`DeltaSink`] the session drains.
 //!

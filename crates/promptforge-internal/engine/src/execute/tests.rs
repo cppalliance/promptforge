@@ -291,9 +291,9 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
 #[tokio::test]
 async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // The nonce is the run seed's: two runs of the same prompt under
-    // different host-drawn seeds wrap the same untrusted tool result under
+    // different Harness-drawn seeds wrap the same untrusted tool result under
     // different nonces, so an envelope's tag stays unguessable from one run
-    // to the next as long as the host draws each seed afresh. (Under one
+    // to the next as long as the Harness draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
     let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\

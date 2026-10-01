@@ -4,11 +4,11 @@
 
 # What a Prompt Is
 
-A PromptForge prompt is a single Markdown file that is also a program: the prose you want a model to see sits right next to the Lua that decides what happens to it, and a host runs the whole file for you. This chapter shows you the shape of that file, the smallest prompt that runs, how prose and Lua meet, how sections work together, and what the host does before and during a run, so you can write and run a first prompt today and know which chapter to open next for each part.
+A PromptForge prompt is a single Markdown file that is also a program: the prose you want a model to see sits right next to the Lua that decides what happens to it, and the Harness runs the whole file for you. This chapter shows you the shape of that file, the smallest prompt that runs, how prose and Lua meet, how sections work together, and what the Harness does before and during a run, so you can write and run a first prompt today and know which chapter to open next for each part.
 
 ## What a prompt file is
 
-A prompt file is one Markdown file (`.md`) that a host parses and runs. The host is the program that runs your prompt and does its outside work for it. You never call the host directly: you write the file, and the host runs it. The prompt is the program, with Lua holding the logic and prose holding text that Lua can read and send to a model.
+A prompt file is one Markdown file (`.md`) that the Engine parses and the Harness runs. The Harness is the program that runs your prompt and does its outside work for it, and the Host is the application, such as Workshop, that starts the run. You write the file, and the Harness runs it. The prompt is the program, with Lua holding the logic and prose holding text that Lua can read and send to a model.
 
 A prompt file has three parts, in this order:
 
@@ -71,7 +71,7 @@ With `local x = 1` in place of the `return`, the same prompt ends with `done`. B
 
 ## The smallest complete prompt
 
-The greeter above is already a complete prompt. It has one section, no Lua anywhere, and nothing in its H1 body, and it declares nothing the host has to provide. Run it, and it ends like this:
+The greeter above is already a complete prompt. It has one section, no Lua anywhere, and nothing in its H1 body, and it declares nothing the Harness has to provide. Run it, and it ends like this:
 
 ````text
 done
@@ -101,7 +101,7 @@ return 'hello'
 hello
 ````
 
-The fence's `return` value becomes the section's result, and because this section's return ends the run, it is also the run's result text. The prompt declares no model, no tools, and no capabilities, and needs none: a Lua block that returns a string does all the work itself. A literal `return` asks the host for no work at all, so the run never waits on anything outside the prompt. Tools that Lua never calls change nothing either: with [tool slots](#the-prompt-and-its-host) filled but never called, a block of `return 'plain'` still ends the run with `plain`.
+The fence's `return` value becomes the section's result, and because this section's return ends the run, it is also the run's result text. The prompt declares no model, no tools, and no capabilities, and needs none: a Lua block that returns a string does all the work itself. A literal `return` asks the Harness for no work at all, so the run never waits on anything outside the prompt. Tools that Lua never calls change nothing either: with [tool slots](#the-prompt-the-host-and-the-harness) filled but never called, a block of `return 'plain'` still ends the run with `plain`.
 
 A prompt can also return the argument string the run received, which Lua reads as `args` ([input basics](06-arguments.md#input-basics)). This prompt ends with whatever text it was given:
 
@@ -485,18 +485,20 @@ hello world
 
 This file has a shared library, two sections, and one child section. The `lua shared` fence in the H1 body holds the shared library, code that loads in every section so each one can call its helpers ([the shared library](03-blocks-and-prose.md#the-shared-library)), which is why `## Prepare` can call `normalize`. No block reads the line of prose in the H1 body, so it is discarded. `var` passes the tidied subject from `## Prepare` to `## Finish`, and the walk never enters `### Author note`.
 
-## The prompt and its host
+## The prompt, the Host, and the Harness
 
-Four optional frontmatter keys are the contract keys, the prompt's contract with the host:
+Three layers take part in every run. The Engine parses the prompt, steps the run, and emits an effect whenever the run needs something from outside, such as a model reply or a tool result. The Harness performs each effect, hands the answer back to the Engine, and keeps the run log. The Host is the application you run prompts in, such as Workshop: it launches runs, chooses policy such as the selected model and whether someone can answer `input.ask()`, and can cancel a run.
 
-- `capabilities:` names the capabilities the prompt needs from the host ([declaring capabilities](12-tools.md#declaring-capabilities)).
+Four optional frontmatter keys are the contract keys, the prompt's contract with the Harness and the Host:
+
+- `capabilities:` names the capabilities the prompt needs from the Harness ([declaring capabilities](12-tools.md#declaring-capabilities)).
 - `tools:` binds tool slots, each an alias mapped to a tool path ([tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)).
 - `models:` declares model roles ([declaring roles](10-models.md#declaring-roles)).
 - `args:` types the prompt's arguments ([arg declarations](06-arguments.md#arg-declarations)).
 
-The parser checks only the shape of these keys. The host satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the host cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
+The parser checks only the shape of these keys. The Harness satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the Harness cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
 
-A prompt that declares no capabilities, tools, or model roles has no requirements for the host to meet before the run. It runs on its Lua sections alone, with no model, no tools, and no host files behind it:
+A prompt that declares no capabilities, tools, or model roles has no requirements for the Harness to meet before the run. It runs on its Lua sections alone, with no model, no tools, and no real files behind it:
 
 ````markdown
 ---
@@ -518,16 +520,16 @@ return 'no capabilities'
 no capabilities
 ````
 
-When a prompt does declare model roles and tool slots, the frontmatter decides what is bound. Before the run begins, the host fills every declared model role with a concrete model and every tool slot with the tool at its declared tool path ([filling tool slots and model roles](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles)). For the `writer: {}` role in the prompts above, prepare fills `writer` with the host's current model and reports the declaration satisfied, and a section's `models.use('writer')` then runs its rounds under that model.
+When a prompt does declare model roles and tool slots, the frontmatter decides what is bound. Before the run begins, the Harness fills every declared model role with a concrete model and every tool slot with the tool at its declared tool path ([filling tool slots and model roles](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles)). For the `writer: {}` role in the prompts above, prepare fills `writer` with the Host's current model and reports the declaration satisfied, and a section's `models.use('writer')` then runs its rounds under that model.
 
 Lua only ever selects labels that are already bound:
 
-- `models.use` selects only a role label that the frontmatter declared and the host filled, and raises `models.use label "{label}" is not a bound model role` for any other label.
+- `models.use` selects only a role label that the frontmatter declared and the Harness filled, and raises `models.use label "{label}" is not a bound model role` for any other label.
 - `tools.add` puts a slot's tool in scope for the model in the current section ([advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), accepts only an alias whose slot is filled, and fails with `tools.add alias "{alias}" is not a bound tool slot` for any other alias.
 
 The model calls a bound tool by its alias from `tools:`, such as `search`, never by its tool path, such as `promptforge/web/search`.
 
-The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly five kinds of host work:
+The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through Harness work: requests the Harness performs for the run and answers. There are exactly five kinds of Harness work:
 
 - A model round: `models.infer` sends one round with its prompt text and no tools, and `models.loop` runs rounds ([running a round with models.infer](10-models.md#running-a-round-with-modelsinfer)).
 - A tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)), a wait for operator input included, because `input.ask()` calls a tool ([asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)).
@@ -535,7 +537,7 @@ The language itself performs no I/O and reads no clock. A prompt reaches the out
 - The timer behind a timed wait on tasks ([time limits on waits](15-tasks.md#time-limits-on-waits)).
 - A read of a task's event history ([reading a task's history](16-task-events.md#reading-a-tasks-history)).
 
-Everything else a block does, such as computing and returning a value, is plain Lua that needs no host work, which is why a literal `return` asks the host for nothing. While the host performs host work, only the chain that asked for it waits ([waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
+Everything else a block does, such as computing and returning a value, is plain Lua that needs no Harness work, which is why a literal `return` asks the Harness for nothing. While the Harness performs Harness work, only the chain that asked for it waits ([waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
 
 This section asks for two store operations, a write and then a read:
 
@@ -588,7 +590,7 @@ models:
 - `args:` declares `use_mcp`, a `boolean` argument with a default of `true` and a description.
 - `models:` declares two roles, `analyst` and `triage`, each with `keywords` and a `description`, and `analyst` also sets `min_context`.
 
-A prompt with this frontmatter still needs its H1 title and the H1 body blocks or sections that do its work, and prepare checks each declaration against the host before the run starts.
+A prompt with this frontmatter still needs its H1 title and the H1 body blocks or sections that do its work, and prepare checks each declaration against the Harness before the run starts.
 
 ---
 
@@ -682,7 +684,7 @@ promptforge: 0
 # Header Only
 ````
 
-Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-and-its-host):
+Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness):
 
 ````markdown
 ---
@@ -717,7 +719,7 @@ promptforge: 0
 
 The `name:` string need not match the file name. A file saved as `research-person.md` can declare `name: research_person`, and one saved as `echo.md` can declare `name: echo`. Common values are lowercase identifiers such as `echo`, `greet`, `analyst_example`, and `vfs-end-to-end`. Every parse error found after the frontmatter reports this name, so you can tell which prompt failed.
 
-The `description:` string is a one-line, free-text sentence, kept verbatim, and hosts show it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
+The `description:` string is a one-line, free-text sentence, kept verbatim, and the Host shows it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
 
 Leaving out either key fails the parse with parse error kind `Frontmatter`, and the message names the missing field. The message follows the frontmatter form `invalid frontmatter: {detail}` described in [Frontmatter rules and errors](#frontmatter-rules-and-errors), with one of these details:
 
@@ -783,7 +785,7 @@ output:
   description: The output report
 ````
 
-Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the host to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the host which store file to put in place before the run and which one to collect after it.
+Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the Harness to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the Harness which store file to put in place before the run and which one to collect after it.
 
 The run itself never acts on either declaration, so the prompt writes its declared output file itself:
 
@@ -810,13 +812,13 @@ return 'copied'
 ```
 ````
 
-With a host that puts `paper.md` in the store first, its run result is:
+When the Harness puts `paper.md` in the store first, its run result is:
 
 ````text
 copied
 ````
 
-Afterwards `report.md` holds the paper's text, ready for the host to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the host goes to collect it.
+Afterwards `report.md` holds the paper's text, ready for the Harness to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the Harness goes to collect it.
 
 ## Frontmatter rules and errors
 
@@ -921,7 +923,7 @@ Lua code can catch this error with `pcall`, as [Catching and inspecting errors](
 
 Every tool alias and every model role label becomes a bare Lua global of the same name in every section VM, as [Alias globals](12-tools.md#alias-globals) and [Role globals](10-models.md#role-globals) show. So neither may take a name the section VM already uses for something else. These names are reserved:
 
-- The host globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
+- The Engine globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
 - The Lua standard-library globals the sandbox keeps: `assert`, `error`, `getmetatable`, `ipairs`, `math`, `next`, `pairs`, `pcall`, `select`, `setmetatable`, `string`, `table`, `tonumber`, `tostring`, `type`, and `xpcall`, plus `_G` and `_VERSION`, which the name grammar already rules out.
 - The Lua 5.5 keywords: `and`, `break`, `do`, `else`, `elseif`, `end`, `false`, `for`, `function`, `global`, `goto`, `if`, `in`, `local`, `nil`, `not`, `or`, `repeat`, `return`, `then`, `true`, `until`, and `while`.
 
@@ -1850,7 +1852,7 @@ A prompt that needs no shared code leaves the `lua shared` fence out. Every sect
 
 ### What top-level library code can use
 
-The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
+The Engine installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the Harness are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
 
 | In the library's top-level code | What happens |
 |---|---|
@@ -1911,7 +1913,7 @@ captured = {}
 setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })
 ````
 
-The host sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
+The Engine sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
 
 In a fanout arm, `item` is installed before the replay, so the library's top-level code sees the arm's member and can set globals the worker section reads. With a library line `captured_by_shared = item`, a worker section that returns `tostring(captured_by_shared) .. '|' .. tostring(item)` gives `alpha|alpha` for the member `alpha`.
 
@@ -2053,14 +2055,14 @@ section `{name}` has no pre-parsed items
 
 # How a Prompt Runs
 
-Every run of a prompt follows one fixed order, so you can read a prompt top to bottom and know exactly what will happen: the host checks that it can give the prompt what it asks for, the H1 body runs once as setup, the sections run in file order, and the run ends with a result, a cancel, or a failure that names its cause. This chapter walks through that order step by step, so you can decide where each piece of a prompt belongs, return the result you want from the right place, stop a run early when its input is wrong, and read the notice the host gives when it cannot start your prompt at all.
+Every run of a prompt follows one fixed order, so you can read a prompt top to bottom and know exactly what will happen: the Harness checks that it can give the prompt what it asks for, the H1 body runs once as setup, the sections run in file order, and the run ends with a result, a cancel, or a failure that names its cause. This chapter walks through that order step by step, so you can decide where each piece of a prompt belongs, return the result you want from the right place, stop a run early when its input is wrong, and read the notice the Harness gives when it cannot start your prompt at all.
 
 ## What a run does
 
 A run is one execution of a prompt file. Every run goes through the same steps in the same order:
 
-1. Prepare. Before any Lua runs, the host sets up everything the prompt's frontmatter asks for and checks that it can provide it. [Capability activation](#capability-activation) and [Filling tool slots and model roles](#filling-tool-slots-and-model-roles) describe this step.
-2. The H1 pass. When the H1 body holds anything that runs, a `lua` block or prose, it runs once first, with the same access to the host as any section. [The H1 pass](#the-h1-pass) covers it. A prompt whose H1 body holds neither goes straight to its first section.
+1. Prepare. Before any Lua runs, the Harness sets up everything the prompt's frontmatter asks for and checks that it can provide it. [Capability activation](#capability-activation) and [Filling tool slots and model roles](#filling-tool-slots-and-model-roles) describe this step.
+2. The H1 pass. When the H1 body holds anything that runs, a `lua` block or prose, it runs once first, with the same access to the Harness as any section. [The H1 pass](#the-h1-pass) covers it. A prompt whose H1 body holds neither goes straight to its first section.
 3. The walk. The top-level `##` sections run top to bottom in file order, starting from the first one, and each one falls through to the next when it finishes. [The section walk](#the-section-walk) covers it.
 4. The outcome. The run ends completed with a result, cancelled, or failed.
 
@@ -2158,9 +2160,9 @@ Every run ends in exactly one of three outcomes:
 - Cancelled, reported as its own outcome and not as a failure.
 - Failed, with a run error kind that names the cause, such as an uncaught Lua error, and a message for people to read.
 
-This chapter's features can fail a run with two run error kinds: `Lua` for an uncaught Lua error in a section, and `RequirementsUnmet` when the host cannot satisfy the prompt or the H1 pass fails. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind, and [Failure and cancellation](#failure-and-cancellation) shows how a run fails or is cancelled.
+This chapter's features can fail a run with two run error kinds: `Lua` for an uncaught Lua error in a section, and `RequirementsUnmet` when the Harness cannot satisfy the prompt or the H1 pass fails. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind, and [Failure and cancellation](#failure-and-cancellation) shows how a run fails or is cancelled.
 
-A run can also be refused before it starts. When the host cannot provide what the prompt requires, for example a model with a large enough context for one of the prompt's roles, no section runs and no Lua runs, so nothing in the prompt can catch the refusal. The run fails with run error kind `RequirementsUnmet`, and the error's message is the requirements notice, which lists what is missing:
+A run can also be refused before it starts. When the Harness cannot provide what the prompt requires, for example a model with a large enough context for one of the prompt's roles, no section runs and no Lua runs, so nothing in the prompt can catch the refusal. The run fails with run error kind `RequirementsUnmet`, and the error's message is the requirements notice, which lists what is missing:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -2338,7 +2340,7 @@ Its outcome is failed, with run error kind `Lua` and an error message that conta
 
 A failed run always comes with a run error kind that classifies the cause by condition, together with a message for people to read. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists them all.
 
-When the host cancels a run, the run ends as cancelled. A cancel is its own outcome and never a failure. It stops the run even while its Lua is busy in a loop or while a block waits on a model's reply, and a model request cut short by a cancel is not reported as a failed model call. A cancel that lands while every chain is waiting takes effect at the next step.
+When the Host cancels a run, the run ends as cancelled. A cancel is its own outcome and never a failure. It stops the run even while its Lua is busy in a loop or while a block waits on a model's reply, and a model request cut short by a cancel is not reported as a failed model call. A cancel that lands while every chain is waiting takes effect at the next step.
 
 The first outcome that ends a run is the one reported. Once a run has failed, completed, or been cancelled, a later error or cancel never replaces that outcome.
 
@@ -2402,7 +2404,7 @@ return models.infer(prose)
 
 Its run result is the model's reply.
 
-Lua in the H1 body works like Lua in any section. The H1 pass gets the same globals, the same shared library, and every host call a section can make, including model calls, [`list_from_section`](03-blocks-and-prose.md#reading-list-items-from-lua), and `jump`, `call`, and the other calls that move between sections ([Control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)). It follows the walk's rules with three differences: it runs first, ahead of the main walk's sections; a scalar return from it ends the whole run; and an uncaught Lua error in it is the prompt's failed hard gate, described below.
+Lua in the H1 body works like Lua in any section. The H1 pass gets the same globals, the same shared library, and every Engine call a section can make, including model calls, [`list_from_section`](03-blocks-and-prose.md#reading-list-items-from-lua), and `jump`, `call`, and the other calls that move between sections ([Control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)). It follows the walk's rules with three differences: it runs first, ahead of the main walk's sections; a scalar return from it ends the whole run; and an uncaught Lua error in it is the prompt's failed hard gate, described below.
 
 The H1 body can hold several `lua` blocks separated by prose. They run in file order as one pass, each exactly once:
 
@@ -2524,7 +2526,7 @@ Every part of a run follows the same fixed order. The H1 pass runs first: its se
 
 ## Capability activation
 
-Prepare begins with capability activation. A prompt's `capabilities:` key lists the capabilities it needs, each a set of tools the host provides, named by a capability id such as `promptforge/web`; a plain entry is required, and an entry written with `optional: true` is optional ([Declaring capabilities](12-tools.md#declaring-capabilities)):
+Prepare begins with capability activation. A prompt's `capabilities:` key lists the capabilities it needs, each a set of tools the Harness provides, named by a capability id such as `promptforge/web`; a plain entry is required, and an entry written with `optional: true` is optional ([Declaring capabilities](12-tools.md#declaring-capabilities)):
 
 ````yaml
 capabilities:
@@ -2539,18 +2541,18 @@ capabilities:
 
 Each declared capability activates exactly once per run, before the rest of prepare, in declaration order, and the tools it contributes join the run's available tools in that same order.
 
-A required capability must be present on the host and must actually start. When one is absent, or present but fails to activate, the run is refused before it starts with run error kind `RequirementsUnmet`. The requirements notice names each missing capability by its capability id on its own line, `- missing required capability: {id}`:
+A required capability must be present in the Harness and must actually start. When one is absent, or present but fails to activate, the run is refused before it starts with run error kind `RequirementsUnmet`. The requirements notice names each missing capability by its capability id on its own line, `- missing required capability: {id}`:
 
 ````text
 the environment cannot satisfy this prompt:
 - missing required capability: promptforge/web
 ````
 
-When a required capability fails to start, the host also logs a line naming it. That line is the host's own log, not a checkpoint from the prompt.
+When a required capability fails to start, the Harness also logs a line naming it. That line is the Harness's own log, not a checkpoint from the prompt.
 
-An optional capability is one the prompt can run without. When the host lacks it, the host logs a line naming it, skips it, and the run continues. When it is present but fails to start, it contributes no tools, the run continues, and the failure shows up only in the host's log line.
+An optional capability is one the prompt can run without. When the Harness lacks it, the Harness logs a line naming it, skips it, and the run continues. When it is present but fails to start, it contributes no tools, the run continues, and the failure shows up only in the Harness's log line.
 
-Declare only capabilities that can activate together. The capabilities themselves declare which others they conflict with, so which pairs conflict depends on the capabilities your host provides; the `promptforge/web` capability conflicts with none. When two declared capabilities conflict, the run is refused with run error kind `RequirementsUnmet` and the notice line `- conflicting capabilities: {first} and {second} cannot be activated together; declare one or the other`, where `{first}` is the one declared earlier. For a host whose `acme/bashkit` and `acme/terminal` capabilities conflict, a prompt that declares `acme/bashkit` first gets this notice:
+Declare only capabilities that can activate together. The capabilities themselves declare which others they conflict with, so which pairs conflict depends on the capabilities your Harness provides; the `promptforge/web` capability conflicts with none. When two declared capabilities conflict, the run is refused with run error kind `RequirementsUnmet` and the notice line `- conflicting capabilities: {first} and {second} cannot be activated together; declare one or the other`, where `{first}` is the one declared earlier. For a Harness whose `acme/bashkit` and `acme/terminal` capabilities conflict, a prompt that declares `acme/bashkit` first gets this notice:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -2561,7 +2563,7 @@ Conflict detection works both ways and applies to the whole pair. The conflict i
 
 ## Filling tool slots and model roles
 
-After activation, prepare fills the prompt's tool slots and model roles with what the host has, and checks each one. A `tools:` entry is a tool slot: an alias the prompt uses, mapped to a tool path such as `promptforge/web/fetch`, whose first two segments name the capability that contributes it ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). A `models:` entry is a model role, and its `keywords` and `min_context` state what the role needs from its model ([Keywords and the thinking switch](10-models.md#keywords-and-the-thinking-switch)). Once filled, a slot or role is bound.
+After activation, prepare fills the prompt's tool slots and model roles with what the Harness has, and checks each one. A `tools:` entry is a tool slot: an alias the prompt uses, mapped to a tool path such as `promptforge/web/fetch`, whose first two segments name the capability that contributes it ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). A `models:` entry is a model role, and its `keywords` and `min_context` state what the role needs from its model ([Keywords and the thinking switch](10-models.md#keywords-and-the-thinking-switch)). Once filled, a slot or role is bound.
 
 The bindings come only from the frontmatter, never from Lua. They are made once, before the run starts, and stay fixed for the whole run. Every section, the H1 pass included, sees the same bound tools and models, and Lua only chooses among them.
 
@@ -2596,7 +2598,7 @@ the environment cannot satisfy this prompt:
 
 When several slots share one missing capability, the notice names it only once. Slots are checked in sorted alias order, so each missing capability appears where its first slot falls in that order.
 
-A slot whose capability is active but contributed no tool at that path is a different case. The capability is not missing, so the run starts: the slot stays unbound, and the host logs a warning. The slot fails only when a section tries to offer that alias to the model, with the message `tools.add alias "{alias}" is not a bound tool slot`, for example `tools.add alias "search" is not a bound tool slot`.
+A slot whose capability is active but contributed no tool at that path is a different case. The capability is not missing, so the run starts: the slot stays unbound, and the Harness logs a warning. The slot fails only when a section tries to offer that alias to the model, with the message `tools.add alias "{alias}" is not a bound tool slot`, for example `tools.add alias "search" is not a bound tool slot`.
 
 ### Model roles
 
@@ -2686,27 +2688,27 @@ the environment cannot satisfy this prompt:
 - role '{label}': requires '{keyword}'; the current model's thinking capability is {capability}
 ````
 
-One refusal names every gap at once. The gaps found during capability activation and the gaps found while filling tool slots and model roles merge into one notice, and a capability that both steps report missing is listed only once. With no capabilities on the host, the `fetch: promptforge/web/fetch` slot from [Filling tool slots and model roles](#filling-tool-slots-and-model-roles) gives a one-line notice, even though both steps find `promptforge/web` missing.
+One refusal names every gap at once. The gaps found during capability activation and the gaps found while filling tool slots and model roles merge into one notice, and a capability that both steps report missing is listed only once. With no capabilities in the Harness, the `fetch: promptforge/web/fetch` slot from [Filling tool slots and model roles](#filling-tool-slots-and-model-roles) gives a one-line notice, even though both steps find `promptforge/web` missing.
 
 A prompt runs normally when every required capability is present, no two declared capabilities conflict, and every model role's requirements are met. The refusal happens only when at least one of those fails. The `analyst` prompt above runs to `done` on a 200000-token model whose thinking capability is `Always`.
 
-The run error kind `RequirementsUnmet` covers both ways a prompt's preconditions can fail: a requirement the host cannot satisfy, found at prepare, and an uncaught Lua error in the H1 pass, the [hard gate](#the-h1-pass). The message tells them apart: a refusal at prepare is the requirements notice, and a failed gate is the Lua error text. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists the other run error kinds.
+The run error kind `RequirementsUnmet` covers both ways a prompt's preconditions can fail: a requirement the Harness cannot satisfy, found at prepare, and an uncaught Lua error in the H1 pass, the [hard gate](#the-h1-pass). The message tells them apart: a refusal at prepare is the requirements notice, and a failed gate is the Lua error text. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists the other run error kinds.
 
 A prompt can also fail to start for reasons outside the notice: its `promptforge` version is missing or unsupported ([The promptforge version](02-file-structure.md#the-promptforge-version)), or its store cannot be set up ([Store errors](09-the-store.md#store-errors)). Such a prompt runs none of its sections and reports nothing; that failure is the run's whole outcome. A file without the `promptforge:` key parses but never runs.
 
 ## Waiting and reproducibility
 
-Host work, the work the host does for a run ([The prompt and its host](01-what-a-prompt-is.md#the-prompt-and-its-host)), is done by the host while only the calling chain waits. Model requests, tool calls, `input.ask()` requests, and store operations are all host work. While one chain waits for its answer, other chains keep running. For example, `store.write('notes.md', 'kept')` issues one piece of host work, and its chain waits for the answer before its next line runs. `input.ask()` asks the operator for text ([Asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)), `store.write` saves a file in the run's store ([What the store is](09-the-store.md#what-the-store-is)), and a script calls tools by alias ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)). Tasks, sections started to run beside the section that started them, are chains that keep running this way ([Starting a task](15-tasks.md#starting-a-task)).
+Harness work, the work the Harness does for a run ([The prompt, the Host, and the Harness](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness)), is done by the Harness while only the calling chain waits. Model requests, tool calls, `input.ask()` requests, and store operations are all Harness work. While one chain waits for its answer, other chains keep running. For example, `store.write('notes.md', 'kept')` issues one piece of Harness work, and its chain waits for the answer before its next line runs. `input.ask()` asks the operator for text ([Asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)), `store.write` saves a file in the run's store ([What the store is](09-the-store.md#what-the-store-is)), and a script calls tools by alias ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)). Tasks, sections started to run beside the section that started them, are chains that keep running this way ([Starting a task](15-tasks.md#starting-a-task)).
 
-Runs are reproducible. Each run has a seed and a start instant, both supplied by the host; a prompt cannot set either one. Lua in a prompt has no clock or random source of its own, so the same prompt with the same seed, the same start instant, and the same model answers, as a replay has, produces byte-identical result text. It also produces the same `sys.when`, the run's start time as Lua sees it, and the same host work in the same order. The same holds for the run's events ([Reading a task's history](16-task-events.md#reading-a-tasks-history)) and for the random nonce inside each untrusted envelope ([Wrapping untrusted text](09-the-store.md#wrapping-untrusted-text)); a different seed gives a different nonce.
+Runs are reproducible. Each run has a seed and a start instant, both supplied by the Harness; a prompt cannot set either one. Lua in a prompt has no clock or random source of its own, so the same prompt with the same seed, the same start instant, and the same model answers, as a replay has, produces byte-identical result text. It also produces the same `sys.when`, the run's start time as Lua sees it, and the same Harness work in the same order. The same holds for the run's events ([Reading a task's history](16-task-events.md#reading-a-tasks-history)) and for the random nonce inside each untrusted envelope ([Wrapping untrusted text](09-the-store.md#wrapping-untrusted-text)); a different seed gives a different nonce.
 
-A task's record does not depend on how fast, or in what order, model answers arrive. Answering the model requests one at a time, all at once in the order they were issued, or all at once in reverse gives the same result text, the same events for each task, and the same host work for each task. Only the interleaving across tasks differs.
+A task's record does not depend on how fast, or in what order, model answers arrive. Answering the model requests one at a time, all at once in the order they were issued, or all at once in reverse gives the same result text, the same events for each task, and the same Harness work for each task. Only the interleaving across tasks differs.
 
 ---
 
 # The Lua Environment
 
-Every `lua` fence in a prompt runs real Lua 5.5, with the host's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the host without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
+Every `lua` fence in a prompt runs real Lua 5.5, with the Harness's work, the run's metadata, and the operator one plain function call away. This chapter shows you exactly what that Lua can reach: the sandbox and its globals, calls that wait on the Harness without callbacks, a table order that never changes between runs, the `var` table that carries your values along the walk, the `sys`, `ui`, `log`, and `input` globals, and error values you can catch, inspect, and trace back to a line in your prompt file.
 
 ## The sandbox and its globals
 
@@ -2746,9 +2748,9 @@ The run result is:
 HELLO
 ````
 
-### Host globals
+### Engine globals
 
-On top of the sandbox, the runtime installs host globals in every section VM, with nothing to import. These are always present:
+On top of the sandbox, the runtime installs Engine globals in every section VM, with nothing to import. These are always present:
 
 - `args`, `argv`, `sys`, `var`, and `prose`
 - `log`
@@ -2757,7 +2759,7 @@ On top of the sandbox, the runtime installs host globals in every section VM, wi
 - `call`, `jump`, `fanout`, and `list_from_section`
 - `tasks`
 
-Four more appear only when they apply. `ui` is present when the host supplies a host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. None of those ever replaces a host global or a sandbox library global: a label or alias that names one fails the parse ([Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels)), and a capability global that names one fails the run before it does anything. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
+Four more appear only when they apply. `ui` is present when the Host supplies a Host-state snapshot. `item` is present inside a fanout arm, one of the concurrent runs that `fanout` starts ([Inside an arm](14-fanout.md#inside-an-arm)). A declared capability can define globals of its own, such as the `input` table that `promptforge/user-input` defines ([Asking the operator with input.ask](#asking-the-operator-with-inputask)). And every declared model role label and every tool slot alias becomes a bare global of its own. None of those ever replaces an Engine global or a sandbox library global: a label or alias that names one fails the parse ([Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels)), and a capability global that names one fails the run before it does anything. This chapter teaches `var`, `sys`, `ui`, `log`, and `input`; each of the others is taught in its own chapter.
 
 ### Blocks, sections, and section VMs
 
@@ -2765,7 +2767,7 @@ A section VM is the fresh Lua instance a section runs in ([How the shared librar
 
 That gives you two rules to write by:
 
-- All blocks of one section run in the same section VM, so state set in one block is still there in every later block of that section. That covers globals you define, `var` fields, and saved references to host globals, including anything set while the shared library loaded.
+- All blocks of one section run in the same section VM, so state set in one block is still there in every later block of that section. That covers globals you define, `var` fields, and saved references to Engine globals, including anything set while the shared library loaded.
 - A plain global set in one section reads as nil in the next. Of all the Lua values, only `var` passes from one section to the next.
 
 This prompt shows both rules. The two blocks of `## First` share a plain global, and `## Second` sees only what went through `var`:
@@ -2819,7 +2821,7 @@ A saved reference works the same way. A first block can run `saved_log = log` an
 
 ## Calls that wait and errors that raise
 
-Some host globals ask the host to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
+Some Engine globals ask the Harness to do work and wait for the answer. These suspending calls are `models.infer`, `models.loop`, `call`, `fanout`, `tools.call`, the `tasks` functions, the `store` operations, and `input.ask`. You write each one as an ordinary Lua call in straight-line code:
 
 ````lua
 local reply = models.infer(prose)
@@ -2852,11 +2854,11 @@ return answer
 
 The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
 
-### Failed host calls raise
+### Failed Engine calls raise
 
-A host call returns its result directly when it succeeds. When it fails, it raises the host's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
+An Engine call returns its result directly when it succeeds. When it fails, it raises the Engine's error value right at the call site, and `pcall` catches it so the block can keep going. That holds for `models.infer`, `call`, `fanout`, `tools.call`, the `store` operations, `input.ask`, and the rest. A failed `store` operation raises an error value of kind `store`, whose `reason` names what failed, with the operation's fields beside it ([Store errors](09-the-store.md#store-errors)). One store failure is different: a conflict between two chains over the same store file never raises at the call, and instead ends the run with run error kind `Determinism`.
 
-Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a host request that failed, such as a model round, and for a host function that fails on the spot:
+Whatever failed, `pcall` gives you one kind of thing back: an error value, a Lua table holding a `kind` and a `message`, plus any fields that kind carries. That is true for an argument error from a suspending call, for a Harness request that failed, such as a model round, and for an Engine function that fails on the spot:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -2869,7 +2871,7 @@ return result
 
 [Catching and inspecting errors](#catching-and-inspecting-errors) teaches error values in full.
 
-## Standard Lua and host calls
+## Standard Lua and Engine calls
 
 The standard functions and operators work inside blocks as they do in any Lua 5.5 program: `assert`, `error`, `pcall`, `tostring`, `type`, `setmetatable`, `string.upper`, `string.find`, string methods such as `s:match(pattern)`, `table.concat`, the length operator `#`, and `..` concatenation.
 
@@ -2887,7 +2889,7 @@ That block returns `ALPHA, BETA, GAMMA (3 words)`.
 
 `table.concat(list, sep, i, j)` joins the elements `list[i]` through `list[j]`. `i` defaults to `1`, `j` defaults to `#list`, and `sep` defaults to the empty string, so `table.concat(list)` joins the whole list with nothing between the elements.
 
-Strings and numbers join as they are. `table.concat` also joins any value that renders through `__tostring`, converting each such element with `tostring` first. That covers the host's own values, such as fanout results, which are one table per arm ([Results](14-fanout.md#results)), and model handles, the Lua values that stand for a model role ([Model handles](10-models.md#model-handles)). It also covers a table of your own with a `__tostring` metamethod:
+Strings and numbers join as they are. `table.concat` also joins any value that renders through `__tostring`, converting each such element with `tostring` first. That covers the Engine's own values, such as fanout results, which are one table per arm ([Results](14-fanout.md#results)), and model handles, the Lua values that stand for a model role ([Model handles](10-models.md#model-handles)). It also covers a table of your own with a `__tostring` metamethod:
 
 ````lua
 local point = setmetatable({ x = 1, y = 2 }, {
@@ -2907,9 +2909,9 @@ invalid value ({type}) at index {k} in table for 'concat'
 
 The first is for a nil slot in the range. The second is for a boolean, a function, or a table without `__tostring`, and `{type}` names it. A `j` past `#list` reaches a nil slot, so it gives the nil message at index `#list + 1`. The error is an ordinary Lua runtime error: `pcall` can catch it, and left uncaught it ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
 
-### Host calls in every section
+### Engine calls in every section
 
-The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `tasks` functions work in every section's Lua, the H1 pass and fanout arms included, because every section VM's setup installs them. A block pauses only at one of the host's suspending calls; it never yields on its own.
+The suspending calls `models.infer`, `call`, `fanout`, `tools.call`, and the `tasks` functions work in every section's Lua, the H1 pass and fanout arms included, because every section VM's setup installs them. A block pauses only at one of the Engine's suspending calls; it never yields on its own.
 
 `models.infer` takes an optional leading model handle and then the prompt, and a call with three or more arguments raises `models.infer takes (handle?, prompt)`. `models.infer` and `models.loop` both take an optional leading model handle. When the first argument is userdata but not a model handle, the call raises `{call} handle must be a model handle`, where `{call}` is `models.infer` or `models.loop`. For `models.infer` called with a handle and a prompt, any other non-nil value in the handle position raises `models.infer handle must be a model handle, got {type}`, naming the type; `models.loop` treats only a userdata first argument as its handle. Both are `lua`-kind errors raised at the call site, where `pcall` catches them.
 
@@ -3166,7 +3168,7 @@ The read-back runs at the end of a section, when prose renders, and when `call`,
 | `sys.id` | string | The current section entry's id, such as `0.1` |
 | `sys.taskid` | string | The id of the nearest enclosing task, such as `0` |
 | `sys.section_name` | string | The heading name of the section whose Lua is running |
-| `sys.execution` | string | The run's name, which the host assigns |
+| `sys.execution` | string | The run's name, which the Harness assigns |
 | `sys.section_count` | number | The number of top-level sections in the prompt |
 
 ````markdown
@@ -3191,7 +3193,7 @@ The run result is:
 Only 0.1 of 1
 ````
 
-`sys.when`, `sys.execution`, and `sys.section_count` are run-wide: every section, the H1 pass included, reads the same values. Fanout arms and chains started by `call` see the same `sys.section_count` as the run. `sys.section_name` is the heading name of the running section ([Sections and nesting](02-file-structure.md#sections-and-nesting)); in the H1 pass it is the prompt's title ([The H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). `sys.execution` is the execution identity the host gives the run, the same string in every section.
+`sys.when`, `sys.execution`, and `sys.section_count` are run-wide: every section, the H1 pass included, reads the same values. Fanout arms and chains started by `call` see the same `sys.section_count` as the run. `sys.section_name` is the heading name of the running section ([Sections and nesting](02-file-structure.md#sections-and-nesting)); in the H1 pass it is the prompt's title ([The H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). `sys.execution` is the execution identity the Harness gives the run, the same string in every section.
 
 ### The start instant in sys.when
 
@@ -3214,7 +3216,7 @@ It always has the UTC shape `YYYY-MM-DDTHH:MM:SS[.fff]Z`: a four-digit year, a t
 - The year is four zero-padded digits for start instants from year 0000 through 9999.
 - Any standard RFC 3339 parser reads `sys.when`, because it matches a standard RFC 3339 rendering byte for byte.
 
-The host, not the prompt, supplies the start instant, together with a seed, when it creates the run. `sys.when` does not depend on the seed: a different seed changes the run's seeded values but leaves `sys.when` unchanged. With the same seed, the same start instant, and the same host answers, a prompt produces the same `sys.when` and the same seeded values, so its text result matches byte for byte ([Waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
+The Harness, not the prompt, supplies the start instant, together with a seed, when it creates the run. `sys.when` does not depend on the seed: a different seed changes the run's seeded values but leaves `sys.when` unchanged. With the same seed, the same start instant, and the same Harness answers, a prompt produces the same `sys.when` and the same seeded values, so its text result matches byte for byte ([Waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
 
 ### Section entry ids in sys.id
 
@@ -3288,9 +3290,9 @@ unknown sys field '{name}'
 
 ## Host state with ui
 
-Some hosts hand the run a host-state snapshot: a JSON object describing the host's state when the run started, such as the model currently selected in the host. `ui()` returns that snapshot as a Lua table whose fields are the snapshot's JSON fields as Lua values, for example `ui().selected_model`. Which fields a snapshot holds is up to the host.
+Some Hosts hand the run a Host-state snapshot: a JSON object describing the Host's state when the run started, such as the model currently selected in the Host. `ui()` returns that snapshot as a Lua table whose fields are the snapshot's JSON fields as Lua values, for example `ui().selected_model`. Which fields a snapshot holds is up to the Host.
 
-The `ui` global exists only when the host supplies a snapshot. A run without one has no `ui` global at all, so test for it before calling it:
+The `ui` global exists only when the Host supplies a snapshot. A run without one has no `ui` global at all, so test for it before calling it:
 
 ````markdown
 ---
@@ -3318,10 +3320,10 @@ return 'no host state'
 
 - A JSON null field in the snapshot reads as nil, the same as an absent field, never as a special null value. With the snapshot `{ "selected_model": "m-1", "workspace_root": null }`, `ui().selected_model .. '/' .. tostring(ui().workspace_root)` gives `m-1/nil`.
 - Each `ui()` call builds a new table. You can change the returned table freely, and the next call never sees the change.
-- `ui()` shows the host state as the host captured it at run start, identically in every section. A change on the host takes effect on the next run.
+- `ui()` shows the Host state as the Host captured it at run start, identically in every section. A change on the Host takes effect on the next run.
 - `ui` is installed before the shared library loads, so shared code can call it too.
 
-When the host supplies a snapshot, `models.get` also accepts a model id taken from it that no role declares, as in `models.get(ui().selected_model)`, which returns a model handle for that model ([Model handles](10-models.md#model-handles)); without a snapshot there is no `ui` global, and `models.get` resolves only declared role labels.
+When the Host supplies a snapshot, `models.get` also accepts a model id taken from it that no role declares, as in `models.get(ui().selected_model)`, which returns a model handle for that model ([Model handles](10-models.md#model-handles)); without a snapshot there is no `ui` global, and `models.get` resolves only declared role labels.
 
 ## Checkpoints with log
 
@@ -3382,7 +3384,7 @@ A `log` message is recorded verbatim, with no redaction. Keep it to your own sta
 
 ### Log quotas
 
-Each section VM records up to 1024 `log` checkpoints by default, within a log byte quota of 256 bytes per allowed checkpoint, 262,144 bytes by default. The host can change the checkpoint count, and the byte quota follows it.
+Each section VM records up to 1024 `log` checkpoints by default, within a log byte quota of 256 bytes per allowed checkpoint, 262,144 bytes by default. The Harness can change the checkpoint count, and the byte quota follows it.
 
 - Every one-argument call spends one checkpoint from the log event quota before the other checks run, so only an argument-count error costs nothing. A message that passes the checks then spends its UTF-8 byte length from the log byte quota.
 - The shared library's load-time `log` calls spend the same section quotas.
@@ -3399,7 +3401,7 @@ lua log cumulative byte budget exceeded
 
 ## Asking the operator with input.ask
 
-The operator is the person the host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
+The operator is the person the Host puts in front of the run, answering its questions. A prompt asks the operator for text through the `promptforge/user-input` capability. Declare it in the frontmatter, and every section can call `input.ask()`, which waits for the operator's next message:
 
 ````markdown
 ---
@@ -3420,7 +3422,7 @@ return 'Topic: ' .. text
 ```
 ````
 
-`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the host has someone to ask. If the operator types `lighthouses`, the run result is:
+`input.ask()` is a suspending call. The block waits until the operator answers, then gets two values: the operator's text, and `available`, a boolean that is `true` when the Host has someone to ask. If the operator types `lighthouses`, the run result is:
 
 ````text
 Topic: lighthouses
@@ -3430,16 +3432,16 @@ Topic: lighthouses
 
 The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
 
-Asking needs an input broker: the part of the host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a host without one.
+Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
 
-A plain entry, as in the prompt above, declares the capability required. On a host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
 
 ````text
 the environment cannot satisfy this prompt:
 - promptforge/user-input needs an input broker, and this host provides none
 ````
 
-An entry with `optional: true` always runs. On a host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
+An entry with `optional: true` always runs. On a Host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
 
 ````yaml
 capabilities:
@@ -3449,7 +3451,7 @@ capabilities:
 
 ### Checking for an operator
 
-`input.connected()` returns `true` when the host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the host for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
+`input.connected()` returns `true` when the Host has an input broker and `false` when it does not. The answer is fixed when the run starts and never changes, and reading it asks the Harness for nothing. A prompt that declares the capability optional can check it in its first section and stop or carry on:
 
 ````markdown
 ---
@@ -3474,7 +3476,7 @@ return 'Topic: ' .. text
 ```
 ````
 
-When nobody is there, `input.ask()` still asks the host, so the host sees every question, and it returns this fixed sentence with `available` set to `false`:
+When nobody is there, `input.ask()` still asks the Harness, so the Host sees every question, and it returns this fixed sentence with `available` set to `false`:
 
 ````text
 User input is unavailable in this host; continue without it.
@@ -3489,7 +3491,7 @@ That is a normal return, not an error: the section keeps running. `available` is
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
 - A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
 ### Letting the model ask
 
@@ -3502,7 +3504,7 @@ tools:
   ask: promptforge/user-input/ask
 ````
 
-Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. A tool slot requires its capability, so the slot needs the required declaration shown above: declaring `promptforge/user-input` with `optional: true` beside the slot fails the parse ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). A host with no broker refuses the required declaration before the run starts.
+Then put the alias in scope with `tools.add('ask')` for one section, or `tools.always('ask')` for every section ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)). The model calls `ask` with no arguments and reads the operator's next message as the tool's result, in plain text. A tool slot requires its capability, so the slot needs the required declaration shown above: declaring `promptforge/user-input` with `optional: true` beside the slot fails the parse ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). When the Host has no broker, the Harness refuses the required declaration before the run starts.
 
 Choose any alias except `input`. A tool alias or model role label named `input` collides with the capability's `input` global, and the run fails before it does anything, with run error kind `Lua` and this message:
 
@@ -3512,7 +3514,7 @@ capability `promptforge/user-input`: its prelude defines the global `input`, whi
 
 ### When an ask fails or is cancelled
 
-When the host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
+When the Host's input broker fails a wait, `input.ask()` raises at its call site an error value of kind `tool`, and `tostring(err)` reads `tool call failure: {message}`, with the Host's failure text in place of `{message}` ([Tool failures](12-tools.md#tool-failures)). `pcall(input.ask)` catches it:
 
 ````lua
 local ok, text = pcall(input.ask)
@@ -3573,7 +3575,7 @@ assert(false)
 ```
 ````
 
-The frontmatter takes lines 1 to 5, the title is line 6, `## Check` is line 8, the prose is line 10, and the fence opens on line 12. The region's first Lua line is 13, and `assert(false)` is on line 2 of the block, so the error is reported at line 13 + 2 - 1 = 14. The message opens with a `{location}:{line}: ` tag taken from the first rewritten line, which a host can show next to the file name:
+The frontmatter takes lines 1 to 5, the title is line 6, `## Check` is line 8, the prose is line 10, and the fence opens on line 12. The region's first Lua line is 13, and `assert(false)` is on line 2 of the block, so the error is reported at line 13 + 2 - 1 = 14. The message opens with a `{location}:{line}: ` tag taken from the first rewritten line, which a Host can show next to the file name:
 
 ````text
 section `Check` epilog:14: [string "section `Check` epilog"]:14: assertion failed!
@@ -3591,13 +3593,13 @@ Had that block failed to compile instead, the compile error would read ``lua com
 
 Runtime errors and tracebacks always show region names and real line numbers, never `?:` placeholders.
 
-- A failed block's traceback is taken where the error was raised, so it shows your own frames, mapped to prompt lines, rather than the host's wrapper around the block.
+- A failed block's traceback is taken where the error was raised, so it shows your own frames, mapped to prompt lines, rather than the Engine's wrapper around the block.
 - An error raised in a fanout arm or a called section traces back through its caller, and each frame's line points at its own region's prompt line, because only the current region's own markers are rewritten. A caller's frame such as ``[string "section `Main` prologue"]:3: in main chunk`` maps to the caller's own file line, and the arm's already-mapped line is left intact.
-- Some host functions, such as `fanout` and the `tasks` functions, are written in Lua inside PromptForge. A failure that unwinds through them shows frames naming a built-in helper file and an exact line in it. Those frames are never rewritten, while your own frames still map to absolute prompt lines.
+- Some Engine functions, such as `fanout` and the `tasks` functions, are written in Lua inside PromptForge. A failure that unwinds through them shows frames naming a built-in helper file and an exact line in it. Those frames are never rewritten, while your own frames still map to absolute prompt lines.
 
 ## Catching and inspecting errors
 
-`pcall` catches every failure a host call or host function raises as an error value: a Lua table whose `kind` field is its error kind and whose `message` field is its text, plus any fields that kind carries. `type(err)` is `'table'`, and branching on `err.kind` is the way to decide what to do:
+`pcall` catches every failure an Engine call or Engine function raises as an error value: a Lua table whose `kind` field is its error kind and whose `message` field is its text, plus any fields that kind carries. `type(err)` is `'table'`, and branching on `err.kind` is the way to decide what to do:
 
 ````markdown
 ---
@@ -3648,16 +3650,16 @@ not an arm: runtime error: unknown sys field 'index'
 | `lua` | none | This chapter |
 | `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
 
-`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. A host function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed host error, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
+`err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. An Engine function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed error from Harness work, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
 ### Message, fields, and tostring
 
 - `err.message` is always a string. When the raiser gave no message, the message is the kind tag itself.
-- `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught host error shows exactly the host's message.
+- `tostring(err)` gives exactly the message, with no traceback appended and no `file:line:` position prefix, so printing a caught error from an Engine call shows exactly its message.
 - A caught error value joins with a string using `..` on either side, as `'prefix: ' .. err` or `err .. ' suffix'`, exactly as if it were its message string.
 - A kind's own fields sit beside `kind` and `message`: `reason` for `context_exhausted`, `finish_reason` for `empty_model_reply`, `name` for `out_of_scope_tool` and `unbound_tool`, `tasks` for `tasks_live`, and `task` for `task_not_owned`, `task_consumed`, and a cancelled task. A `store` value carries `reason`, `path`, and either `anchor` with `count` or `rule`. Every such field is a string except `count`, which is a number, and kinds without fields have only `kind` and `message`.
 
-A caught host-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the host's message verbatim from `tostring(err)`:
+A caught Harness-request failure is inspected the same way: branch on `err.kind`, read the kind's own fields, and get the Harness's message verbatim from `tostring(err)`:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -3675,7 +3677,7 @@ A `models.loop` failure works the same way: catch it with `pcall` and read `err.
 
 ### Catching at the call site
 
-An argument error from a host call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
+An argument error from an Engine call such as `models.infer`, `models.loop`, `call`, `fanout`, `tasks.spawn`, `tools.call`, or a `store` function is raised where the call was made, not as a failure of the whole block. It is an error value of kind `lua` whose `tostring` is the message, and `pcall` catches it at the call site. Failures of the operation itself, once its arguments have passed, are the operation's own error kind: a failed `store` operation is kind `store`, whatever made it fail ([Store errors](09-the-store.md#store-errors)).
 
 Every string-argument failure has one of two shapes:
 
@@ -3686,7 +3688,7 @@ Every string-argument failure has one of two shapes:
 
 `{name}` is the argument's name: `prompt`, `input`, `path`, `contents`, `old`, `new`, or `pattern`. The first shape is for a value of the wrong type, and a missing required argument reads `got nil`. The second is for a Lua string holding invalid bytes. Type names tell integers from floats: an integer reads as `integer` and a float as `number`, so `3` reports `got integer` and `2.5` reports `got number`.
 
-Host functions that fail on the spot, such as `models.get`, `tools.add`, a `sys` field read, or the `var` guard, also give error values under `pcall`, so `err.kind` works on them like on any other error value.
+Engine functions that fail on the spot, such as `models.get`, `tools.add`, a `sys` field read, or the `var` guard, also give error values under `pcall`, so `err.kind` works on them like on any other error value.
 
 Suspending calls work inside `pcall`. The block still pauses inside the `pcall` and resumes there, so a successful call makes `pcall` return `true` and the result:
 
@@ -3712,11 +3714,11 @@ return tostring(count)
 
 That block returns `4`: a successful `pcall` returns `true` and then every value the function returned, nils included.
 
-Only error values the host builds take a kind out of a block. A table you build and raise, even one whose `kind` matches a PromptForge kind, ends the block as an ordinary Lua runtime error.
+Only error values the Engine builds take a kind out of a block. A table you build and raise, even one whose `kind` matches a PromptForge kind, ends the block as an ordinary Lua runtime error.
 
 ### Raising a caught error again
 
-When a failed host call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
+When a failed Engine call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
 
 - Raised again with `error(err)` before any other suspending call, an error value ends the run exactly as if it had never been caught, with the same run error kind.
 - Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Store`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
@@ -3730,9 +3732,9 @@ An uncaught Lua failure, a runtime error in your code or an error you raise your
 
 Every section, the H1 pass, and every fanout arm gets its own fresh section VM ([Inside an arm](14-fanout.md#inside-an-arm) shows the arm's side). The runtime sets each one up in the same fixed order:
 
-1. The host values: `args`, `argv`, `sys`, and `var`.
-2. The host functions: `log`, `store`, `tools`, and `models`.
-3. `ui`, when the host supplied a snapshot.
+1. The Engine values: `args`, `argv`, `sys`, and `var`.
+2. The Engine functions: `log`, `store`, `tools`, and `models`.
+3. `ui`, when the Host supplied a snapshot.
 4. `item`, in a fanout arm.
 5. `jump` and `list_from_section`.
 6. The suspending calls.
@@ -5049,7 +5051,7 @@ The result is:
 helped:check
 ````
 
-`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the host. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
+`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the Harness. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
 
 Here a section calls another one and uses its result:
 
@@ -5813,11 +5815,11 @@ A call from the H1 pass takes the first child slot too, so it runs as `0.0.0`. A
 
 # The Store
 
-Every run comes with a store: a set of virtual files that any Lua block can write and read. With it a prompt keeps its bulk state in files, hands text from one section to a later one, and leaves finished files for the host to collect. This chapter teaches all eight `store` calls, the rules for paths, line ranges, and glob patterns, how the store behaves when several chains use it at once, what each store error says, and how to wrap text with `untrusted()` before a model sees it.
+Every run comes with a store: a set of virtual files that any Lua block can write and read. With it a prompt keeps its bulk state in files, hands text from one section to a later one, and leaves finished files for the Harness to collect. This chapter teaches all eight `store` calls, the rules for paths, line ranges, and glob patterns, how the store behaves when several chains use it at once, what each store error says, and how to wrap text with `untrusted()` before a model sees it.
 
 ## What the store is
 
-Every run has a store: a set of virtual files, each addressed by a logical string path such as `report.md` or `notes/plan.md`, where a prompt keeps its bulk state. Lua blocks write and read store files with calls such as `store.write(path, text)` and `store.read(path)`, and under the default store no real file on the host is touched. This prompt writes a store file and reads it back:
+Every run has a store: a set of virtual files, each addressed by a logical string path such as `report.md` or `notes/plan.md`, where a prompt keeps its bulk state. Lua blocks write and read store files with calls such as `store.write(path, text)` and `store.read(path)`, and under the default store no real file on the machine is touched. This prompt writes a store file and reads it back:
 
 ````markdown
 ---
@@ -5842,7 +5844,7 @@ The run result is the file's text:
 remember this
 ````
 
-The `store` table is always present in every Lua block of every section, with nothing to declare. It is a [host global](05-lua-environment.md#the-sandbox-and-its-globals) that needs no frontmatter entry and does not depend on which tools the prompt uses. It has eight functions:
+The `store` table is always present in every Lua block of every section, with nothing to declare. It is an [Engine global](05-lua-environment.md#the-sandbox-and-its-globals) that needs no frontmatter entry and does not depend on which tools the prompt uses. It has eight functions:
 
 | Function | What it does |
 |---|---|
@@ -5855,7 +5857,7 @@ The `store` table is always present in every Lua block of every section, with no
 | `store.glob(pattern)` | Lists the files that match a pattern |
 | `store.exists(path)` | Tells whether a path exists |
 
-Each run gets its own store with no setup. Unless the host supplies a store, the run starts with a fresh, empty, in-memory store that lasts only for that run, so stored files are gone when the next run starts, and two runs going at the same time can write the same path without seeing each other's content or conflicting. A host can supply its own store instead: backed by memory or by a directory, possibly seeded with files, and possibly under a host policy or read-only.
+Each run gets its own store with no setup. Unless the Host supplies a store, the run starts with a fresh, empty, in-memory store that lasts only for that run, so stored files are gone when the next run starts, and two runs going at the same time can write the same path without seeing each other's content or conflicting. A Host can supply its own store instead: backed by memory or by a directory, possibly seeded with files, and possibly under a Host policy or read-only.
 
 Every section of a run shares the one store, so a file written or appended in one section can be read and extended in any later section. That holds even though each section starts in a fresh [section VM](03-blocks-and-prose.md#how-the-shared-library-loads). This is how a prompt hands data from one section to a later one:
 
@@ -5887,7 +5889,7 @@ return store.read('note.txt')
 handoff text
 ````
 
-Appends from successive sections accumulate in order. Everything a prompt writes stays in the store after the block, the section, and the run end, so once the run finishes the host can read files back by path or list them by pattern. The model never reads the store on its own: store text reaches a model only when your Lua code puts it in front of one.
+Appends from successive sections accumulate in order. Everything a prompt writes stays in the store after the block, the section, and the run end, so once the run finishes the Host can read files back by path or list them by pattern. The model never reads the store on its own: store text reaches a model only when your Lua code puts it in front of one.
 
 ## Writing and reading files
 
@@ -5932,7 +5934,7 @@ worked
 finished
 ````
 
-A write is visible at once. A later `store.read` sees it in the same block, in later blocks of the same section, and in every section after that. Files the host seeded into the store before the run are readable the same way, from any block and from [shared library](03-blocks-and-prose.md#the-shared-library) code.
+A write is visible at once. A later `store.read` sees it in the same block, in later blocks of the same section, and in every section after that. Files the Host seeded into the store before the run are readable the same way, from any block and from [shared library](03-blocks-and-prose.md#the-shared-library) code.
 
 Both arguments of `store.write` and `store.append` are required strings. A value of another type fails the call with an [error value](05-lua-environment.md#catching-and-inspecting-errors) of kind `lua` whose message names the argument and the type received, where an integer such as `5` shows as `integer` and a float such as `2.5` as `number`. The `path` message is the same for every store call that takes a path:
 
@@ -5943,14 +5945,14 @@ contents must be a string, got {type}
 
 Reading a file that does not exist fails with `file not found in store: {path}`, naming the path as the prompt wrote it.
 
-A file declared under `input:` or `output:` in the frontmatter is an ordinary store file ([Input and output files](02-file-structure.md#input-and-output-files)). The host places each input file in the store before the run, and a block reads it with `store.read(path)` at the declared path. A prompt produces each promised output file by writing it with `store.write(path, contents)` at the declared path, and the host collects it from the store after the run ends. With `paper.md` declared as an input file and `report.md` as an output file, this block reads the first and writes the second:
+A file declared under `input:` or `output:` in the frontmatter is an ordinary store file ([Input and output files](02-file-structure.md#input-and-output-files)). The Harness places each input file in the store before the run, and a block reads it with `store.read(path)` at the declared path. A prompt produces each promised output file by writing it with `store.write(path, contents)` at the declared path, and the Harness collects it from the store after the run ends. With `paper.md` declared as an input file and `report.md` as an output file, this block reads the first and writes the second:
 
 ````lua
 local paper = store.read('paper.md')
 store.write('report.md', 'report on: ' .. paper)
 ````
 
-When the host seeds `paper.md` with `the paper body`, it collects `report.md` holding `report on: the paper body` once the run ends.
+When the Harness seeds `paper.md` with `the paper body`, it collects `report.md` holding `report on: the paper body` once the run ends.
 
 ## Store paths
 
@@ -6309,7 +6311,7 @@ Every store call returns a value of a fixed shape:
 
 Store calls work in section blocks, in blocks under the H1 during the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), and in [shared library](03-blocks-and-prose.md#the-shared-library) code while it loads. They give the same results, the same store errors, and the same line-bound rules in all three places.
 
-In a block, each store call is one [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise) answered by the host, a point where other [chains](04-how-a-prompt-runs.md#the-section-walk) may run. It suspends and interleaves the same way whatever serves the store, memory or a host backend, and an ordinary failure is raised right at the call. A prompt's store reads, writes, and globs behave the same whether the host serves the store from memory or from a directory; with a directory-backed store, each `store.write` lands as a real file under the host's directory.
+In a block, each store call is one [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise) answered by the Harness, a point where other [chains](04-how-a-prompt-runs.md#the-section-walk) may run. It suspends and interleaves the same way whatever serves the store, memory or real files, and an ordinary failure is raised right at the call. A prompt's store reads, writes, and globs behave the same whether the Harness serves the store from memory or from a directory; with a directory-backed store, each `store.write` lands as a real file in the real directory behind it.
 
 In shared library code while it loads, store calls run directly instead of suspending. One thing differs there: an argument of the wrong type fails with a generic conversion message instead of the `must be a string` and `must be an integer` messages, while a number passed where a string is expected is converted to text. A claims conflict ends the run with `Determinism` there too, exactly as in block code, as [Sharing the store across calls and tasks](#sharing-the-store-across-calls-and-tasks) explains.
 
@@ -6486,9 +6488,9 @@ A failing store call raises at the call and aborts the block unless caught. Ever
 | `is_a_directory` | `is a directory in store: {path}` | A call that needs a file at a directory path |
 | `not_a_directory` | `not a directory in store: {path}` | A call that needs a directory at a file path |
 | `not_utf8` | `file in store is not UTF-8: {path}` | A call that reads or edits text |
-| `already_exists` | `file already exists in store: {path}` | A host-supplied store that refuses a path that already exists |
-| `permission_denied` | `permission denied for store path {path}: {reason}` | A call the host refuses |
-| `unsupported` | `unsupported store operation on {path}: {detail}` | A host-supplied store that cannot serve the call |
+| `already_exists` | `file already exists in store: {path}` | A Host-supplied store that refuses a path that already exists |
+| `permission_denied` | `permission denied for store path {path}: {reason}` | A call the Host refuses |
+| `unsupported` | `unsupported store operation on {path}: {detail}` | A Host-supplied store that cannot serve the call |
 | `backend` | `store backend failure: {message}` | Any call, when the storage behind the store fails |
 
 The message names the path exactly as the prompt wrote it, with two exceptions: `invalid glob pattern` names the pattern and no path, and `store backend failure` names no path. Where the message points at a fix, it says how to make it: an anchor that occurs more than once says to include more surrounding text, and an invalid path names the rule the path broke. `err.rule` carries that rule's tag as `empty`, `too_long`, `absolute`, `control`, `backslash`, `empty_segment`, `traversal`, `unsafe_suffix`, or `reserved_name`, and `wildcard` for a glob pattern. An anchor error's `err.anchor` and `err.count` carry the anchor text and its match count, and `count` is a number, the one store error field that is not a string.
@@ -6502,7 +6504,7 @@ Four failures that once shared one fixed message now carry their own reasons, ea
 - Deleting a directory that still holds files, reason `directory_not_empty`. The directory and its files stay as they were.
 - Using a directory path as a file, reason `is_a_directory`, or a file path where a directory is required, reason `not_a_directory`. Once `notes/a.txt` exists, `notes` is a directory, so `store.read`, `store.read_numbered`, `store.str_replace`, `store.write`, or `store.append` on `notes` fails with `is a directory in store: {path}` rather than `file not found`. Writing or appending `a.txt/b.txt` while `a.txt` is a file fails with `not_a_directory`. The failed call changes nothing.
 - Reading or editing a file whose contents are not UTF-8, reason `not_utf8`. The store holds text, so `store.read`, `store.read_numbered`, and `store.str_replace` need the file's contents to be UTF-8.
-- A call the host refuses, reason `permission_denied`, such as a denial by a host policy or a write to a read-only store. The run's default store has neither, so this appears only when the host sets up such a store.
+- A call the Host refuses, reason `permission_denied`, such as a denial by a Host policy or a write to a read-only store. The run's default store has neither, so this appears only when the Host sets up such a store.
 
 ### Run error kinds
 
@@ -6513,9 +6515,9 @@ A store problem that ends a run is classified by one of two run error kinds ([Ho
 | `Store` | An uncaught `store.*` failure, in block code, in the H1 pass, or while the shared library loads; a caught store error raised again; a run whose handle declares no store; or the storage behind the store failing outside any `store.*` call |
 | `Determinism` | A claims conflict, from block code or while the shared library loads |
 
-When the host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
+When the Host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
 
-A host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a host-supplied store.
+A Host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a Host-supplied store.
 
 ## Wrapping untrusted text
 
@@ -6595,7 +6597,7 @@ The preface names the tag without angle brackets, so the envelope keeps exactly 
 
 ### The nonce
 
-The nonce is exactly 32 lowercase hex digits derived from the [seed](04-how-a-prompt-runs.md#waiting-and-reproducibility) the host supplies for the run. It differs between runs and cannot be predicted from the prompt, while a replay with the same seed reproduces every envelope byte for byte.
+The nonce is exactly 32 lowercase hex digits derived from the [seed](04-how-a-prompt-runs.md#waiting-and-reproducibility) the Harness supplies for the run. It differs between runs and cannot be predicted from the prompt, while a replay with the same seed reproduces every envelope byte for byte.
 
 Every `untrusted` call in a run shares one nonce, so identical content wraps to a byte-identical envelope anywhere in the run: in every section, in every [arm](14-fanout.md#isolation-and-the-store), and across a whole conversation loop. That keeps model cache prefixes and snapshot comparisons stable, and `untrusted('same')` returns the same text every time within a run.
 
@@ -6672,7 +6674,7 @@ Plain text passes through unchanged: content with no `<`, no listed bracket mark
 
 # Models
 
-A prompt never names a concrete model. It declares the roles it needs, such as a writer or an analyst, and the host fills each role with its current model before the run starts, so the same prompt runs on whatever model the host provides. This chapter shows you how to declare roles and their requirements, choose the role each section uses, inspect a role through its model handle, set sampling options, and send text to the model with `models.infer`.
+A prompt never names a concrete model. It declares the roles it needs, such as a writer or an analyst, and the Harness fills each role with the model the Host chose before the run starts, so the same prompt runs on whatever model the Host selects. This chapter shows you how to declare roles and their requirements, choose the role each section uses, inspect a role through its model handle, set sampling options, and send text to the model with `models.infer`.
 
 ## Model roles at a glance
 
@@ -6704,7 +6706,7 @@ return models.infer(prose)
 
 The `models:` frontmatter key declares the model roles the prompt needs. Its value is a map from a role label, a name local to the prompt, to that role's declaration, and `writer: {}` declares a role labeled `writer` with no settings. Lua refers to a role by its label.
 
-At [prepare](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles), the step before the run, the host fills every declared role with its one current model, the model the host chose from its model catalog. A prompt names roles, never a concrete model, and it can declare as many roles as it needs. The host has one current model, so every role is bound to that same model, and what sets roles apart is their settings, which the rest of this chapter covers.
+At [prepare](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles), the step before the run, the Harness fills every declared role with the Host's one current model, the model the Host chose from its model catalog. A prompt names roles, never a concrete model, and it can declare as many roles as it needs. The Host has one current model, so every role is bound to that same model, and what sets roles apart is their settings, which the rest of this chapter covers.
 
 The block in the H1 body runs in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), before any section, and `models.default('writer')` there makes `writer` the prompt-wide default role. Every section that makes no selection of its own uses the default, and so does every model call there that names no model. By convention you call `models.default` from the H1 body, but it works from any section, because the whole run shares one set of roles and one default.
 
@@ -6779,7 +6781,7 @@ A mistake inside `models:` fails the parse with a [`Frontmatter`](17-limits-and-
 
 - A label used twice fails with ``duplicate model role label `{key}`: contract map keys must be unique``, which names the label.
 - A label outside the name grammar fails with ``invalid model role label `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}``, which names the label and the grammar.
-- A reserved label fails with ``model role label `{key}` in `models` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name``, which names the label and whether it is a host global, a Lua standard-library global, or a Lua keyword.
+- A reserved label fails with ``model role label `{key}` in `models` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name``, which names the label and whether it is an Engine global, a Lua standard-library global, or a Lua keyword.
 - Any other key inside a role, a keyword outside the seven, or a `min_context` of zero also fails the parse, with a message from the YAML reader.
 
 A label that is also a key under `tools:` fails the parse with a `Frontmatter` error too, one that names the label and both maps but reports no line or column, as [Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels) shows.
@@ -6816,24 +6818,24 @@ return models.infer(prose)
 ```
 ````
 
-`thinking` asks for thinking on, `no-thinking` asks for thinking off, and a role with neither leaves the model's own default. Every model in the host's catalog has one of three thinking modes: it never thinks, it always thinks, or it can switch thinking on and off per request. The switch takes effect on a model that can switch, and there every round under `responder` asks for thinking off, including rounds in sections that reach the role only through the prompt-wide default. If a role lists both hard keywords, the later one in the list sets the switch. Here `fast` records intent and changes nothing.
+`thinking` asks for thinking on, `no-thinking` asks for thinking off, and a role with neither leaves the model's own default. Every model in the Host's catalog has one of three thinking modes: it never thinks, it always thinks, or it can switch thinking on and off per request. The switch takes effect on a model that can switch, and there every round under `responder` asks for thinking off, including rounds in sections that reach the role only through the prompt-wide default. If a role lists both hard keywords, the later one in the list sets the switch. Here `fast` records intent and changes nothing.
 
 ## Requirements at prepare
 
-Hard keywords and `min_context` are requirements. At prepare, the host checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
+Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
 
 - `thinking` needs a model that can think. It is unmet only when the bound model never thinks, and its line is `role '{role}': requires 'thinking'; the current model's thinking capability is Never`.
 - `no-thinking` needs a model that can reply without thinking. It is unmet only when the bound model always thinks, and its line is `role '{role}': requires 'no-thinking'; the current model's thinking capability is Always`.
 - `min_context` is unmet when the bound model's context window is smaller than the minimum, and its line is `role '{role}': requires a context of at least {required} tokens; the current model provides {actual}`. A window equal to the minimum passes.
 
-For example, a role labeled `analyst` with `min_context: 200000`, on a host whose current model has a 32000-token context window, stops the run with this notice:
+For example, a role labeled `analyst` with `min_context: 200000`, on a Host whose current model has a 32000-token context window, stops the run with this notice:
 
 ````text
 the environment cannot satisfy this prompt:
 - role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000
 ````
 
-Both thinking lines have the form `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`, where `{required}` is the keyword and `{actual}` is `Never` or `Always`. A model that can switch thinking satisfies both hard keywords, so a role that lists both still passes on it, and its rounds follow the later keyword. Soft keywords are never checked. Prepare checks only hard keywords and `min_context`, and only when the host provides a current model.
+Both thinking lines have the form `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`, where `{required}` is the keyword and `{actual}` is `Never` or `Always`. A model that can switch thinking satisfies both hard keywords, so a role that lists both still passes on it, and its rounds follow the later keyword. Soft keywords are never checked. Prepare checks only hard keywords and `min_context`, and only when the Host provides a current model.
 
 ## Choosing a section's model
 
@@ -6872,7 +6874,7 @@ end
 return 'skipped (' .. result.kind .. ')'
 ````
 
-In a section with no selection and no default, this block returns `skipped (internal)`. A conversation run with [`models.loop`](11-conversations.md#a-first-conversation) picks its model in the same order and raises the same error. Prose that is never sent to a model needs no model, and a prompt that makes no round runs even when the host provides no model at all.
+In a section with no selection and no default, this block returns `skipped (internal)`. A conversation run with [`models.loop`](11-conversations.md#a-first-conversation) picks its model in the same order and raises the same error. Prose that is never sent to a model needs no model, and a prompt that makes no round runs even when the Host provides no model at all.
 
 ### One default for the whole run
 
@@ -6893,7 +6895,7 @@ Roles come only from the frontmatter, and Lua never creates one. `models.use` an
 - `models.use label "{label}" is not a bound model role` from `models.use`, naming the label.
 - `models.default label "{label}" is not a bound model role` from `models.default`, naming the label. The default stays unchanged.
 
-When the host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
+When the Host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
 
 These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
 
@@ -6918,7 +6920,7 @@ Each bound role is also a role global: a bare Lua global named after the role's 
 return models.infer(analyst, prose)
 ````
 
-Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. No role global ever replaces a host global, a sandbox library global, or a tool alias's global, because the parse refuses a label that would.
+Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. No role global ever replaces an Engine global, a sandbox library global, or a tool alias's global, because the parse refuses a label that would.
 
 ### Keeping the default's handle
 
@@ -6935,9 +6937,9 @@ The shared library can keep the handle in a global the same way. Called as a sta
 
 A handle is a frozen snapshot. Its field values are fixed when the handle is made and stay the same for as long as you hold it, whatever the section selects afterwards. Every field is read-only, and assigning to one raises a Lua runtime error.
 
-### Model ids from the host
+### Model ids from the Host
 
-When the host runs the prompt with a host-state snapshot, the one [`ui()`](05-lua-environment.md#host-state-with-ui) reads, `models.get` also accepts a model id from the host's catalog, as in `models.get(ui().selected_model)`, and returns a handle for a model the prompt never declared. The `ui` global exists only when the host gives a snapshot, so this block tests for it first:
+When the Host runs the prompt with a Host-state snapshot, the one [`ui()`](05-lua-environment.md#host-state-with-ui) reads, `models.get` also accepts a model id from the Host's catalog, as in `models.get(ui().selected_model)`, and returns a handle for a model the prompt never declared. The `ui` global exists only when the Host gives a snapshot, so this block tests for it first:
 
 ````lua
 local id = ui and ui().selected_model
@@ -6947,13 +6949,13 @@ end
 return models.infer(prose)
 ````
 
-This is the only way a prompt reaches a model other than the host's current model. A declared role whose label matches the id still wins. The handle's `name`, `label`, `model_id`, and `description` are all the id, its `capabilities` is empty, its `context` is 8192, and it has no sampling or thinking settings. It passes to `models.infer` like any other handle. Only `models.get` has this fallback, and `models.use` and `models.default` always need a bound role.
+This is the only way a prompt reaches a model other than the Host's current model. A declared role whose label matches the id still wins. The handle's `name`, `label`, `model_id`, and `description` are all the id, its `capabilities` is empty, its `context` is 8192, and it has no sampling or thinking settings. It passes to `models.infer` like any other handle. Only `models.get` has this fallback, and `models.use` and `models.default` always need a bound role.
 
 A model id is any non-empty text with no control characters, and it may contain `/`, `.`, `:`, and non-ASCII letters, as in `qwen/qwen3-8b`. An empty id, or one with a control character, fails with `models.get model id "{id}" is invalid: {reason}`, which names the id and the reason.
 
 ### Label errors
 
-A label passed to `models.use` or `models.default`, or to `models.get` outside the model id fallback, follows the same grammar as a role label, 1 to 64 bytes in all. `models.use` and `models.default` check the grammar and then look for the bound role. `models.get` looks for a declared role first, and when none matches it treats the name as a model id if the host gave a snapshot, or otherwise checks the grammar and then reports the missing role. These calls fail with:
+A label passed to `models.use` or `models.default`, or to `models.get` outside the model id fallback, follows the same grammar as a role label, 1 to 64 bytes in all. `models.use` and `models.default` check the grammar and then look for the bound role. `models.get` looks for a declared role first, and when none matches it treats the name as a model id if the Host gave a snapshot, or otherwise checks the grammar and then reports the missing role. These calls fail with:
 
 - `invalid alias "{name}": expected [A-Za-z][A-Za-z0-9_-]{0,63}` for a name outside the grammar, which names the rejected name and the grammar.
 - `models.get alias "{alias}" is not a bound model role` for a `models.get` label that names no bound role, naming the label. The error is the same wherever the call runs, including a run with no current model, where no role is bound.
@@ -7062,13 +7064,13 @@ return h.label .. '|' .. h.model_id .. '|' .. table.concat(h.capabilities, ',')
 ```
 ````
 
-On a host whose current model is `claude-sonnet-4-6`, the run result is:
+On a Host whose current model is `claude-sonnet-4-6`, the run result is:
 
 ````text
 analyst|claude-sonnet-4-6|frontier,thinking
 ````
 
-`model_id` is the model's id, distinct from the role label. Every declared role is bound to the host's one current model, so `model_id` reads the same on every role's handle, while fields such as `description`, `capabilities`, and `thinking` show how the roles differ.
+`model_id` is the model's id, distinct from the role label. Every declared role is bound to the Host's one current model, so `model_id` reads the same on every role's handle, while fields such as `description`, `capabilities`, and `thinking` show how the roles differ.
 
 Each read of `capabilities` builds a fresh table, so changing the table you get back leaves the handle unchanged. `temperature` and `max_tokens` read `nil` on every handle for a declared role, except a handle that `models.use` returned with options, because a role declares no sampling settings of its own. Reading any key other than the nine raises a Lua runtime error that names the key: `attempt to get an unknown field '{key}'`.
 
@@ -7145,7 +7147,7 @@ return prose
 ```
 ````
 
-The first block makes the section's first tool call, here to a small tool written in Lua, and [Tools](12-tools.md#calling-tools-from-lua) teaches both parts. On a host whose current model is `claude-sonnet-4-6`, the run result is `Model in use: claude-sonnet-4-6.`
+The first block makes the section's first tool call, here to a small tool written in Lua, and [Tools](12-tools.md#calling-tools-from-lua) teaches both parts. On a Host whose current model is `claude-sonnet-4-6`, the run result is `Model in use: claude-sonnet-4-6.`
 
 The field appears at the section's first tool call, made either from a Lua block or at the model's request during a conversation; whichever tool the first call runs, it counts. At that moment `sys.model` takes the section's model, its selection or else the prompt-wide default, and it stays fixed for the rest of the section. A round by itself never sets it, and a section that makes no tool call, or has no model when its first tool call runs, never gets the field.
 
@@ -7286,7 +7288,7 @@ models.loop(msgs)
 return msgs[#msgs].content
 ````
 
-A built list stays plain data: its length, its numeric indexes, and its conversion to JSON contain only the records, because the builder methods live on the list's metatable, never as fields. Message lists are also the only values the host provides that have colon-call methods. [Model handles](10-models.md#model-handles) have read-only fields and no methods, and no other handle the host provides has methods either, so you pass handles to functions instead, as in `models.infer(handle, prompt)`.
+A built list stays plain data: its length, its numeric indexes, and its conversion to JSON contain only the records, because the builder methods live on the list's metatable, never as fields. Message lists are also the only values the Engine provides that have colon-call methods. [Model handles](10-models.md#model-handles) have read-only fields and no methods, and no other handle the Engine provides has methods either, so you pass handles to functions instead, as in `models.infer(handle, prompt)`.
 
 ## Message records
 
@@ -7432,7 +7434,7 @@ tool_call_succeeded
 model_turn_completed
 ````
 
-When the host shows live output, each text fragment of a loop round reaches the host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A host that stops listening does not fail the round.
+When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
 
 ## How the list reaches the model
 
@@ -7589,7 +7591,7 @@ A compactor is the policy for a round that overflows the model's context window.
 
 | Reason | What happened |
 |---|---|
-| `precheck` | The estimated request size exceeded the model's context window, and no request left the host |
+| `precheck` | The estimated request size exceeded the model's context window, and the round stopped before its request reached the Harness |
 | `provider` | The provider rejected the request as too large for its context window |
 
 `pcall` catches context exhaustion as an error value whose `kind` is `context_exhausted` and whose `reason` field is `"precheck"` or `"provider"`:
@@ -7604,7 +7606,7 @@ end
 return msgs[#msgs].content
 ````
 
-When the prose is far longer than the model's context window, the round is refused before any request leaves the host, and the result is:
+When the prose is far longer than the model's context window, the round is refused before any request reaches the Harness, and the result is:
 
 ````text
 context_exhausted: precheck
@@ -7645,7 +7647,7 @@ A refused round appends nothing. A bad compactor argument is refused before any 
 
 ### The precheck
 
-Before each round is sent, a precheck compares the estimated request size with the model's context window. Only an estimate larger than the window is refused, with reason `"precheck"` and before anything leaves the host, so an estimate equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
+Before each round is sent, a precheck compares the estimated request size with the model's context window. Only an estimate larger than the window is refused, with reason `"precheck"` and before anything reaches the Harness, so an estimate equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
 
 The estimate is the conversation's total text length in UTF-8 bytes, divided by 4 with the remainder dropped, plus 4 tokens for each record sent. The division runs once over the whole conversation, and records are counted after they merge as [How the list reaches the model](#how-the-list-reaches-the-model) describes, so merged records pay the per-record overhead once. One 396-character record estimates to 103 tokens, 99 for the text plus 4, so a 103-token window admits it and a 102-token window refuses it. Non-ASCII text weighs more per visible character, because each such character takes more than one byte.
 
@@ -7668,7 +7670,7 @@ promptforge: 0
 max_tool_iterations: 5
 ````
 
-The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the host running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
+The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the Harness running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
 
 Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
 
@@ -7719,7 +7721,7 @@ The loop raises these error kinds:
 | `context_exhausted` | A round overflows under `compactors.fail`; `reason` is `"precheck"` or `"provider"` | `ContextExhausted` |
 | `tool_loop_exhausted` | The round cap runs out; there are no extra fields | `Tool` |
 | `out_of_scope_tool` | The model calls a tool that is not [in scope](12-tools.md#advertising-tools-to-the-model) for the round; `name` holds the requested name | `Tool` |
-| `internal` | A backend, transport, or other host-side failure, the missing-model error included | `Completion` for backend and transport failures, `Binding` for the missing-model error |
+| `internal` | A backend, transport, or other failure outside the prompt, the missing-model error included | `Completion` for backend and transport failures, `Binding` for the missing-model error |
 
 An `out_of_scope_tool` message begins `tool "{name}" is not in this section's scope; in-scope aliases: [{aliases}]`, where `{aliases}` lists the aliases in scope, each in double quotes, as in `["echo"]`, and none of that round's calls run, so the round appends nothing. An error raised inside a [local tool](12-tools.md#local-tools) handler during the loop reaches the call with its own kind.
 
@@ -7737,7 +7739,7 @@ Tools let a prompt reach past the model's own text: in the middle of a conversat
 
 ## Tools at a glance
 
-Every tool comes from the host. The host registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
+Every tool comes from the Harness. The Harness registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
 
 ````markdown
 ---
@@ -7759,7 +7761,7 @@ return tools.call('fetch', { url = args })
 ```
 ````
 
-`capabilities:` lists the capabilities the prompt uses, here `promptforge/web`, the first-party capability that supplies the tools `promptforge/web/fetch` and `promptforge/web/search`. Each declared capability is activated at [prepare](04-how-a-prompt-runs.md#capability-activation), before any Lua runs, and the run's tool catalog, the set of tools the prompt can bind, is built from exactly the declared capabilities. A host tool reaches a run no other way.
+`capabilities:` lists the capabilities the prompt uses, here `promptforge/web`, the first-party capability that supplies the tools `promptforge/web/fetch` and `promptforge/web/search`. Each declared capability is activated at [prepare](04-how-a-prompt-runs.md#capability-activation), before any Lua runs, and the run's tool catalog, the set of tools the prompt can bind, is built from exactly the declared capabilities. A Harness tool reaches a run only this way.
 
 `tools:` binds tool slots. Each entry is written `alias: namespace/pack/name`, a prompt-local alias mapped to one exact tool path, so `fetch` here is an alias for `promptforge/web/fetch`. Each alias then exists as a Lua global and as a name `tools.call` accepts. A prompt without a `tools:` key has no tool slots.
 
@@ -7794,13 +7796,13 @@ return msgs[#msgs].content
 ```
 ````
 
-`models.use` selects the section's [model role](10-models.md#choosing-a-sections-model), and `models.loop` runs rounds on a message list until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.add` puts `search` and `fetch` in this section's scope, and on every round `models.loop` offers the model every tool in scope. The host supplies each tool, the prompt only names it by path, and the model receives it as plain data: a name, a description, and a JSON Schema for its arguments.
+`models.use` selects the section's [model role](10-models.md#choosing-a-sections-model), and `models.loop` runs rounds on a message list until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.add` puts `search` and `fetch` in this section's scope, and on every round `models.loop` offers the model every tool in scope. The Harness supplies each tool, the prompt only names it by path, and the model receives it as plain data: a name, a description, and a JSON Schema for its arguments.
 
 That name is the alias. The alias is the only name the model sees or uses for a tool: the model never sees the tool path, and every call still runs the exact tool the path names.
 
 When the model calls a tool it was offered, the loop runs the call under the model's call id, appends the assistant record holding the call and one tool record per result, linked by `tool_call_id` as [Conversations](11-conversations.md#what-the-loop-appends) describes, and asks the model again until it answers with text.
 
-You can also make a tool out of a Lua function. `tools.add_local(alias, description, params, handler)` in a section's `lua` block registers a local tool that the model can call in that section beside the bound tools, and that your Lua code can call with `tools.call`. The engine answers these calls itself, without the host:
+You can also make a tool out of a Lua function. `tools.add_local(alias, description, params, handler)` in a section's `lua` block registers a local tool that the model can call in that section beside the bound tools, and that your Lua code can call with `tools.call`. The Engine answers these calls itself, inside the calling chain:
 
 ````lua
 tools.add_local('grab', 'Grab a value', { value = 'string' }, function(a)
@@ -7813,7 +7815,7 @@ local out = tools.call('grab', { value = 'hi' })
 
 Every tool operation lives in one Lua table, `tools`, the way model operations live in `models`. Besides `tools.add`, `tools.call`, and `tools.add_local`, the table holds `tools.always`, one member for letting the model start tasks, named under [Advertising tools to the model](#advertising-tools-to-the-model), and `tools.calls` once the section has made its first tool call.
 
-Everything about tools lives in the prompt file. There are no command-line flags or config files for them, and credentials and server settings come from the host. Without a `capabilities:` key a prompt has no capabilities, without a `tools:` key it has no tool slots, and a section offers the model no tools until the prompt puts some in scope.
+Everything about tools lives in the prompt file. There are no command-line flags or config files for them, and credentials and server settings come from the Host. Without a `capabilities:` key a prompt has no capabilities, without a `tools:` key it has no tool slots, and a section offers the model no tools until the prompt puts some in scope.
 
 ## Declaring capabilities
 
@@ -7826,7 +7828,7 @@ capabilities:
     optional: true
 ````
 
-A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the host does not have a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
+A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -7841,9 +7843,9 @@ The map form has three keys, and plain and map entries mix freely in one list:
 | `optional` | a boolean | `false` |
 | `config` | any YAML value | no config |
 
-With `optional: true`, a capability the host lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a host without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
+With `optional: true`, a capability the Harness lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a Harness without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
 
-`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the host, never from the prompt.
+`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
 
 Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
 
@@ -7855,7 +7857,7 @@ invalid frontmatter: capability {id} is declared more than once under capabiliti
 
 Prepare activates capabilities in the order declared, and their tools join the run's tool catalog in that order: by declaration first, then in each capability's own order.
 
-A declared id matches the one capability the host installed under exactly that id. The capabilities a prompt can use are exactly the ones the host has registered, so an id the host never registered matches nothing: a required entry is reported missing, and an optional one is skipped.
+A declared id matches the one capability the Harness installed under exactly that id. The capabilities a prompt can use are exactly the ones the Harness has registered, so an id the Harness never registered matches nothing: a required entry is reported missing, and an optional one is skipped.
 
 A capability works against the run's own filesystem, so the files its tools read and write are the same files [the store](09-the-store.md#what-the-store-is) sees.
 
@@ -7895,15 +7897,15 @@ A tool path is written `namespace/pack/name`, such as `promptforge/web/fetch`, a
 | `org.rustalliance/core/search` | `search` | `org.rustalliance/core` |
 | `org.rustalliance/my-pack/v1_2.tool` | `v1_2.tool` | `org.rustalliance/my-pack` |
 
-A capability supplies only tools whose path is its own id plus one name segment, compared by whole segments: `promptforge/web` supplies `promptforge/web/fetch` but never `promptforge/other/fetch`, and `promptforge/web2/fetch` belongs to `promptforge/web2`, not to `promptforge/web`. The host admits a contributed tool only when its path sits under the contributing capability's id, so every tool a prompt can bind has this shape.
+A capability supplies only tools whose path is its own id plus one name segment, compared by whole segments: `promptforge/web` supplies `promptforge/web/fetch` but never `promptforge/other/fetch`, and `promptforge/web2/fetch` belongs to `promptforge/web2`, not to `promptforge/web`. The Harness admits a contributed tool only when its path sits under the contributing capability's id, so every tool a prompt can bind has this shape.
 
 ### Segment rules
 
 - Every segment has at least one character, and each character is a lowercase ASCII letter `a` to `z`, a digit `0` to `9`, `-`, `_`, or `.`. Tool path segments follow the same rules as capability id segments.
 - A segment or a whole name has no length limit and no rule about its first or last character, so a segment may start or end with `-`, `_`, `.`, or a digit.
 - Names are kept exactly as written, with no case folding, trimming, or other normalizing, and compare byte for byte. Write every id and path in lowercase; `promptforge/web` is the only spelling of that capability.
-- `-`, `_`, and `.` are not interchangeable. The host looks ids up exactly, so `acme/web-search`, `acme/web_search`, and `acme/web.search` are three different capabilities.
-- A capability id has no version part. It names the one capability the host installed under that id.
+- `-`, `_`, and `.` are not interchangeable. The Harness looks ids up exactly, so `acme/web-search`, `acme/web_search`, and `acme/web.search` are three different capabilities.
+- A capability id has no version part. It names the one capability the Harness installed under that id.
 - By convention an organization's own capabilities live under a reverse-DNS namespace such as `org.rustalliance` or `io.github.corp`, and `promptforge` is the first-party namespace. The parser checks neither convention.
 
 A capability id or tool path prints as its segments joined with `/`, and that text reads back as the same name, so run reports and error messages show it exactly as written, the missing-capability line of the requirements notice included.
@@ -7952,9 +7954,9 @@ A tool slot requires its capability, so an optional capability cannot back one. 
 invalid frontmatter: tool alias '{alias}' names {path}, whose capability {id} is declared optional; a tool slot requires its capability
 ````
 
-In all, a required capability is reported missing, and the run refused before it starts, in three cases: the host does not have it, it fails to activate, or a slot names it but it contributed no tools. Capability and slot problems at prepare are always reported as `RequirementsUnmet`.
+In all, a required capability is reported missing, and the run refused before it starts, in three cases: the Harness lacks it, it fails to activate, or a slot names it but it contributed no tools. Capability and slot problems at prepare are always reported as `RequirementsUnmet`.
 
-Each bound slot records its alias, the tool's description, and the tool path, whose last segment is the tool's short name. The catalog finds a tool only by its full tool path, and only aliases declared under `tools:` are bound. Every tool in the catalog has a short name, a description, and a JSON Schema for its arguments. The description comes from the host, the model reads it when deciding whether to call the tool, and the engine sets no length or sentence rule on it.
+Each bound slot records its alias, the tool's description, and the tool path, whose last segment is the tool's short name. The catalog finds a tool only by its full tool path, and only aliases declared under `tools:` are bound. Every tool in the catalog has a short name, a description, and a JSON Schema for its arguments. The description comes from the Harness, the model reads it when deciding whether to call the tool, and the Engine sets no length or sentence rule on it.
 
 Two aliases can name the same tool path, and both call that one tool:
 
@@ -8111,7 +8113,7 @@ Calling `tools.always` again for the same alias is harmless and records it once,
 
 ### Description overrides
 
-The model sees each bound tool with its catalog description and parameter JSON Schema, exactly as the host declared them, since the `tools:` entry is only a path. You can replace the description the model sees with your own text:
+The model sees each bound tool with its catalog description and parameter JSON Schema, exactly as the Harness declared them, since the `tools:` entry is only a path. You can replace the description the model sees with your own text:
 
 ````lua
 tools.always('search', 'Search the web for recent, reputable sources.')
@@ -8170,7 +8172,7 @@ Uncaught, these fail the run wherever the call is made. A slot can stay unbound 
 - `tools.add expects strings, Tool objects, or arrays of either, got {type}` for an alias or array element that is neither a string nor a Tool object.
 - `tools.add array form takes no override` for a description passed with the array form.
 
-Every tool schema is checked before it reaches the model. A host tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
+Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
 
 ````text
 model-facing schema build failure for tool alias "{alias}"
@@ -8187,7 +8189,7 @@ local b = tools.call(fetch, { url = 'https://example.com' })
 
 Both lines call the same tool. A call your Lua code makes this way is a script call, and a call the model makes inside `models.loop` is a model tool call. Both reach the tool the same way; a model tool call also includes the model's call id, which a script call lacks.
 
-`tools.call` is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise): the block pauses while the host runs the tool and resumes with the result. Only the calling [chain](04-how-a-prompt-runs.md#the-section-walk) waits, and the rest of the run goes on. A bound tool is called the same way whatever the host runs behind it, its own code or a gateway: each call reaches the host as host work naming the tool path.
+`tools.call` is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise): the block pauses while the Harness runs the tool and resumes with the result. Only the calling [chain](04-how-a-prompt-runs.md#the-section-walk) waits, and the rest of the run goes on. A bound tool is called the same way whatever the Harness runs behind it, its own code or a gateway: each call reaches the Harness as Harness work naming the tool path.
 
 A script call can reach any tool bound in the run, even one outside the section's scope. The scope only limits what the model is offered.
 
@@ -8407,11 +8409,11 @@ return saved .. ' notes saved'
 
 The four arguments of `tools.add_local(alias, description, params, handler)` are the alias, the description, the parameter table, and the handler function. The model sees the local tool under exactly that alias and description, and the tool is offered on the next model call without a separate `tools.add`. A local tool belongs to the section that registers it.
 
-A local tool is called by alias, by the model or from Lua with `tools.call`. The handler runs as Lua inside the calling chain, in the section VM; the call itself involves no host work, and the handler's return value is the call's result. When the model makes the call, `models.loop` answers it itself: it runs the handler, appends the assistant record holding the call and a tool record with the handler's return, and continues until the model replies with text.
+A local tool is called by alias, by the model or from Lua with `tools.call`. The handler runs as Lua inside the calling chain, in the section VM; the call itself involves no Harness work, and the handler's return value is the call's result. When the model makes the call, `models.loop` answers it itself: it runs the handler, appends the assistant record holding the call and a tool record with the handler's return, and continues until the model replies with text.
 
 State across calls lives in ordinary Lua variables, like `saved` above, because the handler is a normal closure over the section's locals and runs in the same section VM as the rest of the section.
 
-Local and bound tools mix in one round: the model is offered both, and each call goes to the section's Lua handler or to the host tool behind the alias.
+Local and bound tools mix in one round: the model is offered both, and each call goes to the section's Lua handler or to the Harness tool behind the alias.
 
 ### Parameters
 
@@ -8441,7 +8443,7 @@ Because the handler runs inside the calling chain, it can use [the store](09-the
 
 Inside a handler, `tools.call` is a script call. A failing bound tool raises there as kind `tool` instead of becoming text for the model, and a bound tool's untrusted output reaches the handler already wrapped and keeps its envelope if the handler returns it.
 
-A local tool call involves no host work of its own: the engine hands it to the handler inside the calling chain, and only the calls the handler makes, such as store operations or bound tool calls, go to the host. Calls to a local tool count in `tools.calls` like any other tool call.
+A local tool call involves no Harness work of its own: the Engine hands it to the handler inside the calling chain, and only the calls the handler makes, such as store operations or bound tool calls, go to the Harness. Calls to a local tool count in `tools.calls` like any other tool call.
 
 `jump` refuses while a handler runs, so a handler never [jumps](08-jump-and-call.md#sibling-jumps). Calling it there, even through a reference to `jump` saved before the handler ran, raises an ordinary error that `pcall` can catch, with the message `jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns`. The refusal lasts until the outermost handler returns or raises, including across nested local calls, and then `jump` works again in the block.
 
@@ -8507,7 +8509,7 @@ end)
 
 # Web Fetch and Search
 
-Declare one capability and your prompt's model can read the live web: a fetch tool returns a page as clean markdown under a short header saying where the text came from, and a search tool returns results as JSON. Every fetch runs under a host-set policy that keeps its requests on the public internet, and neither tool needs a key, token, or address in your prompt. This chapter shows how to bind the two tools, what each call takes and returns, the limits and policy a fetch runs under, and the exact text a model or a script sees when a call fails.
+Declare one capability and your prompt's model can read the live web: a fetch tool returns a page as clean markdown under a short header saying where the text came from, and a search tool returns results as JSON. Every fetch runs under a Harness-set policy that keeps its requests on the public internet, and neither tool needs a key, token, or address in your prompt. This chapter shows how to bind the two tools, what each call takes and returns, the limits and policy a fetch runs under, and the exact text a model or a script sees when a call fails.
 
 ## The web capability
 
@@ -8547,7 +8549,7 @@ The `tools:` line `fetch: promptforge/web/fetch` is a tool slot that binds the p
 
 The rest of the block is the usual conversation: `models.default('writer')` selects the `writer` role ([choosing a section's model](10-models.md#choosing-a-sections-model)), the section's prose becomes the first user record, and after `models.loop` the last record in the list holds the model's final reply ([a first conversation](11-conversations.md#a-first-conversation)).
 
-The fetch tool fetches one web page with a GET request for a URL the model supplies and returns the page's main content as text the model can cite, as markdown for an HTML page. It enforces a safety policy, set by the host and not by the prompt, on every address it will reach, which keeps it from being turned against internal systems (server-side request forgery, or SSRF).
+The fetch tool fetches one web page with a GET request for a URL the model supplies and returns the page's main content as text the model can cite, as markdown for an HTML page. It enforces a safety policy, set by the Harness and not by the prompt, on every address it will reach, which keeps it from being turned against internal systems (server-side request forgery, or SSRF).
 
 Add the search tool the same way. This prompt binds both tools and writes the `capabilities:` value as a YAML list, which means the same as the bracketed form `capabilities: [promptforge/web]`:
 
@@ -8583,9 +8585,9 @@ return msgs[#msgs].content
 
 The search tool takes a search query and returns a list of search results. `tools.add({"search", "fetch"})` puts both aliases in scope at once, and the prose tells the model to search first and then fetch the best results.
 
-Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The host provides the gateway address and token when it registers the capability, and the prompt only declares the capability id. The standard session host provides `promptforge/web` as a built-in capability when it is configured with its PromptForge gateway connection.
+Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the Host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The Host provides the gateway address and token, the Harness passes them to the capability when it registers it, and the prompt only declares the capability id. The Harness provides `promptforge/web` as a built-in capability when the Host configures it with a PromptForge gateway connection.
 
-When the host cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
+When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -8767,7 +8769,7 @@ A body that breaks off mid-download never comes back as partial text. It returns
 
 ## The fetch policy
 
-Every fetch runs under one fetch policy that the host sets and a prompt cannot change. The table shows the built-in default policy, which applies unless the host installs its own. Per-call arguments such as `max_chars` can only ask for less:
+Every fetch runs under one fetch policy that the Harness sets and a prompt cannot change. The table shows the built-in default policy, which applies unless the Harness installs its own. Per-call arguments such as `max_chars` can only ask for less:
 
 | Policy value | Default setting |
 |---|---|
@@ -9211,7 +9213,7 @@ alpha-1
 beta-2
 ````
 
-The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and host calls](05-lua-environment.md#standard-lua-and-host-calls)).
+The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and Engine calls](05-lua-environment.md#standard-lua-and-engine-calls)).
 
 Results land in collection order no matter which arm finishes first, so a join or merge built from them is the same on every run. In this worker section, which sends prompts with [`models.infer`](10-models.md#running-a-round-with-modelsinfer), the arm for `a` makes a second model call and so finishes after the arms for `b` and `c`:
 
@@ -9620,7 +9622,7 @@ Conversations overlap the same way. With `models.loop` in every arm, all the arm
 
 ### The concurrency limit
 
-The host running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
+The Harness running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
 
 `fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). It spawns every arm up front and then collects them, and an arm that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` ([Checking on tasks](15-tasks.md#checking-on-tasks)). The scheduler admits the waiting arms in spawn order as slots free up, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
 
@@ -9873,7 +9875,7 @@ UNKNOWN
 
 When an arm is cancelled because a sibling failed, everything under it stops too: a chain it started with `call` stops, a nested fanout's arms stop with it, and so on down, and anything that had not yet run its block never runs it. What a cancelled arm had started is abandoned with the reason `owner_aborted`, which [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) explains.
 
-If the host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
+If the Host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
 
 ## Addressing from an arm
 
@@ -10240,7 +10242,7 @@ Cons: hard to maintain
 
 The walk never enters a child section by [falling through](04-how-a-prompt-runs.md#the-section-walk), so `### Pros` and `### Cons` run only as tasks, even in a prompt whose spawning section falls through to a later sibling. That matters because a target is an ordinary section. No syntax takes a section out of the walk, so if the main walk reaches a section that also runs as a task, the walk runs it again as a walked section. Keep task sections out of the walk's path by spawning child sections, as here, or by ending the spawning section with `return`, as the first prompt in this chapter does.
 
-The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
+The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the Harness, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
 
 A [local tool](12-tools.md#local-tools) handler runs inside the calling chain, so it can start and wait on tasks just as block code can, although `jump` stays unavailable there.
 
@@ -10646,7 +10648,7 @@ return models.infer('Summarize in one line: ' .. args)
 ```
 ````
 
-The H1 body makes `writer` the prompt-wide default [model role](10-models.md#choosing-a-sections-model), so the task has a model for its round. `tasks.spawn` does not run the task, but `store.write` waits for the host, which gives the task its first chance to run: it sets its note and parks in its model round. When the model is still answering at the moment `## Main` reads the status, the log line is:
+The H1 body makes `writer` the prompt-wide default [model role](10-models.md#choosing-a-sections-model), so the task has a model for its round. `tasks.spawn` does not run the task, but `store.write` waits for the Harness, which gives the task its first chance to run: it sets its note and parks in its model round. When the model is still answering at the moment `## Main` reads the status, the log line is:
 
 ````text
 state=running section=Child blocked=chat note=working
@@ -10727,9 +10729,9 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 
 ## The concurrency limit
 
-The host running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
 
-`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the host's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. Under a host ceiling of 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable across hosts with different ceilings. The new limit gates admissions from then on only, and never preempts a task that is already running.
+`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the Harness's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. With the Harness's ceiling at 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable wherever it runs, under any ceiling. The new limit gates admissions from then on only, and never preempts a task that is already running.
 
 An argument that is not a positive whole number raises an error value of kind `lua` at the call site with the message `tasks.concurrency limit must be a positive whole number, got {type}`, where a whole-number float such as `2.0` counts as a whole number and is accepted.
 
@@ -10780,7 +10782,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 ```
 ````
 
-`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
+`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on Harness work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
 A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
 
@@ -10895,9 +10897,9 @@ A live task is abandoned for one of five reasons, and each reason has a fixed ph
 | `owner_failed` | The owner failed while the task was live | `the owner failed` |
 | `tool_loop_exhausted` | The owner's `models.loop` ran past its [round cap](11-conversations.md#the-round-cap) while the model's task was live | `the tool loop was exhausted` |
 | `owner_aborted` | The owner was stopped from outside, by a failing sibling arm's fail-fast or by its own owner ending first | `the owner was aborted` |
-| `run_terminated` | The run itself ended while the task was live, for example because the host cancelled it | `the run ended` |
+| `run_terminated` | The run itself ended while the task was live, for example because the Host cancelled it | `the run ended` |
 
-`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
+`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
 
 ### When a chain stops
 
@@ -11221,7 +11223,7 @@ A run reports everything it does as it goes: each section that starts and finish
 
 ## Reading a task's history
 
-An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
+An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The Harness keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
 
 ````markdown
 ---
@@ -11251,7 +11253,7 @@ return 'done'
 ```
 ````
 
-`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
+`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The Harness serves the read from its run log.
 
 Each table's `kind` field names its event, so the block returns one line per event. The first line is `section_started`, reported when `### Child` began, and the last is `task_succeeded`, reported when the task ended with a result. The lines between report the child's section VM starting up, its Lua block running, and its section finishing.
 
@@ -11291,7 +11293,7 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
 | Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
-| Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
+| Debug capture, only when the Harness switches it on | `request`, `response` | [Model round events](#model-round-events) |
 
 ### The section label
 
@@ -11361,7 +11363,7 @@ local reason = e.finish_reason or 'no stop label'
 
 Reading a history has no side effects: a `tasks.events` call adds no events of its own. A task that reads its own history sees every event reported before the read.
 
-The model reads the same host-kept history with its `task_events` built-in, as [The model's status, cancel, and history tools](15-tasks.md#the-models-status-cancel-and-history-tools) describes. Your Lua code gets the events back as a sequence of tables, while the same read made by the model comes back to the model as untrusted text.
+The model reads the same Harness-kept history with its `task_events` built-in, as [The model's status, cancel, and history tools](15-tasks.md#the-models-status-cancel-and-history-tools) describes. Your Lua code gets the events back as a sequence of tables, while the same read made by the model comes back to the model as untrusted text.
 
 ### Read errors
 
@@ -11389,7 +11391,7 @@ end
 return #history .. ' events so far'
 ````
 
-If the run is cancelled while a read is still waiting for the host, the read fails with an error value of kind `cancelled`, and the model's `task_events` read fails the same way. [Cancelling a run](17-limits-and-errors.md#cancelling-a-run) covers what a cancel does to the rest of the run.
+If the run is cancelled while a read is still waiting for the Harness, the read fails with an error value of kind `cancelled`, and the model's `task_events` read fails the same way. [Cancelling a run](17-limits-and-errors.md#cancelling-a-run) covers what a cancel does to the rest of the run.
 
 ## Event coordinates and task ids
 
@@ -11443,19 +11445,19 @@ The event has the called section's own heading, `Inner`, as its `section`, and t
 
 ### Sequence numbers
 
-`provenance.seq` strictly increases within a task, independently of every other task, so sorting a task's events by `seq` puts them in order without a clock. A spawned task counts from 0. The main walk's count starts after any parse events the host logged ahead of the run.
+`provenance.seq` strictly increases within a task, independently of every other task, so sorting a task's events by `seq` puts them in order without a clock. A spawned task counts from 0. The main walk's count starts after any parse events the Harness logged ahead of the run.
 
-Event numbers can skip. One counter per task numbers both the [host work](01-what-a-prompt-is.md#the-prompt-and-its-host) the task asks for, such as model calls and store writes, and the events the task reports, so the two stay in order against each other. Each piece of host work takes the next number, so the numbers on events skip wherever the task asked the host for something. With no host work in between, event numbers run without gaps from the task's starting number. The counter itself never skips; only the events leave holes where host work took a number.
+Event numbers can skip. One counter per task numbers both the [Harness work](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness) the task asks for, such as model calls and store writes, and the events the task reports, so the two stay in order against each other. Each piece of Harness work takes the next number, so the numbers on events skip wherever the task asked the Harness for something. With no Harness work in between, event numbers run without gaps from the task's starting number. The counter itself never skips; only the events leave holes where Harness work took a number.
 
 The pair of task id and `seq` is unique across a run's log. `seq` is a 32-bit unsigned count, from 0 to 4294967295, the same range `last` accepts.
 
 ### Reproducible ids
 
-Two runs of the same prompt, given the same argument string and the same answers to their host work, get the same task ids and stamp the same `{ task, seq }` on the same events, however their chains interleave. Provenance sorts by task path first and by `seq` second.
+Two runs of the same prompt, given the same argument string and the same answers to their Harness work, get the same task ids and stamp the same `{ task, seq }` on the same events, however their chains interleave. Provenance sorts by task path first and by `seq` second.
 
 ### How the run log writes an event
 
-Outside Lua, the host writes each event to its run log as one line of JSON: `kind` first, then `execution`, `section`, and `provenance`, then the kind's own fields. The store write shown earlier in this chapter becomes:
+Outside Lua, the Harness writes each event to its run log as one line of JSON: `kind` first, then `execution`, `section`, and `provenance`, then the kind's own fields. The store write shown earlier in this chapter becomes:
 
 ````text
 {"kind":"store_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}
@@ -11495,7 +11497,7 @@ return var.word
 ```
 ````
 
-Leaving out any parse events the host logged first, the run log for this prompt reads as follows, one event per line with its `section` and then its `kind`:
+Leaving out any parse events the Harness logged first, the run log for this prompt reads as follows, one event per line with its `section` and then its `kind`:
 
 ````text
 Lifecycle  run_started
@@ -11533,7 +11535,7 @@ Each section starts, its [section VM](03-blocks-and-prose.md#how-the-shared-libr
 | `section_started` | A walked section began |
 | `section_finished` | A walked section completed successfully |
 
-`run_started` is reported on the main walk, task `0`, under the H1 title and ahead of any section event, so the main walk can find it in `tasks.events(sys.taskid)`. A run ends with exactly one closing event, `run_succeeded` or `run_failed`, under the H1 title and after every task's terminal event. There is no run-cancelled kind: a [cancelled](04-how-a-prompt-runs.md#failure-and-cancellation) run also closes with `run_failed`, even though its outcome is cancelled rather than failed. A prompt never reads either closing event, because both are reported after every chain has stopped, so they appear only in the host's run log.
+`run_started` is reported on the main walk, task `0`, under the H1 title and ahead of any section event, so the main walk can find it in `tasks.events(sys.taskid)`. A run ends with exactly one closing event, `run_succeeded` or `run_failed`, under the H1 title and after every task's terminal event. There is no run-cancelled kind: a [cancelled](04-how-a-prompt-runs.md#failure-and-cancellation) run also closes with `run_failed`, even though its outcome is cancelled rather than failed. A prompt never reads either closing event, because both are reported after every chain has stopped, so they appear only in the Harness's run log.
 
 Each walked section reports `section_started` when it begins and `section_finished` only when it completes successfully, both with its heading text as `section`. A section completes by falling through, by [`jump`](08-jump-and-call.md#sibling-jumps), or by `return`, and it reports `section_finished` after its Lua teardown and before the next section reports `section_started`. The events of a task's chain have that task's id.
 
@@ -11572,7 +11574,7 @@ Every section VM reports its phases, with the section's heading as `section`:
 - Running each Lua block reports `lua_chunk_started`, then `lua_chunk_succeeded` or `lua_chunk_failed`.
 - Teardown reports `lua_teardown_started` and `lua_teardown_succeeded`, back to back. Teardown has no failed kind.
 
-When a block pauses at a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), such as a model call, a tool call, or a store operation, no event marks the pause. The block's `lua_chunk_started` and its closing event still bracket it, and the events of the host work it waited on come between them.
+When a block pauses at a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), such as a model call, a tool call, or a store operation, no event marks the pause. The block's `lua_chunk_started` and its closing event still bracket it, and the events of the Harness work it waited on come between them.
 
 `lua_shared_load_failed` covers any error while the shared library loads or runs, including a call to `jump`, which is not available while the library loads. Every section reports exactly one teardown pair, even when its section VM fails before any block runs: a failing shared library reports `lua_shared_load_failed`, then `lua_teardown_started` and `lua_teardown_succeeded`.
 
@@ -11624,7 +11626,7 @@ A `log` call that breaks one of its rules raises at the call and reports nothing
 2. one compilation pair for each Lua block: `lua_compilation_started`, then `lua_compilation_succeeded` or `lua_compilation_failed`
 3. `parse_succeeded` or `parse_failed`
 
-The main walk sees these events in its own history only when the host logs parse events in the same log it serves reads from, as the standard runner does, and the main walk's own numbering then continues after them. A file whose parse fails never runs, so a prompt never reads `parse_failed`, or a `lua_compilation_failed`, which fails the parse. Both appear only in the host's run log.
+The main walk sees these events in its own history only when the Harness logs parse events in the same log it serves reads from, as the standard runner does, and the main walk's own numbering then continues after them. A file whose parse fails never runs, so a prompt never reads `parse_failed`, or a `lua_compilation_failed`, which fails the parse. Both appear only in the Harness's run log.
 
 ## Store and operator input events
 
@@ -11687,7 +11689,7 @@ The read of a file that does not exist raised an error value, which `pcall` caug
 
 ### Operator input
 
-Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
+Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a Host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
 
 ````lua
 local asks = 0
@@ -11787,7 +11789,7 @@ The round count is separate from the round cap, which limits each `models.loop` 
 
 A round's events come in a fixed order:
 
-1. `request` and `response`, only when the host has debug capture switched on
+1. `request` and `response`, only when the Harness has debug capture switched on
 2. `model_turn_completed`, or `model_turn_failed` in its place
 3. one `model_metadata_degraded` for each metadata problem
 4. `thinking`, when the answer has non-empty reasoning
@@ -11817,7 +11819,7 @@ A healthy backend leaves a clean history: well-formed metadata, and parts the ba
 
 ### Debug capture
 
-When the host switches debug capture on, each round also reports its raw bodies, as sent to and received from the backend, under the section. `request` holds `turn` and the full, unredacted `body`, and `response` holds `turn`, `body`, and, when the backend supplied them, `finish_reason` and `reasoning_content`. The bodies are raw and include the full prompt. Capture is a host setting that a prompt cannot change: by default neither event is reported, and the standard runner leaves capture off.
+When the Harness switches debug capture on, each round also reports its raw bodies, as sent to and received from the backend, under the section. `request` holds `turn` and the full, unredacted `body`, and `response` holds `turn`, `body`, and, when the backend supplied them, `finish_reason` and `reasoning_content`. The bodies are raw and include the full prompt. Capture is a Harness setting that a prompt cannot change: by default neither event is reported, and the standard runner leaves capture off.
 
 ## Model call metrics
 
@@ -12107,11 +12109,11 @@ A [`tasks.cancel`](15-tasks.md#cancellation-and-task-lifetimes) reports one `tas
 | `owner_failed` | The owner failed while the task was live | `the owner failed` |
 | `tool_loop_exhausted` | The owner's `models.loop` ran past its round cap | `the tool loop was exhausted` |
 | `owner_aborted` | The owner was itself aborted, as happens to the tasks nested under an abandoned task | `the owner was aborted` |
-| `run_terminated` | The run was cancelled or ended by the host | `the run ended` |
+| `run_terminated` | The run was cancelled by the Host or ended by the Harness | `the run ended` |
 
 An abandonment is distinct from a purposeful cancel. For an author task, `owner_returned` goes with the [`tasks_live`](15-tasks.md#cancellation-and-task-lifetimes) error on the owner, while for a model task it is a quiet abandon. In a nested abandonment, everything the abandoned task owned reports its end first, and the task's own `task_abandoned` comes last. Before `run_succeeded` or `run_failed`, the run settles every task still live by abandoning it exactly once: `run_terminated` for a task still live at the end, and `owner_aborted` for the tasks nested under it.
 
-A prompt never reads `task_abandoned` through `tasks.events`. It is stamped on the abandoned task after the task's owner has already ended, so it appears only in the host's run log.
+A prompt never reads `task_abandoned` through `tasks.events`. It is stamped on the abandoned task after the task's owner has already ended, so it appears only in the Harness's run log.
 
 ### Task notices
 
@@ -12141,7 +12143,7 @@ Treat the text inside events as untrusted:
 - the `request` and `response` bodies
 - `model_metadata_degraded.message`
 
-The coordinates come from the host, for `execution`, and from your own headings, for `section`. Before you hand event text to a model, wrap it with [`untrusted()`](09-the-store.md#wrapping-untrusted-text) as you would any other untrusted text:
+The coordinates come from the Harness, for `execution`, and from your own headings, for `section`. Before you hand event text to a model, wrap it with [`untrusted()`](09-the-store.md#wrapping-untrusted-text) as you would any other untrusted text:
 
 ````lua
 local t = tasks.spawn('### Research')
@@ -12159,7 +12161,7 @@ A `tool_result` whose `trusted` is `false` already arrives in the untrusted enve
 
 ### Events a prompt never reads
 
-A prompt reads the events of its own task and of the tasks it owns, as reported so far. No prompt ever reads these, which appear only in the host's run log:
+A prompt reads the events of its own task and of the tasks it owns, as reported so far. No prompt ever reads these, which appear only in the Harness's run log:
 
 - `run_succeeded` and `run_failed`, which are reported after every chain has stopped
 - every `task_abandoned`, which is stamped on the abandoned task after its owner has already ended
@@ -12169,13 +12171,13 @@ Two more limits depend on who is reading. A task never reads its own terminal ev
 
 ### Events never steer the run
 
-The engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the host serves from its log, so a host that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a host may stream live never become events.
+The engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the Harness serves from its log, so a Harness that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a Harness may stream live never become events.
 
 ---
 
 # Limits and Errors
 
-This chapter is the map for when a prompt runs long or goes wrong. It gathers every limit a run observes in one table, shows what happens when Lua code runs into each one, and gives the full classification of failures: the parse error kinds a file can fail with before it runs, the error kinds `pcall` sees inside Lua, and the run error kind a failed run reports. It ends with the host cancel, the one way a run stops without failing. With it, any failure message from any chapter tells you what broke and where to look.
+This chapter is the map for when a prompt runs long or goes wrong. It gathers every limit a run observes in one table, shows what happens when Lua code runs into each one, and gives the full classification of failures: the parse error kinds a file can fail with before it runs, the error kinds `pcall` sees inside Lua, and the run error kind a failed run reports. It ends with the Host cancel, the one way a run stops without failing. With it, any failure message from any chapter tells you what broke and where to look.
 
 ## Limits at a glance
 
@@ -12183,16 +12185,16 @@ Every run observes six limits. These are their defaults:
 
 | Limit | Default | Applies to | Set by |
 |---|---|---|---|
-| Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the host |
-| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the host, lowered by `tasks.concurrency` |
-| Response cap | 16 MiB (16,777,216 bytes) | each model reply | the host |
-| Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the host |
-| Log event quota | 1024 `log` calls | each section VM | the host |
-| Receive timeout | 120 seconds | each wait for the next piece of a model reply | the host |
+| Round cap | 24 tool rounds | each `models.loop` call | `max_tool_iterations:` in the frontmatter, or the Harness |
+| Concurrency limit | 8 tasks at once | every task the run admits, fanout arms included | the Harness, lowered by `tasks.concurrency` |
+| Response cap | 16 MiB (16,777,216 bytes) | each model reply | the Harness |
+| Memory ceiling | 64 MiB (67,108,864 bytes) of Lua heap | each section VM | the Harness |
+| Log event quota | 1024 `log` calls | each section VM | the Harness |
+| Receive timeout | 120 seconds | each wait for the next piece of a model reply | the Harness |
 
 The log byte quota follows from the log event quota: 256 bytes for each call the log event quota allows, so 262,144 bytes by default. No limit counts Lua instructions.
 
-One set of limits applies to the whole run, the H1 pass and every section included. A run uses the defaults unless the host that runs it sets its own values, so the limits a given run observes can differ from this table.
+One set of limits applies to the whole run, the H1 pass and every section included. A run uses the defaults unless the Harness that runs it sets its own values, so the limits a given run observes can differ from this table.
 
 From inside a prompt, only the round cap can change. The frontmatter key `max_tool_iterations` takes a whole number from 1 to 1000 and caps each `models.loop` call separately ([The round cap](11-conversations.md#the-round-cap)):
 
@@ -12212,7 +12214,7 @@ max_tool_iterations must be a positive integer (>= 1), got {raw}
 max_tool_iterations must be <= 1000, got {raw}
 ````
 
-No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the host and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
+No frontmatter key sets the other five limits. The concurrency limit is taught with [fanout](14-fanout.md#concurrency), a prompt can only lower it, with `tasks.concurrency` ([Tasks](15-tasks.md#the-concurrency-limit)), and the rest of this chapter covers the memory ceiling, the log quotas, the response cap, and the receive timeout. The web fetch tool has a policy of its own, whose values are also defaults set by the Harness and that a prompt cannot change ([The fetch policy](13-web-fetch-and-search.md#the-fetch-policy)).
 
 ## How failures are reported
 
@@ -12225,7 +12227,7 @@ Failures fall into four families, each with its own vocabulary:
 | Parse failure | before anything runs | one of five parse error kinds |
 | Error value | inside Lua, at the call that failed | an error value whose `kind` is one of thirteen lowercase tags |
 | Failed run | when the file fails to parse, prepare refuses the run, or a failure goes uncaught | one of twelve run error kinds |
-| Cancelled outcome | when the host cancels | no error kind at all |
+| Cancelled outcome | when the Host cancels | no error kind at all |
 
 A parse failure has exactly one of five parse error kinds: `Frontmatter`, `Structure`, `Fence`, `List`, or `Lua` ([Parse error kinds](#parse-error-kinds)).
 
@@ -12243,11 +12245,11 @@ end
 return reply
 ````
 
-Here an `internal` failure, such as a model call the host could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
+Here an `internal` failure, such as a model call the Harness could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
 
-A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
+A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The Host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
 
-A run the host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the host, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
+A run the Host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the Harness, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The Host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
 
 ## Lua block budgets
 
@@ -12281,11 +12283,11 @@ Its run result:
 8000000
 ````
 
-Even an endless loop such as `while true do end` is legal. Only a host cancel stops it, within about 10,000 instructions ([Cancelling a run](#cancelling-a-run)).
+Even an endless loop such as `while true do end` is legal. Only a Host cancel stops it, within about 10,000 instructions ([Cancelling a run](#cancelling-a-run)).
 
 ### The memory ceiling
 
-Each section VM may use up to 64 MiB of Lua heap by default, or the host's value. An allocation past the memory ceiling is refused as an ordinary Lua error whose message mentions memory. It is not a quota:
+Each section VM may use up to 64 MiB of Lua heap by default, or the Harness's value. An allocation past the memory ceiling is refused as an ordinary Lua error whose message mentions memory. It is not a quota:
 
 - Caught with `pcall`, it is an error value of kind `lua`.
 - Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` in the H1 pass, where the Lua error text becomes the requirements notice.
@@ -12305,7 +12307,7 @@ end
 
 [`log`](05-lua-environment.md#checkpoints-with-log) records author checkpoints, and each section VM has two quotas for it:
 
-- The log event quota: 1024 `log` calls by default, or the host's value.
+- The log event quota: 1024 `log` calls by default, or the Harness's value.
 - The log byte quota: the log event quota times 256, so 262,144 bytes by default, counted in UTF-8 bytes across all of the section VM's `log` calls. Multibyte text uses it up faster: 256 copies of `é` cost 512 bytes.
 
 Every `log` call counts, calls made while the shared library loads included. Each call is checked in this order:
@@ -12356,11 +12358,11 @@ With the default quota, the 1025th call is refused, and the run result is:
 lua: lua log event budget exceeded
 ````
 
-Two host-set quotas show the other cases. With a log event quota of 4, the log byte quota is 1024 bytes, so three `log(string.rep('é', 200))` calls of 400 bytes each fail on the third with the log byte quota refusal. Exactly two checkpoints are recorded, and left uncaught the failure ends the run as `Quota` before the block's later `return` runs. With a log event quota of 1, a shared library that calls `log('one')` and then `log('two')` fails on the second call, which left uncaught ends the run with `lua log event quota exceeded`.
+Two Harness-set quotas show the other cases. With a log event quota of 4, the log byte quota is 1024 bytes, so three `log(string.rep('é', 200))` calls of 400 bytes each fail on the third with the log byte quota refusal. Exactly two checkpoints are recorded, and left uncaught the failure ends the run as `Quota` before the block's later `return` runs. With a log event quota of 1, a shared library that calls `log('one')` and then `log('two')` fails on the second call, which left uncaught ends the run with `lua log event quota exceeded`.
 
 ## Model reply size and wait time
 
-Two limits guard every model call. Both apply to every round in the run, [`models.infer`](10-models.md#running-a-round-with-modelsinfer) rounds (nested ones included) and [`models.loop`](11-conversations.md#a-first-conversation) rounds alike, so an oversized or stalled reply ends that round with an error instead of hanging the run. Only the host changes either one.
+Two limits guard every model call. Both apply to every round in the run, [`models.infer`](10-models.md#running-a-round-with-modelsinfer) rounds (nested ones included) and [`models.loop`](11-conversations.md#a-first-conversation) rounds alike, so an oversized or stalled reply ends that round with an error instead of hanging the run. Only the Harness changes either one.
 
 ### The response cap
 
@@ -12456,13 +12458,13 @@ Every Lua block, whether the shared library, an H1 block, or a section block, is
 
 ## Finding where a parse failed
 
-A parse failure comes with a location when the parser can point at the problem. The host reports it beside the message as a path, a line, a column, and a byte span, each when known. Lines are 1-based and count from the top of the file, the frontmatter included, with the opening `---` as line 1.
+A parse failure comes with a location when the parser can point at the problem. The Host reports it beside the message as a path, a line, a column, and a byte span, each when known. Lines are 1-based and count from the top of the file, the frontmatter included, with the opening `---` as line 1.
 
 ### Frontmatter failures
 
 A frontmatter failure, whether the YAML is invalid or the contract rejects a value, gives a 1-based line and a 1-based column. For a capability entry on line 5 whose value is not a capability id, the failure reports line 5 and column 5, where the value starts after the `  - ` list marker. The exceptions are the checks that span entries, which give neither a line nor a column: a name declared both under `tools:` and under `models:`, a capability declared twice, and a tool slot whose capability is declared optional.
 
-A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the host may label the failure with its own name for the file instead.
+A frontmatter failure has no prompt name, because the name comes from the frontmatter itself. Its location path is the placeholder `<prompt>`, and the Host may label the failure with its own name for the file instead.
 
 ### Body failures
 
@@ -12532,17 +12534,17 @@ An ordinary failed `store` call is kind `store`, not `internal`. Its message tex
 
 ### The cancelled kind
 
-`kind == 'cancelled'` covers a host cancel and a cancelled task. For a host cancel the message is `interrupted by Ctrl-C` ([Calls waiting during a cancel](#calls-waiting-during-a-cancel)). For a cancelled task, `err.task` holds the task id ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
+`kind == 'cancelled'` covers a Host cancel and a cancelled task. For a Host cancel the message is `interrupted by Ctrl-C` ([Calls waiting during a cancel](#calls-waiting-during-a-cancel)). For a cancelled task, `err.task` holds the task id ([Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes)).
 
 ### Error kinds and run error kinds
 
-An error kind is what Lua sees at the call. A run error kind is what the host reports when a failure ends the run. They are separate vocabularies, and one error kind can lead to different run error kinds depending on its source. An uncaught failure ends the run with its kind, message, and fields intact, never flattened to a message string, so the run is classified the same as the original error: an uncaught `context_exhausted` ends the run as `ContextExhausted` with a message starting `context exhausted: `.
+An error kind is what Lua sees at the call. A run error kind is what the Host reports when a failure ends the run. They are separate vocabularies, and one error kind can lead to different run error kinds depending on its source. An uncaught failure ends the run with its kind, message, and fields intact, never flattened to a message string, so the run is classified the same as the original error: an uncaught `context_exhausted` ends the run as `ContextExhausted` with a message starting `context exhausted: `.
 
 | `err.kind` | Its own fields | Uncaught, ends the run as |
 |---|---|---|
 | `lua` | none | `Lua`, or `Quota` for a refused `log` call |
 | `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an engine fault |
-| `cancelled` | `task`, for a cancelled task | the cancelled outcome for a host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
+| `cancelled` | `task`, for a cancelled task | the cancelled outcome for a Host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
 | `context_exhausted` | `reason` | `ContextExhausted` |
 | `empty_model_reply` | `finish_reason`, only when the backend gave one | `Completion` |
 | `tool_loop_exhausted` | none | `Tool` |
@@ -12574,7 +12576,7 @@ A value missing its kind's fields also ends the run as `Lua`, or as `Requirement
 
 ## How a failed run is classified
 
-A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A host cancel is not among them, because a cancelled run has not failed.
+A failed run reports exactly one run error kind. The kind names what failed, and the message beside it is always the underlying error's own text with its full cause chain; the kind never replaces it. There are twelve run error kinds. A Host cancel is not among them, because a cancelled run has not failed.
 
 | Run error kind | The run failed because | Message |
 |---|---|---|
@@ -12601,11 +12603,11 @@ Nothing reruns a failed run automatically. [Model call and environment failures]
 
 ### Model, tool, and input failures
 
-- `Binding`: a section sends prose to a model, or calls `models.infer` without a handle, while neither `models.use` nor a prompt-wide `models.default` is in effect ([Choosing a section's model](10-models.md#choosing-a-sections-model)). Caught with `pcall`, the same error is kind `internal`. The kind also covers a host tool whose schema the host cannot offer to the model, which nothing in a prompt causes.
+- `Binding`: a section sends prose to a model, or calls `models.infer` without a handle, while neither `models.use` nor a prompt-wide `models.default` is in effect ([Choosing a section's model](10-models.md#choosing-a-sections-model)). Caught with `pcall`, the same error is kind `internal`. The kind also covers a Harness tool whose schema the Harness cannot offer to the model, which nothing in a prompt causes.
 - `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, missing or invalid environment variables, invalid client configuration, and a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
 - `Tool`: a dispatched tool fails ([Tool failures](12-tools.md#tool-failures)), a tool call is out of the section's scope ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), a call names a tool not bound in the run ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)), or a `models.loop` call does not finish within the round cap ([The round cap](11-conversations.md#the-round-cap)), and the prompt does not catch it.
 - `ContextExhausted`: the selected compactor runs out of the model's context window and the prompt does not catch it ([Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion)).
-- A failed operator ask is a tool failure: when the host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
+- A failed operator ask is a tool failure: when the Host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
 
 The four `Tool` messages are these, where `{name:?}` and the other `:?` placeholders show the value in double quotes with escapes:
 
@@ -12626,7 +12628,7 @@ tool-call loop did not converge
 
 - An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
 - `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
-- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
+- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the Host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
 - `Internal`: an engine invariant broke, a fault in the engine rather than a mistake in the prompt. Its location names an engine source file and line.
 
 ### The H1 pass hard gate
@@ -12667,12 +12669,12 @@ Everything else keeps its own classification in the H1 pass:
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
 - Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, and `ContextExhausted` keep their kinds.
 - A failed store call stays `Store`, and a claims conflict stays `Determinism`.
-- A host cancel stays the cancelled outcome.
+- A Host cancel stays the cancelled outcome.
 - A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
 
 ## Model call and environment failures
 
-A model call that fails on the host's side reaches Lua as an error value of kind `internal` with no extra fields. Its message never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
+A model call that fails on the Harness's side reaches Lua as an error value of kind `internal` with no extra fields. Its message never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
 
 | Failure | Message |
 |---|---|
@@ -12680,7 +12682,7 @@ A model call that fails on the host's side reaches Lua as an error value of kind
 | non-success status from the gateway | `non-success backend status {status}` |
 | oversized or undecodable reply | `malformed response: {message}` |
 | error reply whose body cannot be read | `unreadable backend error body (status {status})` |
-| gateway disabled by the host | `gateway access is disabled` |
+| gateway disabled by the Host | `gateway access is disabled` |
 | environment variable not set | `missing environment variable: {name}` |
 | environment variable not valid Unicode | `environment variable is set but not valid Unicode: {name}` |
 
@@ -12704,7 +12706,7 @@ A backend answering with status 503 makes this block return `skipped: non-succes
 
 ### Environment variables
 
-The host's model connection reads two environment variables. A prompt never reads them; it only sees the error when one is missing or invalid.
+The Harness's model connection reads two environment variables. A prompt never reads them; it only sees the error when one is missing or invalid.
 
 - `PROMPTFORGE_GATEWAY_URL` is always required.
 - `PROMPTFORGE_GATEWAY_API_KEY` is required unless the URL's host is loopback: `127.0.0.1`, `::1`, or `localhost`. An empty key counts as unset.
@@ -12724,7 +12726,7 @@ A status below 500 is not transient, and neither is any other failure.
 
 ## Cancelling a run
 
-A host cancel stops a run from outside, for example when the person running it presses Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome. The run ends with the cancelled outcome, a clean stop rather than a failure, so it has no run error kind.
+A Host cancel stops a run from outside, for example when the person running it presses Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome. The run ends with the cancelled outcome, a clean stop rather than a failure, so it has no run error kind.
 
 A cancel reaches running Lua promptly, even a tight endless loop:
 
@@ -12745,13 +12747,13 @@ while true do n = n + 1 end
 ```
 ````
 
-Nothing in this prompt ends the loop, and no limit does either. When the host cancels, the loop is aborted and the run ends with the cancelled outcome.
+Nothing in this prompt ends the loop, and no limit does either. When the Host cancels, the loop is aborted and the run ends with the cancelled outcome.
 
 ### How a cancel reaches running Lua
 
 - Every 10,000 Lua instructions, running Lua checks the run's cancel flag. The check covers each section VM's main code and every block coroutine, so it reaches every block of every section, the H1 pass included. The engine also checks the flag between steps.
 - Every section VM and every activated capability share the same cancel flag.
-- Once the flag is set, the running block fails with the interrupted error: kind `cancelled`, message `interrupted by Ctrl-C` whatever the host's actual trigger was, and no source location. It never appears as an ordinary Lua runtime error, and it wins over any error value the block had raised.
+- Once the flag is set, the running block fails with the interrupted error: kind `cancelled`, message `interrupted by Ctrl-C` whatever the Host's actual trigger was, and no source location. It never appears as an ordinary Lua runtime error, and it wins over any error value the block had raised.
 - The cancel stops every block in the run, not only the first. After a cancel, a block with a bounded loop such as `for i = 1, 100000 do end` followed by `return "done"` never returns `done`.
 - A running `models.loop` stays cancellable, because the loop runs as Lua inside your block and the check keeps running while it does.
 
@@ -12759,7 +12761,7 @@ Left uncaught, the interrupted error ends the run with the cancelled outcome.
 
 ## Calls waiting during a cancel
 
-A cancel also reaches every call that is waiting on the host. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
+A cancel also reaches every call that is waiting on the Harness. Each one resumes with the interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
 
 - `models.infer`, and each `models.loop` round
 - `tools.call`, `input.ask()` included, and tool calls the model makes
@@ -12783,7 +12785,7 @@ return out
 
 A cancel during the tool call gives `ok == false`, `out.kind == 'cancelled'`, and `tostring(out) == 'interrupted by Ctrl-C'`. A `models.loop` round cut short the same way raises an error value whose `kind` is `cancelled` and whose `message` is `interrupted by Ctrl-C`, so `tostring(err)` gives exactly that message.
 
-Catching a cancel does not keep the run going. Once the host cancels, running Lua is stopped by the instruction check and the engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
+Catching a cancel does not keep the run going. Once the Host cancels, running Lua is stopped by the instruction check and the engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
 
 ### Work in flight
 
@@ -12808,7 +12810,7 @@ Every frontmatter key and value rule, with top-level keys first and nested keys 
 | `name` | string, kept as written | none, required | [Prompt File Structure](02-file-structure.md#name-and-description) |
 | `description` | one-line string, kept as written | none, required | [Prompt File Structure](02-file-structure.md#name-and-description) |
 | `promptforge` | `0` | none, needed to run | [Prompt File Structure](02-file-structure.md#the-promptforge-version) |
-| `max_tool_iterations` | whole number `1` to `1000` | `24` per `models.loop` call, or the host's default | [Conversations](11-conversations.md#the-round-cap) |
+| `max_tool_iterations` | whole number `1` to `1000` | `24` per `models.loop` call, or the Harness's default | [Conversations](11-conversations.md#the-round-cap) |
 | `input` | map of `path` and `description` | no input file | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `output` | map of `path` and `description` | no output file | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `capabilities` | list of capability entries | no capabilities | [Tools](12-tools.md#declaring-capabilities) |
@@ -12841,7 +12843,7 @@ Every frontmatter key and value rule, with top-level keys first and nested keys 
 | Name grammar for aliases, role labels, and arg names | `[A-Za-z][A-Za-z0-9_-]{0,63}` | none | [Prompt File Structure](02-file-structure.md#names-for-aliases-roles-and-args) |
 | `output.description` | string | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `output.path` | store filename, such as `report.md` | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
-| Reserved names for tool aliases and role labels | no host global, sandbox Lua global, or Lua keyword, such as `store`, `argv`, `pairs`, or `end`, and no name under both `tools` and `models`; the chapter lists every one | none | [Prompt File Structure](02-file-structure.md#reserved-names-for-aliases-and-role-labels) |
+| Reserved names for tool aliases and role labels | no Engine global, sandbox Lua global, or Lua keyword, such as `store`, `argv`, `pairs`, or `end`, and no name under both `tools` and `models`; the chapter lists every one | none | [Prompt File Structure](02-file-structure.md#reserved-names-for-aliases-and-role-labels) |
 | Tool path in `tools.{alias}` | `namespace/pack/name`, such as `promptforge/web/fetch` | none | [Tools](12-tools.md#capability-ids-and-tool-paths) |
 | `tools.{alias}` | tool path string | none | [Tools](12-tools.md#tool-slots-and-tool-objects) |
 
@@ -12865,7 +12867,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | model handle | `local h = models.get('writer')` | Frozen userdata with nine read-only fields and no methods | [Models](10-models.md#model-handles) |
 | `models.default` | `models.default(label)` | The default role's model handle; sets the prompt-wide default | [Models](10-models.md#choosing-a-sections-model) |
 | `models.get` | `models.get(label)` | The role's model handle; the selection is unchanged | [Models](10-models.md#model-handles) |
-| `models.get` | `models.get(ui().selected_model)` | A model handle for a host catalog model id, with a host-state snapshot only | [Models](10-models.md#model-handles) |
+| `models.get` | `models.get(ui().selected_model)` | A model handle for a Host catalog model id, with a Host-state snapshot only | [Models](10-models.md#model-handles) |
 | `models.infer` | `models.infer(prompt)` | The reply as a string, from one round on the section's model | [Models](10-models.md#running-a-round-with-modelsinfer) |
 | `models.infer` | `models.infer(handle, prompt)` | The reply as a string, from one round on the handle's model | [Models](10-models.md#running-a-round-with-modelsinfer) |
 | `models.loop` | `models.loop(messages, compactor?)` | `nil`; appends every record to `messages` | [Conversations](11-conversations.md#a-first-conversation) |
@@ -12974,7 +12976,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 
 | Name | Form | Returns | Taught in |
 |---|---|---|---|
-| `sys.execution` | `sys.execution` | The run's name, assigned by the host | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
+| `sys.execution` | `sys.execution` | The run's name, assigned by the Harness | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
 | `sys.id` | `sys.id` | The current section entry's id, such as `0.3.0` | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
 | `sys.index` | `sys.index` | An arm's 1-based position in its collection, or a task's `index` option | [Fanout](14-fanout.md#inside-an-arm) |
 | `sys.model` | `sys.model` | The section's catalog model id, readable only after the section's first tool call | [Models](10-models.md#the-bound-model-in-sysmodel) |
@@ -13030,9 +13032,9 @@ The `promptforge/user-input` row is the capability line that defines the rest. T
 
 | Name | Form | Returns | Taught in |
 |---|---|---|---|
-| `promptforge/user-input` | `capabilities: [promptforge/user-input]` | The `input` global and the tool path `promptforge/user-input/ask`; required, it refuses a host with nobody to ask | [The Lua Environment](05-lua-environment.md#declaring-the-capability) |
+| `promptforge/user-input` | `capabilities: [promptforge/user-input]` | The `input` global and the tool path `promptforge/user-input/ask`; required, the run is refused when the Host has nobody to ask | [The Lua Environment](05-lua-environment.md#declaring-the-capability) |
 | `input.ask` | `local text, available = input.ask()` in Lua | the operator's next message and `true`, or the fixed fallback sentence and `false` | [The Lua Environment](05-lua-environment.md#asking-the-operator-with-inputask) |
-| `input.connected` | `input.connected()` in Lua | `true` when the host has someone to ask; fixed for the whole run | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
+| `input.connected` | `input.connected()` in Lua | `true` when the Host has someone to ask; fixed for the whole run | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 | `promptforge/user-input/ask` | `{}` | The operator's next message, trusted; offered to a model only through a `tools:` alias | [The Lua Environment](05-lua-environment.md#letting-the-model-ask) |
 
 ### Lua standard library
@@ -13052,7 +13054,7 @@ Every section VM runs Lua 5.5 with these libraries and base functions.
 | `setmetatable` | `setmetatable(t, mt)` | `t`; on `_G`, `mt` composes behind the `argv` and `prose` guard | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `string` library | `string.upper(s)`, `s:match(pattern)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table` library | `table.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
-| `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-host-calls) |
+| `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-engine-calls) |
 | `tonumber` | `tonumber(v)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `tostring` | `tostring(v)` | string; an error value gives its message | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `type` | `type(v)` | type name; an error value gives `'table'` | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
@@ -13078,7 +13080,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `err.tasks` | `err.tasks` | leaked task ids joined with `, ` in spawn order, on `tasks_live` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `fanout` | `fanout(worker, collection)` | array of fanout results, one per member in collection order | [Fanout](14-fanout.md#the-fanout-call) |
 | heading reference | `'## Name'` | the section with that level and name | [Jump and Call](08-jump-and-call.md#heading-addresses) |
-| host globals | no import | installed in every section VM | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| Engine globals | no import | installed in every section VM | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `item` | `item` | the arm's member inside a fanout arm, or a task's `item` option | [Fanout](14-fanout.md#inside-an-arm) |
 | `item.key` and `item.value` | `item.key`, `item.value` | a keyed member's key and value | [Fanout](14-fanout.md#collections-and-member-order) |
 | `jump` | `jump(target)` | nothing; ends the block and the walk continues at `target` | [Jump and Call](08-jump-and-call.md#jump-and-call-at-a-glance) |
@@ -13101,7 +13103,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `tools` | `tools.{name}(...)` | the `tools` namespace | [Tools](12-tools.md#tools-at-a-glance) |
 | `tostring(err)` | `tostring(err)` | the error's message, with no traceback | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `tostring(result)` and `table.concat(results)` | `tostring(r[i])`, `table.concat(r, sep)` | the result's text; the joined texts | [Fanout](14-fanout.md#the-fanout-call) |
-| `ui` | `ui()` | host-state snapshot table; present only when the host supplies one | [The Lua Environment](05-lua-environment.md#host-state-with-ui) |
+| `ui` | `ui()` | Host-state snapshot table; present only when the Host supplies one | [The Lua Environment](05-lua-environment.md#host-state-with-ui) |
 | `untrusted` | `untrusted(s)` | `s` inside an untrusted envelope | [The Store](09-the-store.md#wrapping-untrusted-text) |
 | `var` | `var.key = value` | your own values, carried along the walk | [The Lua Environment](05-lua-environment.md#keeping-values-in-var) |
 | `xpcall` | `xpcall(f, handler, ...)` | like `pcall`; `handler` receives the error value | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
@@ -13127,26 +13129,26 @@ Each row links to the section that teaches the form.
 
 ## Defaults and limits
 
-Set by names the frontmatter key that sets a value, or says whether the host sets it or it is fixed.
+Set by names the frontmatter key that sets a value, or says whether the Harness sets it or it is fixed.
 
 | Name | Default | Range or rule | Set by | Taught in |
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
-| Cancel poll interval | 10,000 instructions | A host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | host | [Fanout](14-fanout.md#concurrency) |
+| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | Harness | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
-| Host-set limits | Listed in the chapter | A prompt changes only the round cap | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
 | Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
 | Log message length | 256 characters | Counted as Unicode characters | fixed | [The Lua Environment](05-lua-environment.md#checkpoints-with-log) |
-| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | host | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Model response cap | 16 MiB | A larger reply fails the call | host | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | host | [Conversations](11-conversations.md#the-round-cap) |
-| Round cap from frontmatter | The host default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
-| Run limit defaults | Listed in the chapter | One set applies to the whole run | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
-| `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
+| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | Harness | [Conversations](11-conversations.md#the-round-cap) |
+| Round cap from frontmatter | The Harness default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
+| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the Host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 
 ## Error kinds
 
@@ -13167,7 +13169,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
 | `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Cancelled outcome | The host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
 | `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
@@ -13177,7 +13179,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 
@@ -13185,11 +13187,11 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `cancelled` | A host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The reply's detail phrase, or plain `empty model reply`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A host-side failure the prompt cannot fix: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
-| `lua` | A runtime error, a host call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |
 | `task_consumed` | A wait names a task already delivered | The task, in `` task `{task}` was already delivered: a task's result is taken by one wait ``; field `task` | [Tasks](15-tasks.md#waiting-for-results) |

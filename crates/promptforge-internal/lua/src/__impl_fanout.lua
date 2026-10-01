@@ -2,10 +2,10 @@
 -- protocol (`spawn`, `join_any`, `cancel`), so every wait inside a fanout
 -- is an ordinary yield and the scheduler keeps no fanout state of its own.
 --
--- The host installs this after the coroutine prelude (`__impl_coro.lua`)
+-- The Engine installs this after the coroutine prelude (`__impl_coro.lua`)
 -- and installs the returned function as the `fanout` global. The chunk
 -- arguments are privileged captures, never globals: `yield` is
--- coroutine.yield, `var_snapshot` is the host helper returning the hidden
+-- coroutine.yield, `var_snapshot` is the Engine helper returning the hidden
 -- `var` data table as a plain deep copy, `helpers` is the prelude's shared
 -- trio (`raise(kind, fields)` builds and raises the structured error
 -- table, `fail(result)` raises an envelope's failure value, and

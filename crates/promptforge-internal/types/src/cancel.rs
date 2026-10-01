@@ -2,17 +2,17 @@
 //!
 //! The engine is a pure state machine, so it polls a flag between chain
 //! steps and from the Lua instruction hook rather than awaiting a
-//! cancellation, and the host that cancels it sets that flag from
+//! cancellation; when the Host cancels, the Harness sets that flag from
 //! whichever thread it likes. [`CancelHandle`] is that flag, arranged as a
 //! tree so a run-level cancel reaches every task while one task can be
 //! cancelled without touching its siblings or its owner.
 //!
 //! This is the handle the engine's `RunContext` holds and the one
-//! `RunServices` hands a capability; the tokio-aware token a host selects
+//! `RunServices` hands a capability; the tokio-aware token a Host selects
 //! over is `harness::cancel::CancelHandle`, defined in `harness-runner`,
-//! and it bridges to this flag. A host that drives the engine and must
+//! and it bridges to this flag. A Harness that steps the Engine and must
 //! wait on the flag itself awaits [`CancelHandle::cancelled`], a std-only
-//! future woken by the cancel, so no host has to poll the flag on a timer.
+//! future the cancel itself wakes, in place of a timer that polls the flag.
 
 use std::fmt;
 use std::future::Future;
@@ -44,7 +44,7 @@ static NEXT_WAITER: AtomicU64 = AtomicU64::new(0);
 /// - **No registry.** A child holds its parent, never the reverse, so there
 ///   are no reference cycles and nothing to unregister when a handle drops.
 /// - **Awaitable.** [`cancelled`](Self::cancelled) is a future the cancel
-///   wakes, for a host that waits on the flag beside its other sources.
+///   wakes, for a Harness that waits on the flag beside its other sources.
 ///   Polling stays a flag read; waiting costs one waker per node per
 ///   waiter, dropped when the cancel fires them or the waiter drops.
 ///
@@ -137,7 +137,7 @@ impl Node {
 /// Completes when the handle it was drawn from reports cancelled.
 ///
 /// Returned by [`CancelHandle::cancelled`]. The future is `Unpin` and owns
-/// its handle, so a host can hold it across awaits or select over it
+/// its handle, so a Harness can hold it across awaits or select over it
 /// beside its other sources. It never times out or spins: the cancel that
 /// sets the flag wakes it.
 #[derive(Debug)]
@@ -231,7 +231,7 @@ impl CancelHandle {
 
     /// A future that completes when this handle reports cancelled: at once
     /// if it already does, otherwise when a cancel lands on it or on an
-    /// ancestor. This is how a host that must wait on the flag waits
+    /// ancestor. This is how a Harness that must wait on the flag waits
     /// without polling it on a timer.
     ///
     /// # Examples

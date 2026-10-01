@@ -1,4 +1,4 @@
-//! The test host bundle: [`RunHost`], the resources the suites hand the
+//! The suites' Harness bundle: [`RunHost`], the resources the suites hand the
 //! tokio test driver.
 //!
 //! A [`Run`](crate::execute::Run) issues effects and reports events as
@@ -9,9 +9,9 @@
 //! a streaming round forwards to, and the observer and capture the run's
 //! events are replayed onto. [`performers`](RunHost::performers) and
 //! [`sink`](RunHost::sink) turn the bundle into what
-//! [`drive_tokio`](super::drive_tokio) takes. None of it reaches the
-//! engine; a production host builds its own [`Performers`] and sink, and
-//! activates its own capabilities.
+//! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
+//! effects and answers; the Harness builds its own [`Performers`] and
+//! sink in production, and activates its own capabilities.
 
 use std::fmt;
 use std::sync::Arc;
@@ -34,8 +34,8 @@ pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
 /// What the test driver performs a `Chat` round on: a stand-in for the
 /// harness's model client, which the engine never holds and this crate
 /// never names. The suites' implementation speaks the wire vocabulary to
-/// an axum mock gateway over a dev-only HTTP client; a scripted host can
-/// answer from a table.
+/// an axum mock gateway over a dev-only HTTP client; a scripted
+/// implementation can answer from a table.
 pub trait ChatClient: Send + Sync {
     /// Performs one round: sends `messages` (with `tools` advertised when
     /// non-empty) under `options`, bounded by `limits`' request timeout
@@ -70,7 +70,7 @@ pub struct RunHost {
 }
 
 impl RunHost {
-    /// Builds the silent host: a null observer, no capture, no client, no
+    /// Builds the silent bundle: a null observer, no capture, no client, no
     /// tools, no delta hook.
     #[must_use]
     pub fn new() -> RunHost {
@@ -111,8 +111,8 @@ impl RunHost {
     /// Sets the implementations `ToolCall` effects resolve their ids in.
     /// The catalog the engine binds against is the caller's to install on
     /// the [`Environment`](crate::execute::Environment) (see
-    /// [`TestToolTable::catalog`]); a production host assembles both from
-    /// its activated capabilities.
+    /// [`TestToolTable::catalog`]); in production the Harness assembles
+    /// both from its activated capabilities.
     #[must_use]
     pub fn tools(mut self, tools: TestToolTable) -> RunHost {
         self.tools = tools;
@@ -127,8 +127,8 @@ impl RunHost {
         self
     }
 
-    /// The host's performers for the tokio test driver, starting from
-    /// [`Performers::refusing`] and overriding the slots this host
+    /// The bundle's performers for the tokio test driver, starting from
+    /// [`Performers::refusing`] and overriding the slots this bundle
     /// supplies: with a client, a `Chat` runs on it under `limits`'
     /// request timeout and body cap; a `ToolCall` resolves its id in the
     /// tool table (a miss is the refusal).
@@ -151,7 +151,7 @@ impl RunHost {
                     else {
                         return EffectAnswer::Dropped;
                     };
-                    // The host's delta callback is the live consumer of a
+                    // The bundle's delta callback is the live consumer of a
                     // streaming round; without one, or for a round the
                     // effect marks non-streaming (a nested infer), the
                     // chunks drop at the leaf and the completed reply is
@@ -185,7 +185,7 @@ impl RunHost {
         performers
     }
 
-    /// The host's event sink for the tokio test driver: every event is
+    /// The bundle's event sink for the tokio test driver: every event is
     /// replayed onto the observer and, for the debug pair, the capture.
     pub fn sink(&self) -> impl FnMut(Event) + Send + use<> {
         let observer = Arc::clone(&self.observer);

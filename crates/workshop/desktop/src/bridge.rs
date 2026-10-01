@@ -13,7 +13,7 @@
 //!
 //! WebView2 has a supported channel for this: on a drop the page
 //! calls `chrome.webview.postMessageWithAdditionalObjects` with the DOM
-//! `File` objects, and the host receives each one as an
+//! `File` objects, and the desktop app receives each one as an
 //! [`ICoreWebView2File`] whose `Path` is the real OS path. [`attach`]
 //! subscribes to those messages and feeds the paths into the
 //! `promptforge:file-drop` dispatch ([`crate::drops`]) the page already

@@ -35,7 +35,7 @@ fn emitter() -> Emitter {
     Emitter::root(EventSink::default(), "bench", DebugMode::Off)
 }
 
-/// A section VM with host values injected, so the `messages` namespace is
+/// A section VM with Engine values injected, so the `messages` namespace is
 /// installed as the executor installs it.
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(

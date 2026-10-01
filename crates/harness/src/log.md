@@ -8,7 +8,7 @@ You need this when you read back what a session recorded, or handle a failure to
 
 # Read a session's history
 
-Your `desk` host lost its client and wants back everything its session recorded. One execution of the session's agent is a *run*, as [the crate overview](crate#before-you-start) defines it.
+Your `desk` Host lost its client and wants back everything its session recorded. One execution of the session's agent is a *run*, as [the crate overview](crate#before-you-start) defines it.
 
 A session begins a new run each time it restarts: after you cancel a turn, or after a gateway or catalog push that [the crate overview](crate#the-complete-program) says restarts it. A higher-generation gateway that cannot make a model client closes the session instead and records no new run.
 
@@ -106,7 +106,7 @@ A history outlives your client, and its run ids mean something only in the log t
 
 # Tell history failures apart
 
-A history call failed, and your host must decide what to report: disk trouble, a damaged record, or a run the log did not expect.
+A history call failed, and your Host must decide what to report: disk trouble, a damaged record, or a run the log did not expect.
 
 You meet [`LogError`] in two places. [`Session::transcript`](crate::Session::transcript) returns `LogError` directly. [`Harness::launch`](crate::Harness::launch) returns it wrapped in [`LaunchError::Log`](crate::LaunchError::Log), and only when the run log cannot be opened. The harness opens the run log on the first launch, and a failed open is tried again by the next launch. A state directory that cannot be created is one way the open fails, and it reaches you as `Io` inside `LaunchError::Log`.
 
@@ -152,7 +152,7 @@ assert!(matches!(failure, LogError::UnknownRun(id) if id == never));
 1. Step 1 prints the whole chain with [`display_chain`](crate::display_chain).
 2. Step 2 matches the variant. [`LogError::Database`] means the database refused an operation, and [`LogError::Io`] means an I/O operation failed. Those two point at the disk or the database. `Payload` means a record's JSON would not serialize on the way in or parse on the way out, and `Corrupt` means a stored row disagrees with the schema. Those point at the data. The `UnknownRun` and `RunEnded` arms word their messages as instructions, but `desk` has nothing to follow them with, because the harness writes the history itself and no public call of yours takes a [`RunId`] or writes a record. Treat those two messages as a report of what the log saw. `LogError` is `#[non_exhaustive]`, so a match outside the crate needs a wildcard arm.
 3. Step 3 downcasts the `Database` source to `DatabaseSource`, calls [`DatabaseSource::as_inner`], and gets the database's own [`turso::Error`](https://docs.rs/turso/latest/turso/enum.Error.html).
-4. Step 4 asks the history nothing. It builds [`LogError::UnknownRun`] by hand from `RunId::from_raw(-1)`, the value the log returns when asked about a run it never began. No public call takes a `RunId`, so a host cannot make the log answer this itself.
+4. Step 4 asks the history nothing. It builds [`LogError::UnknownRun`] by hand from `RunId::from_raw(-1)`, the value the log returns when asked about a run it never began. No public call takes a `RunId`, so a Host cannot make the log answer this itself.
 5. Step 5 asserts the failure is `UnknownRun` carrying the id step 4 built.
 
 `DatabaseSource` is transparent, so its `source()` returns the Turso error's own cause, and a walk of `source()` steps straight past the Turso error. That makes step 3's downcast the only way to branch on what the database reported.

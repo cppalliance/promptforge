@@ -1,9 +1,9 @@
 //! A prompt's declared files through a session: the launch's input text is
 //! staged at the declared input path and the completed run's declared
-//! output comes back from `Session::output_text`; a host filesystem
+//! output comes back from `Session::output_text`; a Host-built filesystem
 //! handed over through `launch_with` is the one every run works in, its
-//! store mounted wherever the host put it and its other mounts untouched;
-//! a host-seeded store satisfies the declared input; a prompt without an
+//! store mounted wherever the Host put it and its other mounts untouched;
+//! a Host-seeded store satisfies the declared input; a prompt without an
 //! output file, and a run that never writes its own, report why; and a
 //! declared input with nothing to stage fails the run as `RunFailed`.
 
@@ -102,7 +102,7 @@ async fn a_host_filesystem_is_the_one_the_session_works_in() {
     let session = run_to_close(&harness, request("copies", Some("# Paper")), options).await;
     assert_eq!(session.output_text(), Ok("seen: # Paper".to_owned()));
 
-    // The run staged and wrote under the host's store root, and the host
+    // The run staged and wrote under the Host's store root, and the Host's
     // mount beside it kept its own file.
     let access = vfs.acquire(Origin::new("session files test")).unwrap();
     assert_eq!(access.read("/store/paper.md").unwrap(), b"# Paper");

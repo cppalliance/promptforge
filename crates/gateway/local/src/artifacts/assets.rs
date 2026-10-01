@@ -1,4 +1,4 @@
-//! Pinned `llama-server` release assets and the host->asset selection table.
+//! Pinned `llama-server` release assets and the platform->asset selection table.
 
 use gateway_config::LlamaBackend;
 
@@ -180,7 +180,7 @@ const WINDOWS_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
 };
 
 // The upstream CUDA 13 build plus its matching runtime zip, extracted into
-// the same install folder; the host then needs only the NVIDIA driver.
+// the same install folder; the machine then needs only the NVIDIA driver.
 const WINDOWS_X86_64_CUDA: ServerAsset<'static> = ServerAsset {
     os: "windows",
     arch: "x86_64",
@@ -205,7 +205,7 @@ const WINDOWS_X86_64_CUDA: ServerAsset<'static> = ServerAsset {
 
 // The PromptForge Blackwell build, produced by the llama-cuda-blackwell
 // workflow from `crates/build-llama-cuda`. The zip ships the CUDA runtime
-// DLLs, so the host needs only the NVIDIA driver.
+// DLLs, so the machine needs only the NVIDIA driver.
 //
 const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {
     os: "windows",
@@ -277,7 +277,7 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 /// Selects the pinned whisper.cpp runtime for `(os, arch)`.
 ///
 /// # Errors
-/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the platform.
 pub(super) fn whisper_asset(os: &str, arch: &str) -> Result<WhisperAsset<'static>> {
     WHISPER_ASSETS
         .iter()
@@ -297,7 +297,7 @@ pub(super) fn whisper_asset(os: &str, arch: &str) -> Result<WhisperAsset<'static
 /// other platform has exactly one row.
 ///
 /// # Errors
-/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the platform.
 pub(super) fn server_asset(
     os: &str,
     arch: &str,

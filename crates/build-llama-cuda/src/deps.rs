@@ -2,7 +2,7 @@
 //!
 //! The bundle ships every llama.cpp/GGML runtime file the build emits.
 //! Windows system DLLs and declared CUDA Toolkit DLLs stay external: the
-//! runtime host must have the same compatible CUDA Toolkit.
+//! machine that runs the bundle must have the same compatible CUDA Toolkit.
 
 /// Classification of one imported DLL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +111,7 @@ pub fn parse_dumpbin_dependents(output: &str) -> Vec<String> {
     dlls
 }
 
-/// Splits the import closure into the external DLL names the runtime host
+/// Splits the import closure into the external DLL names the runtime machine
 /// must provide, requiring every bundle-classified import to be present in
 /// `bundled`.
 ///

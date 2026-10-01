@@ -140,7 +140,7 @@ jobs:
       - name: Docs
         run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api
 
-      # Each facade as hosts read it and as the docs site publishes it: the
+      # Each facade as consumers read it and as the docs site publishes it: the
       # topic docs build alone, with default features.
       - name: Facade docs
         run: cargo doc -p promptforge --no-deps

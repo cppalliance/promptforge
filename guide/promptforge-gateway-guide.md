@@ -194,7 +194,7 @@ The admin config endpoints sit behind a loopback wall in every build. A non-loop
 
 ## Derived addresses
 
-An unspecified bind IP such as 0.0.0.0 or :: becomes the matching loopback address in derived client URLs. Same-host consumers, including a hosted workshop, always get a dialable URL.
+An unspecified bind IP such as 0.0.0.0 or :: becomes the matching loopback address in derived client URLs. Same-machine consumers, including the workshop, always get a dialable URL.
 
 ---
 
@@ -290,7 +290,7 @@ This chapter teaches you to run models on your own machine through the gateway. 
 
 ## Declare a local model
 
-A gateway-hosted model is a `[[local_model]]` entry. Start with the smallest useful declaration:
+A gateway-served model is a `[[local_model]]` entry. Start with the smallest useful declaration:
 
 ````
 [[local_model]]
@@ -319,7 +319,7 @@ cache_dir = "~/.promptforge"
 
 The default is `~/.promptforge`, or `%USERPROFILE%\.promptforge` on Windows, where the location inherits the per-user ACL. Models land in `<cache_dir>/models`, keyed by a hash of the full source URL, so two distinct URLs that share a filename never collide. The llama.cpp runtime installs in `<cache_dir>/llama.cpp`.
 
-On Windows x86-64 you can pick the llama-server build with `[local].llama_backend`: `auto`, `cuda-blackwell`, `cuda`, or `vulkan`. The `auto` setting picks from the host's GPUs. You can also force an explicit llama-server executable with `[local].llama_server_path`; it wins over the `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed download.
+On Windows x86-64 you can pick the llama-server build with `[local].llama_backend`: `auto`, `cuda-blackwell`, `cuda`, or `vulkan`. The `auto` setting picks from the machine's GPUs. You can also force an explicit llama-server executable with `[local].llama_server_path`; it wins over the `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed download.
 
 ## What runs underneath
 
@@ -434,9 +434,9 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 
 ## The runtime
 
-Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. The gateway serves first and loads speech second: after the listener is bound, the queued boot command downloads and verifies the model artifacts and the runtime into the configured cache directory, with progress on the status and progress endpoints. Each model file is prewarmed and then loaded, with progress per model. Speech routes answer as unavailable until the load completes, and the model catalog advertises speech models only once the engine is ready.
+Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. The gateway serves first and loads speech second: after the listener is bound, the queued boot command downloads and verifies the model artifacts and the runtime into the configured cache directory, with progress on the status and progress endpoints. Each model file is prewarmed and then loaded, with progress per model. Speech routes answer as unavailable until the load completes, and the model catalog advertises speech models only once the speech engine is ready.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or speech engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
 
 ## How a take is transcribed
 
@@ -458,7 +458,7 @@ The 30-second limit is retained ownership, not recording duration. It includes r
 
 The desktop Workshop exposes the same `/v1/realtime` path on its own origin. Its server authenticates the fixed upstream target and relays payloads without parsing them, so the webview never receives the gateway credential.
 
-Speech loads exactly once per process, from the profile active at boot. Switching the active profile or applying a new configuration persists a changed speech selection but never loads, reloads, or unloads the running engine; the new selection takes effect on the next start. The configuration UI raises a restart toast when an apply changes the speech tuning, the speech model catalog, or the active profile's speech membership.
+Speech loads exactly once per process, from the profile active at boot. Switching the active profile or applying a new configuration persists a changed speech selection but never loads, reloads, or unloads the running speech engine; the new selection takes effect on the next start. The configuration UI raises a restart toast when an apply changes the speech tuning, the speech model catalog, or the active profile's speech membership.
 
 ---
 
@@ -794,7 +794,7 @@ The Dominions and Endpoints cards show used-by chips that count dependents, and 
 
 The Tools section configures web search with the provider locked to Brave and the defaults documented on the card. The Storage card edits the cache directory beside live cache-drive usage, with a warning that changing the directory does not move existing files.
 
-The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. The Workshop card edits the `[workshop]` section's one live content, the STT capture tuning - the gateway hosts no workshop listener, so the section's old `bind` and `open_browser` settings are inert and stay out of the editor. Adding the tuning seeds window_seconds 15, interval_ms 500, and an empty vocabulary.
+The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. The Workshop card edits the `[workshop]` section's one live content, the STT capture tuning - the gateway serves no workshop listener, so the section's old `bind` and `open_browser` settings are inert and stay out of the editor. Adding the tuning seeds window_seconds 15, interval_ms 500, and an empty vocabulary.
 
 ## Editing a model
 
@@ -816,7 +816,7 @@ The configuration UI runs in two modes. Standalone mode runs in a browser tab. P
 
 # Serving and Observing
 
-This chapter teaches you the running gateway: the HTTP endpoints it serves, the tools it can host, and the health, logs, and observability surface you operate day to day. You already run a configured gateway with a profile and its models.
+This chapter teaches you the running gateway: the HTTP endpoints it serves, the tools it can run, and the health, logs, and observability surface you operate day to day. You already run a configured gateway with a profile and its models.
 
 ## Web search
 
@@ -842,25 +842,25 @@ When no `[tools.web_search]` section is configured, the route answers 404. The r
 
 ## The deprecated [workshop] section
 
-The gateway never hosts the workshop: the desktop application embeds the workshop server itself. A boot config left over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
+The gateway and the workshop run separately: the desktop application embeds the workshop server itself. A boot config left over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 ## Manage the cache
 
 Manage the blob cache through the gateway's cache routes. GET /v1/cache lists entries with source URL, path, SHA-256, and size. Only blobs with a `.meta.json` sidecar appear in the listing, and listing reads the sidecar metadata only; it never re-hashes the blobs. POST /v1/cache downloads a blob with an optional pin and streams progress events ending in a ready event. DELETE removes one blob by digest. Cache downloads validate the source URL and the pin before any network access. A cache download lands in the same slot layout that local model provisioning uses, so a cache download is a provisioning cache hit for the same URL, and vice versa.
 
-GET /admin/orphans lists cache files that no `[[local_model]]` or `[[stt_model]]` declared in the catalog references, so leftovers can be adopted or deleted. GET /admin/model-info reports a GGUF file's header summary (architecture, layer count, parameter count, and chat template) without loading the model; only files inside the artifact cache can be inspected, and escaping or missing paths are refused. POST /admin/reveal opens the host's file manager at a model or config file; reveal requests are confined three ways: loopback-only, bearer key required, and the path must canonicalize to strictly inside the artifact cache.
+GET /admin/orphans lists cache files that no `[[local_model]]` or `[[stt_model]]` declared in the catalog references, so leftovers can be adopted or deleted. GET /admin/model-info reports a GGUF file's header summary (architecture, layer count, parameter count, and chat template) without loading the model; only files inside the artifact cache can be inspected, and escaping or missing paths are refused. POST /admin/reveal opens the machine's file manager at a model or config file; reveal requests are confined three ways: loopback-only, bearer key required, and the path must canonicalize to strictly inside the artifact cache.
 
 The gateway restricts the cache root to your own account at startup and refuses to run when it cannot, failing with a cache-not-private error.
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time speech engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
 Download progress renders as tracing log lines on every stream.
 
-GET /admin/system reports host metrics: CPU, RAM, the cache drive, and the first NVIDIA GPU's VRAM. The GPU field is absent, never an error, when no capable driver is present. You can also pull bounded captured stdout and stderr tails for each running local model as diagnostics.
+GET /admin/system reports machine metrics: CPU, RAM, the cache drive, and the first NVIDIA GPU's VRAM. The GPU field is absent, never an error, when no capable driver is present. You can also pull bounded captured stdout and stderr tails for each running local model as diagnostics.
 
 GET /admin/chat-templates returns a bearer-authenticated catalog of chat template families, known model-to-family mappings, and each pending local model's effective template decision.
 

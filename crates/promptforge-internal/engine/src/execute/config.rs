@@ -19,22 +19,22 @@ use promptforge_vfs::VfsRef;
 
 use super::bindings::{ModelBindings, ToolBindings};
 
-/// One run. Created by the host from the
+/// One run. Created by the Harness from the
 /// [`Environment`](super::Environment) holding the per-run inputs,
 /// enriched at prepare, owned by the engine for the run. Never shared
 /// between runs.
 ///
 /// The context is the engine's input and nothing else: it holds no
 /// observer, client, tool implementation, broker, or capture. Those are
-/// the host's; the engine reports events and issues effects as values and
-/// never reaches for a host seam.
+/// the Harness's; the Engine reports events and issues effects as values
+/// and hands each one to the Harness through `step`.
 ///
-/// The engine takes its clock and randomness from the host: the run's
-/// `seed` and `started_at` are inputs the host supplies to
+/// The Engine takes its clock and randomness from the Harness: the run's
+/// `seed` and `started_at` are inputs the Harness supplies to
 /// [`new`](RunContext::new) (a harness draws both, records both, and a
 /// replay hands back the recorded values), so given the same inputs and
 /// the same answers a run reproduces its nonces, `sys.when`, effects, and
-/// events. There is no default for either: a host that runs once draws
+/// events. Both are required: for a live run the Harness draws
 /// the seed from its own CSPRNG and stamps its own clock.
 ///
 /// # Examples
@@ -52,18 +52,18 @@ use super::bindings::{ModelBindings, ToolBindings};
 pub struct RunContext {
     /// Run identity, stamped on every report and event.
     pub(crate) name: String,
-    /// The run's seed: host-drawn, the source of the untrusted-envelope
+    /// The run's seed: Harness-drawn, the source of the untrusted-envelope
     /// nonce (and of every future in-run random choice).
     pub(crate) seed: u64,
     /// The behavior flags the run records; empty until an engine change
     /// gates itself behind one.
     pub(crate) flags: Flags,
-    /// When the run began, as the host stamped it: rendered as `sys.when`
+    /// When the run began, as the Harness stamped it: rendered as `sys.when`
     /// in every section, the H1 pass included.
     pub(crate) started_at: Timestamp,
-    /// Where the root task's provenance sequence starts: 0 by default. A
-    /// host that logged the prompt's parse events (stamped under task `0`
-    /// from zero) ahead of the run passes their count, so the run's root
+    /// Where the root task's provenance sequence starts: 0 by default. When
+    /// the Harness logged the prompt's parse events (stamped under task `0`
+    /// from zero) ahead of the run, it passes their count, so the run's root
     /// task continues the sequence and `(task, seq)` is unique across the
     /// parse/run boundary.
     pub(crate) provenance_start: u32,
@@ -73,27 +73,27 @@ pub struct RunContext {
     pub(crate) depth: u32,
     /// Whether the run reports each model round's raw request and response
     /// bodies as `Request` and `Response` events. Off by default: the
-    /// bodies already travel in the `Chat` effect and its answer, so a host
-    /// that logs effects has them, and the events are for a host that
+    /// bodies already travel in the `Chat` effect and its answer, so the
+    /// Harness's effect log has them, and the events serve a Harness that
     /// wants the pair in the event stream too.
     pub(crate) report_debug: DebugMode,
     /// The run's cancel flag: minted once at construction, replaced by
     /// [`cancel`](RunContext::cancel), and shared from here by every
     /// section VM's instruction hook and the run's own `cancel`, so one
-    /// flag reaches them all; the host hands the same flag to the
+    /// flag reaches them all; the Harness hands the same flag to the
     /// capabilities it activates.
     pub(crate) cancel: CancelHandle,
     pub(crate) limits: RunLimits,
-    /// The host-state snapshot the `ui()` global serves, taken by the host
+    /// The Host-state snapshot the `ui()` global serves, taken by the Host
     /// at run start; its presence also turns on the raw-model-id
     /// `models.get` fallback.
     pub(crate) ui: Option<serde_json::Value>,
-    /// The run's whole filesystem: host roots and the declared store. The
-    /// default is a fresh memory store at `/`; a host that mounts its own
-    /// roots and declares its own store sets the handle with
-    /// [`vfs`](RunContext::vfs).
+    /// The run's whole filesystem: real directories and the declared
+    /// store. The default is a fresh memory store at `/`; the Harness
+    /// mounts the run's real directories and declared store and sets the
+    /// handle with [`vfs`](RunContext::vfs).
     pub(crate) vfs: VfsRef,
-    /// The run's current model: the host's selection (in Workshop, the
+    /// The run's current model: the Host's selection (in Workshop, the
     /// dropdown), set before prepare. Input to prepare's fill function,
     /// which binds every declared role to it. Grows into a catalog or
     /// policy in the deferred multi-model future - a field change, never
@@ -123,16 +123,16 @@ pub struct RunContext {
 }
 
 impl RunContext {
-    /// Builds a context for the run `name` under the host's `seed` and
+    /// Builds a context for the run `name` under the Harness's `seed` and
     /// `started_at`, with a fresh cancel flag, no `ui` snapshot, no debug
     /// reporting, default [`RunLimits`], empty [`Flags`], and the default
     /// filesystem, a fresh memory store at `/`.
     ///
-    /// `seed` is the source of the untrusted-envelope nonce, so a live host
-    /// draws it from a CSPRNG (a predictable seed is a guessable nonce);
-    /// `started_at` is the instant every section reads as `sys.when`. The
-    /// engine reads neither the OS RNG nor the clock: both are the host's,
-    /// recorded by a harness and handed back verbatim by a replay.
+    /// `seed` is the source of the untrusted-envelope nonce, so for a live
+    /// run the Harness draws it from a CSPRNG (a predictable seed is a
+    /// guessable nonce); `started_at` is the instant every section reads as
+    /// `sys.when`. The Engine takes both from its caller: the Harness draws
+    /// and records them, and a replay hands them back verbatim.
     #[must_use]
     pub fn new(name: impl Into<String>, seed: u64, started_at: Timestamp) -> RunContext {
         RunContext {
@@ -157,8 +157,8 @@ impl RunContext {
 
     /// Sets whether the run reports each model round's raw request and
     /// response bodies as `Request` and `Response` events. The default
-    /// ([`DebugMode::Off`]) reports neither; a host that wants the pair in
-    /// the event stream (a debug capture) passes [`DebugMode::On`].
+    /// ([`DebugMode::Off`]) reports neither; when the Harness wants the pair in
+    /// the event stream (a debug capture), it passes [`DebugMode::On`].
     #[must_use]
     pub fn report_debug(mut self, mode: DebugMode) -> RunContext {
         self.report_debug = mode;
@@ -167,7 +167,7 @@ impl RunContext {
 
     /// Sets the run's cancellation flag: the synchronous [`CancelHandle`]
     /// the engine polls between chain steps and from the Lua instruction
-    /// hook. A host that cancels through an awaitable token bridges it to
+    /// hook. A Harness that cancels through an awaitable token bridges it to
     /// this flag (set the flag when the token fires), and hands the same
     /// flag to the capabilities it activates so one cancel reaches them
     /// all. Replaces the flag minted at construction.
@@ -184,9 +184,9 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's host-state snapshot. Section VMs gain a `ui()` global
-    /// serving this snapshot (taken by the host at run start, so a
-    /// host-state change takes effect on the next run), and `models.get`
+    /// Sets the run's Host-state snapshot. Section VMs gain a `ui()` global
+    /// serving this snapshot (taken by the Host at run start, so a
+    /// Host-state change takes effect on the next run), and `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id, so a
     /// prompt can run `models.loop(models.get(ui().selected_model), ...)`
     /// without declaring its model. The default (`None`) installs no `ui`
@@ -206,8 +206,8 @@ impl RunContext {
     }
 
     /// Sets where the root task's provenance sequence starts. The default
-    /// (0) is a run recorded on its own. A host that records the prompt's
-    /// parse events ahead of the run in one stream passes their count:
+    /// (0) is a run recorded on its own. When the Harness records the prompt's
+    /// parse events ahead of the run in one stream, it passes their count:
     /// `Prompt::parse` stamps them under task `0` from zero, and this seeds
     /// the run's root counter past them so every `(task, seq)` in the
     /// stream is unique. Spawned tasks are unaffected and count from zero.
@@ -217,7 +217,7 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's current model: the host's selection (in Workshop,
+    /// Sets the run's current model: the Host's selection (in Workshop,
     /// the dropdown). Input to
     /// [`Environment::prepare`](super::Environment::prepare)'s fill
     /// function, which binds every declared role to it and checks the
@@ -230,17 +230,17 @@ impl RunContext {
         self
     }
 
-    /// Sets the run's VFS handle, the run's whole filesystem: the host
-    /// roots and the declared store every section's `store` table
+    /// Sets the run's VFS handle, the run's whole filesystem: the real
+    /// directories and the declared store every section's `store` table
     /// operates on. The default is a fresh memory store at `/`.
     ///
-    /// A handle set here is the host's, used as given by
+    /// A handle set here is the Harness's, used as given by
     /// [`Environment::prepare`](super::Environment::prepare) - the
-    /// environment never replaces it - so a host that activates
-    /// capabilities builds the run's handle first, hands it to
+    /// environment never replaces it - so the Harness, when it activates
+    /// capabilities, builds the run's handle first, hands it to
     /// activation's services and to this builder, and the capabilities
-    /// and the run share one filesystem. Hosts that seed before the run
-    /// or extract after it go through the prepared handle
+    /// and the run share one filesystem. The Harness seeds files before the
+    /// run and extracts output after it through the prepared handle
     /// ([`vfs_handle`](RunContext::vfs_handle)).
     #[must_use]
     pub fn vfs(mut self, vfs: VfsRef) -> RunContext {
@@ -248,9 +248,9 @@ impl RunContext {
         self
     }
 
-    /// Returns the run's VFS handle: the run's whole filesystem, host
-    /// roots and declared store included, through which hosts seed files
-    /// before the run and extract output after it.
+    /// Returns the run's VFS handle: the run's whole filesystem, real
+    /// directories and declared store included, through which the Harness
+    /// seeds files before the run and extracts output after it.
     ///
     /// Named `vfs_handle` because the builder half already owns
     /// [`vfs`](RunContext::vfs).
@@ -259,13 +259,13 @@ impl RunContext {
         &self.vfs
     }
 
-    /// Returns the run's current model, when the host set one.
+    /// Returns the run's current model, when the Host selected one.
     #[must_use]
     pub fn current_model(&self) -> Option<&ModelDescriptor> {
         self.model.as_ref()
     }
 
-    /// Returns the run's cancel flag: the handle the host hands to the
+    /// Returns the run's cancel flag: the handle the Harness hands to the
     /// capabilities it activates so one cancel reaches them and the run.
     /// Named `cancel_handle` because the builder half already owns
     /// [`cancel`](RunContext::cancel).
@@ -309,7 +309,7 @@ impl RunContext {
         &self.name
     }
 
-    /// Returns the run's seed, as the host drew it.
+    /// Returns the run's seed, as the Harness drew it.
     #[must_use]
     pub fn seed(&self) -> u64 {
         self.seed
@@ -322,7 +322,7 @@ impl RunContext {
         self.flags
     }
 
-    /// Returns when the run began, as the host stamped it.
+    /// Returns when the run began, as the Harness stamped it.
     #[must_use]
     pub fn started_at(&self) -> Timestamp {
         self.started_at

@@ -10,7 +10,7 @@
 //! (A9).
 //!
 //! The shim is pure Lua with no privileged captures (it never yields), so it
-//! installs with the host tables during host injection, ahead of the shared
+//! installs with the Engine globals during Engine injection, ahead of the shared
 //! replay. The source is pulled in with `include_str!` so chunk line 1 is
 //! file line 1, compiled once through the usual [`LuaProgram`] machinery,
 //! and loaded per VM; the `@`-prefixed chunk name renders shim frames as

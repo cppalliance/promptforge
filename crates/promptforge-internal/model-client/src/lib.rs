@@ -12,7 +12,7 @@
 //! [`model::ModelCatalog`] built from the gateway's `GET /v1/models`, the
 //! validated [`model::ModelId`] identity, and the
 //! [`model::ModelBinding`]/[`model::ModelSet`]/[`model::ModelView`] types
-//! a host resolves and freezes model selections through, with
+//! model selections resolve and freeze through, with
 //! [`model::CompletionError`] as the failure a round reports.
 //!
 //! The metrics vocabulary in [`promptforge_types::metrics`] (`Usage`,
@@ -26,8 +26,8 @@
 //! its historical `model` paths.
 //!
 //! The HTTP client that sends a round to the gateway and fetches its model
-//! list is the harness's (`harness-models`), the engine's production host;
-//! it reaches this vocabulary through the `promptforge` facade.
+//! list is the Harness's (`harness-models`); it reaches this vocabulary
+//! through the `promptforge` facade.
 //! This crate contains no HTTP, no prompt parser, no Lua runtime, and no
 //! executor.
 //!

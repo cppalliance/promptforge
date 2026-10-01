@@ -27,7 +27,7 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// - while reading its configuration: [`MissingEnv`](Error::MissingEnv),
 ///   [`InvalidEnv`](Error::InvalidEnv), [`Config`](Error::Config), and
 ///   [`InvalidConfig`](Error::InvalidConfig)
-/// - when the host turned gateway access off:
+/// - when the Host turned gateway access off:
 ///   [`GatewayDisabled`](Error::GatewayDisabled)
 /// - when a send or a read fails: [`Http`](Error::Http), wrapping a
 ///   timeout in [`ClientTimeout`](Timeout) first
@@ -69,7 +69,7 @@ pub enum Error {
         source: BoxedSource,
     },
 
-    /// Gateway access was explicitly disabled by the host.
+    /// Gateway access was explicitly disabled by the Host.
     #[error("gateway access is disabled")]
     GatewayDisabled,
 

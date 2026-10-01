@@ -4,7 +4,7 @@ A run reports everything it does as it goes: each section that starts and finish
 
 ## Reading a task's history
 
-An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The host keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
+An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The Harness keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
 
 ````markdown
 ---
@@ -34,7 +34,7 @@ return 'done'
 ```
 ````
 
-`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The host serves the read from its run log.
+`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The Harness serves the read from its run log.
 
 Each table's `kind` field names its event, so the block returns one line per event. The first line is `section_started`, reported when `### Child` began, and the last is `task_succeeded`, reported when the task ended with a result. The lines between report the child's section VM starting up, its Lua block running, and its section finishing.
 
@@ -74,7 +74,7 @@ A kind is the event's name written in snake_case, such as `run_started`, `sectio
 | Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
 | Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
 | Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
-| Debug capture, only when the host switches it on | `request`, `response` | [Model round events](#model-round-events) |
+| Debug capture, only when the Harness switches it on | `request`, `response` | [Model round events](#model-round-events) |
 
 ### The section label
 
@@ -144,7 +144,7 @@ local reason = e.finish_reason or 'no stop label'
 
 Reading a history has no side effects: a `tasks.events` call adds no events of its own. A task that reads its own history sees every event reported before the read.
 
-The model reads the same host-kept history with its `task_events` built-in, as [The model's status, cancel, and history tools](15-tasks.md#the-models-status-cancel-and-history-tools) describes. Your Lua code gets the events back as a sequence of tables, while the same read made by the model comes back to the model as untrusted text.
+The model reads the same Harness-kept history with its `task_events` built-in, as [The model's status, cancel, and history tools](15-tasks.md#the-models-status-cancel-and-history-tools) describes. Your Lua code gets the events back as a sequence of tables, while the same read made by the model comes back to the model as untrusted text.
 
 ### Read errors
 
@@ -172,7 +172,7 @@ end
 return #history .. ' events so far'
 ````
 
-If the run is cancelled while a read is still waiting for the host, the read fails with an error value of kind `cancelled`, and the model's `task_events` read fails the same way. [Cancelling a run](17-limits-and-errors.md#cancelling-a-run) covers what a cancel does to the rest of the run.
+If the run is cancelled while a read is still waiting for the Harness, the read fails with an error value of kind `cancelled`, and the model's `task_events` read fails the same way. [Cancelling a run](17-limits-and-errors.md#cancelling-a-run) covers what a cancel does to the rest of the run.
 
 ## Event coordinates and task ids
 
@@ -226,19 +226,19 @@ The event has the called section's own heading, `Inner`, as its `section`, and t
 
 ### Sequence numbers
 
-`provenance.seq` strictly increases within a task, independently of every other task, so sorting a task's events by `seq` puts them in order without a clock. A spawned task counts from 0. The main walk's count starts after any parse events the host logged ahead of the run.
+`provenance.seq` strictly increases within a task, independently of every other task, so sorting a task's events by `seq` puts them in order without a clock. A spawned task counts from 0. The main walk's count starts after any parse events the Harness logged ahead of the run.
 
-Event numbers can skip. One counter per task numbers both the [host work](01-what-a-prompt-is.md#the-prompt-and-its-host) the task asks for, such as model calls and store writes, and the events the task reports, so the two stay in order against each other. Each piece of host work takes the next number, so the numbers on events skip wherever the task asked the host for something. With no host work in between, event numbers run without gaps from the task's starting number. The counter itself never skips; only the events leave holes where host work took a number.
+Event numbers can skip. One counter per task numbers both the [Harness work](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness) the task asks for, such as model calls and store writes, and the events the task reports, so the two stay in order against each other. Each piece of Harness work takes the next number, so the numbers on events skip wherever the task asked the Harness for something. With no Harness work in between, event numbers run without gaps from the task's starting number. The counter itself never skips; only the events leave holes where Harness work took a number.
 
 The pair of task id and `seq` is unique across a run's log. `seq` is a 32-bit unsigned count, from 0 to 4294967295, the same range `last` accepts.
 
 ### Reproducible ids
 
-Two runs of the same prompt, given the same argument string and the same answers to their host work, get the same task ids and stamp the same `{ task, seq }` on the same events, however their chains interleave. Provenance sorts by task path first and by `seq` second.
+Two runs of the same prompt, given the same argument string and the same answers to their Harness work, get the same task ids and stamp the same `{ task, seq }` on the same events, however their chains interleave. Provenance sorts by task path first and by `seq` second.
 
 ### How the run log writes an event
 
-Outside Lua, the host writes each event to its run log as one line of JSON: `kind` first, then `execution`, `section`, and `provenance`, then the kind's own fields. The store write shown earlier in this chapter becomes:
+Outside Lua, the Harness writes each event to its run log as one line of JSON: `kind` first, then `execution`, `section`, and `provenance`, then the kind's own fields. The store write shown earlier in this chapter becomes:
 
 ````text
 {"kind":"store_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}
@@ -278,7 +278,7 @@ return var.word
 ```
 ````
 
-Leaving out any parse events the host logged first, the run log for this prompt reads as follows, one event per line with its `section` and then its `kind`:
+Leaving out any parse events the Harness logged first, the run log for this prompt reads as follows, one event per line with its `section` and then its `kind`:
 
 ````text
 Lifecycle  run_started
@@ -316,7 +316,7 @@ Each section starts, its [section VM](03-blocks-and-prose.md#how-the-shared-libr
 | `section_started` | A walked section began |
 | `section_finished` | A walked section completed successfully |
 
-`run_started` is reported on the main walk, task `0`, under the H1 title and ahead of any section event, so the main walk can find it in `tasks.events(sys.taskid)`. A run ends with exactly one closing event, `run_succeeded` or `run_failed`, under the H1 title and after every task's terminal event. There is no run-cancelled kind: a [cancelled](04-how-a-prompt-runs.md#failure-and-cancellation) run also closes with `run_failed`, even though its outcome is cancelled rather than failed. A prompt never reads either closing event, because both are reported after every chain has stopped, so they appear only in the host's run log.
+`run_started` is reported on the main walk, task `0`, under the H1 title and ahead of any section event, so the main walk can find it in `tasks.events(sys.taskid)`. A run ends with exactly one closing event, `run_succeeded` or `run_failed`, under the H1 title and after every task's terminal event. There is no run-cancelled kind: a [cancelled](04-how-a-prompt-runs.md#failure-and-cancellation) run also closes with `run_failed`, even though its outcome is cancelled rather than failed. A prompt never reads either closing event, because both are reported after every chain has stopped, so they appear only in the Harness's run log.
 
 Each walked section reports `section_started` when it begins and `section_finished` only when it completes successfully, both with its heading text as `section`. A section completes by falling through, by [`jump`](08-jump-and-call.md#sibling-jumps), or by `return`, and it reports `section_finished` after its Lua teardown and before the next section reports `section_started`. The events of a task's chain have that task's id.
 
@@ -355,7 +355,7 @@ Every section VM reports its phases, with the section's heading as `section`:
 - Running each Lua block reports `lua_chunk_started`, then `lua_chunk_succeeded` or `lua_chunk_failed`.
 - Teardown reports `lua_teardown_started` and `lua_teardown_succeeded`, back to back. Teardown has no failed kind.
 
-When a block pauses at a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), such as a model call, a tool call, or a store operation, no event marks the pause. The block's `lua_chunk_started` and its closing event still bracket it, and the events of the host work it waited on come between them.
+When a block pauses at a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), such as a model call, a tool call, or a store operation, no event marks the pause. The block's `lua_chunk_started` and its closing event still bracket it, and the events of the Harness work it waited on come between them.
 
 `lua_shared_load_failed` covers any error while the shared library loads or runs, including a call to `jump`, which is not available while the library loads. Every section reports exactly one teardown pair, even when its section VM fails before any block runs: a failing shared library reports `lua_shared_load_failed`, then `lua_teardown_started` and `lua_teardown_succeeded`.
 
@@ -407,7 +407,7 @@ A `log` call that breaks one of its rules raises at the call and reports nothing
 2. one compilation pair for each Lua block: `lua_compilation_started`, then `lua_compilation_succeeded` or `lua_compilation_failed`
 3. `parse_succeeded` or `parse_failed`
 
-The main walk sees these events in its own history only when the host logs parse events in the same log it serves reads from, as the standard runner does, and the main walk's own numbering then continues after them. A file whose parse fails never runs, so a prompt never reads `parse_failed`, or a `lua_compilation_failed`, which fails the parse. Both appear only in the host's run log.
+The main walk sees these events in its own history only when the Harness logs parse events in the same log it serves reads from, as the standard runner does, and the main walk's own numbering then continues after them. A file whose parse fails never runs, so a prompt never reads `parse_failed`, or a `lua_compilation_failed`, which fails the parse. Both appear only in the Harness's run log.
 
 ## Store and operator input events
 
@@ -470,7 +470,7 @@ The read of a file that does not exist raised an error value, which `pcall` caug
 
 ### Operator input
 
-Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
+Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a Host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
 
 ````lua
 local asks = 0
@@ -570,7 +570,7 @@ The round count is separate from the round cap, which limits each `models.loop` 
 
 A round's events come in a fixed order:
 
-1. `request` and `response`, only when the host has debug capture switched on
+1. `request` and `response`, only when the Harness has debug capture switched on
 2. `model_turn_completed`, or `model_turn_failed` in its place
 3. one `model_metadata_degraded` for each metadata problem
 4. `thinking`, when the answer has non-empty reasoning
@@ -600,7 +600,7 @@ A healthy backend leaves a clean history: well-formed metadata, and parts the ba
 
 ### Debug capture
 
-When the host switches debug capture on, each round also reports its raw bodies, as sent to and received from the backend, under the section. `request` holds `turn` and the full, unredacted `body`, and `response` holds `turn`, `body`, and, when the backend supplied them, `finish_reason` and `reasoning_content`. The bodies are raw and include the full prompt. Capture is a host setting that a prompt cannot change: by default neither event is reported, and the standard runner leaves capture off.
+When the Harness switches debug capture on, each round also reports its raw bodies, as sent to and received from the backend, under the section. `request` holds `turn` and the full, unredacted `body`, and `response` holds `turn`, `body`, and, when the backend supplied them, `finish_reason` and `reasoning_content`. The bodies are raw and include the full prompt. Capture is a Harness setting that a prompt cannot change: by default neither event is reported, and the standard runner leaves capture off.
 
 ## Model call metrics
 
@@ -890,11 +890,11 @@ A [`tasks.cancel`](15-tasks.md#cancellation-and-task-lifetimes) reports one `tas
 | `owner_failed` | The owner failed while the task was live | `the owner failed` |
 | `tool_loop_exhausted` | The owner's `models.loop` ran past its round cap | `the tool loop was exhausted` |
 | `owner_aborted` | The owner was itself aborted, as happens to the tasks nested under an abandoned task | `the owner was aborted` |
-| `run_terminated` | The run was cancelled or ended by the host | `the run ended` |
+| `run_terminated` | The run was cancelled by the Host or ended by the Harness | `the run ended` |
 
 An abandonment is distinct from a purposeful cancel. For an author task, `owner_returned` goes with the [`tasks_live`](15-tasks.md#cancellation-and-task-lifetimes) error on the owner, while for a model task it is a quiet abandon. In a nested abandonment, everything the abandoned task owned reports its end first, and the task's own `task_abandoned` comes last. Before `run_succeeded` or `run_failed`, the run settles every task still live by abandoning it exactly once: `run_terminated` for a task still live at the end, and `owner_aborted` for the tasks nested under it.
 
-A prompt never reads `task_abandoned` through `tasks.events`. It is stamped on the abandoned task after the task's owner has already ended, so it appears only in the host's run log.
+A prompt never reads `task_abandoned` through `tasks.events`. It is stamped on the abandoned task after the task's owner has already ended, so it appears only in the Harness's run log.
 
 ### Task notices
 
@@ -924,7 +924,7 @@ Treat the text inside events as untrusted:
 - the `request` and `response` bodies
 - `model_metadata_degraded.message`
 
-The coordinates come from the host, for `execution`, and from your own headings, for `section`. Before you hand event text to a model, wrap it with [`untrusted()`](09-the-store.md#wrapping-untrusted-text) as you would any other untrusted text:
+The coordinates come from the Harness, for `execution`, and from your own headings, for `section`. Before you hand event text to a model, wrap it with [`untrusted()`](09-the-store.md#wrapping-untrusted-text) as you would any other untrusted text:
 
 ````lua
 local t = tasks.spawn('### Research')
@@ -942,7 +942,7 @@ A `tool_result` whose `trusted` is `false` already arrives in the untrusted enve
 
 ### Events a prompt never reads
 
-A prompt reads the events of its own task and of the tasks it owns, as reported so far. No prompt ever reads these, which appear only in the host's run log:
+A prompt reads the events of its own task and of the tasks it owns, as reported so far. No prompt ever reads these, which appear only in the Harness's run log:
 
 - `run_succeeded` and `run_failed`, which are reported after every chain has stopped
 - every `task_abandoned`, which is stamped on the abandoned task after its owner has already ended
@@ -952,4 +952,4 @@ Two more limits depend on who is reading. A task never reads its own terminal ev
 
 ### Events never steer the run
 
-The engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the host serves from its log, so a host that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a host may stream live never become events.
+The engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the Harness serves from its log, so a Harness that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a Harness may stream live never become events.

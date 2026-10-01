@@ -90,5 +90,5 @@ The admin config endpoints sit behind a loopback wall in every build. A non-loop
 
 ## Derived addresses
 
-An unspecified bind IP such as 0.0.0.0 or :: becomes the matching loopback address in derived client URLs. Same-host consumers, including a hosted workshop, always get a dialable URL.
+An unspecified bind IP such as 0.0.0.0 or :: becomes the matching loopback address in derived client URLs. Same-machine consumers, including the workshop, always get a dialable URL.
 

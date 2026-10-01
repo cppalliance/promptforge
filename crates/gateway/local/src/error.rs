@@ -15,7 +15,7 @@ use shared_error_source::{HttpSource, JsonSource};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LocalError {
-    /// The host OS/arch has no pinned `llama-server` archive.
+    /// The machine's OS/arch has no pinned `llama-server` archive.
     #[error("unsupported llama-server platform `{os}/{arch}`")]
     UnsupportedPlatform {
         /// Operating system triple fragment (`windows`, `linux`, `macos`).

@@ -88,7 +88,7 @@ promptforge: 0
 # Header Only
 ````
 
-Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-and-its-host):
+Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness):
 
 ````markdown
 ---
@@ -123,7 +123,7 @@ promptforge: 0
 
 The `name:` string need not match the file name. A file saved as `research-person.md` can declare `name: research_person`, and one saved as `echo.md` can declare `name: echo`. Common values are lowercase identifiers such as `echo`, `greet`, `analyst_example`, and `vfs-end-to-end`. Every parse error found after the frontmatter reports this name, so you can tell which prompt failed.
 
-The `description:` string is a one-line, free-text sentence, kept verbatim, and hosts show it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
+The `description:` string is a one-line, free-text sentence, kept verbatim, and the Host shows it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
 
 Leaving out either key fails the parse with parse error kind `Frontmatter`, and the message names the missing field. The message follows the frontmatter form `invalid frontmatter: {detail}` described in [Frontmatter rules and errors](#frontmatter-rules-and-errors), with one of these details:
 
@@ -189,7 +189,7 @@ output:
   description: The output report
 ````
 
-Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the host to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the host which store file to put in place before the run and which one to collect after it.
+Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the Harness to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the Harness which store file to put in place before the run and which one to collect after it.
 
 The run itself never acts on either declaration, so the prompt writes its declared output file itself:
 
@@ -216,13 +216,13 @@ return 'copied'
 ```
 ````
 
-With a host that puts `paper.md` in the store first, its run result is:
+When the Harness puts `paper.md` in the store first, its run result is:
 
 ````text
 copied
 ````
 
-Afterwards `report.md` holds the paper's text, ready for the host to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the host goes to collect it.
+Afterwards `report.md` holds the paper's text, ready for the Harness to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the Harness goes to collect it.
 
 ## Frontmatter rules and errors
 
@@ -327,7 +327,7 @@ Lua code can catch this error with `pcall`, as [Catching and inspecting errors](
 
 Every tool alias and every model role label becomes a bare Lua global of the same name in every section VM, as [Alias globals](12-tools.md#alias-globals) and [Role globals](10-models.md#role-globals) show. So neither may take a name the section VM already uses for something else. These names are reserved:
 
-- The host globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
+- The Engine globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
 - The Lua standard-library globals the sandbox keeps: `assert`, `error`, `getmetatable`, `ipairs`, `math`, `next`, `pairs`, `pcall`, `select`, `setmetatable`, `string`, `table`, `tonumber`, `tostring`, `type`, and `xpcall`, plus `_G` and `_VERSION`, which the name grammar already rules out.
 - The Lua 5.5 keywords: `and`, `break`, `do`, `else`, `elseif`, `end`, `false`, `for`, `function`, `global`, `goto`, `if`, `in`, `local`, `nil`, `not`, `or`, `repeat`, `return`, `then`, `true`, `until`, and `while`.
 

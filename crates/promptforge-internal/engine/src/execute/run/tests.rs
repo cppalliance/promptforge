@@ -1,6 +1,6 @@
 //! The effect record: every effect kind projects onto a record that
 //! round-trips through serde, and the projection drops exactly the live
-//! handles. Then the run's host boundary: `Done` waits on outstanding
+//! handles. Then the run's Harness boundary: `Done` waits on outstanding
 //! effects, a drop is an answer, and the run is `Send`.
 
 use std::num::NonZeroU32;
@@ -18,7 +18,7 @@ use crate::execute::protocol::StoreOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
 
-/// A context for the run `run-test` under fixed host inputs; nothing here
+/// A context for the run `run-test` under fixed Harness inputs; nothing here
 /// reads the seed or `sys.when`.
 fn run_context() -> RunContext {
     RunContext::new(
@@ -224,7 +224,7 @@ const fn assert_send<T: Send>() {}
 
 #[test]
 fn a_run_is_send() {
-    // The host boundary: one caller at a time, and the thread may change
+    // The Harness boundary: one caller at a time, and the thread may change
     // between calls, so the run (its Lua VMs included) must cross threads.
     assert_send::<Run>();
 }
@@ -240,7 +240,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
         matches!(effect, Effect::Store { .. }),
         "the store call is one store effect: {effect:?}"
     );
-    // The host cancels while the store operation is out. The next step
+    // The Host cancels while the store operation is out. The next step
     // tears the run down and reports its end, but the effect still owes
     // its answer, so `Done` waits.
     run.cancel();
@@ -289,7 +289,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
     let (id, _) = only_effect(run.step());
     run.cancel();
     assert!(matches!(run.step(), Step::Pending { .. }));
-    // The host performed the operation before it learned of the cancel:
+    // The Harness performed the operation before it learned of the cancel:
     // its answer is the effect's one answer, discarded rather than applied.
     run.resume(
         id,
@@ -313,7 +313,7 @@ fn an_answer_for_an_unissued_effect_is_an_internal_error() {
     let (id, _) = only_effect(run.step());
     run.resume(EffectId(id.0 + 99), EffectAnswer::Timer);
     // The unknown id ended the run; the real effect is now an orphan whose
-    // answer the host still owes.
+    // answer the Harness still owes.
     let Step::Pending { events, .. } = run.step() else {
         panic!("the run waits for the orphan's answer");
     };

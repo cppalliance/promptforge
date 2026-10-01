@@ -13,7 +13,7 @@ use promptforge_types::emitter::Emitter;
 use promptforge_vfs::Access;
 use serde_json::json;
 
-/// A fresh default handle's access capability, for tests that inject host
+/// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
 fn fresh_access() -> Arc<Access> {
     Arc::new(

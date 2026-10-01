@@ -3,7 +3,7 @@
 //! walked section (a spawned task's first entry included, seeded with its
 //! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
-//! setup half (host injection, host APIs, the control surface, the
+//! setup half (Engine injection, Engine globals, the control surface, the
 //! capability preludes, the shared replay, the store yield shims, the
 //! captured alias bindings) is shared; only the seed, the `sys` extras,
 //! and the `list_from_section` visible set differ.
@@ -29,7 +29,7 @@ impl SectionContext {
     /// construction and limits, the control surface (the `jump` and
     /// `list_from_section` callbacks resolved over the section's visible
     /// set, plus the coroutine yield shims for the suspending calls), and
-    /// the rest of the shared setup half (host injection, host APIs, the
+    /// the rest of the shared setup half (Engine injection, Engine globals, the
     /// capability preludes, the shared replay, the store yield shims, the
     /// captured alias bindings).
     ///
@@ -91,8 +91,8 @@ impl SectionContext {
         // `models.infer`) are the yield shims the setup half installs.
         let visible = visible_sections(siblings, section);
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
-        // The setup half of the section lifecycle - host injection, host
-        // APIs, the control surface, the shared replay, and the captured
+        // The setup half of the section lifecycle - Engine injection, Engine
+        // globals, the control surface, the shared replay, and the captured
         // alias bindings - is shared with the H1 pass; only the seed, the
         // `sys` extras, and the callback's visible set are the walk's own.
         let setup = ctx.vm_setup(
@@ -129,7 +129,7 @@ impl SectionContext {
     /// the root chain's entry 0, under the prompt's title, with the run's
     /// `when` like every section after it), VM construction over the
     /// run's shared sets, limits, and the shared
-    /// setup half (host injection, host APIs, the control surface, the
+    /// setup half (Engine injection, Engine globals, the control surface, the
     /// coroutine shims, the capability preludes, the shared replay, the
     /// store yield shims, the captured alias bindings).
     ///

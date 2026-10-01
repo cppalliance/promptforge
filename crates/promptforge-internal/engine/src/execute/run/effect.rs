@@ -1,14 +1,14 @@
-//! Effects as values: what the engine asks a host to perform, and what the
-//! host answers with.
+//! Effects as values: what the Engine asks the Harness to perform, and what
+//! the Harness answers with.
 //!
 //! A leaf request a section VM yields - a model round, a bound tool call,
 //! a store operation, a timer - is not performed where it is dispatched.
 //! The arm builds an [`Effect`], a plain description of the work, and the
-//! run returns it from `step` for the host to perform; the host's
+//! run returns it from `step` for the Harness to perform; the Harness's
 //! [`EffectAnswer`] comes back through `resume` keyed by the effect's
 //! [`EffectId`], and the scheduler applies it on the caller's thread,
 //! emitting the round's events there. The engine thus decides *what* to do
-//! and *what it means*; performing is the host's job.
+//! and *what it means*; the Harness performs it.
 //!
 //! An [`Effect`] may hold a live handle (the store access capability) and
 //! so does not serialize itself. [`Effect::record`] projects it onto an
@@ -41,7 +41,7 @@ use crate::execute::protocol::{StoreOp, StoreOutcome};
 pub struct EffectId(pub(crate) u64);
 
 impl EffectId {
-    /// The raw handle, for a host that keys its log or its task table by
+    /// The raw handle, for the Harness to key its log or its task table by
     /// it. Meaningful only within the run that issued it.
     #[must_use]
     pub const fn get(self) -> u64 {
@@ -55,7 +55,7 @@ impl std::fmt::Display for EffectId {
     }
 }
 
-/// One piece of work the engine asks its host to perform.
+/// One piece of work the Engine asks the Harness to perform.
 #[derive(Debug)]
 pub enum Effect {
     /// One model round over `messages` with `tools` advertised, under
@@ -71,7 +71,7 @@ pub enum Effect {
         tools: Vec<ToolSchema>,
         /// The per-request fields, built from `binding`.
         options: CompletionOptions,
-        /// Whether the host forwards the round's live deltas to its delta
+        /// Whether the Harness forwards the round's live deltas to its delta
         /// hook: `true` for a section's `chat` round (the `models.loop`
         /// rounds the hook is documented for), `false` for a nested
         /// `models.infer`, where only the completed reply is consumed.
@@ -80,7 +80,7 @@ pub enum Effect {
         stream: bool,
     },
     /// One bound tool call: `tool` is the stable identity the performer
-    /// resolves to an implementation (a host against its activated
+    /// resolves to an implementation (the Harness against its activated
     /// capabilities, the engine's internal table against the run's
     /// catalog), `alias` the prompt-local name it was called by, and
     /// `origin` who made the call and where, both kept for the record.
@@ -97,9 +97,9 @@ pub enum Effect {
     },
     /// One store operation under the chain's store view: an ordinary
     /// access the engine derived from the chain's capability at dispatch,
-    /// rooted at the handle's declared store. A host performing the
-    /// effect uses it as given and never derives, widens, or retains
-    /// store scope from it. When it drops never affects correctness:
+    /// rooted at the handle's declared store. The Harness, performing the
+    /// effect, uses it exactly as given and within the scope it carries.
+    /// When it drops never affects correctness:
     /// claims follow happens-before within the run's scope, which the
     /// run ends at `Done` or when it is dropped, after which the view
     /// refuses every operation.
@@ -117,7 +117,7 @@ pub enum Effect {
     },
     /// One read of a task's reported history: every event whose
     /// provenance names `task` with a sequence number after `last` (all of
-    /// them when `last` is `None`), in sequence order. The host answers
+    /// them when `last` is `None`), in sequence order. The Harness answers
     /// from its log - the events it was handed by earlier steps, which it
     /// commits before performing the step's effects, so a task reading its
     /// history sees everything reported before the read was issued.
@@ -191,7 +191,7 @@ impl Effect {
 /// The `Chat` record flattens the binding to what identifies the round -
 /// the model, the alias, and the frozen invocation - and stores the
 /// messages in their wire form, so the record reads the same as the
-/// request body the host would build from it.
+/// request body the Harness would build from it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectRecord {
     /// One model round.
@@ -244,7 +244,7 @@ pub enum EffectRecord {
 
 /// Who made one tool call and where: the run's execution, the section
 /// whose Lua was running, and whether the section's script or a model
-/// round asked for the call. A log attributes the call by it, and a host
+/// round asked for the call. A log attributes the call by it, and the Host
 /// can apply different policy to the same tool depending on its caller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallOrigin {
@@ -268,7 +268,7 @@ pub enum ToolCaller {
 }
 
 /// What a performer answers one [`Effect`] with: one variant per effect
-/// kind, plus [`Dropped`](EffectAnswer::Dropped) for an effect the host
+/// kind, plus [`Dropped`](EffectAnswer::Dropped) for an effect the Harness
 /// gave up on. Every effect receives exactly one answer.
 #[derive(Debug)]
 pub enum EffectAnswer {
@@ -285,9 +285,9 @@ pub enum EffectAnswer {
     /// The timer fired.
     Timer,
     /// The task's events after the read's `last`, in sequence order, as
-    /// the host's log holds them.
+    /// the Harness's log holds them.
     TaskEvents(Vec<Event>),
-    /// The host dropped the effect without performing it (a cancelled
+    /// The Harness dropped the effect without performing it (a cancelled
     /// run, or an effect whose task ended first): the chain, if it still
     /// waits, resumes with a cancelled error. A drop is an answer like any
     /// other, so every issued effect receives exactly one.
@@ -340,7 +340,7 @@ pub enum AnswerRecord {
     Timer,
     /// The task's events after the read's `last`, in sequence order.
     TaskEvents(Vec<Event>),
-    /// The host dropped the effect without performing it.
+    /// The Harness dropped the effect without performing it.
     Dropped,
 }
 

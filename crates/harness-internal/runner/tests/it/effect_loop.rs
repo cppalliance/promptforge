@@ -42,7 +42,7 @@ async fn begun_log() -> (SharedLog, RunId) {
     (Arc::new(tokio::sync::Mutex::new(log)), run_id)
 }
 
-/// Fires `cancel` from another thread after `delay`: the host's cancel
+/// Fires `cancel` from another thread after `delay`: the Host's cancel
 /// arriving while the loop waits, without a second tokio task in the
 /// test (the harness spawns only through its tagged wrapper).
 fn cancel_after(cancel: &CancelHandle, delay: Duration) {

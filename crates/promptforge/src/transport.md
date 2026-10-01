@@ -128,7 +128,7 @@ assert_eq!(shown.take(), ["hello"]);
 
 1. `Canned` serves the reply from memory, one server-sent event per chunk, then `None`, so this runs offline. The future [`ChunkSource::next_chunk`] returns must be `Send`, so an `async fn` works only when your source and everything it holds across an `.await` are `Send`. A single-threaded client handle cannot implement the trait.
 2. `stream_round` hands the reader the source, the body you sent, a byte limit, a callback, `started`, and `now`. Read `started` just before you send. Here `now` ticks 10 ms per call. The callback is `Fn`, so it collects pieces through a `RefCell`, and it never sees tool-call fragments. The hidden `block_on` stands in for your async runtime.
-3. Step 3 is the chat arm of the host loop from [Answer a model](crate#answer-a-model), with the rest hidden.
+3. Step 3 is the chat arm of the Harness loop from [Answer a model](crate#answer-a-model), with the rest hidden.
    - It builds the body from the effect's messages, tools, and options. Every body asks for a stream, so send it only to a server that streams OpenAI-style chat completions.
    - The reader stores the body you pass on the completion, so pass the value you sent, and a run's debug capture shows exactly that.
    - A chunk is whatever one `next_chunk` call yields, and it can hold part of an event or several, as the third chunk here holds a payload and the `[DONE]` line. The reader counts payloads, not chunks.

@@ -1,4 +1,4 @@
-//! The `log` global: event correlation and order across chunks and host
+//! The `log` global: event correlation and order across chunks and Engine
 //! operations, its argument and budget checks, and its effect-free null
 //! observer.
 

@@ -1,12 +1,12 @@
-This crate lets your program host PromptForge agents as long-running sessions that a person talks to.
+This crate lets your program run PromptForge agents as long-running sessions that a person talks to.
 
-Your program tells the [`Harness`] where models live, launches agents by name, and relays what each running agent says and asks. That is the whole job of a host. The harness owns the running work, and your program owns everything around it: the settings, the person at the screen, and when anything changes.
+Your program tells the [`Harness`] where models live, launches agents by name, and relays what each running agent says and asks. That is the whole job of a Host. The Harness owns the running work, and your program owns everything around it: the settings, the person at the screen, and when anything changes.
 
-By the end of this page you will have built `desk`, a host that runs the built-in `chat` agent for one person. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost stands in for a real one. It answers each model round with `You said: ` and the last message. It also lists `stub-model` in its model list, with a context window of at least 32768 tokens, because `chat` declares that minimum and a smaller window refuses the run.
+By the end of this page you will have built `desk`, a Host that runs the built-in `chat` agent for one person. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost stands in for a real one. It answers each model round with `You said: ` and the last message. It also lists `stub-model` in its model list, with a context window of at least 32768 tokens, because `chat` declares that minimum and a smaller window refuses the run.
 
 # Before you start
 
-A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and its prose holds text for a model. The [PromptForge language guide](https://cppalliance.github.io/promptforge/language/) teaches how to write one. This page uses a few words for the pieces a host deals with:
+A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and its prose holds text for a model. The [PromptForge language guide](https://cppalliance.github.io/promptforge/language/) teaches how to write one. This page uses a few words for the pieces a Host deals with:
 
 - A prompt file your program can launch by name is an *agent*.
 - One launched agent, which keeps running until it finishes or you close it, is a *session*.
@@ -16,9 +16,9 @@ A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and
 - An open question that a session has asked the operator, and is waiting on, is a *wait*.
 - One small piece of a reply, sent while the model is still writing, is a *delta*.
 
-An agent never reaches the outside world by itself. When it needs outside work done, it asks the harness your program drives. That host work is a model round, a tool call (a question to the operator included), or a read or write of a file in the agent's [store](vfs). An agent that starts background tasks can also ask for a timer and a read of a task's history. Every event, reply, and question a session sends you comes from that host work.
+An agent never reaches the outside world by itself. When it needs outside work done, it asks the Harness your program drives. That Harness work is a model round, a tool call (a question to the operator included), or a read or write of a file in the agent's [store](vfs). An agent that starts background tasks can also ask for a timer and a read of a task's history. Every event, reply, and question a session sends you comes from that Harness work.
 
-Here is the smallest agent a host can launch, placed in `desk`'s agents folder:
+Here is the smallest agent a Host can launch, placed in `desk`'s agents folder:
 
 ````
 use harness::{Harness, HarnessConfig};
@@ -142,7 +142,7 @@ A missing or empty catalog raises no error: the session stays `Alive` and waits 
 
 Start catalog generations at 1. A session launched before any catalog counts generation 0 as already seen, so a push at 0 never reaches it.
 
-Each run reads the host snapshot as it starts, so a new selection reaches a running session only when its run restarts, never in the middle of a reply.
+Each run reads the Host snapshot as it starts, so a new selection reaches a running session only when its run restarts, never in the middle of a reply.
 
 Push the gateway and the catalog, launch by name, wait for `Closed`, then read the output. `chat` loops on `input.ask()` forever, so it never closes by itself, and later tours close it. Next, [Stream a reply](#stream-a-reply) shows a reply while the model writes it.
 
@@ -252,7 +252,7 @@ The agent asks the operator a question, and your program must show it and send b
 
 A wait feels like a [`oneshot`](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html) channel whose sender you hold. Unlike a oneshot, you answer it by token through the session, and it outlives any receiver you watched it on.
 
-An agent can ask in two ways. Its own Lua can call `input.ask()`, which needs only `promptforge/user-input` in its `capabilities:` frontmatter. `capabilities:` lists the tool sets the host provides, and `promptforge/user-input` is the set for asking the operator. `chat` declares it and calls `input.ask()` directly, so this tour takes that path.
+An agent can ask in two ways. Its own Lua can call `input.ask()`, which needs only `promptforge/user-input` in its `capabilities:` frontmatter. `capabilities:` lists the tool sets the Harness provides, and `promptforge/user-input` is the set for asking the operator. `chat` declares it and calls `input.ask()` directly, so this tour takes that path.
 
 Or the model can decide to ask. Then the agent's `tools:` frontmatter maps an alias, the name the model calls, to a tool's full id, as in `ask: promptforge/user-input/ask`, and [`USER_INPUT_ASK_TOOL`] is that id. The agent still declares `promptforge/user-input` under `capabilities:`, because a tool slot whose capability is not declared refuses the run with `RequirementsUnmet`.
 
@@ -511,11 +511,11 @@ assert!(harness.session(&SessionId::new("never-issued")).is_none());
 
 You might expect a disconnect to end the session, the way dropping a receiver ends a channel. Instead, the session keeps running and keeps its open questions, and only a close ends it.
 
-Keep the id, subscribe first, then replay and re-announce. Next, [The complete program](#the-complete-program) puts every tour into one host.
+Keep the id, subscribe first, then replay and re-announce. Next, [The complete program](#the-complete-program) puts every tour into one Host.
 
 # The complete program
 
-Here is the whole `desk` host, every line visible: your program owns the settings and the operator, the harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
+Here is the whole `desk` Host, every line visible: your program owns the settings and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
 
 ````
 use harness::{
@@ -677,7 +677,7 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
 
 A catalog push with a changed model list, under a higher generation, restarts the run, and with no answer in progress it cancels the current turn at once, as a gateway push does. When the operator's answer has already been accepted, the restart waits for that turn to settle at the first `assistant_reply` event or the first `ModelTurnFailed` or `ToolCallFailed` report, without waiting for the agent to ask again. Every catalog push replaces the stored catalog, but a session acts only on a generation above the last one it saw.
 
-The host loop, from launch to streaming, answering, and closing:
+The Host loop, from launch to streaming, answering, and closing:
 
 ````text
    desk                                      harness and session
@@ -737,7 +737,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## Harness
 
-[`Harness`] hosts every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, an unreadable agent source, or a run log that cannot open. Fix them in the order reported; the next launch retries the run log. [Launch an agent](#launch-an-agent) teaches this.
+[`Harness`] runs every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, an unreadable agent source, or a run log that cannot open. Fix them in the order reported; the next launch retries the run log. [Launch an agent](#launch-an-agent) teaches this.
 
 - [`Harness::new`]: touches no filesystem; the run log is opened under `state_dir` on the first launch.
 - [`Harness::discover`]: the `.md` file stems in `agents_path` plus the built-in `chat`, sorted.
@@ -838,7 +838,7 @@ A [`SessionId`] names a session so that you can find it again through [`Harness:
 
 ## USER_INPUT_ASK_TOOL
 
-[`USER_INPUT_ASK_TOOL`] is the id of the tool that asks the operator. Bind it under an alias in `tools:`, such as `ask: promptforge/user-input/ask`, and offer the alias with `tools.add` or `tools.always`. A script's `input.ask()` shows up as this id and returns `available`, which `input.connected()` reports without asking. `available` is `false` only for an agent declaring `promptforge/user-input` with `optional: true` on a host without an input handler; the harness gives every run one. [Answer the operator](#answer-the-operator) teaches this.
+[`USER_INPUT_ASK_TOOL`] is the id of the tool that asks the operator. Bind it under an alias in `tools:`, such as `ask: promptforge/user-input/ask`, and offer the alias with `tools.add` or `tools.always`. A script's `input.ask()` shows up as this id and returns `available`, which `input.connected()` reports without asking. `available` is `false` only for an agent declaring `promptforge/user-input` with `optional: true` on a Host without an input handler; the Harness gives every run one. [Answer the operator](#answer-the-operator) teaches this.
 
 ## WaitError
 

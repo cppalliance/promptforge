@@ -9,7 +9,7 @@
 //! pipeline patterns from the plan's Functional Specification - live
 //! here, and so do the two concurrency traces: 6 (nested tasks, run
 //! within the limits, no deadlock at a ceiling of 1) and 12 (an arm's
-//! `tasks.concurrency` limit and its clamping to the host ceiling).
+//! `tasks.concurrency` limit and its clamping to the Harness's ceiling).
 //! Trace 2 stays in the fanout suites, which pin the unconditional
 //! conflict directly. The only outcomes that may differ between
 //! interleavings are the ones the plan admits as recorded nondeterminism:

@@ -1,6 +1,6 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
-//! tool calls, and completion results. The constructors a host that ran no
-//! transport builds a completion from sit in the `canned` sibling.
+//! tool calls, and completion results. The constructors a Harness that
+//! ran no transport builds a completion from sit in the `canned` sibling.
 
 #[path = "wire-canned.rs"]
 mod canned;
@@ -157,7 +157,7 @@ pub struct ToolCall {
     /// The name of the tool to invoke.
     pub(crate) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
-    /// crate-private: hosts inspect arguments through
+    /// crate-private: the Harness inspects arguments through
     /// [`ToolCall::arguments`].
     pub(crate) arguments: Value,
 }
@@ -281,7 +281,7 @@ pub enum CompletionResult {
 /// metadata - the serving model plus the canonical metrics vocabulary
 /// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
 /// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
-/// accounting. Hosts read through the accessor methods.
+/// accounting. Outside crates read through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {

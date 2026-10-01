@@ -5,7 +5,7 @@
 //!
 //! The output is read once, as the run completes and before the session
 //! reports `Closed`, so a client that awaits `Closed` and then asks for
-//! it never races the read, and a host that tears its filesystem down
+//! it never races the read, and a Host that tears its filesystem down
 //! afterwards keeps the text.
 
 use std::sync::{Mutex, PoisonError};

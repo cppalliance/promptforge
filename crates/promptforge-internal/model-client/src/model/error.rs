@@ -29,7 +29,7 @@ pub enum CompletionErrorKind {
     MalformedResponse,
     /// The model returned neither non-empty tool calls nor non-empty text.
     EmptyReply,
-    /// Gateway access was explicitly disabled by the host.
+    /// Gateway access was explicitly disabled by the Host.
     Disabled,
     /// The client could not be configured (missing environment, bad endpoint).
     Config,

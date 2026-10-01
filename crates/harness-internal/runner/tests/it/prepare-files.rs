@@ -1,6 +1,6 @@
 //! The prompt's declared store files: the launch's input text is staged
 //! at the frontmatter's `input:` path before the run, through the store
-//! view wherever the handle mounts the store; a host-seeded store
+//! view wherever the handle mounts the store; a Host-seeded store
 //! satisfies the declaration; text with no declared file, a declared file
 //! with neither text nor a seeded copy, and a store that refuses the write
 //! each refuse the run and close its row under the `Input` kind; and the

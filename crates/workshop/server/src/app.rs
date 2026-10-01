@@ -151,12 +151,12 @@ impl AppState {
         self.gateway_handles().binding().clone()
     }
 
-    /// Restricted local-Gateway authority for an embedding host.
+    /// Restricted local-Gateway authority for the embedding binary.
     pub(crate) fn gateway_updater(&self) -> GatewayUpdater {
         self.gateway_handles().binding().updater()
     }
 
-    /// Permanently revokes host publication before application teardown.
+    /// Permanently revokes gateway publication before application teardown.
     pub(crate) fn close_gateway_publication(&self) {
         self.gateway_handles()
             .binding()
@@ -205,7 +205,7 @@ impl AppState {
 
     /// The agent-session opener: discovery, launch, and the running
     /// sessions behind the `/agents/ws` socket, every one of them run in
-    /// the harness. Sessions outlive sockets, so an embedding host ends
+    /// the Harness. Sessions outlive sockets, so the embedding binary ends
     /// one through `AgentSessions::close`.
     ///
     /// # Panics
@@ -260,8 +260,8 @@ pub enum Omit {
 }
 
 /// Builds shared state against an already-resolved gateway endpoint: the
-/// construction phase a host holding its own endpoint enters directly,
-/// skipping gateway discovery file resolution.
+/// construction phase an embedding binary holding its own endpoint enters
+/// directly, skipping gateway discovery file resolution.
 ///
 /// The composition root: every subsystem is constructed here, registers
 /// itself into the registry, and is thereafter reached through the

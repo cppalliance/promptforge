@@ -1,4 +1,4 @@
-//! Host callbacks installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
+//! Engine globals installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
 
 #[path = "host-store.rs"]
 mod store;
@@ -13,7 +13,7 @@ use super::{
 pub use store::store_error_message;
 pub(crate) use store::{install_store_table, route_store_to_shims};
 
-/// Shared body of the persistent per-section `log(message)` host callback.
+/// Shared body of the persistent per-section `log(message)` Engine function.
 fn log_checkpoint(
     emitter: &Emitter,
     section: &str,
@@ -108,17 +108,17 @@ pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
 
 /// `ui()` snapshot conversion: a JSON null field reads as nil in author
 /// code, never as the userdata NULL sentinel the serde bridge defaults
-/// to - an unset host field must simply be absent.
+/// to - an unset Host field must simply be absent.
 const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
     .serialize_none_to_null(false)
     .serialize_unit_to_null(false);
 
 /// Installs `ui()` as a persistent global valid for the section's whole
-/// lifecycle: each call converts the host's `snapshot` afresh into a new
+/// lifecycle: each call converts the Host's `snapshot` afresh into a new
 /// table, JSON nulls reading as nil, so author code that mutates one
 /// result never sees the mutation on the next call. The snapshot is the
-/// host state as the host captured it at run start; a change on the host
-/// takes effect on the next run. A run whose host supplies no snapshot
+/// Host state as the Host captured it at run start; a change on the Host
+/// takes effect on the next run. A run whose Host supplies no snapshot
 /// never installs the global, so `ui` is absent there - not stubbed.
 ///
 /// The snapshot arrives shared: one run installs it into every section VM
@@ -134,7 +134,7 @@ pub fn install_ui(lua: &Lua, snapshot: Arc<serde_json::Value>) -> Result<()> {
     lua.globals().raw_set("ui", snapshot).map_err(Error::lua)
 }
 
-/// Shared body of the persistent per-section `store.read` host callback.
+/// Shared body of the persistent per-section `store.read` Engine function.
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
 /// inclusive line range. A negative bound converts to 0, which the range
@@ -171,7 +171,7 @@ fn read_store_bounded(
     }
 }
 
-/// Shared body of the persistent per-section `store.read` host callback.
+/// Shared body of the persistent per-section `store.read` Engine function.
 fn read_store(
     view: &Access,
     path: &str,

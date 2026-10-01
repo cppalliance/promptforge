@@ -1,5 +1,5 @@
 //! Workspace revokes against a live agent session: a root revoked while
-//! an accepted turn is in flight is gone from the host snapshot the
+//! an accepted turn is in flight is gone from the Host snapshot the
 //! session's deferred catalog relaunch reads.
 
 use tokio::sync::mpsc;

@@ -44,7 +44,7 @@ The result is:
 helped:check
 ````
 
-`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the host. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
+`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the Harness. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
 
 Here a section calls another one and uses its result:
 

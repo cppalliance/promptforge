@@ -1,7 +1,7 @@
-//! The per-section Lua VM: construction, host injection, coroutine stepping, and chunk execution.
+//! The per-section Lua VM: construction, Engine injection, coroutine stepping, and chunk execution.
 //!
 //! A local tool registered with `tools.add_local` runs inside the calling
-//! block's coroutine, never as a host callback. The VM keeps only each
+//! block's coroutine, never as an Engine function. The VM keeps only each
 //! tool's alias and schema; the handler sits in the VM's handler table. A
 //! call takes two yields: the shim's `tool_call`, which the scheduler
 //! answers with the handler itself, and the shim's `local_tool_done`
@@ -43,8 +43,8 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 ///
 /// The VM owns one Lua environment from construction until drop. Construction
 /// hardens the sandbox and installs `untrusted`; the caller then drives one
-/// linear startup: apply the run's limits, inject the host values, install
-/// the persistent host APIs and the control globals, replay the shared
+/// linear startup: apply the run's limits, inject the Engine values, install
+/// the persistent Engine globals and the control globals, replay the shared
 /// library as the section's first chunk
 /// ([`replay_shared`](Self::replay_shared)), install the captured tool/model
 /// alias globals, and only then walk the section's blocks with
@@ -53,7 +53,7 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// and on every block coroutine, so cancellation reaches any chunk.
 ///
 /// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
-/// hardening, host injection, instruction accounting, and report delivery on
+/// hardening, Engine injection, instruction accounting, and report delivery on
 /// the one owned path. Each section must receive a new instance; dropping it
 /// destroys all Lua memory belonging to that section. Once Lua allocation
 /// succeeds, construction, shared-load, and captured-binding failures cross
@@ -114,10 +114,10 @@ pub struct SectionVm {
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
-    /// The raw-model-id fallback, on whenever the host passes a host-state
+    /// The raw-model-id fallback, on whenever the Host passes a Host-state
     /// snapshot (`RunContext::ui`): when set, `models.get` resolves an
     /// undeclared alias as a raw gateway catalog model id. Set by
-    /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before host
+    /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before Engine
     /// injection; unset everywhere else.
     raw_model_ids: bool,
     /// Test-support only: the live-section-VM tally guard. Its presence
@@ -258,7 +258,7 @@ impl SectionVm {
     /// the deterministic `pairs`/`next` walk, the default resource
     /// ceilings, the instruction hook, and `untrusted` (wrapping under the
     /// run's `nonce`). Everything else - the run's
-    /// limits, the host values, the persistent host APIs, the control
+    /// limits, the Engine values, the persistent Engine globals, the control
     /// globals, the shared-library replay, and the captured alias globals -
     /// is a separate explicit step the caller drives in that order (see the
     /// type-level docs). Every lifecycle report goes through the emitter
@@ -370,8 +370,8 @@ impl SectionVm {
         self.instruction_budget.set_cancel(cancel);
     }
 
-    /// Opts the VM into the raw-model-id fallback, on whenever the host
-    /// passes a host-state snapshot (`RunContext::ui`): `models.get`
+    /// Opts the VM into the raw-model-id fallback, on whenever the Host
+    /// passes a Host-state snapshot (`RunContext::ui`): `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
     ///
     /// Must be called before [`inject_host_with_var`](Self::inject_host_with_var),

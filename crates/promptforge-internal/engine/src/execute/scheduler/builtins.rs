@@ -123,7 +123,7 @@ impl BuiltinAnswer {
 
 /// How one built-in call resolved: an answer for the caller now, the
 /// caller parked (`await_tasks` on live tasks), answered when it wakes, or
-/// a leaf effect issued (`task_events`), answered when the host does.
+/// a leaf effect issued (`task_events`), answered when the Harness does.
 pub(super) enum BuiltinOutcome {
     Answered(BuiltinAnswer),
     Parked,
@@ -178,7 +178,7 @@ impl Scheduler {
     /// and the trusted `ToolResult` report under the model's call id - or
     /// the chain parked, for an `await_tasks` whose answer comes when a
     /// task ends, or a `TaskEvents` effect issued, for a `task_events`
-    /// whose answer comes from the host's log. Only the caller's own
+    /// whose answer comes from the Harness's log. Only the caller's own
     /// bookkeeping can fail here (a lost frame, a poisoned runtime); every
     /// model-facing fault is the answer's text. The `tool_call` arm routes
     /// only [`is_task_builtin`] names here. `turn` is the turn the call

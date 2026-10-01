@@ -8,7 +8,7 @@ use super::*;
 
 use crate::workspace_file::WorkspaceFile;
 
-/// The `-wal` sidecar the engine keeps beside `path`.
+/// The `-wal` sidecar the database keeps beside `path`.
 fn wal_of(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push("-wal");

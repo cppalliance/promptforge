@@ -73,7 +73,7 @@ fn call_with_a_non_string_target_errors() {
 
 #[test]
 fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
-    // The `tools`/`models` tables install with host injection, before the
+    // The `tools`/`models` tables install with Engine injection, before the
     // replay, so shared top-level code may scope tools at load. The bare
     // alias globals install only after the replay, so a declared alias wins
     // over a same-named shared global.
@@ -130,7 +130,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
 #[test]
 fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
     // A shared function body resolves `tools`/`var` through the real globals
-    // at call time, so a later chunk can drive host mutations through it.
+    // at call time, so a later chunk can mutate Engine state through it.
     let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "search",

@@ -12,7 +12,7 @@ Every frontmatter key and value rule, with top-level keys first and nested keys 
 | `name` | string, kept as written | none, required | [Prompt File Structure](02-file-structure.md#name-and-description) |
 | `description` | one-line string, kept as written | none, required | [Prompt File Structure](02-file-structure.md#name-and-description) |
 | `promptforge` | `0` | none, needed to run | [Prompt File Structure](02-file-structure.md#the-promptforge-version) |
-| `max_tool_iterations` | whole number `1` to `1000` | `24` per `models.loop` call, or the host's default | [Conversations](11-conversations.md#the-round-cap) |
+| `max_tool_iterations` | whole number `1` to `1000` | `24` per `models.loop` call, or the Harness's default | [Conversations](11-conversations.md#the-round-cap) |
 | `input` | map of `path` and `description` | no input file | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `output` | map of `path` and `description` | no output file | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `capabilities` | list of capability entries | no capabilities | [Tools](12-tools.md#declaring-capabilities) |
@@ -45,7 +45,7 @@ Every frontmatter key and value rule, with top-level keys first and nested keys 
 | Name grammar for aliases, role labels, and arg names | `[A-Za-z][A-Za-z0-9_-]{0,63}` | none | [Prompt File Structure](02-file-structure.md#names-for-aliases-roles-and-args) |
 | `output.description` | string | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
 | `output.path` | store filename, such as `report.md` | none, required | [Prompt File Structure](02-file-structure.md#input-and-output-files) |
-| Reserved names for tool aliases and role labels | no host global, sandbox Lua global, or Lua keyword, such as `store`, `argv`, `pairs`, or `end`, and no name under both `tools` and `models`; the chapter lists every one | none | [Prompt File Structure](02-file-structure.md#reserved-names-for-aliases-and-role-labels) |
+| Reserved names for tool aliases and role labels | no Engine global, sandbox Lua global, or Lua keyword, such as `store`, `argv`, `pairs`, or `end`, and no name under both `tools` and `models`; the chapter lists every one | none | [Prompt File Structure](02-file-structure.md#reserved-names-for-aliases-and-role-labels) |
 | Tool path in `tools.{alias}` | `namespace/pack/name`, such as `promptforge/web/fetch` | none | [Tools](12-tools.md#capability-ids-and-tool-paths) |
 | `tools.{alias}` | tool path string | none | [Tools](12-tools.md#tool-slots-and-tool-objects) |
 
@@ -69,7 +69,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 | model handle | `local h = models.get('writer')` | Frozen userdata with nine read-only fields and no methods | [Models](10-models.md#model-handles) |
 | `models.default` | `models.default(label)` | The default role's model handle; sets the prompt-wide default | [Models](10-models.md#choosing-a-sections-model) |
 | `models.get` | `models.get(label)` | The role's model handle; the selection is unchanged | [Models](10-models.md#model-handles) |
-| `models.get` | `models.get(ui().selected_model)` | A model handle for a host catalog model id, with a host-state snapshot only | [Models](10-models.md#model-handles) |
+| `models.get` | `models.get(ui().selected_model)` | A model handle for a Host catalog model id, with a Host-state snapshot only | [Models](10-models.md#model-handles) |
 | `models.infer` | `models.infer(prompt)` | The reply as a string, from one round on the section's model | [Models](10-models.md#running-a-round-with-modelsinfer) |
 | `models.infer` | `models.infer(handle, prompt)` | The reply as a string, from one round on the handle's model | [Models](10-models.md#running-a-round-with-modelsinfer) |
 | `models.loop` | `models.loop(messages, compactor?)` | `nil`; appends every record to `messages` | [Conversations](11-conversations.md#a-first-conversation) |
@@ -178,7 +178,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 
 | Name | Form | Returns | Taught in |
 |---|---|---|---|
-| `sys.execution` | `sys.execution` | The run's name, assigned by the host | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
+| `sys.execution` | `sys.execution` | The run's name, assigned by the Harness | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
 | `sys.id` | `sys.id` | The current section entry's id, such as `0.3.0` | [The Lua Environment](05-lua-environment.md#run-metadata-in-sys) |
 | `sys.index` | `sys.index` | An arm's 1-based position in its collection, or a task's `index` option | [Fanout](14-fanout.md#inside-an-arm) |
 | `sys.model` | `sys.model` | The section's catalog model id, readable only after the section's first tool call | [Models](10-models.md#the-bound-model-in-sysmodel) |
@@ -234,9 +234,9 @@ The `promptforge/user-input` row is the capability line that defines the rest. T
 
 | Name | Form | Returns | Taught in |
 |---|---|---|---|
-| `promptforge/user-input` | `capabilities: [promptforge/user-input]` | The `input` global and the tool path `promptforge/user-input/ask`; required, it refuses a host with nobody to ask | [The Lua Environment](05-lua-environment.md#declaring-the-capability) |
+| `promptforge/user-input` | `capabilities: [promptforge/user-input]` | The `input` global and the tool path `promptforge/user-input/ask`; required, the run is refused when the Host has nobody to ask | [The Lua Environment](05-lua-environment.md#declaring-the-capability) |
 | `input.ask` | `local text, available = input.ask()` in Lua | the operator's next message and `true`, or the fixed fallback sentence and `false` | [The Lua Environment](05-lua-environment.md#asking-the-operator-with-inputask) |
-| `input.connected` | `input.connected()` in Lua | `true` when the host has someone to ask; fixed for the whole run | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
+| `input.connected` | `input.connected()` in Lua | `true` when the Host has someone to ask; fixed for the whole run | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 | `promptforge/user-input/ask` | `{}` | The operator's next message, trusted; offered to a model only through a `tools:` alias | [The Lua Environment](05-lua-environment.md#letting-the-model-ask) |
 
 ### Lua standard library
@@ -256,7 +256,7 @@ Every section VM runs Lua 5.5 with these libraries and base functions.
 | `setmetatable` | `setmetatable(t, mt)` | `t`; on `_G`, `mt` composes behind the `argv` and `prose` guard | [The Lua Environment](05-lua-environment.md#your-own-metatable-on-_g) |
 | `string` library | `string.upper(s)`, `s:match(pattern)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `table` library | `table.{name}(...)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
-| `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-host-calls) |
+| `table.concat` | `table.concat(list, sep, i, j)` | joined string; `__tostring` values render with `tostring` | [The Lua Environment](05-lua-environment.md#standard-lua-and-engine-calls) |
 | `tonumber` | `tonumber(v)` | as in standard Lua 5.5 | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `tostring` | `tostring(v)` | string; an error value gives its message | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `type` | `type(v)` | type name; an error value gives `'table'` | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
@@ -282,7 +282,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `err.tasks` | `err.tasks` | leaked task ids joined with `, ` in spawn order, on `tasks_live` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `fanout` | `fanout(worker, collection)` | array of fanout results, one per member in collection order | [Fanout](14-fanout.md#the-fanout-call) |
 | heading reference | `'## Name'` | the section with that level and name | [Jump and Call](08-jump-and-call.md#heading-addresses) |
-| host globals | no import | installed in every section VM | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
+| Engine globals | no import | installed in every section VM | [The Lua Environment](05-lua-environment.md#the-sandbox-and-its-globals) |
 | `item` | `item` | the arm's member inside a fanout arm, or a task's `item` option | [Fanout](14-fanout.md#inside-an-arm) |
 | `item.key` and `item.value` | `item.key`, `item.value` | a keyed member's key and value | [Fanout](14-fanout.md#collections-and-member-order) |
 | `jump` | `jump(target)` | nothing; ends the block and the walk continues at `target` | [Jump and Call](08-jump-and-call.md#jump-and-call-at-a-glance) |
@@ -305,7 +305,7 @@ These globals, fanout result fields, and error value fields need no declaration.
 | `tools` | `tools.{name}(...)` | the `tools` namespace | [Tools](12-tools.md#tools-at-a-glance) |
 | `tostring(err)` | `tostring(err)` | the error's message, with no traceback | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
 | `tostring(result)` and `table.concat(results)` | `tostring(r[i])`, `table.concat(r, sep)` | the result's text; the joined texts | [Fanout](14-fanout.md#the-fanout-call) |
-| `ui` | `ui()` | host-state snapshot table; present only when the host supplies one | [The Lua Environment](05-lua-environment.md#host-state-with-ui) |
+| `ui` | `ui()` | Host-state snapshot table; present only when the Host supplies one | [The Lua Environment](05-lua-environment.md#host-state-with-ui) |
 | `untrusted` | `untrusted(s)` | `s` inside an untrusted envelope | [The Store](09-the-store.md#wrapping-untrusted-text) |
 | `var` | `var.key = value` | your own values, carried along the walk | [The Lua Environment](05-lua-environment.md#keeping-values-in-var) |
 | `xpcall` | `xpcall(f, handler, ...)` | like `pcall`; `handler` receives the error value | [The Lua Environment](05-lua-environment.md#catching-and-inspecting-errors) |
@@ -331,26 +331,26 @@ Each row links to the section that teaches the form.
 
 ## Defaults and limits
 
-Set by names the frontmatter key that sets a value, or says whether the host sets it or it is fixed.
+Set by names the frontmatter key that sets a value, or says whether the Harness sets it or it is fixed.
 
 | Name | Default | Range or rule | Set by | Taught in |
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
-| Cancel poll interval | 10,000 instructions | A host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | host | [Fanout](14-fanout.md#concurrency) |
+| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | Harness | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
-| Host-set limits | Listed in the chapter | A prompt changes only the round cap | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
 | Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
 | Log message length | 256 characters | Counted as Unicode characters | fixed | [The Lua Environment](05-lua-environment.md#checkpoints-with-log) |
-| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | host | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | host | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Model response cap | 16 MiB | A larger reply fails the call | host | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | host | [Conversations](11-conversations.md#the-round-cap) |
-| Round cap from frontmatter | The host default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
-| Run limit defaults | Listed in the chapter | One set applies to the whole run | host | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
-| `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
+| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | Harness | [Conversations](11-conversations.md#the-round-cap) |
+| Round cap from frontmatter | The Harness default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
+| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the Host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 
 ## Error kinds
 
@@ -371,7 +371,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
 | `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Cancelled outcome | The host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
 | `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
@@ -381,7 +381,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
 
@@ -389,11 +389,11 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `cancelled` | A host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The reply's detail phrase, or plain `empty model reply`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A host-side failure the prompt cannot fix: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
-| `lua` | A runtime error, a host call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |
 | `task_consumed` | A wait names a task already delivered | The task, in `` task `{task}` was already delivered: a task's result is taken by one wait ``; field `task` | [Tasks](15-tasks.md#waiting-for-results) |

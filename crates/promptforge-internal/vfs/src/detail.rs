@@ -1,11 +1,11 @@
 //! Operations on [`Access`] that only the engine performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host: a host passes a run's capability through, and
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it: the Harness passes a run's capability through, and
 //! the engine alone forks it for concurrent arms, joins the arms'
 //! identities back on delivery, derives the store view from a chain's
-//! access for store calls, and ends the run's scope when the run ends. A
-//! host that holds the handle acquires a store view in a scope of its own
+//! access for store calls, and ends the run's scope when the run ends. The
+//! Harness, holding the handle, acquires a store view in a scope of its own
 //! with [`VfsRef::acquire_store`](crate::VfsRef::acquire_store).
 
 use std::fmt;
@@ -34,7 +34,7 @@ pub fn scope_handle(access: &Access) -> ScopeHandle {
 }
 
 /// Ends the scope behind `scope`: its claims stop conflicting at once,
-/// and every access still held in it - a store view a host kept past the
+/// and every access still held in it - a store view the Harness kept past the
 /// run, a forwarded mount session - refuses its next operation, spawn,
 /// or store view with [`VfsError::PermissionDenied`]. Idempotent, and a
 /// no-op once every access in the scope has dropped.
@@ -61,7 +61,7 @@ pub fn store_view(access: &Access) -> Result<Access, VfsError> {
 /// Probes the declared store before a run starts: derives the store
 /// view from `access` and stats the store root through it, which makes
 /// the view's router acquire the store backend. A root the backend
-/// reports [`VfsError::NotFound`] passes, so a host directory created
+/// reports [`VfsError::NotFound`] passes, so a real directory created
 /// lazily still runs.
 ///
 /// # Errors

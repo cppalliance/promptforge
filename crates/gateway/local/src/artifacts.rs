@@ -145,7 +145,7 @@ fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
     })
 }
 
-/// Queries the host's NVIDIA compute capabilities through `nvidia-smi`.
+/// Queries the machine's NVIDIA compute capabilities through `nvidia-smi`.
 /// Returns `None` when the driver or the tool is absent or fails; the
 /// caller falls back to the Vulkan build.
 fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
@@ -195,7 +195,7 @@ impl ArtifactStore {
         })
     }
 
-    /// Resolves the `llama-server` executable for this host: the configured
+    /// Resolves the `llama-server` executable for this machine: the configured
     /// `llama_server_path` first, then the `PROMPTFORGE_LLAMA_SERVER`
     /// environment variable, then the managed download of the pinned build
     /// for the selected backend, writing the download, verify, and extract
@@ -253,7 +253,7 @@ impl ArtifactStore {
         })
     }
 
-    /// Provisions the pinned whisper.cpp runtime for this host and returns
+    /// Provisions the pinned whisper.cpp runtime for this machine and returns
     /// the shared library path.
     ///
     /// The archive is downloaded, digest-verified, and extracted under the

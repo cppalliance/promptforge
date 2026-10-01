@@ -9,14 +9,14 @@
 //! vocabulary as a test fixture. [`forward()`] replays a returned batch onto
 //! an observer, in order, so the suites hold without rewriting their
 //! assertions. The remaining seams - the raw-body capture, the null
-//! observer, the detail constants - are crate-internal plumbing. None of
-//! this is engine API: a production host reads the events themselves.
+//! observer, the detail constants - are crate-internal plumbing. In
+//! production the Harness and the Host read the events themselves.
 //!
 //! # Sensitivity
 //! The `execution` and `section` coordinates are author-controlled, and
 //! every `on_*` payload is model-, tool-, or user-authored; a recorder
-//! that persists them owns treating them as untrusted, exactly as a host
-//! does with the events they came from.
+//! that persists them owns treating them as untrusted, exactly as the Harness
+//! and the Host do with the events they came from.
 
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::TaskId;

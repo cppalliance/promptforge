@@ -12,7 +12,7 @@ todos:
     content: "One generic tab with a registry-driven tab menu: MenuId.EditorTitleContext, per-tab overlay, VS Code-aligned activeEditor, confirm-then-close for the X button and the Close and Close Others commands, tab-menu stub rows"
     status: pending
   - id: status-indicators
-    content: "Status bar indicator slots: platform contract, generic status bar host, contributed activity and recording LEDs wired at the composition root, setRecording removed from the status bar contract, recording verified end to end"
+    content: "Status bar indicator slots: platform contract, generic status bar, contributed activity and recording LEDs wired at the composition root, setRecording removed from the status bar contract, recording verified end to end"
     status: pending
 isProject: false
 ---
@@ -36,7 +36,7 @@ The Workshop SPA's framework (commands, menus, keybindings, context keys, servic
   - The status bar contract hardwires one LED (`setRecording`, `crates/workshop/ui/src/services/status-bar.ts` line 18), and the activity LED logic lives inside the status bar renderer (`crates/workshop/ui/src/parts/status/status-bar.ts` lines 66-113 and 169-188).
 - Goals:
   - A new npm workspace member, `@workshop/platform` at `crates/workshop/platform/`, holds the family's browser-side mechanics. The app depends on it, and it imports nothing from the app or from `@workshop/look`.
-  - No core module (`platform`, `parts/layout/`, the status bar host) names a feature, panel type, or feature LED. Features register their panel types, tab-menu rows and indicators themselves.
+  - No core module (`platform`, `parts/layout/`, the status bar) names a feature, panel type, or feature LED. Features register their panel types, tab-menu rows and indicators themselves.
   - Clean wiring, like neatly routed cables in a datacenter:
     - components expose generic, labeled ports;
     - connections are made in one place, the composition root `crates/workshop/ui/src/main.ts`;
@@ -104,7 +104,7 @@ Developers import mechanics from `@workshop/platform` and register features from
 
 ## Technical Design
 
-The design has four parts. The `platform` package holds the moved mechanics. The panel registry becomes open-ended, with a single generic tab. The tab menu evaluates against the clicked tab through a context overlay and closes through a confirm-then-close path. The status bar hosts indicator slots that features fill. The composition root, `main.ts`, is where the product wires everything together: the layout policy, the recording LED, and dictation's status port.
+The design has four parts. The `platform` package holds the moved mechanics. The panel registry becomes open-ended, with a single generic tab. The tab menu evaluates against the clicked tab through a context overlay and closes through a confirm-then-close path. The status bar holds indicator slots that features fill. The composition root, `main.ts`, is where the product wires everything together: the layout policy, the recording LED, and dictation's status port.
 
 - Architecture:
 
@@ -301,7 +301,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
   - **Straightforward bugs found during the run are fixed in it, in a final step.** User, mid-run: "fix all discovered pre-existing bugs ... if they are reasonably straightforward". This brings in the Delete and Backspace keyboard close, first deferred as pre-existing, and the step 3 tab-title fallback regression. Keyboard close goes through the same confirm-then-close path as the X, because Dockview's handler closes unsaved editors with no prompt.
 - Rejected alternatives:
   - **Putting the mechanics in `look`.** `look` is the visual layer, and registries are behavior. Revisit: never.
-  - **A convention-only boundary**, where features export plain data and each host writes adapters. Family products share the same mechanics, so shared contracts beat per-host adapters. Revisit if a non-family shell must host a feature.
+  - **A convention-only boundary**, where features export plain data and each shell writes adapters. Family products share the same mechanics, so shared contracts beat per-shell adapters. Revisit if a non-family shell must embed a feature.
   - **The names `workbench`, `host-ui` and `shell`.** The user rejected `workbench`. "Host" already means the shell product and would point the dependency the wrong way. `shell` is reserved for a terminal command shell. Revisit: never.
   - **Mapping legacy tab names** for old saved layouts: no one uses the app yet. Revisit if the app gains users with saved workspaces.
   - **A runtime `globalThis` sentinel** against a second copy of `platform`. Many ui tests deliberately load several esbuild bundles in one process, so it would throw there, and workspace resolution plus the boot tests cover the real risk. Revisit if a duplicate copy ever ships.
@@ -368,7 +368,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
 - Component test command pattern:
   - UI: `npm test --workspace <member>` in `crates/workshop`. Members today are `ui` and `look`; the plan adds `platform`.
   - Rust: `cargo nextest run --locked -p <crate>` (same `--all-features` rule), then `cargo test --doc -p <crate>` because nextest skips doctests.
-  - Structural and boundary harness: `cargo test -p build-xtask`.
+  - Structural and boundary checks: `cargo test -p build-xtask`.
 - Full-suite test command:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`
@@ -388,7 +388,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
   - UI: one kebab-case `.mjs` file per subject in the package's top-level `test/` directory (`crates/workshop/ui/test/menu-registries.mjs`, `crates/workshop/look/test/boundary.mjs`), with shared helpers in `ui/test/helpers/`. No tests sit beside sources; the `src/**/*.test.mjs` glob in the `ui` test script matches nothing. Each file opens with a comment naming the modules it covers, what it covers, and a `// Run: node --test test/<name>.mjs` line. Most bundle the TypeScript under test with esbuild (stdin re-exports from `./src/...`) and drive it against jsdom built from the real `index.html`. Most assert through a local `check(name, condition)` helper that collects failures and exits nonzero; a few use `node:assert/strict` or `node:test`.
   - Rust: unit tests in an inline `#[cfg(test)]` module, a sibling `<stem>-tests.rs` wired with `#[path = "<stem>-tests.rs"]` (`crates/build-ui/src/lib-tests.rs`), or a `src/<module>/tests/<topic>.rs` directory once there are three or more files; integration tests in the crate's `tests/<snake_case>.rs`. Test functions have sentence-style snake_case names that state the behavior, such as `a_direct_launch_recovers_the_lease_from_a_terminated_owner`.
 - Directory map:
-  - `crates/`: every crate and npm package. Crates at the root are the public layer: the `promptforge` and `harness` facades, `gateway-api-types` and `gateway-api-discovery`, `shared-error-source` and `shared-loopback`, the `build-*` meta tooling (`build-xtask` structural harness and `cargo xtask`, `build-ui` bundling helper, `build-workshop` behind `cargo workshop`, `build-user-guide`, `build-llama-cuda`), and the hakari `workspace-hack`. `shared-ui` is npm-only TypeScript and CSS, excluded from Cargo, that `@workshop/look` forked from on 2026-09-27.
+  - `crates/`: every crate and npm package. Crates at the root are the public layer: the `promptforge` and `harness` facades, `gateway-api-types` and `gateway-api-discovery`, `shared-error-source` and `shared-loopback`, the `build-*` meta tooling (`build-xtask` structural checks and `cargo xtask`, `build-ui` bundling helper, `build-workshop` behind `cargo workshop`, `build-user-guide`, `build-llama-cuda`), and the hakari `workspace-hack`. `shared-ui` is npm-only TypeScript and CSS, excluded from Cargo, that `@workshop/look` forked from on 2026-09-27.
   - `crates/promptforge-internal/`: engine, lua, parser, types, vfs, model-client.
   - `crates/harness-internal/`: runner, sessions, capabilities, log, models, web, web-search, webfetch.
   - `crates/gateway/`: `app` (package `gateway`), cloud-providers, config, config-ui (a crate plus its own npm package in `config-ui/ui/`), local, logging, progress, protocol, routing, web-search, and `stt/` (api, engine, backend-whisper, whisper-ffi).
@@ -396,7 +396,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
   - `guide/`: mdBook user guides and site sources. `prompts/`: five sample prompt programs. `tools/`: Node scripts for gateway sidecar staging and TTS checks (with `.test.mjs` files) and `tools/scripts/` Python for the facade-docs workflow. `vibe/`: plans, run records, `archdoc.md` and agent `scratch/`.
   - `.github/workflows/`: `ci.yml` (jobs fmt, clippy, test, docs, Windows check-workshop, check-workshop-linux, ui, supply-chain, api-surface, and the ci-green gate) and release workflows. `.githooks/`: pre-commit and pre-push. `.config/`: nextest and hakari. `.cargo/config.toml`: the `xtask` and `workshop` aliases and the Windows rust-lld linker. `local/` (gitignored) holds local configs; `target/` and `target-msrv/` are build output.
 - Component boundaries:
-  - Products: PromptForge (sans-I/O executor behind the `promptforge` facade), Harness (the executor's only production host, behind the `harness` facade, depending only on `promptforge`), Gateway (an independent process whose public surface is the `gateway-api-*` pair and which never depends on promptforge or workshop crates), and Workshop (depends on `harness`, `promptforge`, the gateway public pair and shared crates, never gateway internals). Shared crates depend on no product.
+  - Products: PromptForge (sans-I/O executor behind the `promptforge` facade), Harness (the executor's only production caller, which steps it and performs its effects, behind the `harness` facade, depending only on `promptforge`), Gateway (an independent process whose public surface is the `gateway-api-*` pair and which never depends on promptforge or workshop crates), and Workshop (depends on `harness`, `promptforge`, the gateway public pair and shared crates, never gateway internals). Shared crates depend on no product.
   - The four family containers are private: a crate inside one depends only on root crates and its own siblings, and only its facade reaches into it. `build-*` crates are exempt. Dependency rules bind every dependency kind.
   - Workshop Rust tiers flow one way: server, then features, then services, then vocabulary. The desktop app depends on `workshop-server-api`, never `workshop-server`.
   - Workshop SPA: inside `ui`, imports flow from `parts` to `services` to `base`, never back, except that `services/panel-registry.ts` dynamically imports each lazy part's `index.ts`. `main.ts` is the composition root and nothing imports it. Lazy panels never import the entry bundle (`main.ts` and the `*.contribution.ts` modules), and bundle guards in `ui/test/` enforce this. `@workshop/look` imports only its own files and `lucide`, enforced by `look/test/boundary.mjs`; `ui` depends on `look`. The SPA reaches Rust only through `workshop-server`'s build script at build time and the `/ws` socket and HTTP routes at run time.
@@ -641,7 +641,7 @@ Five components, built in dependency order. The first four are each useful on th
 ### Step 8: Add status indicator slots and contribute the activity LED [completed]
 
 - Component: status bar indicators
-- Piece: slots and the activity LED. Built jointly, because the status bar host stops lighting the activity LED in the same change that the contributed indicator starts, and before the recording LED, which needs the slot contract.
+- Piece: slots and the activity LED. Built jointly, because the status bar stops lighting the activity LED in the same change that the contributed indicator starts, and before the recording LED, which needs the slot contract.
 - Changes:
   - New `platform/status-indicators.ts`, added to `exports`: the `STATUS_INDICATORS` token and `StatusIndicators.register({ id, name, order, decorative? })`, returning `{ set(state, tooltip?), dispose() }`. `state` is `"green" | "amber" | "red" | null`, where null is the unlit lens. `order` sorts ascending, left to right. A duplicate id throws.
   - `parts/status/status-bar.ts` implements `StatusIndicators`:
@@ -650,7 +650,7 @@ Five components, built in dependency order. The first four are each useful on th
     - `name` becomes the `aria-label`, joined with the current tooltip when there is one; a tooltip sets `title`; `decorative: true` sets `aria-hidden` instead of the label;
     - `render(frame)` keeps only the text, tooltip and busy handling, and `reset()` (`main.ts` line 205) never touches indicators;
     - delete `clearActivity`, which has no callers.
-  - Transitional, removed in step 9: `StatusBar.setRecording` stays on the `platform/status-bar.ts` contract, and the host implements it through a `recording` slot it registers itself (`order: 0`, name "Recording indicator"), so dictation lights the renamed red LED with no change to its call sites.
+  - Transitional, removed in step 9: `StatusBar.setRecording` stays on the `platform/status-bar.ts` contract, and the status bar implements it through a `recording` slot it registers itself (`order: 0`, name "Recording indicator"), so dictation lights the renamed red LED with no change to its call sites.
   - `look`: rename the LED modifiers in `crates/workshop/look/status-bar.css` (lines 154-186): `--generating` becomes `--green`, `--thinking` becomes `--amber`, and `--recording` becomes `--red`, which uses the new `--led-red: #ff2a4d` token added to `crates/workshop/look/tokens.css` beside `--led-green` and `--led-amber`. Update the comment in `crates/workshop/look/status-bar.ts` that says "the workshop: recording + activity".
   - New `parts/status/activity-indicator.ts`:
     - it takes the pulse, sustain and decay-timer logic verbatim from `status-bar.ts` (lines 66-113 and 169-188);
@@ -681,7 +681,7 @@ Five components, built in dependency order. The first four are each useful on th
     - build `SttStatus = { showLocal: (label, severity) => statusBar.showLocal(label, severity), setRecording: (on) => recording.set(on ? "red" : null) }`, using arrow functions because `showLocal` reads `this.view`;
     - register it under `STT_STATUS`.
   - `parts/agent/index.ts` (lines 36-43) resolves `STT_STATUS` instead of `STATUS_BAR`, keeping `getServiceOrNull` and the `SILENT_STATUS` fallback. `realtime-stt.ts` keeps calling `status.setRecording(effect.recording)` at lines 89-91 and 154.
-  - Remove `setRecording` from `platform/status-bar.ts` and the host's transitional recording slot from step 8. The `StatusBar` contract is now `showLocal(label, severity)`, `isVisible` and `setVisible(visible)`.
+  - Remove `setRecording` from `platform/status-bar.ts` and the status bar's transitional recording slot from step 8. The `StatusBar` contract is now `showLocal(label, severity)`, `isVisible` and `setVisible(visible)`.
 - Tests:
   - `node test/agent-stt-boot.mjs` passes: the LED starts dark, lights red for a live take, and dims when the Realtime socket drops.
   - New cases in `agent-stt-boot.mjs`: a booted workbench whose restored layout includes an agent panel still lights the LED, proving `STT_STATUS` registers before the layout mounts panels, and the LED still lights with two agent panels open.

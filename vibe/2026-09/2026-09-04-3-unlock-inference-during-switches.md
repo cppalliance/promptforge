@@ -203,7 +203,7 @@ The plan that went green at "run" (4:55 PM) had no download-progress step and a 
 
 ## Execution deviations and decisions (vibe-ledger)
 
-Step 1 (banner): the review-focus sweep found two more `hidden`-ignoring elements (`.section-body`, `.chat-template-custom`), fixed and pinned in the same commit. Tests resolve display from the built `dist/app.css` via a new `bundledDisplay` harness helper because jsdom's `getComputedStyle` cannot reproduce the bug.
+Step 1 (banner): the review-focus sweep found two more `hidden`-ignoring elements (`.section-body`, `.chat-template-custom`), fixed and pinned in the same commit. Tests resolve display from the built `dist/app.css` via a new `bundledDisplay` test-support helper because jsdom's `getComputedStyle` cannot reproduce the bug.
 
 Step 2 (icons): `embed-resource` 3.0.11 was already locked transitively via `tauri-winres`, so the exe icon cost one lockfile edge and no new package. Old medallion PNGs went to `_trash` before `git rm`.
 

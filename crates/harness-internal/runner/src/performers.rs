@@ -4,7 +4,7 @@
 //! The engine issues an [`Effect`](promptforge::effect::Effect) as a
 //! value and waits for its
 //! [`EffectAnswer`](promptforge::effect::EffectAnswer); a performer is
-//! the host code that turns the one into the other. Each trait takes the
+//! the Harness code that turns the one into the other. Each trait takes the
 //! effect's fields and returns the answer's payload for its kind, so a
 //! performer never sees the run, the log, or another kind's effects. The
 //! effect loop owns the correlation: it hands each result back to the run
@@ -104,12 +104,12 @@ pub trait TimerPerformer: Send + Sync {
 /// Performs a `TaskEvents` effect: one read of a task's reported history.
 pub trait TaskEventsPerformer: Send + Sync {
     /// Every event of `task` with a sequence number after `last` (all of
-    /// them when `last` is `None`), in sequence order, as the host's log
+    /// them when `last` is `None`), in sequence order, as the Harness's log
     /// holds them.
     fn events(&self, task: TaskId, last: Option<u32>) -> BoxFuture<Vec<Event>>;
 }
 
-/// The host's performers, one per effect kind.
+/// The Harness's performers, one per effect kind.
 ///
 /// Shared handles, so the loop can move a performer into the task it
 /// spawns for each effect while the bundle stays whole.

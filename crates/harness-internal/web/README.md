@@ -21,6 +21,6 @@ assert_eq!(capability.id().to_string(), "promptforge/web");
 
 The fetch tool enforces the crate's SSRF policy (see `harness-webfetch`);
 the search tool proxies through the gateway so the vendor credential never
-leaves the server (see `harness-web-search`). The host supplies the
-gateway API root and bearer token when it builds the capability at
-registration; the prompt never sees them.
+leaves the server (see `harness-web-search`). The Host provides the
+gateway API root and bearer token, and the Harness passes them to the
+capability when it registers it; the prompt never sees them.

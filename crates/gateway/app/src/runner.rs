@@ -398,7 +398,7 @@ impl Gateway {
     /// `llama-server` child, keyed by configured model name.
     ///
     /// The per-attempt loopback credential is redacted from the captures.
-    /// Embedding hosts use this to verify what a child actually reported -
+    /// Embedders use this to verify what a child actually reported -
     /// that a CUDA build staged its embedded bundle, that the child saw a
     /// CUDA device, that model layers offloaded to the GPU - without
     /// reaching the child's private loopback port. Empty when the config
@@ -1288,9 +1288,9 @@ fn boot_selection_notice(config: &Config) -> Option<BootSelectionNotice> {
 
 /// The deprecation warning for a boot config with a `[workshop]`
 /// section, or `None` when the section is absent. The gateway no longer
-/// hosts the workshop - the desktop shell embeds the workshop server
+/// serves the workshop - the desktop shell embeds the workshop server
 /// itself - so the section's `bind` and `open_browser` settings do
-/// nothing. The section still parses so existing hosting settings do not
+/// nothing. The section still parses so existing serving settings do not
 /// break startup; the warning keeps those inert fields from being silently
 /// ignored.
 fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
@@ -1445,9 +1445,9 @@ models = []
 
     #[test]
     fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
-        // Existing configs include `[workshop]` from the hosted-workshop
-        // era; they must keep parsing, with the warning discharging the
-        // no-silent-ignore rule for the now-inert hosting fields.
+        // Existing configs include `[workshop]` from when the gateway served
+        // the workshop; they must keep parsing, with the warning discharging
+        // the no-silent-ignore rule for the now-inert serving fields.
         let temp = tempfile::TempDir::new().expect("temp dir");
         let path = temp.path().join("gateway.toml");
         std::fs::write(

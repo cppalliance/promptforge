@@ -1,6 +1,6 @@
 //! The runtime-agnostic PromptForge tool vocabulary.
 //!
-//! Some tools run locally in the host's process (for example fetching and
+//! Some tools run locally in the Harness's process (for example fetching and
 //! rendering a web page), while others proxy through a gateway so a shared
 //! credential never leaves the server. The engine sees neither kind: it
 //! binds and advertises tools as data and issues each call as an effect
@@ -8,7 +8,7 @@
 //! the wire name used by the current model transport.
 //!
 //! This module holds vocabulary only: the implementation-free
-//! [`ToolDescriptor`] and the host-supplied [`ToolCatalog`] of descriptors,
+//! [`ToolDescriptor`] and the Harness-supplied [`ToolCatalog`] of descriptors,
 //! trusted output ([`ToolOutput`], [`OutputTrust`]), the model-safe
 //! [`ToolError`], and the contract errors. The implementation trait behind a
 //! descriptor (`Tool`) is the harness's, in `harness-capabilities`, beside

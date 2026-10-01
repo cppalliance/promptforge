@@ -151,7 +151,7 @@ This is a prerequisite simplification that makes the whole system cleaner before
 ### Where tools live in the architecture
 
 - `Tool` trait (`crates/promptforge-core/src/tools/registry.rs`): `id()`, `wire_name()`, `description()`, `parameters_schema()`, `call(args)`
-- `ToolRegistry`: holds `&dyn Tool` by `ToolId`, built from the host's live tool set
+- `ToolRegistry`: holds `&dyn Tool` by `ToolId`, built from the Harness's live tool set
 - `ToolSchema` (`client/wire.rs`): `{name, description, parameters}` sent to the model
 - Tool loop (`execute/tool_loop.rs:215`): dispatches via `dispatch` map (alias to ToolId) then `registry.get(id)` then `tool.call(args)`
 - `ToolBinding` (`lua/handles.rs`): carries alias, description, ToolId

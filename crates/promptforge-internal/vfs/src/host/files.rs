@@ -1,4 +1,4 @@
-//! Host file helpers: the failure-atomic write, ancestor creation,
+//! Real-file helpers: the failure-atomic write, ancestor creation,
 //! the glob walk, and the metadata mapping.
 
 use std::fs::{self, File};
@@ -98,7 +98,7 @@ pub(super) fn walk(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), VfsError>
     Ok(())
 }
 
-/// Maps a host file type to the named POSIX kinds.
+/// Maps a real file's type to the named POSIX kinds.
 #[cfg(unix)]
 fn file_type_of(file_type: fs::FileType) -> FileType {
     use std::os::unix::fs::FileTypeExt;
@@ -121,7 +121,7 @@ fn file_type_of(file_type: fs::FileType) -> FileType {
     }
 }
 
-/// Maps a host file type to the named POSIX kinds. Windows distinguishes
+/// Maps a real file's type to the named POSIX kinds. Windows distinguishes
 /// only files, directories, and symlinks through `std`.
 #[cfg(not(unix))]
 fn file_type_of(file_type: fs::FileType) -> FileType {
@@ -149,7 +149,7 @@ pub(super) fn is_dir_link(_: &fs::Metadata) -> bool {
     false
 }
 
-/// POSIX mode bits where the host tracks them.
+/// POSIX mode bits where the operating system tracks them.
 #[cfg(unix)]
 #[expect(
     clippy::unnecessary_wraps,
@@ -160,13 +160,13 @@ fn mode_of(metadata: &fs::Metadata) -> Option<u32> {
     Some(metadata.permissions().mode())
 }
 
-/// POSIX mode bits where the host tracks them: not on Windows.
+/// POSIX mode bits where the operating system tracks them: not on Windows.
 #[cfg(not(unix))]
 fn mode_of(_: &fs::Metadata) -> Option<u32> {
     None
 }
 
-/// Builds metadata without fabricating fields the host does not track.
+/// Builds metadata from only the fields the operating system tracks.
 pub(super) fn stat_of(metadata: &fs::Metadata) -> Stat {
     Stat {
         file_type: file_type_of(metadata.file_type()),

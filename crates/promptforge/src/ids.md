@@ -358,7 +358,7 @@ You might expect cancelling a run to report its live tasks as cancelled. Instead
 | [`OwnerFailed`](AbandonReason::OwnerFailed) | `owner_failed` | its owner failed |
 | [`ToolLoopExhausted`](AbandonReason::ToolLoopExhausted) | `tool_loop_exhausted` | its owner's model-tool loop ran past its round cap |
 | [`OwnerAborted`](AbandonReason::OwnerAborted) | `owner_aborted` | its owner was ended from outside before it finished, because its own owner ended first, or because the owner was a `fanout` task that `fanout` cancelled when another of its tasks failed |
-| [`RunTerminated`](AbandonReason::RunTerminated) | `run_terminated` | the run itself ended, cancelled by the host or ended by a fatal answer, and the run's end stranded it directly; a task started by a stranded task ends with `OwnerAborted` |
+| [`RunTerminated`](AbandonReason::RunTerminated) | `run_terminated` | the run itself ended, cancelled by the Host or ended by a fatal answer, and the run's end stranded it directly; a task started by a stranded task ends with `OwnerAborted` |
 
 - `why` returns the short phrase the task-abandoned trace line renders, such as `the section ended`.
 

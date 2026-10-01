@@ -8,8 +8,8 @@
 //! buffered turns are judged by one rule set.
 //!
 //! No HTTP happens here. The transport that reads the bytes off the wire
-//! lives with the host that performs the `Chat` effect (the harness's model
-//! client); the engine's own suites drive the same reassembly through a
+//! lives in the Harness's model client, which performs each `Chat` effect;
+//! `promptforge-engine`'s own suites drive the same reassembly through a
 //! dev-only client against a mock gateway. Both hand bytes to the scanner,
 //! payloads to the accumulator, and take the completion from `finish`.
 //!

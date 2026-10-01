@@ -45,7 +45,7 @@ pub use harness_webfetch::{ConfigError, FetchConfig};
 /// Contributes `promptforge/web/fetch` (a hardened page fetch rendering to
 /// markdown) and `promptforge/web/search` (a search proxy through the
 /// gateway). Both tools are built at construction, so a bad gateway root or
-/// an empty token fails here - at host startup - rather than at a run's
+/// an empty token fails here - at registration - rather than at a run's
 /// prepare time.
 ///
 /// # Examples

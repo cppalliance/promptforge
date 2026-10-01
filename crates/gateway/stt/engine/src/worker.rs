@@ -112,7 +112,7 @@ impl Transcriber {
 
     pub(super) fn abandon_startup(&self) {
         // Construction is non-preemptible. Dropping this handle explicitly
-        // abandons only a timed-out startup worker so the host can classify
+        // abandons only a timed-out startup worker so the caller can classify
         // the fatal outcome without claiming the thread was stopped.
         self.signal_and_detach();
     }

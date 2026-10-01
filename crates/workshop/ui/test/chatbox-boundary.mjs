@@ -3,12 +3,12 @@
 // component - it imports only `@workshop/platform/lifecycle`, `@workshop/look/icons`, skin
 // tokens through CSS, `lucide`, and `@tiptap/*` - so this test walks
 // every file in the directory and fails on any quoted import prefix that
-// reaches back into the host layers (`"../agent`, `"../stt`,
+// reaches back into the embedding layers (`"../agent`, `"../stt`,
 // `"../chrome`, `"../../services`, or any `"@workshop/platform/` module
 // other than `lifecycle`; bare quoted prefixes, so an
-// `import type` line trips it too) or on the string `grant`, the host
-// concern that must never leak into the component. No jsdom: this is a
-// source-text check.
+// `import type` line trips it too) or on the string `grant`, the owning
+// part's concern that must never leak into the component. No jsdom:
+// this is a source-text check.
 // Run: node --test test/chatbox-boundary.mjs
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";

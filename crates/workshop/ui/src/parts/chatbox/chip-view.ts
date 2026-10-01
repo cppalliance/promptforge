@@ -28,7 +28,7 @@ import type { ChipRef } from "./types";
 
 const ICON_SIZE_PX = 12;
 
-/** The icons a host may name on a chip. Unknown names fall through to the extension map. */
+/** The icons the owning part may name on a chip. Unknown names fall through to the extension map. */
 const NAMED_ICONS: Readonly<Record<string, IconNode>> = {
   file: File,
   "file-code": FileCode,

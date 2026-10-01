@@ -360,7 +360,7 @@ fn the_handle_exposes_label_and_the_full_keyword_set() {
 }
 
 /// Builds a section VM with the raw-model-id fallback set to `raw_ids`,
-/// host values injected (which installs the `models` table).
+/// Engine values injected (which installs the `models` table).
 fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     let emitter = crate::tests::recording::null_emitter();
     let mut vm = crate::SectionVm::new(

@@ -117,7 +117,7 @@ impl CapabilityId {
     /// contributing capability's id plus one name segment
     /// (`namespace/pack/name` for a `namespace/pack` capability), so
     /// dropping the tool's last segment must yield exactly this id.
-    /// The host enforces containment when the run's catalog is assembled.
+    /// The Harness enforces containment when the run's catalog is assembled.
     ///
     /// # Examples
     ///

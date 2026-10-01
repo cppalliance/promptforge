@@ -1,7 +1,7 @@
-//! Deprecated `[workshop]` hosting settings retained so older boot
+//! Deprecated `[workshop]` serving settings retained so older boot
 //! configurations still parse.
 //!
-//! There is deliberately no `[workshop.gateway]` sub-table: the hosting
+//! There is deliberately no `[workshop.gateway]` sub-table: the
 //! gateway derives the workshop's client URL from its own
 //! `[server]` bind ([`ServerConfig::client_url`](super::ServerConfig::client_url))
 //! and reuses the same api_key, so no credential is duplicated and none can
@@ -15,7 +15,7 @@ fn default_workshop_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7910))
 }
 
-/// The deprecated `[workshop]` hosting section.
+/// The deprecated `[workshop]` serving section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]

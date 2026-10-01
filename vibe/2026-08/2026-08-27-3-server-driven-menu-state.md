@@ -82,7 +82,7 @@ All paths are relative to the repository root `c:\Users\Vinnie\cursor\promptforg
 - AGENTS.md manifest (paths only; each dispatch names the root file plus every file on the ancestor chain of the step's touched files): `AGENTS.md` (root), `crates/promptforge-ws-server/AGENTS.md`, `crates/promptforge-ws-server/ui/AGENTS.md`, `crates/promptforge-ws/AGENTS.md`. The gateway crate has no crate-level file; the root file governs it.
 - The server crate's binding rules, restated from its AGENTS.md: two-zone error policy (startup fails loudly; runtime degrades, never panics), one task owns each WebSocket, every pushed frame classified in the protocol module's delivery contract, module sizes gated by `crates/promptforge-ws-server/module-ceilings.toml` (a new module needs a ceiling entry in the same commit; growth past +30 lines needs the ceiling raised in the same commit with the reason in the message).
 - The UI's binding rules, restated from its AGENTS.md: one-way layer imports (`ui` -> `services` -> `base`), no module-level mutable shared state (shared state lives in a service class with a change emitter, constructed in `main.ts`), vendored code under `ui/src/chat/` is never edited - extend it only through its plugin hooks.
-- Server tests are in-process only: `Router::oneshot`, the spawn fixture, and the typed JSON WebSocket client in `tests/common`. UI tests run under the existing node test harness in `ui/test/`.
+- Server tests are in-process only: `Router::oneshot`, the spawn fixture, and the typed JSON WebSocket client in `tests/common`. UI tests run under the existing node test support in `ui/test/`.
 
 ## Terms
 

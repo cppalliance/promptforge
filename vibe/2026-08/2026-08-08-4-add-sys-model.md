@@ -1,6 +1,6 @@
 ---
 name: Add sys.model
-overview: Explicit-only PromptForge - no host model defaults; gateway env PROMPTFORGE_GATEWAY_URL + PROMPTFORGE_GATEWAY_KEY; sys.model from bindings; design principle documented.
+overview: Explicit-only PromptForge - no Harness model defaults; gateway env PROMPTFORGE_GATEWAY_URL + PROMPTFORGE_GATEWAY_KEY; sys.model from bindings; design principle documented.
 todos:
   - id: step-1-principle
     content: "Commit 1: design-core.md no-defaults principle + README pointer"
@@ -9,7 +9,7 @@ todos:
     content: "Commit 2: GatewayClient url+key only; rename env/config to GATEWAY_URL/KEY and server.key; delete DEFAULT_*; update call sites + tests"
     status: completed
   - id: step-3-require-bind
-    content: "Commit 3: model-facing sections require binding; Error::ModelRequired; kill host fallthrough"
+    content: "Commit 3: model-facing sections require binding; Error::ModelRequired; kill Harness-default fallthrough"
     status: completed
   - id: step-4-sys-model
     content: "Commit 4: enrich sys.model post-close + re-seal Lua; prologue negative test; fanout"
@@ -32,7 +32,7 @@ In [design-core.md](c:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-co
 
 **No defaults. Everything explicit. Implicit is the enemy of precision.**
 
-A prompt declares tools, models, context, thinking, and temperature. The host supplies credentials and the gateway URL, not silent capability choices. Accepting any model is still an explicit `models.need` / `models.always` with a capability sentence and constraints.
+A prompt declares tools, models, context, thinking, and temperature. The Host supplies credentials and the gateway URL, not silent capability choices. Accepting any model is still an explicit `models.need` / `models.always` with a capability sentence and constraints.
 
 One-sentence pointer from README env / models sections.
 
@@ -80,7 +80,7 @@ Local llama-server child `--api-key` stays (upstream flag name).
 ### Commit 3 - Require prompt binding
 
 - In `execute.rs` / `fanout.rs`: before a model turn, if `scopes.model` is `None` → `Error::ModelRequired { section: String }` (or equivalent). Display: lowercase noun phrase, e.g. `model binding required for section {section}` (rust-rulebook error style).
-- Remove README contract that omitting `models.use`/`always` keeps the host default.
+- Remove README contract that omitting `models.use`/`always` keeps the Harness default.
 - Fix tests/prompts that relied on fallthrough by adding `models.always` / `need` + catalog fixtures.
 
 **Falsifier for the definition of model-facing:** a section with whitespace-only prose should not require a binding (same as today's empty skip).

@@ -1,26 +1,26 @@
 -- Coroutine-protocol shim prelude for a scheduler-mode section VM.
 --
--- The host installs this after the host tables exist and before the shared
--- library replays. The chunk arguments are privileged captures, never
+-- The Engine installs this after the Engine globals exist and before the
+-- shared library replays. The chunk arguments are privileged captures, never
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
--- the host helper returning the hidden `var` data table as a plain deep
+-- the Engine helper returning the hidden `var` data table as a plain deep
 -- copy, `models`/`tools`/`compactors` are the section's namespace tables,
 -- passed in so the chunk never reads a global, `max_tool_iterations` is
 -- the run's resolved round cap for `models.loop`, `error_value` builds the
--- structured error table (`{ kind, message, ... }` under the host's shared
+-- structured error table (`{ kind, message, ... }` under the Engine's shared
 -- metatable, whose `__tostring` is `message`), `stash_failure` records a
--- block's raised value for the host before the guard re-raises it, and
+-- block's raised value for the Engine before the guard re-raises it, and
 -- `normalize_failure` turns a Rust callback's raised failure (mlua's
 -- opaque userdata) into the error table, passing every other value
 -- through unchanged, `enter_local_handler()` and `leave_local_handler()`
--- step the counter the host's `jump` reads, so `jump` refuses while a
+-- step the counter the Engine's `jump` reads, so `jump` refuses while a
 -- local tool's handler runs, and `cancel_requested()` reports whether the
 -- run's cancel flag is set: a failure caught under cancellation is the
 -- instruction hook's abort, which must unwind to the block guard, so every
 -- protected call below raises it again instead of returning it. The `tasks`
 -- namespace and the `fanout` shim live in their own chunks
--- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the host right
+-- (`__impl_tasks.lua`, `__impl_fanout.lua`), installed by the Engine right
 -- after this one over the failure helpers this chunk returns.
 local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
   error_value, stash_failure, normalize_failure, enter_local_handler,
@@ -28,15 +28,15 @@ local yield, var_snapshot, models, tools, compactors, max_tool_iterations,
 
 -- The base library's pcall and xpcall, captured before the replacements
 -- below are installed over the globals: the block guard needs the raw
--- failure value so the host's runtime-error mapping keeps its source.
+-- failure value so the Engine's runtime-error mapping keeps its source.
 local raw_pcall, raw_xpcall = pcall, xpcall
 
 -- math.type, captured at install for the same reason: the shim's type
 -- names must not move when author code rebinds `math`.
 local math_type = math.type
 
--- The host's name for a value's type, as the protocol parse reports it:
--- Lua folds integers and floats into "number", while the host names an
+-- The Engine's name for a value's type, as the protocol parse reports it:
+-- Lua folds integers and floats into "number", while the Engine names an
 -- integer "integer" and a float "number", so a shim-raised argument error
 -- reads exactly as the parse-raised one for the same value.
 local function host_type(value)
@@ -48,12 +48,12 @@ end
 -- gives exactly the message, and a caller that branches reads `kind` and
 -- the kind's fields. Level 0 suppresses the position prefix (a table never
 -- gets one, but a string fallback would), so a shim-raised error shows
--- exactly the host's message.
+-- exactly the Engine's message.
 local function raise(kind, fields)
   error(error_value(kind, fields), 0)
 end
 
--- The (ok, result) envelope's failure path. The host renders its typed
+-- The (ok, result) envelope's failure path. The Engine renders its typed
 -- error as the table already; a bare string (a hand-built envelope) is
 -- normalized to a `lua`-kind table so the shape holds without exception.
 local function fail(result)
@@ -62,7 +62,7 @@ local function fail(result)
 end
 
 -- pcall and xpcall, replacing the base library's over the globals so a
--- host callback that fails directly from Rust (`tools.add`, `models.get`,
+-- Engine function that fails directly from Rust (`tools.add`, `models.get`,
 -- a `sys` or `var` guard) reaches author code as the same error table a
 -- shim raise does, instead of mlua's opaque userdata that `err.kind`
 -- cannot index. Only a Rust-raised failure is rewritten; a string, an
@@ -218,7 +218,7 @@ local EMPTY_MODEL_REPLY = "empty model reply"
 -- Invokes the selected compactor on an overflow round with the reason tag.
 -- The shipped policy raises typed context exhaustion from Rust; the raise
 -- is normalized into the structured error table before re-raising, so the
--- kind reaches an author pcall and the host alike. A compactor that
+-- kind reaches an author pcall and the Engine alike. A compactor that
 -- returns instead of raising is the deferred replacement shape, which the
 -- active surface refuses. A failure under cancellation is raised raw.
 local function compact(compactor, reason)
@@ -236,7 +236,7 @@ end
 -- models.loop(handle?, messages, compactor?): the model-tool loop over an
 -- author-owned message list, driven here over `chat` and `tool_call`
 -- yields so every network wait inside it is an ordinary suspension. The
--- host installs this as models.loop. The leading handle is optional: a
+-- Engine installs this as models.loop. The leading handle is optional: a
 -- userdata first argument selects the handle's frozen binding, anything
 -- else is the messages argument (a wrong handle type is the protocol
 -- parse's call error, exactly as for models.infer). The messages pass
@@ -318,7 +318,7 @@ end
 -- store.*: every store operation is a leaf yield, answered by the driver
 -- against the sync VFS uniformly for all backends - no inline fast path,
 -- so interleaving behavior never depends on which backend serves the
--- mount. The host installs these onto the store table of section VMs and
+-- mount. The Engine installs these onto the store table of section VMs and
 -- the live H1 VM. `end` is a keyword, so the read bounds travel under
 -- bracket keys.
 local function store_request(store_op, fields)
@@ -329,19 +329,19 @@ local function store_request(store_op, fields)
   return result
 end
 
--- The block guard: the host runs every block coroutine through it so a
+-- The block guard: the Engine runs every block coroutine through it so a
 -- raised value is seen before mlua stringifies it. The raw `xpcall` is
 -- yieldable, so the block's shim yields pass straight through; a return
--- passes through unchanged; a failure is stashed for the host (which reads
+-- passes through unchanged; a failure is stashed for the Engine (which reads
 -- it back as the structured error when it is one of our tables) and
 -- re-raised as the same value, so mlua's rendering, the retained-error
 -- substitution, and the jump transfer marker all behave exactly as without
 -- the guard. The stash happens in the message handler, which runs at the
--- raise point with the failing frames still on the stack, so the host can
+-- raise point with the failing frames still on the stack, so the Engine can
 -- record the real traceback there; by the time the guard re-raises, the
 -- block's frames are unwound and mlua would see only the guard's own. The
 -- guard deliberately bypasses the normalizing `pcall`: a Rust callback's
--- failure must reach the host as mlua's own error so the runtime-error
+-- failure must reach the Engine as mlua's own error so the runtime-error
 -- mapping keeps its source.
 local function guard_handler(failure)
   stash_failure(failure)
@@ -391,7 +391,7 @@ end
 
 -- The section install passes the section's namespace tables; the live H1
 -- base install passes nil for both (H1's live models table exists only per
--- block, given the shim by the host's per-step wrap) and takes `infer` from
+-- block, given the shim by the Engine's per-step wrap) and takes `infer` from
 -- the return.
 if models then
   models.infer = infer

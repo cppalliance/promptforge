@@ -1,7 +1,7 @@
 //! Answer application: the one path every performed effect's answer takes
 //! back into the scheduler.
 //!
-//! The host hands back a raw [`EffectAnswer`] - a completion, a tool's own
+//! The Harness hands back a raw [`EffectAnswer`] - a completion, a tool's own
 //! output, a store outcome, a timer's firing - and knows nothing of what
 //! the parked chain asked for. `apply_answer` pairs the answer with the
 //! effect's [`Continuation`] and turns it into the chain's protocol
@@ -50,12 +50,12 @@ impl Scheduler {
     /// entry, turns the raw answer into the parked chain's protocol answer
     /// under the effect's continuation (emitting the round's events), and
     /// re-queues the chain. A timer's firing completes its slot and wakes
-    /// its waiter instead. A `Dropped` answer is the host giving the
+    /// its waiter instead. A `Dropped` answer is the Harness giving the
     /// effect up: the chain resumes with the cancelled error.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when no pending entry explains the id
-    /// (the caller has already ruled out an orphan, so the host answered
+    /// (the caller has already ruled out an orphan, so the Harness answered
     /// an effect the run never issued or answered one twice - which fails
     /// loudly), or when the answer's kind does not match the effect's.
     /// Returns [`Error::Determinism`] when a store answer reports a
@@ -204,7 +204,7 @@ impl Scheduler {
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
-    /// `Cancelled` without waking its owner. A host drops a live timer
+    /// `Cancelled` without waking its owner. The Harness drops a live timer
     /// only when it is cancelling the run, and that cancel tears the
     /// waiter down with every other chain.
     fn drop_timer(&mut self, effect: EffectId) {

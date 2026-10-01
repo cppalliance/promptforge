@@ -1,4 +1,4 @@
-Give your runs their files: a shared store, host folders beside it, and rules about what a run may change.
+Give your runs their files: a shared store, real directories beside it, and rules about what a run may change.
 
 You need this when your prompts read or write files, or several runs share a folder. A run reaches files only through one handle your program builds, and the handle checks every operation before any backend sees it. By the end of this page, you build that handle, gate it by mode, and log every file operation it lets through.
 
@@ -9,7 +9,7 @@ This page builds the handle those answers go through, so you decide which files 
 
 # Give a run its files
 
-You want your prompts to see a host folder and a store you control, shared by several runs. The run's set of virtual files, shared by every [section](crate#before-you-start) of a prompt, is the *store*.
+You want your prompts to see a real directory and a store you control, shared by several runs. The run's set of virtual files, shared by every [section](crate#before-you-start) of a prompt, is the *store*.
 
 Building a handle feels like setting up mount points on Unix: each backend serves the paths under its prefix. Unlike a real filesystem, every run's file work goes through this one handle, and the handle remembers which run touched which path. The handle is a [`VfsRef`], one of its mounts is the store, and it refuses file work from two runs that would race.
 
@@ -94,7 +94,7 @@ Share the one handle, never just one backend, because two handles over clones of
 
 A plain `acquire` access names files by their full virtual path, such as `/my/store/note.md`. A store view from `VfsRef::acquire_store`, and every `store.*` call in a prompt, names the same file relative to the store root, as `note.md`, so prompts never name your mount layout. A store path such as `/draft.md` fails with [`VfsError::InvalidPath`] and [`PathReason::Absolute`]. A path no mount covers returns [`VfsError::NotFound`], so mount `/` when every path should be served.
 
-You might expect the second run's write to the same host file to replace the first, as [`std::fs::write`] would. Instead, while the first run's scope is live, the second write fails with `VfsError::Conflict`, and the file keeps the first run's text.
+You might expect the second run's write to the same real file to replace the first, as [`std::fs::write`] would. Instead, while the first run's scope is live, the second write fails with `VfsError::Conflict`, and the file keeps the first run's text.
 
 Build one handle, mount your folders, declare one store, and let the handle refuse races between runs. Next, [Keep a run from changing files](#keep-a-run-from-changing-files) adds rules about what a run may change.
 
@@ -284,7 +284,7 @@ The watcher sees what the rules let through, as it happens, so keep it cheap. Ne
 [`Entry`] is one directory entry from [`Access::list`]: a name within its directory paired with its metadata. You read it when you walk a directory's listing. Both shipped backends return entries sorted by name, but a custom backend may not, so sort them yourself if order matters. It is `#[non_exhaustive]` with public fields and no constructor, so you read entries but cannot build one.
 
 - `Entry.name`: the entry's name within its directory, not a full path.
-- `Entry.stat`: the entry's [`Stat`]; the host backend takes it without following symlinks.
+- `Entry.stat`: the entry's [`Stat`]; the real-filesystem backend takes it without following symlinks.
 - `Entry.description`: an annotation column that both shipped backends leave `None`.
 
 ## ExecId
@@ -293,9 +293,9 @@ The watcher sees what the rules let through, as it happens, so keep it cheap. Ne
 
 ## HostBackend
 
-[`HostBackend`] serves host folders behind the virtual namespace, as in `.mount("/", HostBackend::rooted(&dir)?)`. [`HostBackend::rooted`] fails with `NotFound` when `dir` is absent and `NotADirectory` when it is not a directory, spelling the path as you gave it, so create the folder before building the backend. Writes, copies, and renames are failure-atomic, so a failed write leaves the old file whole. See [Give a run its files](#give-a-run-its-files).
+[`HostBackend`] serves real directories behind the virtual namespace, as in `.mount("/", HostBackend::rooted(&dir)?)`. [`HostBackend::rooted`] fails with `NotFound` when `dir` is absent and `NotADirectory` when it is not a directory, spelling the path as you gave it, so create the folder before building the backend. Writes, copies, and renames are failure-atomic, so a failed write leaves the old file whole. See [Give a run its files](#give-a-run-its-files).
 
-- [`HostBackend::identity`]: applies no containment, so virtual paths are host paths; on Windows, virtual `/C:/a/b` is host `C:\a\b`.
+- [`HostBackend::identity`]: applies no containment, so virtual paths are real paths; on Windows, virtual `/C:/a/b` is the real path `C:\a\b`.
 - `HostBackend::rooted`: checks every resolved path against the folder, denies a followed symlink that resolves outside it, and refuses removing or renaming the mounted root.
 - [`HostBackend::with_read_only`]: `true` makes every mutation fail with `PermissionDenied` naming the path; a new backend is writable.
 
@@ -333,7 +333,7 @@ The watcher sees what the rules let through, as it happens, so keep it cheap. Ne
 
 ## Stat
 
-[`Stat`] is the metadata for one path: its node kind, its size, and an optional mode and timestamps. You get one from [`Access::stat`] or `Entry.stat`. A backend that does not track a field reports `None`, so handle `None` for every optional field. The host backend stats a final-component symlink as the link itself, so a link to a directory reports `Symlink`. It is `#[non_exhaustive]` with public fields and no constructor.
+[`Stat`] is the metadata for one path: its node kind, its size, and an optional mode and timestamps. You get one from [`Access::stat`] or `Entry.stat`. A backend that does not track a field reports `None`, so handle `None` for every optional field. The real-filesystem backend stats a final-component symlink as the link itself, so a link to a directory reports `Symlink`. It is `#[non_exhaustive]` with public fields and no constructor.
 
 - `Stat.size`: in bytes; a directory reports 0 on the memory backend, which also leaves `mode`, `modified`, and `created` all `None`.
 
@@ -367,7 +367,7 @@ The watcher sees what the rules let through, as it happens, so keep it cheap. Ne
 
 ## FileType
 
-[`FileType`] names the node kind in a [`Stat`], with all seven POSIX kinds named rather than lumped together. Match `Stat.file_type` to tell files from directories. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm, because new kinds can arrive. The memory backend reports only `File` or `Directory`, so the other arms matter only for host folders.
+[`FileType`] names the node kind in a [`Stat`], with all seven POSIX kinds named rather than lumped together. Match `Stat.file_type` to tell files from directories. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm, because new kinds can arrive. The memory backend reports only `File` or `Directory`, so the other arms matter only for real directories.
 
 | Variant | Meaning |
 |---|---|

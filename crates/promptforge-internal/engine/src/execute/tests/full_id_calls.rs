@@ -39,9 +39,9 @@ fn full_id_prompt(slots: &str, lua: &str) -> Prompt {
     ))
 }
 
-/// Prepares `prompt` against a catalog of `tools`, as a host does, and
+/// Prepares `prompt` against a catalog of `tools`, as the Harness does, and
 /// builds the run state over the prepared context with the loop models
-/// pre-filled, beside a host holding the implementations.
+/// pre-filled, beside the Harness that holds the implementations.
 fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, RunHost) {
     let (catalog, table) = fixture_tools(tools);
     let (prepared, requirements) = Environment::new()

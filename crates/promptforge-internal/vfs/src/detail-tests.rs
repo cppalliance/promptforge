@@ -286,7 +286,7 @@ fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() -> Result<(), VfsError>
         .acquire(Origin::new("store view test"))
         .expect("the probe backend acquires");
     assert!(probe_access.exists("/host/secret.txt")?);
-    // ...and the host directory mounted beneath the store never saw it.
+    // ...and the `/host` directory mounted beneath the store never saw it.
     let outer = vfs
         .acquire(Origin::new("store view test"))
         .expect("the stock backend acquires");
@@ -461,7 +461,7 @@ fn acquire_store_is_a_scope_of_its_own() -> Result<(), VfsError> {
     let vfs = stock();
     let (_access, run_view) = chain(&vfs);
     run_view.write("claimed.md", b"run")?;
-    // A host view is a second scope: the live run's claim conflicts.
+    // The Harness's view is a second scope: the live run's claim conflicts.
     let host = vfs.acquire_store(Origin::new("acquire_store test"))?;
     assert!(matches!(
         host.write("claimed.md", b"host"),

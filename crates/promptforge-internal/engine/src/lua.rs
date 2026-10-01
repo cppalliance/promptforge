@@ -6,13 +6,13 @@
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
 //! files; and an every-Nth-instruction hook polls the run's cancel flag, so
-//! even an unbounded loop aborts promptly once the host cancels.
+//! even an unbounded loop aborts promptly once the Host cancels.
 //!
 //! The implementation sits in the `promptforge-lua` crate; this module is
 //! the crate-internal import surface for it.
 
 // The store operation behind `execute::perform_store_op`, the entry point
-// a host's store performer answers a `Store` effect through, and the
+// the Harness's store performer answers a `Store` effect through, and the
 // model-facing message renderer a store failure carries.
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaProgram, MessageRecord, ModelReport, OverflowReason,

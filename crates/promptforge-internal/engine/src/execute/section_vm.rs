@@ -1,9 +1,9 @@
-//! The engine's setup half: one section VM's lifecycle from host injection
+//! The Engine's setup half: one section VM's lifecycle from Engine injection
 //! through the captured alias bindings.
 //!
-//! Every driver of the shared engine - the walk's section entry and the
-//! fanout arm - runs the identical setup sequence: inject the host values,
-//! install the persistent host APIs, install the control globals, install
+//! Every section driver - the walk's section entry and the
+//! fanout arm - runs the identical setup sequence: inject the Engine values,
+//! install the persistent Engine globals, install the control globals, install
 //! the capability preludes, replay the shared library as the section's first
 //! chunk, then install the captured alias bindings (so a declared alias wins
 //! over a same-named shared global).
@@ -31,11 +31,11 @@ use crate::lua::{LuaProgram, SectionVm};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
-/// What a section VM is seeded with beyond the shared host contract.
+/// What a section VM is seeded with beyond the shared Engine values.
 ///
 /// Both fields install through the same serde bridge: `var` seeds the hidden
 /// data table behind the guarded `var` proxy, and `item` installs as the
-/// `item` global after the host APIs so [`SectionVm::replay_shared`] - whose
+/// `item` global after the Engine globals so [`SectionVm::replay_shared`] - whose
 /// top-level code may read `item` - sees it.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VmSeed<'a> {
@@ -69,7 +69,7 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
-    /// The chain's emitter: the persistent host APIs (`log`, `store`)
+    /// The chain's emitter: the persistent Engine globals (`log`, `store`)
     /// capture a clone, and the shared-library replay reports through it.
     pub(crate) emitter: &'a Emitter,
     /// The section name used in observations and error messages.
@@ -79,7 +79,7 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's resolved per-section tool-loop cap, captured by the
     /// `models.loop` shim as its round cap.
     pub(crate) max_tool_iterations: usize,
-    /// The run's host-state snapshot, when the host supplied one: its
+    /// The run's Host-state snapshot, when the Host supplied one: its
     /// presence gives the section VM the `ui()` global and the
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
     /// so every section VM serializes the one tree.
@@ -99,7 +99,7 @@ pub(crate) struct SectionVmSetup<'a> {
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
-/// The sequence is fixed and shared: host injection with the driver's
+/// The sequence is fixed and shared: Engine injection with the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
 /// seed includes one, the control surface
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
@@ -114,8 +114,8 @@ pub(crate) struct SectionVmSetup<'a> {
 /// own teardown boundary stays the one place a teardown happens.
 ///
 /// # Errors
-/// Returns the [`Error`] of whichever step failed: host injection, host API
-/// install, `item` install, control-global install, the prelude install (a
+/// Returns the [`Error`] of whichever step failed: Engine injection, Engine
+/// global install, `item` install, control-global install, the prelude install (a
 /// prelude that fails to load, or whose global collides), the shared
 /// replay, or the captured-binding install.
 pub(crate) fn setup_section_vm<L>(
@@ -126,7 +126,7 @@ pub(crate) fn setup_section_vm<L>(
 where
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
-    // The raw-model-id fallback reads its flag during host injection, so
+    // The raw-model-id fallback reads its flag during Engine injection, so
     // the snapshot's opt-in lands first.
     if setup.ui.is_some() {
         vm.allow_raw_model_ids();

@@ -1,8 +1,8 @@
-//! The host filesystem backend, stage 1 (thin).
+//! The real-filesystem backend, stage 1 (thin).
 //!
-//! [`HostBackend`] serves host-OS directories behind the virtual
+//! [`HostBackend`] serves real directories behind the virtual
 //! namespace over direct `std::fs` calls. Two constructors:
-//! [`HostBackend::identity`] (the virtual path IS the host path) and
+//! [`HostBackend::identity`] (the virtual path IS the real path) and
 //! [`HostBackend::rooted`] (chroot-style, with lexical plus
 //! canonicalize containment). Writes, copies, and renames are
 //! failure-atomic: a sibling temp file plus rename, so a failed
@@ -40,7 +40,7 @@ use resolve::{
 };
 
 /// Maps an I/O failure to the error kind the trait surface promises.
-/// Each `path` field holds the canonical path alone, so a host reading
+/// Each `path` field holds the canonical path alone, so a Harness reading
 /// the field per its documented contract gets a path, never the OS
 /// error's text; the kind carries the OS failure, and only
 /// `PermissionDenied` keeps the extra text in `reason`.
@@ -70,12 +70,12 @@ fn map_io(path: &str, err: &std::io::Error) -> VfsError {
     }
 }
 
-/// A host filesystem backend behind the virtual namespace.
+/// A real-filesystem backend behind the virtual namespace.
 ///
 /// Stage 1 (thin): direct `std::fs` operations, lexical plus
 /// canonicalize containment for [`HostBackend::rooted`], and
 /// failure-atomic writes, copies, and renames. `ExecId` attribution is
-/// accepted as a no-op: the host filesystem holds no per-identity
+/// accepted as a no-op: the real filesystem holds no per-identity
 /// state.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -85,8 +85,8 @@ pub struct HostBackend {
 }
 
 impl HostBackend {
-    /// A backend whose virtual paths ARE host paths: virtual
-    /// `/a/b` is host `/a/b` (on Windows, virtual `/C:/a/b` is host
+    /// A backend whose virtual paths ARE real paths: virtual
+    /// `/a/b` is real `/a/b` (on Windows, virtual `/C:/a/b` is real
     /// `C:\a\b`). No containment applies.
     #[must_use]
     pub fn identity() -> HostBackend {
@@ -127,7 +127,7 @@ impl HostBackend {
 
 impl Vfs for HostBackend {
     fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
-        // Attribution is accepted as a no-op: the host filesystem holds
+        // Attribution is accepted as a no-op: the real filesystem holds
         // no per-identity state, and the claims model above the backend
         // enforces conflicts.
         let _ = cx;
@@ -155,7 +155,7 @@ struct HostAccess {
 }
 
 impl HostAccess {
-    /// Resolves a canonical virtual path to its host path, applying
+    /// Resolves a canonical virtual path to its real path, applying
     /// containment in rooted mode.
     fn resolve(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
@@ -167,7 +167,7 @@ impl HostAccess {
         }
     }
 
-    /// Resolves a canonical virtual path to its host path without
+    /// Resolves a canonical virtual path to its real path without
     /// following a final-component link, applying containment to the
     /// parent in rooted mode.
     fn resolve_no_follow(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
@@ -180,7 +180,7 @@ impl HostAccess {
         }
     }
 
-    /// Translates a host path back to its virtual spelling.
+    /// Translates a real path back to its virtual spelling.
     fn to_virtual(&self, host: &Path) -> String {
         match &self.root {
             HostRoot::Identity => identity_to_virtual(host),
@@ -225,7 +225,7 @@ impl VfsAccess for HostAccess {
     }
 
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
-        // Seek, never materialize: the host can position directly.
+        // Seek, never materialize: a real file can position directly.
         let host = self.resolve(path)?;
         if host.is_dir() {
             return Err(VfsError::IsADirectory {

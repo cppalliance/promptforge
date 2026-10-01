@@ -32,8 +32,8 @@ use promptforge_model_client::detail::{message_content_value, message_raw_tool_c
 /// deferred compactor framework.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverflowReason {
-    /// The pre-dispatch estimate exceeds the model's context window; no
-    /// request left the host.
+    /// The pre-dispatch estimate exceeds the model's context window; the
+    /// check ran before any request was sent.
     Precheck,
     /// The provider rejected the request as too large for the model's
     /// context window.
@@ -195,8 +195,8 @@ pub fn is_context_overflow(status: u16, body: &str) -> bool {
 /// downcastable rather than flattened to text; the loop shim, which invokes
 /// the selected compactor on an overflow round, normalizes that raise into
 /// the structured error table before re-raising it, so the kind reaches
-/// author code and the host alike. The namespace installs with the host
-/// tables during host injection, beside `messages`.
+/// author code and the Engine alike. The namespace installs with the Engine
+/// globals during Engine injection, beside `messages`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the function or the global install fails.

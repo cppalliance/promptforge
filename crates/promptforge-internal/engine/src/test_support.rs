@@ -1,5 +1,5 @@
-//! The engine's test drivers: hosts for a [`Run`] for this crate's own
-//! suites and, under the `test-support` feature, for companion crates'.
+//! The Engine's test drivers: each plays the Harness for a [`Run`] in this
+//! crate's suites and, under the `test-support` feature, companion crates'.
 //!
 //! [`drive`] is the serial sans-IO driver: it steps a run on the calling
 //! thread and answers every effect the moment it is issued, through a
@@ -12,7 +12,7 @@
 //! (a struct of boxed async closures, one per kind) on the current tokio
 //! runtime, runs store operations on the blocking pool, sleeps timers on
 //! the timer wheel, and hands every event to the caller's sink. It is the
-//! host the engine's own suites drive.
+//! Harness for the Engine's own suites.
 //!
 //! [`RunHost`] bundles a suite's resources for one run - an observer, a
 //! client, a fixture tool table, a delta hook - and [`run_with_host`] is
@@ -26,7 +26,7 @@
 //! onto one, so the observation suites hold without rewriting their
 //! assertions. Everything else here - the raw-body capture, the null
 //! observer, the detail constants, the fixture tool table - is
-//! crate-internal test plumbing, not host API.
+//! crate-internal test plumbing, outside the facade API.
 
 use std::sync::Arc;
 
@@ -88,7 +88,7 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// through `perform` as it is issued, and returns the run's result with
 /// every event it reported, in order.
 ///
-/// The driver is the simplest correct host. After each `step` it answers
+/// The driver is the simplest correct Harness. After each `step` it answers
 /// the step's effects in issue order - each through `perform`, except a
 /// [`Effect::TaskEvents`] read, which it answers from the events it has
 /// collected so far (the step's own events are collected before its
@@ -96,7 +96,7 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// reported before the read) - and steps again. Once the run has decided
 /// its outcome ([`Run::decided`]), the effects it still issues are
 /// answered [`EffectAnswer::Dropped`] without reaching `perform`, as a
-/// host abandoning a cancelled run would answer them.
+/// Harness abandoning a cancelled run would answer them.
 ///
 /// `perform` is handed the effect's id beside the effect so a scripted
 /// performer can correlate answers however it likes; it must return an
@@ -172,7 +172,7 @@ pub fn drive(
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on the host ([`RunHost::tools`]). Capability activation
+/// implementations on `host` ([`RunHost::tools`]). Capability activation
 /// is the harness's and never happens here.
 ///
 /// An unsatisfiable prompt - a missing required capability or an unmet
@@ -194,7 +194,7 @@ pub async fn run_with_host(
 }
 
 /// Runs an already-prepared `prompt` under `ctx` with the resources
-/// `host` bundles, on the tokio driver: the host's
+/// `host` bundles, on the tokio driver: the bundle's
 /// [`performers`](RunHost::performers) perform the effects under the
 /// context's limits, and every event is replayed onto its observer and
 /// capture.

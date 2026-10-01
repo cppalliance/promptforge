@@ -98,7 +98,7 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// [`build_request_body`](super::build_request_body) returned it; the
 /// completion carries it back, so a run's debug capture records exactly
 /// what was sent. `on_delta` receives each
-/// [`StreamDelta`] as it is decoded, for a host that shows the reply as it
+/// [`StreamDelta`] as it is decoded, for a Host that shows the reply as it
 /// arrives; the completion holds the whole turn either way.
 ///
 /// `started` is the transport's clock reading from before it sent the

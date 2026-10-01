@@ -557,10 +557,10 @@ You are sitting beside a capable Rust developer who has 20 minutes and a task to
 
 Each pair below differs in exactly the thing it teaches. Write like the Yes line.
 
-- No: "[`Harness`] is the engine's production host, seen from outside the family."
+- No: "[`Harness`] is the Engine's only production caller, seen from outside the family."
   Yes: "[`Harness`] runs prompt sessions for your program."
 - No: "The live [`Session`] handle is what a client launches, sends input to, cancels, closes, subscribes to events and deltas through, and reads the completed run's output file from."
-  Yes: "A [`Session`] is one running prompt. You send it input, watch its events, and read its output when it finishes."
+  Yes: "A [`Session`] owns a sequence of runs. You send it input, watch its events, and read each run's output when the run finishes."
 - No: "[`Prompt::parse`] takes two arguments. `input`, a [`&str`](str), is the prompt file's full source text."
   Yes: "Pass the file's full text to [`Prompt::parse`], with a label for its parse events."
 - No: "Replay itself is not built yet."
@@ -623,13 +623,13 @@ The plan is the syllabus the user approves, so every sentence in it reads well t
 
 <plan-reader>
 
-A Rust developer writing a program that runs PromptForge prompts: a CLI, a server, or a test harness. They know traits, enums, `Arc`, `Result`, and async. They have never seen a PromptForge prompt.
+A Rust developer writing a program that runs PromptForge prompts: a CLI, a server, or a test suite. They know traits, enums, `Arc`, `Result`, and async. They have never seen a PromptForge prompt.
 
 </plan-reader>
 
 <plan-example>
 
-`greeter`, a small host that runs one prompt file. Each tour adds one idea: store answers, a model reply, a tool, cancelling, and an event log. Every answer is canned, so each example runs offline.
+`greeter`, a small Harness of your own that runs one prompt file. Each tour adds one idea: store answers, a model reply, a tool, cancelling, and an event log. Every answer is canned, so each example runs offline.
 
 </plan-example>
 
@@ -670,11 +670,11 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 - Diagram: none
 
 ### Tour: The complete program
-- How: How do the pieces from every tour fit into one host?
-- What if: What happens when the host drops an effect instead of answering it?
-- Why: Why does the host log a step's events before it performs the step's effects?
-- Example: the whole greeter host, every line visible.
-- Diagram: the host loop, from step to effects to resume and back.
+- How: How do the pieces from every tour fit into one Harness?
+- What if: What happens when the Harness drops an effect instead of answering it?
+- Why: Why does the Harness log a step's events before it performs the step's effects?
+- Example: the whole greeter Harness, every line visible.
+- Diagram: the Harness loop, from step to effects to resume and back.
 
 Owns:
 - item: promptforge::Prompt
@@ -697,7 +697,7 @@ One `## <Name>` record per item, in batch order. Every line starts with its labe
 
 - path: promptforge::RunLimits [code crates/promptforge/src/lib.rs:12]
 - signature: `pub struct RunLimits { /* private fields */ }` [code crates/promptforge/src/lib.rs:12]
-- use: A host builds one only to change a resource ceiling, then installs it with `RunContext::limits`. [code crates/example/src/context.rs:88-95]
+- use: The Harness builds one only to change a resource ceiling, then installs it with `RunContext::limits`. [code crates/example/src/context.rs:88-95]
 - meaning: The ceilings one run honors: model rounds per section, concurrent tasks, response bytes, Lua memory, Lua log checkpoints, and the model receive timeout. [comment crates/example/src/limits.rs:1-9]
 - default: `RunContext::new` installs `RunLimits::new`, whose values are safe as they are. [code crates/example/src/context.rs:40-52]
 - fails: Running out of Lua log checkpoints ends the run with `RunErrorKind::Quota`. [test crates/example/tests/limits.rs:30-58]
@@ -732,7 +732,7 @@ A curator's Output file holds two blocks, each tag alone on its line. `<brief-pa
 - Concept: A run never reaches outside itself; whenever it needs outside work, it stops and asks you.
 - Claims:
   1. `Prompt::parse` turns the file's text into a `Prompt` that many runs can share. (why: parse once, run often)
-  2. `Run::step` returns the effects to perform and the events to log. (why: this is the loop every host writes)
+  2. `Run::step` returns the effects to perform and the events to log. (why: every Harness is built around this loop)
 - Misconception: You might expect `Run::step` to wait while a model thinks. Instead, it returns at once with the work, and the waiting happens in your code.
 - Takeaway: A run asks, and you answer.
 - Next: Answer a model
@@ -746,7 +746,7 @@ A curator's Output file holds two blocks, each tag alone on its line. `<brief-pa
 - Fails: a run that uses up its Lua log checkpoints ends with `RunErrorKind::Quota`.
 - Then: raise `RunLimits::lua_log_events`, or fix the prompt.
 - Claims:
-  1. `RunContext::new` installs safe defaults, so most hosts never build one. (why: leave it alone until a run hits a ceiling)
+  1. `RunContext::new` installs safe defaults, so a Harness rarely builds one. (why: leave it alone until a run hits a ceiling)
 - Members:
   - `RunLimits::max_tool_iterations`: caps model rounds in one section's tool loop; a prompt's `max_tool_iterations:` overrides it.
 - Tour: none

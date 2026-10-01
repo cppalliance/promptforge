@@ -238,7 +238,7 @@ SPA side (7 points):
 **SPA module-scope state:** `zones.ts` and `workshop-panel.ts` hold Maps/Sets at module scope, invisible to services. Move into `ZoneStateService` and `TreeStateService` on the existing Emitter pattern.
 
 - Modules and interfaces: Server splits into 8 crates across 4 tiers. SPA splits into ~14 feature directories. Three SPA registries (panel, menu/command, service) mirror the server's `workshop-registry`. Each lazy directory exports `register()`.
-- File and public API changes: `app.rs` shrinks from composition root to registry host. `main.ts` shrinks from 230 lines of hand-wiring to registry setup + lazy thunks. 8 oversized Rust files split during crate extraction. `window-menu.ts` splits into 3 registry files + per-directory registrations.
+- File and public API changes: `app.rs` shrinks from composition root to registry owner. `main.ts` shrinks from 230 lines of hand-wiring to registry setup + lazy thunks. 8 oversized Rust files split during crate extraction. `window-menu.ts` splits into 3 registry files + per-directory registrations.
 - Data, persistence, failure, security, and privacy constraints: Wire protocol unchanged. Layout persistence JSON unchanged (dockview serialization). `workshop.toml` config unchanged. CSP, cross-site guard, and jailed workspace unchanged. No new persistence, no new network surface.
 
 ### AGENTS.md guard rails

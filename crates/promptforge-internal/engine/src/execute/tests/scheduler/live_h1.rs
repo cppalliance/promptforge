@@ -11,7 +11,7 @@ fn h1_context(prompt: &Prompt) -> (RunState, RunHost) {
     h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
-/// Builds the H1 run context and its observing host on the given store and
+/// Builds the H1 run context and its observing Harness on the given store and
 /// observer, so a pass test can inspect the store's contents and the
 /// observation stream afterward. The context's model bindings are filled the
 /// way prepare's trivial fill does: every declared role bound to the test

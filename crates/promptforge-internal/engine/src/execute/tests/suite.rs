@@ -3,7 +3,7 @@
 //! without a live gateway. Split by domain - parsing contracts, section
 //! execution, fanout, control flow, the args/argv and lazy-prose surfaces,
 //! an author's own `_G` metatable, and the prepare pass - over shared
-//! harness code in [`support`]. Its
+//! fixture support in [`support`]. Its
 //! cases reach engine-only items (the test drivers and recorders, the store
 //! facade, the parser's Lua programs), so they run here rather than
 //! against the `promptforge` facade, whose own suite holds the rest.

@@ -19,7 +19,7 @@ use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::{Origin, perform_store_op};
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
-/// A [`RunContext`] for the run `name` under fixed host inputs: no fixture
+/// A [`RunContext`] for the run `name` under fixed Harness inputs: no fixture
 /// here asserts on the nonce or `sys.when`.
 pub(super) fn context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
@@ -74,7 +74,7 @@ pub(super) fn run_activated(
 
 /// Drives `run` to its result, answering [`Effect::Store`] through
 /// [`perform_store_op`] and panicking on any other effect, which names a
-/// fixture that issues something this suite does not host.
+/// fixture that issues something this suite does not answer.
 fn drive_store_only(mut run: Run) -> RunResult {
     loop {
         match run.step() {

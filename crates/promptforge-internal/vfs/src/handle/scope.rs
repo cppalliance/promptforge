@@ -29,7 +29,7 @@ pub(crate) struct Scope {
     /// scope lock would deadlock against).
     pub(super) live: AtomicUsize,
     /// Set when the run that owns the scope ends: the scope has ended
-    /// however many accesses a host still holds. Separate from `live`
+    /// however many accesses the Harness still holds. Separate from `live`
     /// so a later release still balances the count.
     closed: AtomicBool,
     /// Per-identity state, behind the scope's own lock.

@@ -11,7 +11,7 @@
 //! subsystem handle; this module reaches it through the registry and opens
 //! every session through it. Everything the harness knows about the server
 //! arrives as data pushed through its public API ([`bindings`]): the
-//! gateway endpoint and bearer, the chat-capable catalog, and the host
+//! gateway endpoint and bearer, the chat-capable catalog, and the Host
 //! snapshot (the menu's selection and the workspace's granted roots).
 //! Status-bar reporting stays in the server (`status`): a per-session
 //! reporter derives it from the session's events, deltas, and error reports.
@@ -48,7 +48,7 @@ const HARNESS_STATE_DIR: &str = "harness";
 
 /// The harness every agent session runs in, built for `config` with the
 /// server's current state already pushed through its public API: the
-/// gateway endpoint and bearer, the chat catalog, and the host snapshot,
+/// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
 /// each read through `registry` from the subsystems registered before it.
 /// The composition root registers the returned handle and the forwarder
 /// task ([`register_tasks`]) that keeps the bindings current from the
@@ -120,7 +120,7 @@ impl AgentSessions {
             .map_or_else(Vec::new, |harness| harness.discover())
     }
 
-    /// Pushes the server's current gateway, catalog, and host state into
+    /// Pushes the server's current gateway, catalog, and Host state into
     /// the harness, so the next run the harness prepares reads them.
     pub(crate) fn sync_bindings(&self) {
         if let Some(harness) = self.harness() {

@@ -74,7 +74,7 @@ fn test_tools() -> ToolSet {
     )
 }
 
-/// Builds a section VM through the real setup path: construction, host
+/// Builds a section VM through the real setup path: construction, Engine
 /// injection, the control surface with the yield shims, the shared
 /// replay, and the captured alias bindings.
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {

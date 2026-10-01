@@ -38,7 +38,7 @@ pub enum StoreOutcome {
 /// binding's declared [`ToolOutputKind`] so the envelope resumes the right
 /// Lua shape: a plain binding's text resumes as a Lua string, a structured
 /// binding's parsed JSON resumes as a Lua table through the serde boundary.
-/// The host performs the one conversion.
+/// The Engine performs the one conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallOutcome {
     /// A plain binding's output text, resumed as a Lua string - every

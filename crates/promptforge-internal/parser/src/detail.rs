@@ -1,8 +1,8 @@
-//! Operations on the parser's host-visible types that only the engine
-//! performs.
+//! Operations on the parser's facade-visible types that only
+//! `promptforge-engine` performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host.
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it.
 
 use crate::{
     Block, Error, Frontmatter, LuaProgram, MaxToolIterations, ParseError, Prompt, Section,

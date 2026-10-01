@@ -1,5 +1,5 @@
 // Dictation on the agent session's chat box (src/parts/agent/agent-session-view.ts
-// hosting src/parts/chatbox/chat-box.ts and mounting src/parts/stt/stt.ts),
+// embedding src/parts/chatbox/chat-box.ts and mounting src/parts/stt/stt.ts),
 // driven through the real AgentSessionService over a scripted wire,
 // canonical Realtime events, production capture, and a recording status
 // sink in jsdom. The mic button is the box's: its click reaches
@@ -98,7 +98,7 @@ const bundle = await esbuild.build({
 });
 
 // pretendToBeVisual supplies the requestAnimationFrame ProseMirror
-// schedules with; the prompt input's editor mounts in every harness.
+// schedules with; the prompt input's editor mounts in every test setup.
 const { window } = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
   pretendToBeVisual: true,

@@ -81,7 +81,7 @@ After converting the sys JSON to a Lua table in `inject_host`, attach a metatabl
 - `__index` - if the key is absent from the real table, raise a Lua error naming the missing key (e.g. `unknown sys field 'bogus'`). Present keys still resolve normally.
 - `__newindex` - reject every write (`sys` is runtime metadata, not author-writable).
 
-Implementation detail: keep the real key/value pairs on the table (or on a private store table the metatable closes over). Prefer a private data table + empty proxy if that keeps `pairs(sys)` from seeing internal machinery; otherwise a metatable on the populated table with `__index` only for misses is enough. Do not allow authors to replace the metatable after injection if `setmetatable` is already stripped by hardening - confirm and keep host `raw_set` of the sealed table.
+Implementation detail: keep the real key/value pairs on the table (or on a private store table the metatable closes over). Prefer a private data table + empty proxy if that keeps `pairs(sys)` from seeing internal machinery; otherwise a metatable on the populated table with `__index` only for misses is enough. Do not allow authors to replace the metatable after injection if `setmetatable` is already stripped by hardening - confirm and keep the Engine's `raw_set` of the sealed table.
 
 ### Tests (required in the same change)
 
@@ -100,7 +100,7 @@ Per the rust rulebook: new behavior ships with tests in the same commit.
 
 ### Docs
 
-- README Substitution / Lua host globals: note that Lua `sys` only exposes the keys the runtime injected, and unknown reads or any writes raise.
+- README Substitution / Engine globals: note that Lua `sys` only exposes the keys the runtime injected, and unknown reads or any writes raise.
 - Fix the README gloss for `sys.now`: it is refreshed at each section start, not a build-time stamp.
 - design-core.md one-line note if it describes `sys` access.
 

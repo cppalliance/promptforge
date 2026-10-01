@@ -8,7 +8,7 @@ You need this when an agent must read your program's files, or when you want to 
 
 # Before you start
 
-Every example on this page is code from `desk`, a small host program that embeds the harness and runs agents for one operator.
+Every example on this page is code from `desk`, a small Host program that embeds the Harness and runs agents for one operator.
 
 A prompt keeps its working files in a *store*. The store is the set of files a session reads and writes. The prompt's Lua code calls `store.read` and `store.write` on relative paths such as `notes.md`. Every *section* of the prompt shares the same files, and the files stay after the run ends.
 
@@ -249,7 +249,7 @@ The harness's own file work, labeled `input: <path>` before the run and `output:
 
 `Access` has no `Clone`, so each `acquire` gives you exactly one `Access`, and dropping it ends its scope and its claims; keep each one short.
 
-You might expect a host write to wait for the run's access, the way a `Mutex` would. Instead, a store operation fails at once with `VfsError::Conflict`, so retry only after the other access drops.
+You might expect a Host write to wait for the run's access, the way a `Mutex` would. Instead, a store operation fails at once with `VfsError::Conflict`, so retry only after the other access drops.
 
 The policy decides, the sink watches, `Origin` labels, and claims catch overlaps. The [Reference](#reference) covers only `Origin`, [`VfsError`], and [`VfsRef`], the three types this module exports. For [`Access`](promptforge::vfs::Access), `Policy`, `Verdict`, `Op`, and `OpEvent`, see `promptforge::vfs`; `Access` lists the operations the `VfsError` table names, such as `str_replace`, `read_range`, and `remove` with its `recursive` flag.
 

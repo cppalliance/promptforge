@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// A nonce over a random seed, the way a production host mints one
+/// A nonce over a random seed, the way the Harness mints one
 /// through `from_seed` with its own CSPRNG draw.
 fn fresh() -> GuardNonce {
     GuardNonce::from_seed(rand::random())
@@ -30,7 +30,7 @@ fn parts(out: &str) -> (String, String) {
 
 #[test]
 fn a_seeded_nonce_is_a_function_of_its_seed_alone() {
-    // The engine derives the run nonce from the host's seed, so a replayed
+    // The Engine derives the run nonce from the Harness's seed, so a replayed
     // run wraps identically; a different seed is a different nonce, and
     // the rendering keeps the 32-hex-digit shape `neutralize` relies on.
     let first = GuardNonce::from_seed(7);
@@ -196,7 +196,7 @@ fn empty_content_still_balanced() {
 fn one_nonce_wraps_every_envelope_with_identical_tags() {
     // One nonce per run: every wrap in the run shares it, so identical
     // content produces a byte-identical envelope (cache prefixes, snapshot
-    // tests) while the host's random seed keeps the value unguessable across runs.
+    // tests) while the Harness's random seed keeps the value unguessable across runs.
     let nonce = fresh();
     let tag = nonce.as_str();
     assert_eq!(tag.len(), 32, "nonce must be 32 hex chars, got {tag}");

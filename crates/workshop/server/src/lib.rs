@@ -37,12 +37,9 @@
 //! - One task owns each socket: a single `select!` loop reads inbound
 //!   frames and writes every outbound frame itself - no outbox channel,
 //!   no writer task. Agent sessions are the documented carve-out: they
-//!   outlive sockets on purpose, and the harness keeps their table.
-//! - The harness reads the server's state as data pushed through its
-//!   public API (the gateway binding, the chat catalog, the host
-//!   snapshot); the server never hands it a bus, a registry, or a
-//!   callback into itself. Status-bar reporting for a session is derived
-//!   in the server from the session's events, deltas, and error reports.
+//!   outlive sockets on purpose.
+//! - Status-bar reporting for a session is derived in the server from the
+//!   session's events, deltas, and error reports.
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
@@ -51,9 +48,8 @@
 //!   `/v1/realtime` applies a stricter same-origin check that requires a
 //!   browser `Origin` to match the request's own authority. The
 //!   cross-site guard stays the security boundary.
-//! - A dying input wait is an outcome, never silence: the harness's wait
-//!   registry pushes a cancelled frame for every unresolved wait it
-//!   drops, and the agent socket renders it as `input_cancelled`.
+//! - Every unresolved wait that is dropped yields a cancelled frame,
+//!   which the agent socket renders as `input_cancelled`.
 
 mod agents;
 mod app;

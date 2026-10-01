@@ -2,7 +2,7 @@ name: whisper shared libraries
 
 # Builds one runtime-loadable whisper.cpp bundle per supported desktop
 # platform. The archives contain libwhisper plus every sibling ggml runtime
-# library it needs, so PromptForge hosts need no compiler or native SDK.
+# library it needs, so PromptForge machines need no compiler or native SDK.
 on:
   workflow_dispatch:
     inputs:

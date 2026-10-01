@@ -1,11 +1,11 @@
 //! The engine's event vocabulary: everything a run reports, as values.
 //!
 //! An [`Event`] is one thing that happened during a run, returned to the
-//! host from `Run::step` beside the effects the run wants performed. It is
+//! Harness from `Run::step` beside the effects the run wants performed. It is
 //! the one report-only vocabulary: lifecycle boundaries, content the model,
 //! tools, and user produced, and the opt-in debug capture, in one
 //! serializable enum. The engine emits through an
-//! [`Emitter`](crate::emitter::Emitter), the host appends to its log, and
+//! [`Emitter`](crate::emitter::Emitter), the Harness appends to its log, and
 //! nothing is ever read back into the engine by this path: recording every
 //! event or dropping them all leaves a run's outputs, errors, and ordering
 //! unchanged. The payload-free lifecycle variants have named constructors
@@ -14,8 +14,8 @@
 //! Every variant includes three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
 //! or agent name), and `provenance` (the [`Provenance`] replay key: the
-//! nearest enclosing task and the item's position within it). A host writes
-//! `task_id` and `task_seq` for every record from `provenance` alone,
+//! nearest enclosing task and the item's position within it). The Harness
+//! writes `task_id` and `task_seq` for every record from `provenance` alone,
 //! without inspecting the payload.
 //!
 //! # Sensitivity
@@ -25,8 +25,8 @@
 //! `ModelMetadataDegraded`, whose message may quote values from a
 //! backend's response. Content variants hold model-, tool-, or
 //! user-authored text; task variants hold the author's spawn seeds; debug
-//! variants hold the verbatim request and response bodies. A host that
-//! persists or forwards events owns treating all of it as untrusted.
+//! variants hold the verbatim request and response bodies. A Harness or
+//! Host that persists or forwards events must treat all of it as untrusted.
 //!
 //! # Serialized form
 //! One event serializes to one JSON object tagged by `kind` (the variant
@@ -139,7 +139,7 @@ macro_rules! events {
 /// ([`Infer`](Self::Infer)).
 ///
 /// The default is `chat`, so an older log written before the field existed
-/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a host
+/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a Host
 /// matches the two known origins and keeps a wildcard for a future one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,7 +149,7 @@ pub enum ReplyOrigin {
     #[default]
     Chat,
     /// A programmatic inference round (`models.infer`): the reply is a
-    /// model result the host may treat apart from the conversation.
+    /// model result the Host may treat apart from the conversation.
     Infer,
 }
 
@@ -289,7 +289,7 @@ events! {
         // Tasks.
         /// A task chain was started by `tasks.spawn`, by the `fanout` shim
         /// for each of its arms, or by the model's `task` tool. The payload
-        /// is the task's spawn seeds: everything a host needs to start the
+        /// is the task's spawn seeds: everything the Harness needs to start the
         /// same chain again under the same id. Reported under the spawning
         /// section.
         TaskStarted {
@@ -369,7 +369,7 @@ events! {
             model: String,
             /// Everything the call measured, when anything reported.
             metrics: Option<CallMetrics>,
-            /// The provenance a host inspects to distinguish an inference
+            /// The provenance a Host inspects to distinguish an inference
             /// round (`infer`) from a user-facing chat turn (`chat`).
             /// Defaults to `chat` when an older log carries no `origin`.
             #[serde(default)]

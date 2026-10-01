@@ -67,7 +67,7 @@ pub(crate) struct SpeechCatalogModelInfo {
     kind: &'static str,
 }
 
-/// Bearer-authed catalog of configured models for host bind.
+/// Bearer-authed catalog of configured models for catalog bind.
 pub(crate) async fn list_models(
     State(state): State<AppState>,
     _caller: AuthedCaller,

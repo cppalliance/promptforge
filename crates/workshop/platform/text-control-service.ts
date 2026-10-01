@@ -1,5 +1,5 @@
 // The text-control service: one undo/redo/select-all surface over every
-// text-hosting widget. Each widget registers an adapter rooted at its DOM
+// text-editing widget. Each widget registers an adapter rooted at its DOM
 // subtree (the CodeMirror editor surface, the agent's ProseMirror prompt,
 // future Run-panel boxes); the service tracks which root contains focus
 // and routes the edit commands to that adapter. When no adapter claims
@@ -24,7 +24,7 @@ import type { ContextKey, ContextKeyService } from "./context-key-service";
 import { createServiceToken, getService, registerService } from "./service-registry";
 
 /**
- * A text-hosting widget's edit surface. `kind` names the widget family
+ * A text-editing widget's edit surface. `kind` names the widget family
  * ("codemirror", "prosemirror"); editorTextFocus follows the codemirror
  * kind. canUndo/canRedo report history depth so a command on an empty
  * stack falls back to execCommand instead of no-op-ing.
@@ -40,7 +40,7 @@ export interface TextControl {
 
 /** The native text inputs and textareas: what inputFocus means. */
 function isTextInput(element: Element | null): element is HTMLElement {
-  // The constructor globals are probed: a partial-DOM host (a jsdom test
+  // The constructor globals are probed: a partial-DOM environment (a jsdom test
   // shimming only the keys it needs) may lack them.
   if (typeof HTMLElement === "undefined" || !(element instanceof HTMLElement)) {
     return false;
@@ -79,7 +79,7 @@ function isEditable(element: Element | null): element is HTMLElement {
   );
 }
 
-/** The page's document, or null where none exists (a DOM-free host). */
+/** The page's document, or null where none exists (a DOM-free environment). */
 function defaultDocument(): Document | null {
   return typeof globalThis.document === "undefined" ? null : globalThis.document;
 }

@@ -8,7 +8,7 @@ This page stops your program's own async work, such as the loop that reads a ses
 
 # Stop work on Ctrl-C
 
-`desk` is the host you built on the main page, meaning your own program that launches agents and relays what they say. It runs the `chat` agent for one person, and its loop reads the session's events. When the operator presses Ctrl-C, dropping the loop's future could stop it halfway through handling an event. You want a flag you set from one task, which the loop checks at points it chooses. That flag is a [`CancelHandle`].
+`desk` is the Host you built on the main page, meaning your own program that launches agents and relays what they say. It runs the `chat` agent for one person, and its loop reads the session's events. When the operator presses Ctrl-C, dropping the loop's future could stop it halfway through handling an event. You want a flag you set from one task, which the loop checks at points it chooses. That flag is a [`CancelHandle`].
 
 A cancel handle feels like a shared [`Arc<AtomicBool>`](std::sync::atomic::AtomicBool) stop flag that your loop checks. Unlike a bare flag, you can also await it, and code deep inside the work can find it without you passing it down.
 

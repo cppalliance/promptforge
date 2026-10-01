@@ -36,7 +36,7 @@ const EFFECT_FIRST: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
     ```lua\nreturn 'done'\n```\n";
 
 /// Prepares `md` against the echo fixture's catalog, the test model, and
-/// `preludes`, as a host does, and starts a run over the prepared context.
+/// `preludes`, as the Harness does, and starts a run over the prepared context.
 fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Run {
     let prompt = parse(md);
     let (catalog, _table) = fixture_tools(&[Arc::new(EchoTool) as Arc<dyn TestTool>]);

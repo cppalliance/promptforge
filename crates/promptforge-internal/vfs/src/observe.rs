@@ -34,7 +34,7 @@ pub struct Origin {
 }
 
 impl Origin {
-    /// Stamps the Rust call site via [`Location::caller`]: host code and
+    /// Stamps the Rust call site via [`Location::caller`]: Harness code and
     /// tests get their position for free. Use the most specific label
     /// available - a section name for a chain, a tool id for a tool, a
     /// fixture name for a test - never a generic label when a specific

@@ -12,7 +12,7 @@
 //! with nothing deployed yields an empty list. Cataloguing what Foundry
 //! offers is anonymous, so the descriptor leaves `env_vars` empty.
 //!
-//! Two filters keep the response to the models Azure hosts itself:
+//! Two filters keep the response to the models Azure serves itself:
 //! `Labels=latest` drops superseded versions and
 //! `AzureOffers=standard-paygo` drops the mirrored HuggingFace registry,
 //! the bulk of the 15k-row unfiltered catalog. Ordering is by name, not
@@ -56,7 +56,7 @@ const MODELS_PATH: &str = "/asset-gallery/v1.0/models";
 /// so this bounds a full fetch to a handful of pages.
 const PAGE_SIZE: u32 = 100;
 
-/// The offer label marking a model Azure hosts and bills itself, as
+/// The offer label marking a model Azure serves and bills itself, as
 /// opposed to a mirrored registry entry that is merely listed.
 const HOSTED_OFFER: &str = "standard-paygo";
 

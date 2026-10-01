@@ -38,14 +38,14 @@ impl std::error::Error for SharedSource {
     }
 }
 
-/// The crate's internal error type, spanning sandbox construction, host
-/// bridging, capability binding, and Lua compile/runtime failures.
+/// The crate's internal error type, spanning sandbox construction, Engine
+/// value bridging, capability binding, and Lua compile/runtime failures.
 ///
 /// Public only so `promptforge-engine` can convert it back onto its own
 /// internal type variant-for-variant; the facade does not re-export it.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A section's Lua phase failed a host contract or hit a poisoned lock: a
+    /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
@@ -56,7 +56,7 @@ pub enum Error {
     #[error("{0}")]
     Lua(String),
 
-    /// A section's Lua phase failed at runtime or while bridging host values,
+    /// A section's Lua phase failed at runtime or while bridging Engine values,
     /// retaining the originating `mlua` error as the private `#[source]` cause
     /// alongside the mapped prompt-location message.
     ///
@@ -95,8 +95,8 @@ pub enum Error {
         source: BoxedSource,
     },
 
-    /// A Lua host resource quota (log events, log bytes, or instructions) was
-    /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
+    /// An Engine quota on Lua (log events, log bytes, or instructions) was
+    /// exhausted. A stable typed error rather than a bare `Lua(String)` so the Host
     /// can distinguish quota exhaustion from an authoring error.
     #[error("lua {resource} quota exceeded")]
     LuaQuota {
@@ -108,7 +108,7 @@ pub enum Error {
     /// overflowed the context window (the pre-dispatch precheck or a
     /// provider rejection) and the policy - `compactors.fail`, the only
     /// shipped one - does not compact. A stable typed error rather than a
-    /// bare [`Error::Lua`] so hosts and `pcall` sites can distinguish
+    /// bare [`Error::Lua`] so the Host and `pcall` sites can distinguish
     /// context exhaustion from an authoring error.
     #[error("context exhausted: {reason}")]
     ContextExhausted {
@@ -116,7 +116,7 @@ pub enum Error {
         reason: crate::compactors::OverflowReason,
     },
 
-    /// The host cancelled the run (for example Ctrl-C during fanout).
+    /// The Host cancelled the run (for example Ctrl-C during fanout).
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
@@ -162,7 +162,7 @@ pub enum Error {
     Raised(crate::error_value::Raised),
 }
 
-/// Stable messages emitted by Lua host-quota refusals.
+/// Stable messages emitted by Lua Engine-quota refusals.
 ///
 /// Kept as constants so [`crate`] emits them and the runtime-error boundary
 /// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].

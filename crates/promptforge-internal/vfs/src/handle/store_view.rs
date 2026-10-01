@@ -187,7 +187,7 @@ impl Access {
         };
         // One mount - the store's own - behind a fresh router:
         // operations are confined to the store mount, so a store at
-        // `/` never reaches a host directory mounted beneath it.
+        // `/` never reaches a real directory mounted beneath it.
         let mut mounts = Mounts::new();
         mounts.insert(
             store.root.to_buf(),

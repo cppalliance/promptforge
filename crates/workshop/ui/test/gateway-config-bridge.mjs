@@ -1,6 +1,6 @@
 // Unit test for the Gateway Config panel's workshop side: the
 // window-level postMessage bridge (src/parts/gateway/gateway-config-bridge.ts) and
-// the iframe host panel (src/parts/gateway/gateway-config-panel.ts).
+// the panel that embeds the iframe (src/parts/gateway/gateway-config-panel.ts).
 // Bundles the TS modules with esbuild and drives them in jsdom. Covers:
 // origin pinning (the iframe is proxied same-origin, so a message from
 // any foreign origin - the gateway's own port included - is ignored and
@@ -182,7 +182,7 @@ dispatch({ type: "pf-bridge-ready" });
 await flush();
 check("a disposed bridge answers nothing", replies.length === repliesBefore);
 
-// --- The panel hosts the iframe same-origin through the workshop proxy ----------
+// --- The panel embeds the iframe same-origin through the workshop proxy ---------
 
 {
   const panel = new GatewayConfigPanel({

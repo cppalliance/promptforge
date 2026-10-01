@@ -176,10 +176,10 @@ fn defined_globals(capability: &CapabilityId, env: &Table) -> Result<BTreeMap<St
 /// Fails when `name` is already taken: by an earlier prelude, a
 /// frontmatter alias, a reserved name, or a name bound in `_G`.
 ///
-/// The reserved check covers the host globals that a raw `_G` read does
+/// The reserved check covers the Engine globals that a raw `_G` read does
 /// not find on every VM (`ui` and `item` bind only on some, and the `_G`
 /// guard serves `argv` outside H1 and `prose`), so whether a prelude
-/// installs does not depend on the host or the section.
+/// installs does not depend on the Host or the section.
 fn check_collision(
     globals: &Table,
     capability: &CapabilityId,

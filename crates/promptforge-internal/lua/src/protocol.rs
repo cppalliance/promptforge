@@ -1,13 +1,13 @@
 //! The coroutine protocol: validated request and answer types for the
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
-//! A suspending host call (`models.infer(handle?, prompt)`, `call`,
+//! A suspending Engine call (`models.infer(handle?, prompt)`, `call`,
 //! `tasks.spawn`, `fanout`, `tools.call`, `store.*`, and
 //! the `chat` and `tool_call` rounds the `models.loop` shim yields on the
 //! author's behalf) is a Lua-side shim that yields a request table; the driver validates the
 //! yield into a [`Request`], dispatches it, and resumes the coroutine with
 //! the `(ok, result)` envelope rendered from an [`Answer`]. The two enums
-//! are the audit surface: what a script can cause the host to do is one
+//! are the audit surface: what a script can cause the Engine to do is one
 //! short read, and each variant's fields are the compiler-checked
 //! per-message contract.
 //!

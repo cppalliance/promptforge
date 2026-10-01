@@ -117,7 +117,7 @@ pub trait VfsAccess: Send {
 
     /// Reads `len` bytes starting at byte `offset`.
     ///
-    /// Default: read whole, slice. Backends that can seek (host
+    /// Default: read whole, slice. Backends that can seek (real
     /// directory, SQLite) override and never materialize the file.
     /// The handle's line-based ranges are built on this.
     ///
@@ -386,8 +386,8 @@ pub enum Verdict {
 }
 
 /// One policy per VfsRef, consulted by Access on every operation,
-/// before the claims check. Dynamic through shared state: the host
-/// or UI holds the same Arc and changes behavior mid-run.
+/// before the claims check. Dynamic through shared state: the Host
+/// or its UI holds the same Arc and changes behavior mid-run.
 pub trait Policy: Send {
     /// Decides whether `op` on `path` may proceed.
     fn check(&self, op: Op, path: &VfsPath) -> Verdict;

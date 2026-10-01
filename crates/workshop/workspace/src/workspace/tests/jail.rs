@@ -305,7 +305,7 @@ fn a_unc_spelling_never_escapes_the_grants() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     fs::write(dir.path().join("a.txt"), "a").expect("seed the local file");
     // The UNC spelling either canonicalizes to a form that no local grant
-    // prefix-matches (OutsideGrants) or fails to resolve on a host without
+    // prefix-matches (OutsideGrants) or fails to resolve on a machine without
     // the administrative share (NotFound or ResolvePath). It must never
     // admit the path.
     let error = workspace
@@ -330,7 +330,7 @@ fn a_unc_spelling_of_a_granted_path_is_rejected() {
     fs::write(&file, "hello").expect("seed the granted file");
     // A UNC spelling canonicalizes to a UNC form that never prefix-matches a
     // local grant, so even a granted path is refused (OutsideGrants); on a
-    // host without the administrative share the resolution fails instead
+    // machine without the administrative share the resolution fails instead
     // (NotFound or ResolvePath). It is never admitted.
     let error = workspace
         .read_file(&unc(&file))

@@ -181,7 +181,7 @@ pub struct Config {
     tools: Option<ToolsConfig>,
     /// Optional canonical speech pipeline tuning.
     stt: Option<SttPipelineConfig>,
-    /// Deprecated workshop hosting settings retained for boot compatibility.
+    /// Deprecated workshop serving settings retained for boot compatibility.
     workshop: Option<WorkshopConfig>,
 }
 
@@ -340,7 +340,7 @@ pub struct DominionConfig {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum LlamaBackend {
-    /// Picks from the host's GPUs: a Blackwell (compute capability 12.x) gets
+    /// Picks from the machine's GPUs: a Blackwell (compute capability 12.x) gets
     /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream
     /// CUDA build, and anything else gets Vulkan.
     #[default]
@@ -375,7 +375,7 @@ pub struct LocalConfig {
     #[serde(default)]
     cache_dir: Option<String>,
     /// Which `llama-server` build to download on Windows x86-64. Defaults
-    /// to `auto` (pick from the host's GPUs).
+    /// to `auto` (pick from the machine's GPUs).
     #[serde(default, skip_serializing_if = "LlamaBackend::is_auto")]
     llama_backend: LlamaBackend,
     /// Explicit `llama-server` executable path. Wins over the

@@ -210,7 +210,7 @@ fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
         }
         other => panic!("expected a denial, got {other:?}"),
     }
-    // The host flips the policy mid-run through shared state.
+    // The Host flips the policy mid-run through shared state.
     *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
     let allowed = vfs.acquire(test_origin())?;
     // Had the denied attempt registered a write claim, this write

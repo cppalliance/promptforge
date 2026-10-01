@@ -17,7 +17,7 @@ use super::{
 /// `getmetatable` replacements ([`crate::globals`]).
 ///
 /// Also wraps `table.concat` so a value with a `__tostring` metamethod
-/// (fanout result objects, host userdata) coerces like `tostring`, keeping
+/// (fanout result objects, Engine userdata) coerces like `tostring`, keeping
 /// existing `table.concat(results)` callers working with structured
 /// results. Plain tables, booleans, and nil still error as stock Lua would.
 pub(crate) fn harden(lua: &Lua) -> Result<()> {

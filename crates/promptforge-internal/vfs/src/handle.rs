@@ -97,7 +97,7 @@ impl VfsRef {
     }
 
     /// Returns a handle over `backend` consulting `policy` on every
-    /// operation. The policy is dynamic through shared state: the host
+    /// operation. The policy is dynamic through shared state: the Host
     /// holds the same `Arc` and changes behavior mid-run, and the next
     /// operation sees it.
     #[must_use]
@@ -187,7 +187,7 @@ impl VfsRef {
     /// followed by the store view, so it starts a new scope of its own
     /// and never joins a run's. Logical paths join onto the store root
     /// under the store's strict path rules, and errors come back in the
-    /// caller's logical form, so a host seeds and extracts store files
+    /// caller's logical form, so the Harness seeds and extracts store files
     /// by the names the prompt uses without knowing where the store is
     /// mounted.
     ///

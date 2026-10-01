@@ -1,4 +1,4 @@
-//! Shared admin-route test harness: serves `build_router` over a state
+//! Shared admin-route test support: serves `build_router` over a state
 //! assembled from one fixture profile.
 
 use std::net::SocketAddr;

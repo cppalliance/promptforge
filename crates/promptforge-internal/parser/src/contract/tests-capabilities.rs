@@ -86,7 +86,7 @@ fn a_malformed_exact_tool_path_is_a_parse_error() {
 
 #[test]
 fn the_reserved_open_tool_slot_key_is_rejected() {
-    // The open host-offered posture is deferred, so `open` is reserved even
+    // The open Harness-offered posture is deferred, so `open` is reserved even
     // though it satisfies the alias grammar.
     let error = parse("name: x\ndescription: d\ntools:\n  open: true\n")
         .expect_err("the reserved `open` key must be rejected");

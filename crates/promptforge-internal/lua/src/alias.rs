@@ -1,5 +1,5 @@
 //! The one prompt-local alias grammar, shared by the `tools` and `models`
-//! host tables.
+//! Engine globals.
 
 use crate::{Error, Result};
 

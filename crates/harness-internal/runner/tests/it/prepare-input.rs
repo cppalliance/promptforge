@@ -1,7 +1,7 @@
-//! The host's optional input broker at preparation: activation hands it
-//! to every declared capability, or hands none when the host has nobody
+//! The Host's optional input broker at preparation: activation hands it
+//! to every declared capability, or hands none when the Host has nobody
 //! to ask; and the `promptforge/user-input` capability's `input.ask()`
-//! reaches it, is refused when required on a host without one, and
+//! reaches it, is refused when required on a Host without one, and
 //! degrades when optional. A frontmatter alias named `input` collides
 //! with the capability's prelude global and fails the run before any
 //! effect, while an alias of another name runs beside it.
@@ -72,7 +72,7 @@ impl Capability for Probe {
 }
 
 /// Prepares the probe-declaring prompt from a file in `dir` with `input`
-/// as the host's broker, and returns what each activation of the probe
+/// as the Host's broker, and returns what each activation of the probe
 /// saw.
 async fn probe_activations(dir: &Path, input: Option<Arc<dyn InputBroker>>) -> Vec<bool> {
     let saw_broker = Arc::new(Mutex::new(Vec::new()));
@@ -167,7 +167,7 @@ fn user_input_registry() -> Arc<CapabilityRegistry> {
 }
 
 /// The preparation services over `log` with the user-input registry and
-/// `input` as the host's broker.
+/// `input` as the Host's broker.
 fn user_input_services(log: &SharedLog, input: Option<Arc<dyn InputBroker>>) -> Services {
     let mut services = services(log, Some(user_input_registry()));
     services.input = input;

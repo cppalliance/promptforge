@@ -4,7 +4,7 @@
 // busy barberpole beside the indicators. Info and error frames set the
 // text (the description shows as the tooltip) and drive the barberpole;
 // debug frames are internal instrumentation that never touch either. The
-// bar hosts the indicator slots: features register their LEDs into the
+// bar holds the indicator slots: features register their LEDs into the
 // indicators group through StatusIndicators; the view's extras region
 // stays empty.
 

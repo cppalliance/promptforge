@@ -1,24 +1,24 @@
 //! The chain scheduler: the coroutine protocol's state machine.
 //!
 //! One [`Scheduler`] per run, owned by the [`Run`](super::run::Run) that
-//! the host steps: no `Arc`, no `Mutex`, no sharing. One caller at a time
+//! the Harness steps: no `Arc`, no `Mutex`, no sharing. One caller at a time
 //! runs every chain step, and the Lua shims only yield (they never call
 //! into Rust for suspending operations), so the scheduler state is
 //! unreachable from Lua. Nothing here awaits, spawns, or sleeps: a leaf
-//! request becomes an [`Effect`] the step hands out, and the host's
+//! request becomes an [`Effect`] the step hands out, and the Harness's
 //! [`EffectAnswer`] comes back through `resume`. The scheduler is `Send`
 //! and moves between threads between calls.
 //!
 //! The loop is `resume -> match request -> dispatch -> resume with answer`.
 //! A chain whose coroutine yields a leaf request (`infer`) is parked in the
-//! pending table while its [`Effect`] is out with the host: the arm builds
+//! pending table while its [`Effect`] is out with the Harness: the arm builds
 //! the effect as a value, `issue` stamps it with the chain's task
 //! provenance and queues it for the step's return, and `apply_answer`
-//! turns the host's answer into the chain's protocol answer on the
+//! turns the Harness's answer into the chain's protocol answer on the
 //! caller's thread, emitting the round's events there. A chain that
 //! yields a structural request (`call`) blocks while its child chain runs,
 //! and the child's finish delivers its final text as the parent's answer.
-//! When no chain is ready the step returns and the host performs.
+//! When no chain is ready the step returns and the Harness performs the effects.
 //!
 //! [`RunState`] stays the ambient shared read-mostly context, cloned into
 //! chains and callbacks; the scheduler owns the run's copy and is the
@@ -48,7 +48,7 @@
 //! task built-ins (`task`, `task_cancel`, `task_status`) answered over
 //! the arena and advertised once a section runs `tools.allow_tasks`,
 //! `await_tasks` the fourth built-in, the model's wait over its live
-//! tasks, `task_events` the fifth, the host-answered history read the
+//! tasks, `task_events` the fifth, the Harness-answered history read the
 //! author's `tasks.events` shares, `notices` the model-task notices
 //! (queued at a model task's end, drained into the owner's next round or
 //! its `await_tasks` answer), `tasks` the task arena and the `spawn` arm,
@@ -166,7 +166,7 @@ fn prompt_origin(prompt: &Prompt, label: &str, blocks: &[Block]) -> Origin {
 
 /// Arena index of a chain: indices, not references, so no chain ever holds
 /// a pointer to another. The index is the scheduler's private handle; the
-/// chain's identity for authors and hosts is its hierarchical
+/// chain's identity for authors and Hosts is its hierarchical
 /// [`ChainId`](promptforge_types::ids::ChainId), which never depends on arena order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct ChainIndex(u32);
@@ -253,10 +253,10 @@ pub(crate) struct Scheduler {
     /// The effects issued since the step began, in issue order, each with
     /// the provenance of the task that built it; the step returns them.
     issued: Vec<(EffectId, Provenance, Effect)>,
-    /// The effects whose chain stopped waiting before the host answered (a
+    /// The effects whose chain stopped waiting before the Harness answered (a
     /// chain end, a task cancel or abandonment, the run's teardown): the
-    /// host still owes each one answer, which is discarded on arrival. An
-    /// unknown id that is neither pending nor orphaned means the host
+    /// Harness still owes each one answer, which is discarded on arrival. An
+    /// unknown id that is neither pending nor orphaned means the Harness
     /// answered an effect the run never issued, or answered one twice -
     /// which fails loudly rather than passing silently. An id leaves the
     /// set when its answer arrives, so the set stays bounded by the
@@ -274,7 +274,7 @@ pub(crate) struct Scheduler {
     next_effect: u64,
     /// The run's scope, taken where the run acquires its root identity:
     /// closed when the run reaches `Done` or is dropped before it, so a
-    /// store view a host still holds never outlives the run.
+    /// store view the Harness still holds never outlives the run.
     scope: Option<ScopeHandle>,
 }
 
@@ -289,7 +289,7 @@ impl Scheduler {
     /// the run's start, so the first step's events open with it.
     pub(crate) fn new(ctx: RunState) -> Self {
         // The run's boundaries are events like every other report: pushed
-        // into the buffer under the root task, so the host sees them in
+        // into the buffer under the root task, so the Harness sees them in
         // order with the sections between them.
         ctx.emitter()
             .report(ctx.prompt().title(), lifecycle::RUN_STARTED);

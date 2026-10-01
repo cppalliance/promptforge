@@ -155,7 +155,7 @@ pub(crate) async fn run(mut rx: mpsc::Receiver<Command>, conn: turso::Connection
 /// exactly the file behind: the WAL is checkpointed into the main file
 /// and truncated, the connection dropped, and the emptied `-wal` sidecar
 /// removed. A sidecar that still holds frames is never touched; the
-/// engine replays it on the next open. The sidecar check is filesystem
+/// database replays it on the next open. The sidecar check is filesystem
 /// work and runs on the blocking pool, awaited, so the close is complete
 /// when this returns.
 pub(crate) async fn close_database(conn: turso::Connection, path: &Path) {
@@ -352,7 +352,7 @@ fn remove_empty_wal_sidecar(path: &Path) {
     }
 }
 
-/// The path of the WAL sidecar the engine keeps beside `path`.
+/// The path of the WAL sidecar the database keeps beside `path`.
 pub(crate) fn wal_sidecar_of(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push("-wal");

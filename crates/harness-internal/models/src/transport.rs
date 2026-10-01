@@ -176,7 +176,7 @@ impl GatewayClient {
         }
     }
 
-    /// Builds an explicit sentinel client that hosts use for hermetic
+    /// Builds an explicit sentinel client that the Harness uses for hermetic
     /// execution paths.
     ///
     /// Any attempted model call fails with a `Disabled`-kind

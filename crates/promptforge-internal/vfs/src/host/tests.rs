@@ -1,4 +1,4 @@
-//! Tests for the host backend, split by topic. The temporary
+//! Tests for the real-filesystem backend, split by topic. The temporary
 //! directory and the rooted session helper live here because every
 //! topic module uses them.
 
@@ -18,7 +18,7 @@ use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 mod atomicity;
 mod links;
 /// The rooted-path, idempotent-remove, and split-glob semantics of
-/// the public capability, exercised over the host backend.
+/// the public capability, exercised over the real-filesystem backend.
 mod semantics;
 
 fn path(s: &str) -> Result<VfsPath, VfsError> {
@@ -81,7 +81,7 @@ fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> 
     let stat = access.stat(&path("/a/b/f.txt")?)?;
     assert_eq!(stat.file_type, FileType::File);
     assert_eq!(stat.size, 11);
-    // The host tracks modification times; honesty permits Some here.
+    // The OS tracks modification times; honesty permits Some here.
     assert!(stat.modified.is_some());
     let entries = access.list(&path("/a/b")?)?;
     assert_eq!(entries.len(), 1);
@@ -208,7 +208,7 @@ fn map_io_reports_the_canonical_path_not_the_os_sentence() {
     use std::io::ErrorKind;
     // The kind carries the OS failure; the `path` field holds the
     // canonical path alone, as the field's documented contract
-    // promises, so a host reading it gets a path, never OS text.
+    // promises, so a Harness reading it gets a path, never OS text.
     let cases = [
         (ErrorKind::NotFound, "not found: /x"),
         (ErrorKind::AlreadyExists, "already exists: /x"),

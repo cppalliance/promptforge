@@ -1,4 +1,4 @@
-//! The host-supplied performers the tokio test driver performs a run's
+//! The caller-supplied performers the tokio test driver performs a run's
 //! `Chat` and `ToolCall` effects through.
 
 use std::future::Future;
@@ -16,7 +16,7 @@ pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 /// spawns the future, so it must be `Send` and own what it needs.
 pub type Performer = Box<dyn FnMut(Effect) -> BoxFuture<EffectAnswer> + Send>;
 
-/// The host-supplied performers, one per effect kind a host performs.
+/// The caller-supplied performers, one per effect kind the Harness performs.
 ///
 /// A struct of boxed async closures, so a caller supplies behavior
 /// without implementing anything from this module. The
@@ -25,7 +25,7 @@ pub type Performer = Box<dyn FnMut(Effect) -> BoxFuture<EffectAnswer> + Send>;
 ///
 /// [`Performers::refusing`] answers every kind with its refusal: a `Chat`
 /// with a disabled-gateway completion error and a `ToolCall` with a
-/// no-implementation tool error. A host starts from it and overrides the
+/// no-implementation tool error. A caller starts from it and overrides the
 /// slots it supplies.
 pub struct Performers {
     /// Performs a [`Effect::Chat`] and answers [`EffectAnswer::Chat`].

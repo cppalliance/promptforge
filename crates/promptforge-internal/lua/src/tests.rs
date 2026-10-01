@@ -263,9 +263,9 @@ fn section_vm_with_bindings(
 }
 
 /// Builds a section VM through the engine's startup order for a shared
-/// library: construction, host injection, persistent host APIs, then the
-/// shared replay. Tests that need control globals or captured bindings add
-/// them by hand.
+/// library: construction, Engine injection, persistent Engine globals, then
+/// the shared replay. Tests that need control globals or captured bindings
+/// add them by hand.
 fn section_vm_with_shared(
     shared: &LuaProgram,
     args: &str,

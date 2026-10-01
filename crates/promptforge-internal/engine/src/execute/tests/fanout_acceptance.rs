@@ -75,7 +75,7 @@ fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// A scheduler context and its observing host with the run's concurrency
+/// A scheduler context and its observing Harness with the run's concurrency
 /// ceiling narrowed to `ceiling` admitted tasks.
 fn ceiling_context(
     prompt: &Prompt,

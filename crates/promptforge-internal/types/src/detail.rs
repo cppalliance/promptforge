@@ -1,8 +1,8 @@
 //! Operations on the identity types that only the engine performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host. Each function builds an identity without
-//! validating it; hosts build one through its checked constructor, such
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it. Each function builds an identity without validating
+//! it; outside crates build one through its checked constructor, such
 //! as [`ModelId::new`].
 
 use crate::models::ModelId;

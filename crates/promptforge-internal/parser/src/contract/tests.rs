@@ -136,7 +136,7 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
 }
 
 /// One reserved name from each category, with the category the refusal
-/// names: a guarded host global, a host table, a Lua base function, and a
+/// names: a guarded Engine global, an Engine table, a Lua base function, and a
 /// Lua keyword (quoted so YAML keeps `true` a string).
 const RESERVED_SAMPLES: [(&str, &str); 5] = [
     ("argv", "a host global"),

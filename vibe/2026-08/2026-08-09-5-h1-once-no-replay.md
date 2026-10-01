@@ -1,6 +1,6 @@
 ---
 name: H1 once no replay
-overview: "Runtime refactor shipped: bind phase eliminated, H1 runs once with live resolution, lua shared replays before host inject. Plan complete except two doc gaps identified on rescan."
+overview: "Runtime refactor shipped: bind phase eliminated, H1 runs once with live resolution, lua shared replays before Engine globals are injected. Plan complete except two doc gaps identified on rescan."
 todos:
   - id: doc-quick-reference
     content: "Add Quick Reference rules block to the user guide (before final image)"
@@ -75,10 +75,10 @@ flowchart TD
 | Bind phase | Eliminated |
 | `BoundPrompt` type | Removed |
 | Declaration mode / replay mode | Removed |
-| H1 execution | Once, live, full host access |
+| H1 execution | Once, live, full access to Engine globals |
 | `tools.need` / `models.need` | Runtime resolution via picker; return frozen Tool/Model objects |
 | Section VM binding install | Rust installs from frozen maps |
-| Library (`lua shared`) | Loaded per section BEFORE host inject; pure function defs only at load time |
+| Library (`lua shared`) | Loaded per section BEFORE Engine global injection; pure function defs only at load time |
 | `var` from H1 | Serialized; seeds each section's initial `var` |
 | `store` from H1 | Persists naturally (run-scoped) |
 | Conditional declarations | Natural (tools.need inside if-blocks, after infer) |
@@ -87,4 +87,4 @@ flowchart TD
 
 ## Research (retained for reference)
 
-VM clone research confirmed no stock Lua 5.4 / mlua state clone exists. Host-ID-registry snapshot (Eris-style, in Rust) remains a viable future design for richer state sharing. Current approach (explicit `lua shared` replay + frozen bindings from Rust) is the pragmatic working solution.
+VM clone research confirmed no stock Lua 5.4 / mlua state clone exists. A snapshot keyed by an Engine-object ID registry (Eris-style, in Rust) remains a viable future design for richer state sharing. Current approach (explicit `lua shared` replay + frozen bindings from Rust) is the pragmatic working solution.

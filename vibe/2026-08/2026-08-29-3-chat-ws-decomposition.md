@@ -28,7 +28,7 @@ The current module facts below were measured at `e622185`: `chat_ws.rs` is 2,965
 
 ## Completed baseline this plan must preserve
 
-The merged gateway and Workshop build is complete: the gateway optionally hosts the Workshop on its second loopback listener, the desktop executable boots that merged process, and the Model menu switches gateway profiles over the session socket. Its post-run findings sweep closed at zero open findings.
+The merged gateway and Workshop build is complete: the gateway optionally serves the Workshop on its second loopback listener, the desktop executable boots that merged process, and the Model menu switches gateway profiles over the session socket. Its post-run findings sweep closed at zero open findings.
 
 The server hardening survey's immediate fixes are also complete: cross-site and DNS-rebinding guards, atomic workspace writes, request deadlines, delta-decoder conformance, reconnect backoff, and debug asset traversal parity. Do not reimplement or weaken them during the split.
 
@@ -113,7 +113,7 @@ flowchart LR
 
 Update `crates/promptforge-workshop-server/AGENTS.md` in one documentation-only commit:
 
-- Zone one returns rich errors to the host; an embeddable crate never panics for configuration, binding, asset, or initialization failures. Binary entry points may convert returned errors to a failing exit status.
+- Zone one returns rich errors to the embedding binary; an embeddable crate never panics for configuration, binding, asset, or initialization failures. Binary entry points may convert returned errors to a failing exit status.
 - Each WebSocket endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists. Never share hypothetical reuse.
 - Durable state is recoverable from retained state or a cursor, and consumers tolerate duplicate delivery. Ephemeral snapshots may coalesce or drop under lag; the latest complete snapshot is resent on reconnect.
 - A module name states its responsibility. When the name no longer covers what the module owns, rename or split it before adding another responsibility. Use `session.rs` beside `session/`; do not introduce `session/mod.rs`.

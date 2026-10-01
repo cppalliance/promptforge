@@ -9,7 +9,7 @@ mod tools;
 
 pub(super) use self::tools::*;
 
-/// A fresh default handle's access capability, for tests that inject host
+/// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
 pub(super) fn fresh_access() -> Arc<Access> {
     Arc::new(
@@ -21,7 +21,7 @@ pub(super) fn fresh_access() -> Arc<Access> {
 
 pub(super) const EXECUTION: &str = "execute-test";
 
-/// The fixed host inputs every test run shares: a seed and a start instant
+/// The fixed Harness inputs every test run shares: a seed and a start instant
 /// a test that does not care about them never has to choose. The tests of
 /// the inputs themselves (`run_inputs`) build their contexts directly.
 pub(super) const TEST_SEED: u64 = 1;
@@ -239,7 +239,7 @@ impl TestStore {
 /// [`RunOptions`], for the tests that call [`Environment::run`] directly.
 /// The context sets the test model as the current selection, so prepare's
 /// trivial fill binds every declared role to it; the observer, client, and
-/// capture go on the host the driver performs and reports through.
+/// capture go on the Harness the driver performs and reports through.
 pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHost) {
     let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
     let mut host = RunHost::new().observer(opts.observer);
@@ -309,16 +309,16 @@ pub(super) async fn run(
     // actually wrote.
     let mut ctx = test_context(opts.execution).vfs(store.vfs());
     if !tools.is_empty() {
-        // The host pattern with tools: the fixtures' descriptors form the
+        // The Harness pattern with tools: the fixtures' descriptors form the
         // catalog the run binds its frontmatter slots against, and the
-        // implementations go to the host table the driver's tool
+        // implementations go to the Harness's tool table the driver's tool
         // performer resolves a `ToolCall` effect in - the two halves a
         // harness assembles from its activated capabilities.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
         host = host.tools(table);
     }
-    // The host pattern: the context holds the current model, and
+    // The Harness pattern: the context holds the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
         ctx = ctx.model(model.clone());
@@ -338,7 +338,7 @@ pub(super) async fn run(
 }
 
 /// The test-support driver ([`crate::test_support::run_with_host`]) with the
-/// context and host [`to_context`] assembled (observer, client, capture).
+/// context and Harness [`to_context`] assembled (observer, client, capture).
 pub(super) async fn env_run(
     env: &Environment,
     prompt: &Prompt,

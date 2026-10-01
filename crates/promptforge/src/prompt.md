@@ -305,7 +305,7 @@ Only thinking and the context minimum are checked; the other keywords are notes 
 
 ## ModelRoles
 
-[`ModelRoles`] maps each role label to its [`ModelRole`], and labels are local to the prompt. Prepare binds every role to the context's current model, or leaves all unbound without one; see [Answer a model](crate#answer-a-model). Parsing fails when a label breaks the alias pattern, repeats, is also a tool alias, or is a reserved name: a host global, a kept Lua standard-library global, or a Lua keyword. Each label becomes a global in the section, so rename the label. See [Check a prompt's model roles](#check-a-prompts-model-roles).
+[`ModelRoles`] maps each role label to its [`ModelRole`], and labels are local to the prompt. Prepare binds every role to the context's current model, or leaves all unbound without one; see [Answer a model](crate#answer-a-model). Parsing fails when a label breaks the alias pattern, repeats, is also a tool alias, or is a reserved name: an Engine global, a kept Lua standard-library global, or a Lua keyword. Each label becomes a global in the section, so rename the label. See [Check a prompt's model roles](#check-a-prompts-model-roles).
 
 - [`ModelRoles::iter`]: yields roles sorted by label, not in declaration order.
 

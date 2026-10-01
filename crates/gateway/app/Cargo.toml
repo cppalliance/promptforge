@@ -18,8 +18,8 @@ path = "src/main.rs"
 
 # build.rs embeds the program icon (assets/icon.ico, a copy of the
 # workshop master) into the Windows exe as an RT_GROUP_ICON resource.
-# Host-gated: the table is
-# evaluated against the build host, and the script is a no-op elsewhere.
+# Platform-gated: the table is
+# evaluated against the build machine, and the script is a no-op elsewhere.
 [target.'cfg(windows)'.build-dependencies]
 embed-resource.workspace = true
 
@@ -62,14 +62,14 @@ gateway-api-types.workspace = true
 gateway-api-discovery.workspace = true
 gateway-routing.workspace = true
 gateway-progress.workspace = true
-# Optional: gateway-hosted speech-to-text (engine lifecycle, the
+# Optional: the gateway's speech-to-text (speech engine lifecycle, the
 # `/v1/audio/transcriptions` route), behind the default-on `stt` feature.
 gateway-stt = { workspace = true, optional = true }
 gateway-web-search = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-# Host CPU/RAM/disk metrics for GET /admin/system.
+# Machine CPU/RAM/disk metrics for GET /admin/system.
 sysinfo.workspace = true
 subtle.workspace = true
 # Opens the Settings handoff URL in the system browser: the tray's Settings
@@ -136,8 +136,8 @@ web-search = ["dep:gateway-web-search"]
 # loopback-only. Default, so plain builds need Node 22 for the SPA's esbuild
 # pipeline; --no-default-features builds skip the SPA crate entirely.
 config-ui = ["dep:gateway-config-ui"]
-# Gateway-hosted speech-to-text via the `gateway-stt` crate: the engine
-# lifecycle and `POST /v1/audio/transcriptions` on the gateway listener.
+# The gateway's speech-to-text via the `gateway-stt` crate: the speech
+# engine lifecycle and `POST /v1/audio/transcriptions` on the gateway listener.
 # Default on, so every default build ships STT; a --no-default-features
 # build stubs the route and refuses a configuration declaring [[stt_model]].
 stt = ["dep:gateway-stt"]

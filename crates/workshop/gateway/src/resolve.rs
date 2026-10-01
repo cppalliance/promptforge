@@ -39,8 +39,8 @@ pub enum GatewaySource {
 
 impl ResolvedGateway {
     /// The endpoint explicit config names, with no discovery: the bypass
-    /// for a host that already holds its gateway endpoint, or a test
-    /// fixture.
+    /// for an embedding binary that already holds its gateway endpoint, or
+    /// a test fixture.
     #[must_use]
     pub fn from_config(config: &GatewayConfig) -> Self {
         Self {
@@ -52,8 +52,8 @@ impl ResolvedGateway {
         }
     }
 
-    /// The endpoint a validated local gateway boot published, for a host
-    /// holding its own validated identity (a test fixture).
+    /// The endpoint a validated local gateway boot published, for a test
+    /// fixture holding its own validated identity.
     #[cfg(feature = "test-fixtures")]
     #[must_use]
     pub fn from_validated(identity: ValidatedConnection) -> Self {
@@ -67,7 +67,7 @@ impl ResolvedGateway {
     }
 
     /// The same resolution with its API served from `base_url` instead of
-    /// the identity's own port: a test host whose shutdown authority (the
+    /// the identity's own port: a test setup whose shutdown authority (the
     /// validated fixture process) and API surface (a mock router) are two
     /// processes.
     #[cfg(feature = "test-fixtures")]

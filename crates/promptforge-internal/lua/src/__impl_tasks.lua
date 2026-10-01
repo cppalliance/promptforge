@@ -2,10 +2,10 @@
 -- waits, the non-blocking checks, the event history read, the progress
 -- note, cancel, and the admission limit.
 --
--- The host installs this after the coroutine prelude (`__impl_coro.lua`)
+-- The Engine installs this after the coroutine prelude (`__impl_coro.lua`)
 -- and installs the returned table as the `tasks` global. The chunk
 -- arguments are privileged captures, never globals: `yield` is
--- coroutine.yield, `var_snapshot` is the host helper returning the hidden
+-- coroutine.yield, `var_snapshot` is the Engine helper returning the hidden
 -- `var` data table as a plain deep copy, and `helpers` is the prelude's
 -- shared trio - `raise(kind, fields)` builds and raises the structured
 -- error table, `fail(result)` raises an envelope's failure value, and
@@ -72,7 +72,7 @@ end
 
 -- Resolves a wait's opts argument to its timeout in seconds, or nil when
 -- no timeout was given. The domain check (non-negative, finite) is the
--- host's at the timer yield; the shape check is here so the message names
+-- Engine's at the timer yield; the shape check is here so the message names
 -- the call.
 local function wait_timeout(opts, call)
   if opts == nil then return nil end
@@ -263,7 +263,7 @@ end
 
 -- tasks.concurrency(limit?): set the chain's admission limit for the
 -- tasks it spawns from here on (clamped to the parent chain's limit, or
--- the host's ceiling for the main walk), or read the effective limit
+-- the Harness's ceiling for the main walk), or read the effective limit
 -- back with no argument. Never preempts a running task: the limit gates
 -- future admissions only. The argument must be a positive whole number.
 local function tasks_concurrency(limit)

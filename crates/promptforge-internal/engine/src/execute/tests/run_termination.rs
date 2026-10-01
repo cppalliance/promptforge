@@ -1,4 +1,4 @@
-//! Run-level termination and the tasks it strands: when the host cancels a
+//! Run-level termination and the tasks it strands: when the Host cancels a
 //! run while an author-spawned task is parked on a model round, the run's
 //! end settles that task - one `TaskAbandoned` with `run_terminated`,
 //! observed before the run's own `RUN_FAILED` boundary - so the
@@ -37,7 +37,7 @@ const PARKED_CHILD: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
 /// Steps `run` until its first chat round is outstanding, cancels it
 /// there, answers the orphaned effects so the run can report `Done`, and
 /// returns the result. Every step's events are replayed onto `recorder`
-/// in order, as a host driver replays them onto its observer.
+/// in order, as the Harness replays them onto its observer.
 fn cancel_at_first_chat_round(mut run: Run, recorder: &TaskRecorder) -> RunResult {
     let mut cancelled = false;
     loop {

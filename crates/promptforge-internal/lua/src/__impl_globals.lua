@@ -1,15 +1,15 @@
 -- The `_G` guard for a section VM, and the `setmetatable` and
 -- `getmetatable` replacements that keep it in place.
 --
--- The host runs this chunk first at VM construction, before hardening
+-- The Engine runs this chunk first at VM construction, before hardening
 -- strips the raw functions it captures and before any other chunk
 -- captures `setmetatable` or `getmetatable`. The chunk arguments are
 -- privileged captures, never globals: `globals` is the VM's globals table,
--- `state` is the host's slot table (`argv_frozen` and `argv` once a
+-- `state` is the Engine's slot table (`argv_frozen` and `argv` once a
 -- section freezes `argv`, `prose` once a block installs its render, and
 -- `author` for the metatable author code set on `_G`), and `refuse_argv()`
--- and `refuse_prose()` raise the host's assignment refusals. The chunk
--- returns the guard and the two replacements for the host to install.
+-- and `refuse_prose()` raise the Engine's assignment refusals. The chunk
+-- returns the guard and the two replacements for the Engine to install.
 local globals, state, refuse_argv, refuse_prose = ...
 
 local base_setmetatable, base_getmetatable = setmetatable, getmetatable

@@ -1,7 +1,7 @@
 //! Reports any internal crate name, in kebab or snake spelling, found in
 //! the doc text of a surface item or a facade module. Rustdoc inlines a
 //! re-exported item's docs into the facade, so a name in them is a name
-//! hosts read and cannot use.
+//! dependents read and cannot use.
 
 use super::Finding;
 use super::items::Surface;

@@ -39,7 +39,7 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
-/// A store argument type error stays kind `lua`, like every other host
+/// A store argument type error stays kind `lua`, like every other Engine
 /// function's argument errors: only what the VFS reports is kind `store`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_store_argument_type_error_is_kind_lua() {
@@ -145,8 +145,8 @@ return 'sibling'\n\
     );
 }
 
-/// A store declared at `/` cannot reach a host directory mounted beneath
-/// it: the store view is confined to its own mount, so a file the host
+/// A store declared at `/` covers only its own mount: a real directory
+/// mounted beneath it lies outside the store view, so a file that
 /// directory holds reads as absent from the store.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_store_at_the_root_cannot_reach_a_host_mount_beneath_it() {
@@ -164,8 +164,8 @@ return 'ok'\n\
         .store("/", promptforge_vfs::MemoryBackend::new())
         .mount("/host", promptforge_vfs::MemoryBackend::new())
         .build();
-    // The host mount really holds the file: only the store view cannot
-    // reach it.
+    // The real mount holds the file; the store view reads only its own
+    // mount.
     vfs.acquire(promptforge_vfs::Origin::new("host seeding"))
         .expect("the handle acquires")
         .write("/host/secret.txt", b"secret")
@@ -282,7 +282,7 @@ return item\n\
 }
 
 /// A store function the shared library captured at load time reaches the
-/// host as an `Effect::Store` when called after load, like `store.*` does.
+/// Harness as an `Effect::Store` when called after load, like `store.*` does.
 #[test]
 fn a_captured_store_function_called_after_load_reaches_the_host_as_a_store_effect() {
     use super::super::super::context::{parse, test_context};

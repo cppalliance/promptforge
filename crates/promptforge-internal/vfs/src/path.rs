@@ -82,7 +82,7 @@ impl fmt::Display for VfsPathBuf {
 /// Canonicalizes a virtual path at API receipt.
 ///
 /// The internal namespace follows POSIX: rooted, forward slashes, strict.
-/// The lexical rules are: backslashes from Windows hosts count as
+/// The lexical rules are: backslashes from Windows machines count as
 /// separators; duplicate separators collapse; `.` segments vanish; `..`
 /// pops exactly one segment and stops at the access root, never climbing
 /// above it; a trailing slash is dropped; the root canonicalizes to

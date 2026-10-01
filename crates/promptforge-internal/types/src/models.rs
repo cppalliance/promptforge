@@ -1,10 +1,10 @@
-//! Host-facing model vocabulary: stable identity, catalog, and descriptor.
+//! Public model vocabulary: stable identity, catalog, and descriptor.
 //!
-//! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
+//! The Harness builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
 //! pinned offline entry) and names catalog entries by their validated
 //! [`ModelId`]. These types are the shared vocabulary every promptforge
-//! crate and host may name, with no transport, binding, or invocation
-//! machinery.
+//! crate, the Harness, and the Host may name, with no transport, binding,
+//! or invocation machinery.
 
 use std::num::NonZeroU32;
 
@@ -246,7 +246,7 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Builds a catalog from descriptors in host order.
+    /// Builds a catalog from descriptors in the Harness's order.
     ///
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one

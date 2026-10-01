@@ -22,15 +22,15 @@ pub struct Requirements {
     /// Populated by the model fill; capability activation adds none.
     pub unmet_requirements: Vec<UnmetRequirement>,
     /// The required capabilities the run cannot have: reported by
-    /// activation when absent from the host's registry or failed to
+    /// activation when absent from the Harness's registry or failed to
     /// activate, and by prepare when an exact tool slot names a
     /// capability that contributed nothing to the catalog. The run fails
     /// until every one is satisfied.
     pub missing_required: Vec<CapabilityId>,
-    /// The required capabilities that are present but need a host
-    /// service this host does not provide: one entry per capability and
+    /// The required capabilities that are present but need a Host
+    /// service this Host lacks: one entry per capability and
     /// missing service. Reported by activation, which does not activate
-    /// such a capability; the run fails until the host provides the
+    /// such a capability; the run fails until the Host provides the
     /// service or the prompt declares the capability optional.
     pub missing_services: Vec<MissingService>,
     /// The declared co-activation conflicts: pairs of present
@@ -44,7 +44,7 @@ pub struct Requirements {
 
 impl Requirements {
     /// Returns whether the report is satisfied: every model requirement
-    /// is met, every required capability is present and has the host
+    /// is met, every required capability is present and has the Host
     /// services it needs, and no pair of capabilities conflicts.
     #[must_use]
     pub fn is_satisfied(&self) -> bool {
@@ -54,7 +54,7 @@ impl Requirements {
             && self.conflicts.is_empty()
     }
 
-    /// Folds `other` into this report: the host merges what activation
+    /// Folds `other` into this report: the Harness merges what activation
     /// could not satisfy into what prepare could not, so one refusal names
     /// every gap. A capability already reported missing, or a service
     /// already reported missing for the same capability, is not repeated.
@@ -85,11 +85,11 @@ impl Requirements {
         self.unmet_requirements.extend(other.unmet_requirements);
     }
 
-    /// The refusal a host fails the run with when the report is
+    /// The refusal the Harness fails the run with when the report is
     /// unsatisfied: a [`RunError`](super::RunError) of kind
     /// [`RequirementsUnmet`](super::RunErrorKind::RequirementsUnmet)
     /// reporting the [`notice`](Requirements::notice), or `None` when
-    /// nothing blocks the run. The host checks this after merging
+    /// nothing blocks the run. The Harness checks this after merging
     /// activation's report into prepare's, before building the run.
     #[must_use]
     pub fn refusal(&self) -> Option<super::RunError> {
@@ -100,7 +100,7 @@ impl Requirements {
         })
     }
 
-    /// The refusal notice a host fails the run with when the report is
+    /// The refusal notice the Harness fails the run with when the report is
     /// unsatisfied.
     ///
     /// Written to be read by a model - concise, factual, self-contained -
@@ -163,16 +163,16 @@ pub struct CapabilityConflict {
 
 impl CapabilityConflict {
     /// Records one conflicting pair in declaration order: `first` was
-    /// declared before `second`. The host's activation reports these; the
-    /// engine's prepare never does.
+    /// declared before `second`. Only the Harness's activation reports
+    /// these.
     #[must_use]
     pub fn new(first: CapabilityId, second: CapabilityId) -> CapabilityConflict {
         CapabilityConflict { first, second }
     }
 }
 
-/// One host service a required capability needs and the host does not
-/// provide, such as a capability that asks the operator on a batch host
+/// One Host service a required capability needs and the Host lacks,
+/// such as a capability that asks the operator on a batch Host
 /// with nobody to ask.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -180,15 +180,15 @@ pub struct MissingService {
     /// The present, required capability that needs the service.
     pub capability: CapabilityId,
     /// The service's model-readable name, such as "an input broker". The
-    /// host owns its service vocabulary, so the report carries the name
-    /// the host gave it.
+    /// Harness owns its service vocabulary, so the report carries the name
+    /// the Harness gave it.
     pub service: String,
 }
 
 impl MissingService {
-    /// Records that `capability` needs the host service named `service`
-    /// and the host does not provide it. The host's activation reports
-    /// these; the engine's prepare never does.
+    /// Records that `capability` needs the Host service named `service`
+    /// and the Host lacks it. Only the Harness's activation reports
+    /// these.
     #[must_use]
     pub fn new(capability: CapabilityId, service: impl Into<String>) -> MissingService {
         MissingService {

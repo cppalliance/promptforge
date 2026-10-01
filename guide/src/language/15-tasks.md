@@ -127,7 +127,7 @@ Cons: hard to maintain
 
 The walk never enters a child section by [falling through](04-how-a-prompt-runs.md#the-section-walk), so `### Pros` and `### Cons` run only as tasks, even in a prompt whose spawning section falls through to a later sibling. That matters because a target is an ordinary section. No syntax takes a section out of the walk, so if the main walk reaches a section that also runs as a task, the walk runs it again as a walked section. Keep task sections out of the walk's path by spawning child sections, as here, or by ending the spawning section with `return`, as the first prompt in this chapter does.
 
-The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the host, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
+The owner keeps running after `tasks.spawn` returns. The new task first runs when the owner parks on a call that waits for the Harness, such as a store call like `store.write` or `store.exists`, a model round, or a wait on tasks, or when the owner ends, like any chain that is ready to run, and once a slot is free under the run's [concurrency limit](#the-concurrency-limit). So a `log` line written right after the spawn comes before anything the task logs, and at that moment the task has not even entered its section. Every `tasks` function is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), but `tasks.spawn` is answered at once and lets no other chain run: tasks get their chance to run only while the owner is parked, on one of the [store calls](09-the-store.md#how-store-calls-run), a model round, or a wait. A task works on the same store as its owner and every other chain of the run, as [The Store](09-the-store.md#sharing-the-store-across-calls-and-tasks) describes.
 
 A [local tool](12-tools.md#local-tools) handler runs inside the calling chain, so it can start and wait on tasks just as block code can, although `jump` stays unavailable there.
 
@@ -533,7 +533,7 @@ return models.infer('Summarize in one line: ' .. args)
 ```
 ````
 
-The H1 body makes `writer` the prompt-wide default [model role](10-models.md#choosing-a-sections-model), so the task has a model for its round. `tasks.spawn` does not run the task, but `store.write` waits for the host, which gives the task its first chance to run: it sets its note and parks in its model round. When the model is still answering at the moment `## Main` reads the status, the log line is:
+The H1 body makes `writer` the prompt-wide default [model role](10-models.md#choosing-a-sections-model), so the task has a model for its round. `tasks.spawn` does not run the task, but `store.write` waits for the Harness, which gives the task its first chance to run: it sets its note and parks in its model round. When the model is still answering at the moment `## Main` reads the status, the log line is:
 
 ````text
 state=running section=Child blocked=chat note=working
@@ -614,9 +614,9 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 
 ## The concurrency limit
 
-The host running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
 
-`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the host's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. Under a host ceiling of 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable across hosts with different ceilings. The new limit gates admissions from then on only, and never preempts a task that is already running.
+`tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the Harness's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. With the Harness's ceiling at 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable wherever it runs, under any ceiling. The new limit gates admissions from then on only, and never preempts a task that is already running.
 
 An argument that is not a positive whole number raises an error value of kind `lua` at the call site with the message `tasks.concurrency limit must be a positive whole number, got {type}`, where a whole-number float such as `2.0` counts as a whole number and is accepted.
 
@@ -667,7 +667,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 ```
 ````
 
-`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on host work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
+`tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on Harness work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
 A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
 
@@ -782,9 +782,9 @@ A live task is abandoned for one of five reasons, and each reason has a fixed ph
 | `owner_failed` | The owner failed while the task was live | `the owner failed` |
 | `tool_loop_exhausted` | The owner's `models.loop` ran past its [round cap](11-conversations.md#the-round-cap) while the model's task was live | `the tool loop was exhausted` |
 | `owner_aborted` | The owner was stopped from outside, by a failing sibling arm's fail-fast or by its own owner ending first | `the owner was aborted` |
-| `run_terminated` | The run itself ended while the task was live, for example because the host cancelled it | `the run ended` |
+| `run_terminated` | The run itself ended while the task was live, for example because the Host cancelled it | `the run ended` |
 
-`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
+`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
 
 ### When a chain stops
 

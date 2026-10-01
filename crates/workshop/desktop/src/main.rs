@@ -1,6 +1,6 @@
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
-//! Hosts the workshop server in-process on a loopback listener with an
+//! Runs the workshop server in-process on a loopback listener with an
 //! OS-assigned port and opens a Tauri window pointed at the in-process
 //! listener's URL. Boot first connects the gateway: attach to a running
 //! gateway through its gateway discovery file, or launch the sibling

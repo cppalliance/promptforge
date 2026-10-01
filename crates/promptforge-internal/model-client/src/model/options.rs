@@ -329,7 +329,7 @@ pub trait ModelView: Send + Sync {
 }
 
 /// Maps a poisoned set lock to the crate's model-set lock error, matching the
-/// wording every other mutex in the host layer uses.
+/// wording every other mutex behind the Engine globals uses.
 fn lock_model_set(set: &Mutex<ModelSet>) -> Result<std::sync::MutexGuard<'_, ModelSet>> {
     set.lock()
         .map_err(|_| Error::ModelSetLock("model set mutex was poisoned".to_owned()))

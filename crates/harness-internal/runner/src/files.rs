@@ -1,4 +1,4 @@
-//! The host's half of a prompt's declared store files: the launch's input
+//! The Harness's half of a prompt's declared store files: the launch's input
 //! text staged at the frontmatter's `input:` path before a run, and the
 //! `output:` path read after it.
 //!

@@ -80,7 +80,7 @@ impl Capability for Preluder {
 
 /// Activates a prompt whose frontmatter declares `capabilities` (the
 /// YAML list entries, one per line) against a registry holding
-/// `installed`, on a host with no input broker.
+/// `installed`, on a Host with no input broker.
 fn activate_declaring(capabilities: &str, installed: Vec<Preluder>) -> Activation {
     let source = format!(
         "---\nname: preludes\ndescription: d\npromptforge: 0\ncapabilities:\n{capabilities}\

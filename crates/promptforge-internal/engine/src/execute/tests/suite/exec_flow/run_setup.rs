@@ -76,7 +76,7 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
 #[tokio::test]
 async fn default_environment_runs_a_capability_free_prompt() {
     // A prompt with no capability binds runs under the default
-    // `Environment`: no registry, no client, no host roots.
+    // `Environment`: no registry, no client, no real roots.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## Only\n\n```lua\nreturn 'no capabilities'\n```\n"
@@ -92,7 +92,7 @@ async fn default_environment_runs_a_capability_free_prompt() {
 async fn default_run_context_store_handle_declares_a_fresh_store() {
     // `RunContext` absorbs the filesystem handle with a `VfsRef::default()`
     // (a fresh memory store at `/`) default: a store-using run needs no
-    // host-supplied handle.
+    // Harness-supplied handle.
     let md = flow_prompt!(
         "# Test prompt\n\n\
         ## First\n\n```lua\nstore.write('default.txt', 'stock')\n```\n\n\

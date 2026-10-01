@@ -4,22 +4,22 @@ use std::io;
 
 use crate::RunId;
 
-/// The database engine's error behind [`LogError::Database`], so the
-/// public error surface names no engine type. Renders and sources exactly
-/// as the engine's error does; [`as_inner`](Self::as_inner) restores
-/// branching on the engine's own variant, which the chain walks past.
+/// The database's error behind [`LogError::Database`], so the
+/// public error surface names no database type. Renders and sources exactly
+/// as the database's error does; [`as_inner`](Self::as_inner) restores
+/// branching on the database's own variant, which the chain walks past.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct DatabaseSource(turso::Error);
 
 impl DatabaseSource {
-    /// The wrapped engine error.
+    /// The wrapped database error.
     #[must_use]
     pub fn as_inner(&self) -> &turso::Error {
         &self.0
     }
 
-    /// Takes the wrapped engine error out of the wrapper.
+    /// Takes the wrapped database error out of the wrapper.
     #[must_use]
     pub fn into_inner(self) -> turso::Error {
         self.0
@@ -64,11 +64,11 @@ impl From<serde_json::Error> for JsonSource {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LogError {
-    /// The database engine refused an operation; the engine's error is
+    /// The database refused an operation; the database's error is
     /// the source.
     #[error("run log database")]
     Database {
-        /// The engine's error.
+        /// The database's error.
         #[source]
         source: DatabaseSource,
     },

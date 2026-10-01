@@ -1,6 +1,6 @@
 //! The `argv` global: the parsed form of the run's args string.
 //!
-//! `argv` installs at host injection in one of two modes. The H1 pass gets
+//! `argv` installs at Engine injection in one of two modes. The H1 pass gets
 //! a plain writable value, so the repair pattern lives there: read the
 //! broken input from `args`, assign `argv = repaired`, and the executor
 //! reads the value back when the pass completes. Every other section gets
@@ -17,7 +17,7 @@
 use super::{Error, Json, Lua, LuaSerdeExt, Result, Value};
 use crate::proxy::read_only_proxy;
 
-/// How a section VM installs the `argv` global at host injection. `None`
+/// How a section VM installs the `argv` global at Engine injection. `None`
 /// installs nil either way, so `if argv then` is the idiomatic malformed
 /// check.
 #[derive(Debug, Clone, Copy)]

@@ -37,7 +37,7 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
         .saturating_add(1)
 }
 
-/// The `sys` JSON every engine driver builds for its section or arm: the
+/// The `sys` JSON every section driver builds for its section or arm: the
 /// six shared fields in one construction. A driver with an extra field
 /// (`index`, on a fanout arm or a spawned chain) inserts it at its own call
 /// site. `when` is the run's `started_at` rendered as RFC 3339, the same
@@ -136,7 +136,7 @@ pub(crate) fn report_model_turn(
             }
         });
     }
-    // The content reports every host transcript is built from: the
+    // The content reports every Host transcript is built from: the
     // thinking side channel first, then the reply, each with model and
     // metrics.
     if let Some(thinking) = &thinking {

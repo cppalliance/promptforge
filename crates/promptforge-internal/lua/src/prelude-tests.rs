@@ -31,8 +31,8 @@ fn fresh_access() -> Arc<crate::Access> {
     )
 }
 
-/// Builds a section VM through section setup up to where preludes
-/// install: host injection with a bound `argv`, the host APIs, the control
+/// Builds a section VM through section setup up to where preludes install:
+/// Engine injection with a bound `argv`, the Engine globals, the control
 /// globals, and every coroutine yield shim. `var` seeds the guarded `var`.
 fn section_vm_with_var(var: Option<&serde_json::Value>) -> SectionVm {
     let emitter = null_emitter();

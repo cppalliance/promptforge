@@ -1,7 +1,7 @@
 //! The parser's internal error type and its public classification.
 //!
 //! [`Error`] is the internal error type every parsing module returns
-//! through [`Result`]. [`ParseError`] is the host-facing wrapper returned
+//! through [`Result`]. [`ParseError`] is the public wrapper returned
 //! by [`Prompt::parse`](crate::Prompt::parse): it classifies the internal
 //! type into a stable [`ParseErrorKind`] and surfaces the failure's
 //! location fields.
@@ -271,7 +271,7 @@ impl ParseError {
     ///
     /// A frontmatter YAML failure predates the name (the parser learns the
     /// name from the frontmatter itself), so it reports `None` and the
-    /// host's own label for the source takes its place.
+    /// Host's own label for the source takes its place.
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()

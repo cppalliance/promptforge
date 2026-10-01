@@ -155,7 +155,7 @@ impl<E: ErrorValue> Answer<E> {
     /// `(false, table)`, where `table` is the error's structured value
     /// (`kind`, `message` as the error's display string, and the kind's
     /// fields, with `tostring` returning the message) - the shim raises it
-    /// with `error(result, 0)`, so a printing author sees exactly the host's
+    /// with `error(result, 0)`, so a printing author sees exactly the Engine's
     /// message and a branching one reads `kind` - and the typed error
     /// is returned alongside for the driver to retain. A successful
     /// `join_any` whose member failed retains the member's error the same
@@ -173,7 +173,7 @@ impl<E: ErrorValue> Answer<E> {
                 vec![Value::String(lua.create_string(&text)?)]
             }
             // The task id resumes as its path text; the shim builds the
-            // `{ task = id }` table around it, so no host handle crosses.
+            // `{ task = id }` table around it, so no Engine handle crosses.
             Answer::Spawn(Ok(task)) | Answer::Timer(Ok(task)) => {
                 vec![Value::String(lua.create_string(task.to_string())?)]
             }

@@ -4,7 +4,7 @@ You need this when you group tools into packs, or add Lua that every section of 
 
 # Where this fits
 
-From [the crate page](crate), you know how your program, the host, prepares a run of a prompt and steps through its sections. From the [tools page](crate::tools), you know that a tool name has three parts, `namespace/pack/name`. This page adds the pack: several tools offered together under the name made of the first two parts. That pack is a *capability*, and a capability can also add Lua, its *prelude*, to every section of a run.
+From [the crate page](crate), you know how your program, the Harness, prepares a run of a prompt and steps through its sections. From the [tools page](crate::tools), you know that a tool name has three parts, `namespace/pack/name`. This page adds the pack: several tools offered together under the name made of the first two parts. That pack is a *capability*, and a capability can also add Lua, its *prelude*, to every section of a run.
 
 # Name a capability
 
@@ -117,9 +117,9 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
 
 Every section, fanout arm, and spawned task installs the preludes afresh, so nothing one section does reaches another's copy. A table a prelude defines is read-only at its top level, so a section that assigns a new field gets an error naming the capability. Each prelude sees only the base Lua functions, `string`, `table`, `math`, `tools`, `store`, `untrusted`, and a read-only `var`, so it cannot call another prelude's helpers.
 
-Each section installs the preludes after the host's `tools` and `store` tables and before the prompt's shared library, the `lua shared` block under the `#` title, so even the shared library's top-level code can call prelude helpers. The prompt's frontmatter tool and model aliases install last, which is why a prelude may not use their names.
+Each section installs the preludes after the `tools` and `store` Engine globals and before the prompt's shared library, the `lua shared` block under the `#` title, so even the shared library's top-level code can call prelude helpers. The prompt's frontmatter tool and model aliases install last, which is why a prelude may not use their names.
 
-A prelude that fails to load fails the run with [`RunErrorKind::Lua`](crate::RunErrorKind::Lua) before the run issues any effect. That covers a prelude that does not compile, raises an error, or calls a tool while loading, and the error and its traceback name the prelude's capability. A prelude also fails the run when it defines a global that another prelude, a host global such as `tools` or `store`, or a reserved name such as `ui` or `item` already holds. So does a global named like one of the prompt's frontmatter tool or model aliases.
+A prelude that fails to load fails the run with [`RunErrorKind::Lua`](crate::RunErrorKind::Lua) before the run issues any effect. That covers a prelude that does not compile, raises an error, or calls a tool while loading, and the error and its traceback name the prelude's capability. A prelude also fails the run when it defines a global that another prelude, an Engine global such as `tools` or `store`, or a reserved name such as `ui` or `item` already holds. So does a global named like one of the prompt's frontmatter tool or model aliases.
 
 You might expect `Prelude::new` to reject Lua that does not compile. Instead, it accepts any text and any id and compiles nothing, so test each prelude with a run.
 

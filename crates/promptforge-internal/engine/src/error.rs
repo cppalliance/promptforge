@@ -110,7 +110,7 @@ pub(crate) enum Error {
         source: BoxedSource,
     },
 
-    /// Gateway access was explicitly disabled by the host.
+    /// Gateway access was explicitly disabled by the Host.
     #[error("gateway access is disabled")]
     GatewayDisabled,
 
@@ -189,11 +189,11 @@ pub(crate) enum Error {
         finish_reason: Option<String>,
     },
 
-    /// The host cancelled the run (for example Ctrl-C during fanout).
+    /// The Host cancelled the run (for example Ctrl-C during fanout).
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
-    /// A section's Lua phase failed a host contract or hit a poisoned lock: a
+    /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
     /// (for example "host values have not been injected" or a poisoned mutex).
     ///
@@ -204,7 +204,7 @@ pub(crate) enum Error {
     #[error("{0}")]
     Lua(String),
 
-    /// A section's Lua phase failed at runtime or while bridging host values,
+    /// A section's Lua phase failed at runtime or while bridging Engine values,
     /// retaining the originating `mlua` error as the private `#[source]` cause
     /// alongside the mapped prompt-location message.
     ///
@@ -369,8 +369,8 @@ pub(crate) enum Error {
     UnsupportedVersion(u32),
 
     /// The environment cannot satisfy the prompt: a required capability is
-    /// missing, a required capability needs a host service this host does
-    /// not provide, two declared capabilities conflict, the filled model
+    /// missing, a required capability needs a Host service this Host lacks,
+    /// two declared capabilities conflict, the filled model
     /// fails a declared requirement (a context minimum or a hard keyword),
     /// or an H1 block failed the prompt's hard gate.
     ///
@@ -416,9 +416,9 @@ pub(crate) enum Error {
         line: u32,
     },
 
-    /// A Lua host resource quota (log events, log bytes, or instructions) was
-    /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
-    /// can distinguish quota exhaustion from an authoring error.
+    /// A Lua resource quota (log events, log bytes, or instructions) was
+    /// exhausted. This stable typed variant lets the Host tell quota
+    /// exhaustion apart from an authoring error.
     #[error("lua {resource} quota exceeded")]
     #[non_exhaustive]
     LuaQuota {

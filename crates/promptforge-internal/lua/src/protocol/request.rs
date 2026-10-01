@@ -1,4 +1,4 @@
-//! The request vocabulary: the validated suspending host calls a shim can
+//! The request vocabulary: the validated suspending Engine calls a shim can
 //! yield, the store operations they hold, and the message-record types
 //! the chat request is built from.
 //!
@@ -14,7 +14,7 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::Error;
 
-/// A validated suspending host call, parsed from the yielded table.
+/// A validated suspending Engine call, parsed from the yielded table.
 ///
 /// The parse happens at the resume boundary while the VM handle is live: a
 /// spawn's `item` seed converts through the serde bridge and the handle
@@ -133,9 +133,9 @@ pub enum Request {
         task: TaskId,
     },
     /// `tasks.events(task, opts?)`: the events one task has reported so
-    /// far, read from the host's history. Owner-or-self, as `status` is: the
+    /// far, read from the Harness's history. Owner-or-self, as `status` is: the
     /// caller may read a task it owns or the task it runs inside. A leaf
-    /// request: the host answers it from its log (a test driver from its
+    /// request: the Harness answers it from its log (a test driver from its
     /// event buffer).
     TaskEvents {
         /// The task whose events are read.
@@ -203,7 +203,7 @@ pub enum Request {
     },
     /// `store.*(...)`: one run-scoped store operation as a leaf yield.
     /// Section VMs and the live H1 VM run the store shims. Every operation
-    /// takes this path uniformly - memory- and host-backed alike, with no
+    /// takes this path uniformly - memory- and real-file-backed alike, with no
     /// inline fast path - so interleaving behavior never depends on the
     /// backend.
     Store {

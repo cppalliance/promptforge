@@ -43,10 +43,10 @@ function captureFailureLabel(failure: SpeechCaptureFailure): string {
  * Wires push-to-talk to production PCM16 capture and the additive Realtime
  * relay. The registry exclusively owns take state; this layer interprets its
  * typed editor, capture, status, and wire effects, and publishes the mic
- * state the host paints. Each instance holds its own owner token for the
- * shared capture service: it streams only audio it owns, and a press while
- * another instance owns the microphone is refused with a reason rather
- * than stealing the take.
+ * state the owning part paints. Each instance holds its own owner token
+ * for the shared capture service: it streams only audio it owns, and a
+ * press while another instance owns the microphone is refused with a
+ * reason rather than stealing the take.
  */
 export function setupStt(
   elements: SttElements,
@@ -254,7 +254,7 @@ export function setupStt(
 
   async function start(): Promise<void> {
     // Ownership first: a microphone held by another window is the reason
-    // even when the host's own blocker would also refuse.
+    // even when the owning part's own blocker would also refuse.
     if (ownedElsewhere()) {
       status.showLocal(BUSY_LABEL, "info");
       return;

@@ -1,5 +1,5 @@
 //! The coroutine-protocol shim layer: per-VM Lua yield wrappers for the
-//! suspending host calls.
+//! suspending Engine calls.
 //!
 //! Yield cannot cross the C boundary, so `models.infer`, `call`,
 //! `tools.call`, the `tasks` namespace, and `fanout` are Lua shims (source
@@ -62,9 +62,9 @@ const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
 const LOOP_REGISTRY: &str = "promptforge.impl_coro.loop";
 
 /// The registry key for the shim's model-issued `tool_call` form, stashed
-/// by the prelude install so a test host can install it as
+/// by the prelude install so a test's Harness can install it as
 /// `tools.call_as_model` and drive the driver's `call_id` path from a
-/// fixture section. The registry is host-side only: in production the
+/// fixture section. The registry is Rust-side only: in production the
 /// loop shim reaches the function directly inside the prelude chunk, and
 /// no VM ever installs it as a global.
 const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
@@ -81,7 +81,7 @@ const GUARD_REGISTRY: &str = "promptforge.impl_coro.guard";
 /// The registry key of the last value a guarded block raised, written by
 /// the guard's `stash_failure` capture from the message handler at the
 /// raise point and taken by [`take_failure`] when the failure reaches the
-/// host.
+/// Engine.
 const FAILURE_REGISTRY: &str = "promptforge.impl_coro.failure";
 
 /// The registry key of the traceback recorded beside the stashed failure:
@@ -117,7 +117,7 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
             .map_err(crate::detail::shared_source_new)
     });
 
-/// Installs the yield shims on a VM whose host tables already exist.
+/// Installs the yield shims on a VM whose Engine globals already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
 /// `yield` capture (a VM without the shims keeps exactly
@@ -126,7 +126,7 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// yield fails the driver's strict validation. The `models`, `tools`, and
 /// `compactors` tables are passed to the shim chunk as arguments, so the
 /// chunk never reads a global; the chunk shims `models.infer` and installs
-/// `tools.call`, and the `call` shim comes back for the host to install as
+/// `tools.call`, and the `call` shim comes back for the Engine to install as
 /// a global. The `tasks` namespace is a second chunk, run over the same
 /// `yield` and `var_snapshot` captures plus the prelude's returned failure
 /// helpers, and installed as the `tasks` global; `fanout` is a third, run
@@ -134,7 +134,7 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// renderer, and installed as the `fanout` global. The `models.loop` shim
 /// is stashed in the registry for [`install_section_loop_shim`].
 /// `max_tool_iterations` is the loop's round cap, the run's resolved value,
-/// captured by the chunk so the shim reads it without a host call.
+/// captured by the chunk so the shim reads it without an Engine call.
 ///
 /// Three further captures give the chunk the structured error shape:
 /// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
@@ -143,7 +143,7 @@ static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
 /// stringifies it, and `normalize_failure` rewrites a Rust callback's
 /// raised failure into the same table. The chunk's `pcall` and `xpcall`
 /// replacements, which run every caught value through that capture, are
-/// installed over the base library's globals here, so a host callback that
+/// installed over the base library's globals here, so an Engine function that
 /// fails directly from Rust reaches author code in the one shape. The next
 /// two captures, `enter_local_handler` and `leave_local_handler`, count up
 /// and down on `local_handler_depth`, the counter the VM's `jump` reads, so
@@ -300,11 +300,11 @@ fn local_handler_captures(lua: &Lua, depth: &Arc<AtomicU32>) -> Result<(Function
 
 /// Returns the shim's block guard for a VM whose shim prelude already ran.
 ///
-/// The host creates every block coroutine from the guard and resumes it
+/// The Engine creates every block coroutine from the guard and resumes it
 /// first with the block function: the guard runs the block under `xpcall`
 /// (yields pass through), stashes a raised value and the raise-point
 /// traceback for [`take_failure`] from the message handler, and re-raises
-/// the same value, so a shim's structured error table reaches the host
+/// the same value, so a shim's structured error table reaches the Engine
 /// intact instead of only as mlua's stringification.
 ///
 /// # Errors
@@ -399,7 +399,7 @@ pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
 /// VM whose shim prelude already ran, so a fixture section can yield a
 /// `tool_call` with a `call_id` straight at the driver's dispatch arm.
 ///
-/// Test hosts are the only callers, so the install exists only under the
+/// A test's Harness is the only caller, so the install exists only under the
 /// `test-support` feature: in production the loop shim reaches the
 /// function directly inside the prelude chunk, and `tools.call_as_model`
 /// never exists in any VM - not stubbed, simply absent.
@@ -419,14 +419,14 @@ pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
 }
 
 /// Installs the store yield shims onto a VM's `store` table, replacing the
-/// dispatchers the host API install put there, and switches those
+/// dispatchers installed with the other Engine globals, and switches those
 /// dispatchers to the shims too, so a store function the shared library
 /// captured before this call (`local write = store.write`) yields as well.
 /// Every store operation, through whichever reference the prompt holds,
 /// then suspends the block as a leaf yield the driver answers against the
 /// sync VFS via the blocking pool - uniformly for all backends, with no
 /// inline fast path, so interleaving behavior never depends on which
-/// backend serves the mount. The host performs each one as an
+/// backend serves the mount. The Harness performs each one as an
 /// `Effect::Store`, and a claims-model conflict through any of them ends
 /// the run with a determinism violation that `pcall` cannot catch.
 ///

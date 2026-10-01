@@ -1,6 +1,6 @@
-// The Gateway Config panel: a Dockview panel hosting the gateway's
+// The Gateway Config panel: a Dockview panel embedding the gateway's
 // config SPA in an iframe at /gateway/config/?mode=panel, proxied
-// same-origin through the workshop server. The panel only hosts; all
+// same-origin through the workshop server. The panel holds the iframe; all
 // traffic between the iframe and the workshop flows through the
 // window-level bridge in gateway-config-bridge.ts. The workshop's own
 // origin is passed in the iframe URL's `bridge` parameter, so the

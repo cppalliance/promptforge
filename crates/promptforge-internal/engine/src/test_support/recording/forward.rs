@@ -335,7 +335,7 @@ fn forward_content(event: Event, observer: &dyn Observer) {
     }
 }
 
-/// The debug pair, as the capture's events; dropped when the host set no
+/// The debug pair, as the capture's events; dropped when the caller set no
 /// capture.
 fn forward_debug(event: Event, debug: Option<&dyn DebugCapture>) {
     match event {

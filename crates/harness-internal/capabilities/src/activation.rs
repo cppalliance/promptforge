@@ -2,13 +2,13 @@
 //! declared capabilities into the run's [`ToolCatalog`] and the
 //! implementations behind it.
 //!
-//! Before a run is prepared, the host resolves the prompt's declarations
+//! Before a run is prepared, the Harness resolves the prompt's declarations
 //! against its [`CapabilityRegistry`], checks the present capabilities for
 //! co-activation conflicts, activates each survivor with the run's
 //! [`RunServices`], and assembles the contributions into three things: the
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
 //! against, the [`Prelude`]s every section VM installs, and the
-//! [`ToolTable`] of implementations the host's tool performer resolves a
+//! [`ToolTable`] of implementations the Harness's tool performer resolves a
 //! `ToolCall` effect's id in. The engine sees only the first two.
 //!
 //! [`Environment::prepare`]: promptforge::Environment::prepare
@@ -28,8 +28,8 @@ use crate::tool::Tool;
 
 /// The implementations behind a run's catalog, keyed by stable identity.
 ///
-/// Held by the host, never by the engine: a `ToolCall` effect names a
-/// [`ToolId`], and the host's performer resolves it here.
+/// Held by the Harness: a `ToolCall` effect from the Engine names a
+/// [`ToolId`], and the Harness's tool performer resolves it here.
 #[derive(Clone, Default)]
 pub struct ToolTable {
     tools: BTreeMap<ToolId, Arc<dyn Tool>>,
@@ -74,38 +74,38 @@ impl fmt::Debug for ToolTable {
 #[non_exhaustive]
 pub struct Activation {
     /// The activated capabilities' contributed tools as descriptors, in
-    /// declaration order: what the host hands to
+    /// declaration order: what the Harness hands to
     /// [`Environment::tools`](promptforge::Environment::tools).
     pub catalog: ToolCatalog,
-    /// The implementations behind the catalog: what the host's tool
+    /// The implementations behind the catalog: what the Harness's tool
     /// performer resolves against.
     pub tools: ToolTable,
     /// The activated capabilities' preludes, in declaration order: what
-    /// the host hands to
+    /// the Harness hands to
     /// [`Environment::preludes`](promptforge::Environment::preludes). A
     /// capability that does not activate contributes none.
     pub preludes: Vec<Prelude>,
     /// What activation could not satisfy: the required capabilities that
     /// are absent or failed to activate, the required capabilities that
-    /// need a host service this host does not provide, and the
+    /// need a run service this Host does not provide, and the
     /// co-activation conflicts. Merged into the prepare report through
     /// [`Requirements::merge`] so one refusal names every gap.
     pub requirements: Requirements,
-    /// The optional capabilities that activated without a host service
+    /// The optional capabilities that activated without a run service
     /// they need, in declaration order: one entry per capability and
     /// missing service. These do not refuse the run; each capability
     /// decides how to work without the service.
     pub service_gaps: Vec<ServiceGap>,
 }
 
-/// One optional capability that activated without a host service it
+/// One optional capability that activated without a run service it
 /// needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ServiceGap {
     /// The optional capability that activated without the service.
     pub capability: CapabilityId,
-    /// The service it needs and this host does not provide.
+    /// The service it needs and this Host does not provide.
     pub service: Service,
 }
 
@@ -127,7 +127,7 @@ pub struct ServiceGap {
 /// optional one activates anyway, and each missing service becomes a
 /// [`ServiceGap`] in [`Activation::service_gaps`] and a warning. Each
 /// remaining capability is activated with `services` (the run's VFS,
-/// cancellation handle, and input broker when the host has one); an
+/// cancellation handle, and input broker when the Host has one); an
 /// activation failure is logged and the capability contributes nothing -
 /// and when the failed capability is required, it also lands in
 /// [`Requirements::missing_required`], since the run cannot have what the

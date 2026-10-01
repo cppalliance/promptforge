@@ -14,8 +14,8 @@ use crate::{
 impl SectionVm {
     /// Replays the shared library as the section's first chunk.
     ///
-    /// The replay runs through the normal chunk path with the full host
-    /// environment already installed: `args`, `sys`, `var`, `log`,
+    /// The replay runs through the normal chunk path with every Engine
+    /// global already installed: `args`, `sys`, `var`, `log`,
     /// `store`, the `tools`/`models` tables, and the control globals are all
     /// visible to shared top-level code. Only the captured tool/model alias
     /// globals are absent; they install afterward via
@@ -65,7 +65,7 @@ impl SectionVm {
     /// already be installed by `install_control_globals`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, execution
+    /// Returns [`Error::Lua`] if Engine values have not been injected, execution
     /// fails, or the program returns a non-scalar value.
     ///
     /// A test helper for `promptforge-engine`'s executor tests, so it exists
@@ -152,7 +152,7 @@ impl SectionVm {
     /// the block function: the guard runs the block under `xpcall`, whose
     /// handler stashes a failure and its raise-point traceback, and
     /// re-raises the same value, so a structured error table a shim raised
-    /// reaches the host as a typed [`Error::Raised`] rather than only as
+    /// reaches the Engine as a typed [`Error::Raised`] rather than only as
     /// mlua's stringification, and a Lua-raised error keeps the author's
     /// frames for the prompt-line mapping.
     ///
@@ -274,7 +274,7 @@ impl SectionVm {
     /// Classifies a block coroutine's failure: the guard's stash restores
     /// the raise-point traceback onto a Lua-raised error first (the guard's
     /// re-raise is what killed the coroutine, so mlua's own traceback shows
-    /// only the guard's frame); cancellation and host quotas then map
+    /// only the guard's frame); cancellation and Engine quotas then map
     /// through [`LuaProgram::map_runtime_error`]; otherwise a structured
     /// error table the guard stashed is kept as [`Error::Raised`], except a
     /// `lua`-kind table, whose mapped runtime error keeps the same
@@ -363,7 +363,7 @@ pub(crate) struct LuaOutcome {
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
 /// even though each section starts a fresh context. The exposed `store` table
-/// is always present (a host capability, not a scoped tool).
+/// is always present (an Engine global, not a scoped tool).
 ///
 /// The `tools` table is the same validating one every section VM installs,
 /// over an empty shared set: a chunk that calls `tools.add(...)` fails loudly

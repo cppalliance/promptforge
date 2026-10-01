@@ -1,6 +1,6 @@
 # Web Fetch and Search
 
-Declare one capability and your prompt's model can read the live web: a fetch tool returns a page as clean markdown under a short header saying where the text came from, and a search tool returns results as JSON. Every fetch runs under a host-set policy that keeps its requests on the public internet, and neither tool needs a key, token, or address in your prompt. This chapter shows how to bind the two tools, what each call takes and returns, the limits and policy a fetch runs under, and the exact text a model or a script sees when a call fails.
+Declare one capability and your prompt's model can read the live web: a fetch tool returns a page as clean markdown under a short header saying where the text came from, and a search tool returns results as JSON. Every fetch runs under a Harness-set policy that keeps its requests on the public internet, and neither tool needs a key, token, or address in your prompt. This chapter shows how to bind the two tools, what each call takes and returns, the limits and policy a fetch runs under, and the exact text a model or a script sees when a call fails.
 
 ## The web capability
 
@@ -40,7 +40,7 @@ The `tools:` line `fetch: promptforge/web/fetch` is a tool slot that binds the p
 
 The rest of the block is the usual conversation: `models.default('writer')` selects the `writer` role ([choosing a section's model](10-models.md#choosing-a-sections-model)), the section's prose becomes the first user record, and after `models.loop` the last record in the list holds the model's final reply ([a first conversation](11-conversations.md#a-first-conversation)).
 
-The fetch tool fetches one web page with a GET request for a URL the model supplies and returns the page's main content as text the model can cite, as markdown for an HTML page. It enforces a safety policy, set by the host and not by the prompt, on every address it will reach, which keeps it from being turned against internal systems (server-side request forgery, or SSRF).
+The fetch tool fetches one web page with a GET request for a URL the model supplies and returns the page's main content as text the model can cite, as markdown for an HTML page. It enforces a safety policy, set by the Harness and not by the prompt, on every address it will reach, which keeps it from being turned against internal systems (server-side request forgery, or SSRF).
 
 Add the search tool the same way. This prompt binds both tools and writes the `capabilities:` value as a YAML list, which means the same as the bracketed form `capabilities: [promptforge/web]`:
 
@@ -76,9 +76,9 @@ return msgs[#msgs].content
 
 The search tool takes a search query and returns a list of search results. `tools.add({"search", "fetch"})` puts both aliases in scope at once, and the prose tells the model to search first and then fetch the best results.
 
-Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The host provides the gateway address and token when it registers the capability, and the prompt only declares the capability id. The standard session host provides `promptforge/web` as a built-in capability when it is configured with its PromptForge gateway connection.
+Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the Host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The Host provides the gateway address and token, the Harness passes them to the capability when it registers it, and the prompt only declares the capability id. The Harness provides `promptforge/web` as a built-in capability when the Host configures it with a PromptForge gateway connection.
 
-When the host cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
+When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -260,7 +260,7 @@ A body that breaks off mid-download never comes back as partial text. It returns
 
 ## The fetch policy
 
-Every fetch runs under one fetch policy that the host sets and a prompt cannot change. The table shows the built-in default policy, which applies unless the host installs its own. Per-call arguments such as `max_chars` can only ask for less:
+Every fetch runs under one fetch policy that the Harness sets and a prompt cannot change. The table shows the built-in default policy, which applies unless the Harness installs its own. Per-call arguments such as `max_chars` can only ask for less:
 
 | Policy value | Default setting |
 |---|---|

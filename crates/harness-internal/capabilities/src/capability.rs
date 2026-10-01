@@ -80,7 +80,7 @@ pub trait Capability: Send + Sync {
     /// Returns the capability's stable identity (`namespace/pack`).
     fn id(&self) -> &CapabilityId;
 
-    /// A one-sentence description, surfaced to hosts.
+    /// A one-sentence description, surfaced to Hosts.
     fn description(&self) -> &str;
 
     /// Returns the capabilities this one cannot be activated with in one
@@ -96,12 +96,12 @@ pub trait Capability: Send + Sync {
         &[]
     }
 
-    /// Returns the host services this capability needs from
+    /// Returns the run services this capability needs from
     /// [`RunServices`].
     ///
     /// Activation checks these against [`RunServices::provides`] before
     /// any capability code runs. When a required capability needs a
-    /// service the host does not provide, activation does not call
+    /// service the Host does not provide, activation does not call
     /// [`create`](Capability::create) and refuses the run naming both.
     /// When the capability is optional, activation calls `create` anyway
     /// and the capability decides how to work without the service. The
@@ -122,7 +122,7 @@ pub trait Capability: Send + Sync {
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
 }
 
-/// A host service a capability can need: the closed set of optional
+/// A run service a capability can need: the closed set of optional
 /// services the harness supplies through [`RunServices`].
 ///
 /// A capability names what it needs through [`Capability::needs`], and
@@ -164,14 +164,14 @@ impl Service {
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RunServices {
-    /// The run's whole filesystem: the host roots and the declared store,
-    /// built by the host before activation.
+    /// The run's whole filesystem: the real directories and the declared
+    /// store, handed over by the Harness before activation.
     pub vfs: VfsRef,
     /// The run's cancellation flag: the same synchronous handle the engine
-    /// polls, so a capability observes the host's cancel by polling too.
+    /// polls, so a capability observes the Host's cancel by polling too.
     pub cancel: CancelHandle,
-    /// The operator's input broker, when the host has someone to ask.
-    /// `None` is a legitimate answer: a batch or eval host has nobody at
+    /// The operator's input broker, when the Host has someone to ask.
+    /// `None` is a legitimate answer: a batch or eval Host has nobody at
     /// the other end. Present or absent, it stays so for the whole run.
     pub input: Option<Arc<dyn InputBroker>>,
 }
@@ -229,7 +229,7 @@ impl RunServices {
     }
 
     /// Returns whether this run has `service`: for [`Service::Input`],
-    /// whether the host supplied an input broker.
+    /// whether the Harness supplied an input broker.
     ///
     /// # Examples
     ///

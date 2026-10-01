@@ -2,7 +2,7 @@
 //! and `chat`, `tool_call`, `store`, `timer` - issues
 //! exactly one `Effect` out of the run's `step`, and each effect's record
 //! round-trips through serde; only a `chat` round streams its deltas to
-//! the host. The run's answer rules (a drop, an orphan, a wrong kind) are
+//! the Harness. The run's answer rules (a drop, an orphan, a wrong kind) are
 //! pinned beside `Run` itself.
 
 use promptforge_types::wire::StreamDelta;
@@ -29,10 +29,10 @@ fn assert_round_trips(records: &[EffectRecord]) {
     }
 }
 
-/// Builds the run context and its host for an effect test: the parsed
+/// Builds the run context and its Harness for an effect test: the parsed
 /// prompt, an empty shared library, and the shared model and tool sets
 /// pre-filled (the scheduler tests bypass the live H1 pass that would fill
-/// them), under the given host.
+/// them), under the given Harness.
 fn effect_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
@@ -61,7 +61,7 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
     }
 }
 
-/// Records every streamed delta the run forwards to the host.
+/// Records every streamed delta the run forwards to the Harness.
 fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunHost) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
@@ -295,7 +295,7 @@ async fn a_chat_round_streams_its_deltas_to_the_host() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_nested_infer_round_streams_no_deltas_to_the_host() {
     // A nested `models.infer` consumes only the completed reply; its
-    // fragments have no consumer and never reach the host's hook.
+    // fragments have no consumer and never reach the Harness's hook.
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
     let (seen, delta_host) = delta_hook();

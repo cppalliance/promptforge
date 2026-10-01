@@ -123,7 +123,7 @@ fn empty_home(test: &str) -> PathBuf {
 }
 
 /// Runs the binary with every provider key stripped from the environment,
-/// so no host credential can turn a fixture run into a live fetch.
+/// so no credential on the machine can turn a fixture run into a live fetch.
 /// Keyless providers (no `key_env`) still fetch live, so their slice
 /// status depends on egress and the universal `unavailable` assertions
 /// below exempt them.

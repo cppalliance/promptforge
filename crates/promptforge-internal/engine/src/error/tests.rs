@@ -22,7 +22,7 @@ fn assert_source_survives_run_error(error: Error) {
 fn context_exhaustion_maps_from_lua_and_classifies() {
     // The compactor's typed exhaustion crosses the crate seam
     // variant-for-variant and classifies as its own run-error kind, so a
-    // host can distinguish context exhaustion from a transport failure.
+    // Host can distinguish context exhaustion from a transport failure.
     let lua_error = LuaError::ContextExhausted {
         reason: promptforge_lua::OverflowReason::Provider,
     };
@@ -150,7 +150,7 @@ fn frontmatter_locations_surface_through_the_run_error() {
     // Step 6: the parser's surfaced YAML position crosses the error-type
     // bridge and lands on `RunError::location` for navigation. A
     // frontmatter failure predates the prompt's name, so the path is
-    // the placeholder a host replaces with its own label for the source.
+    // the placeholder the Host replaces with its own label for the source.
     let source = concat!(
         "---\n",
         "name: x\n",

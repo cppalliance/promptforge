@@ -178,7 +178,7 @@ impl ToolPerformer for PendingTool {
     }
 }
 
-/// Panics instead of answering: a performer the host lost to a bug. The
+/// Panics instead of answering: a performer the Harness lost to a bug. The
 /// call panics on its first poll.
 pub(crate) struct PanickingTool;
 

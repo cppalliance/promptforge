@@ -4,7 +4,7 @@
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, pushes the gateway binding at startup and on
 //! every replacement (the capability registry and model client are
-//! rebuilt when the generation changes), pushes its chat catalog and host
+//! rebuilt when the generation changes), pushes its chat catalog and Host
 //! snapshot as they change, and launches sessions by discovered agent
 //! name. Sessions outlive client connections: a client that reattaches
 //! looks its session up by id and reads the transcript past its cursor.
@@ -48,7 +48,7 @@ pub struct HarnessConfig {
 #[derive(Debug, Clone, Default)]
 pub struct LaunchOptions {
     /// The filesystem every run of the session works in: its declared
-    /// store, and any host mounts, overlays, policy, and op sink the
+    /// store, and any real mounts, overlays, policy, and op sink the
     /// client built into the handle with `promptforge::vfs`. Every run
     /// shares it, relaunches included, so files a retired run wrote are
     /// still there, and the declared input is staged and the declared
@@ -119,8 +119,8 @@ impl SessionTable {
     }
 }
 
-/// The harness: the engine's production host, seen from outside the
-/// family.
+/// The Harness, which steps every Engine run and performs its effects,
+/// seen from outside the family.
 pub struct Harness {
     config: HarnessConfig,
     bindings: Arc<Bindings>,
@@ -184,7 +184,7 @@ impl Harness {
         self.bindings.set_catalog(catalog);
     }
 
-    /// Replaces the host snapshot; the next launch reads it.
+    /// Replaces the Host snapshot; the next launch reads it.
     pub fn set_host(&self, host: HostSnapshot) {
         self.bindings.set_host(host);
     }

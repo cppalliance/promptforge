@@ -6,7 +6,9 @@ You hand it a prompt file, and it hands you back the prompt's result. On the way
 
 A PromptForge prompt is a Markdown file that is also a program. It opens with YAML frontmatter, has exactly one `#` title, and holds `##` headings under the title. Each `##` heading, with the text and Lua under it, is a *section*, and sections run in file order. The `lua` blocks hold the logic, and the prose holds text for a model. The [PromptForge user guide](https://cppalliance.github.io/promptforge/) teaches the prompt language in full.
 
-A prompt does no I/O of its own, so its model calls, tool calls, and file reads and writes all come to your program as work to do. Each piece of that outside work is an *effect*, and the program that runs the prompt and does that work is the *host*. One execution of one prompt, from its start to its result, is a *run*, and a record of something that happened during it is an *event*. The files a prompt reads and writes live in its [store](vfs), a set of virtual files that every section shares.
+A prompt's model calls, tool calls, and file reads and writes all come to your program as work to do. Each piece of that outside work is an *effect*, and the program that runs the prompt and does that work is the *Harness*. In these examples your own program plays the Harness's part.
+
+One execution of one prompt, from its start to its result, is a *run*, and a record of something that happened during it is an *event*. The files a prompt reads and writes live in its [store](vfs), a set of virtual files that every section shares.
 
 Here is the smallest prompt that runs, the one every tour builds on.
 
@@ -104,7 +106,7 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
 2. Step 2 builds the context and then the run.
    - [`RunContext::new`] takes the run's name, which the run stamps on every event, then the seed and the start time. The fixed seed `7` and [`Timestamp::UNIX_EPOCH`](timestamp::Timestamp::UNIX_EPOCH) make this test repeat exactly. A live program passes a seed from a secure random source and the current time instead, because a secret seed keeps the wrapping around [untrusted output](tools) unguessable.
    - [`Run::new`] takes the prompt in an [`Arc`](std::sync::Arc), the argument string that reaches Lua as `args`, here empty, and the context. Creating a run cannot fail.
-3. `answer` performs each [`Effect::Store`](effect::Effect::Store) with [`perform_store_op`](vfs::perform_store_op) against the context's default in-memory store, and drops any other kind. Your program, not the run, does the store work. The greeter issues only store effects, so the last arm never runs here. A host answers every kind of effect its prompts use, and keeps [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped) for work it gives up on. [Stop a run](#stop-a-run) shows what a drop does.
+3. `answer` performs each [`Effect::Store`](effect::Effect::Store) with [`perform_store_op`](vfs::perform_store_op) against the context's default in-memory store, and drops any other kind. Your program, not the run, does the store work. The greeter issues only store effects, so the last arm never runs here. A Harness answers every kind of effect its prompts use, and keeps [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped) for work it gives up on. [Stop a run](#stop-a-run) shows what a drop does.
 4. The loop calls `step`, hands each answer to [`Run::resume`] under its effect's id, and stops only at `Step::Done`. Each effect also comes with its *provenance*: the [task](ids) that issued it and that task's position in its own order. The greeter ignores it, and [Group a log by task](ids#group-a-log-by-task) explains provenance in full. The result `hello` proves the note went out and came back through two store effects.
 
 When the file has a mistake, such as a missing title or a Lua syntax error, `Prompt::parse` returns a [`ParseError`] of kind [`ParseErrorKind::Structure`] or [`ParseErrorKind::Lua`], with no line or column. Show the user the error's message, because it tells the author what is wrong and, for Lua, which block it is in.
@@ -288,7 +290,7 @@ Output you mark as [untrusted](tools) is different. The run wraps untrusted outp
 
 A tool slot's tool belongs to a [capability](capabilities), a named pack of tools. When a slot's capability has no tool in your catalog at all, prepare reports that capability as missing, and [`Requirements::refusal`] returns an error that names it. The user learns exactly which capability to supply. When the slot's capability is in the catalog but that exact tool is not, prepare reports nothing, and the run fails only when a section offers the tool. Make sure your catalog holds the exact tool each slot names, because a clean report does not prove every slot is filled.
 
-A host that serves many prompts usually builds its catalog in a step of its own before prepare, its *capability activation*, and records what it could not provide in a [`Requirements`] of its own. This crate does not do that step, and the greeter, which builds its catalog by hand, has nothing to merge. Prepare never checks the `capabilities:` list itself. Only your own capability activation reports a declared capability you lack.
+A Harness that serves many prompts usually builds its catalog in a step of its own before prepare, its *capability activation*, and records what it could not provide in a [`Requirements`] of its own. This crate does not do that step, and the greeter, which builds its catalog by hand, has nothing to merge. Prepare never checks the `capabilities:` list itself. Only your own capability activation reports a declared capability you lack.
 
 You might expect to register a closure or a trait object that the run calls when it needs the tool. Instead, the run holds only the tool's description, and each call comes back to you as an effect to run and answer.
 
@@ -387,7 +389,7 @@ assert!(matches!(run.step(), Step::Done { result: RunResult::Cancelled, .. }));
 
 1. The loop answers the two store effects as before, but keeps the chat effect's id unanswered in `held`. The model call is still out when the cancel lands.
 2. [`Run::cancel_handle`] gives you a clone of the run's cancel handle, which moves into a second thread that cancels and is joined. Every handle, including one you gave the context with [`RunContext::cancel`], reaches the run's one cancel flag. Cancel whenever you need to, even while Lua is busy in a loop or waiting on a model reply, because your next call to `step` tears the run down wherever it is.
-3. The next step is [`Step::Pending`] with no new effects, and [`Run::decided`] returns true. The host then answers each held id with [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped). [`Step::Done`] arrives only after every issued effect has an answer, so a run with an unanswered effect never ends.
+3. The next step is [`Step::Pending`] with no new effects, and [`Run::decided`] returns true. The Harness then answers each held id with [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped). [`Step::Done`] arrives only after every issued effect has an answer, so a run with an unanswered effect never ends.
 4. The step after that is `Step::Done` with [`RunResult::Cancelled`]. A cancel ends the run as its own outcome and never as a [`RunResult::Failure`], so your failure handling never has to recognize it.
 
 `EffectAnswer::Dropped` is the answer for work you give up on, and it works even when nobody has cancelled. Dropping even one effect when nothing has cancelled the run resumes the Lua waiting on it with the same cancelled error a cancel raises. If the prompt does not catch that error, the run ends as `RunResult::Cancelled`, not as a failure, because giving the work up was your choice, just like a cancel. So if you dropped the greeter's chat effect, its run would end as cancelled even though nothing called cancel.
@@ -396,11 +398,11 @@ Still match every outcome after you cancel. The first outcome that ends a run is
 
 You might expect a cancel to work like dropping a future, where the work just stops and you walk away. Instead, you keep stepping and answer each effect still out with `EffectAnswer::Dropped`, and only then does the run end as cancelled.
 
-Cancel, drop what you hold, and step until `Done`. Next, [The complete program](#the-complete-program) puts every piece into one host.
+Cancel, drop what you hold, and step until `Done`. Next, [The complete program](#the-complete-program) puts every piece into one Harness.
 
 # The complete program
 
-Here is the whole greeter host, every line visible, with one addition: it writes every parse and step event to a log.
+Here is the whole greeter Harness, every line visible, with one addition: it writes every parse and step event to a log.
 
 ````
 use std::num::NonZeroU32;
@@ -510,18 +512,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 1. [`Prompt::parse`] runs once, and its events start the log before the parse result is checked. Write the parse events first, whether or not the file parsed, because they end with a record of whether it did.
 2. The context gets [`RunContext::provenance_start`] with the number of parse events, then the canned model. Every event and effect carries its [provenance](ids): its task and its position in that task's order. Parse events take the first positions, and the run's own events number on from them, so no two records in the one log share a task and position. Pass that count whenever parse events and run events share one log.
-3. The environment offers the `shout` tool, prepare fills the role and the slot, and any refusal becomes the program's error before a run exists. Build every host in this order: parse the prompt, build the context, prepare it with your environment, check the refusal, create the run, and step it. Each call takes what the one before it returns.
+3. The environment offers the `shout` tool, prepare fills the role and the slot, and any refusal becomes the program's error before a run exists. Build every Harness in this order: parse the prompt, build the context, prepare it with your environment, check the refusal, create the run, and step it. Each call takes what the one before it returns.
 4. [`Run::new`] takes the prepared context, and the program keeps a cancel handle that a signal handler or another thread could use. Stopping a run needs no change to the loop.
-5. The loop appends each step's events to the log in the order they come, and each step's events cover exactly what happened since the step before. It answers each effect exactly once, with the answer that matches its kind, and drops effects once [`Run::decided`] returns true. It ends only at [`Step::Done`]. The [`Step`] variant and `Run::decided`, never the events, decide what the host does next.
-6. The result is `HI THERE`, the log starts with the parse events, and nothing cancelled the run. The pieces from every tour fit in one host.
+5. The loop appends each step's events to the log in the order they come, and each step's events cover exactly what happened since the step before. It answers each effect exactly once, with the answer that matches its kind, and drops effects once [`Run::decided`] returns true. It ends only at [`Step::Done`]. The [`Step`] variant and `Run::decided`, never the events, decide what the Harness does next.
+6. The result is `HI THERE`, the log starts with the parse events, and nothing cancelled the run. The pieces from every tour fit in one Harness.
 
 Answer each effect with care, because [`Run::resume`] reports nothing back. A wrong kind, an unknown id, or a second answer ends the run as a failure of kind [`RunErrorKind::Internal`].
 
 Only the run says when it is over. `Step::Done` ends the loop, and the events that come with each step are a record for your log, never a signal.
 
-A run's events are like log records: you write them out, and your control flow never branches on them. Unlike a logger, nothing is emitted behind your back. Each `step` hands you its events, and your host writes them. A run that fails to start returns `Step::Done` with no events at all.
+A run's events are like log records: you write them out, and your control flow never branches on them. Unlike a logger, nothing is emitted behind your back. Each `step` hands you its events, and your Harness writes them. A run that fails to start returns `Step::Done` with no events at all.
 
-This is the loop every host runs:
+This is the loop every Harness runs:
 
 ````text
         ┌────────────────────────────────────────────┐
@@ -565,10 +567,10 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 
 ## MissingService
 
-[`MissingService`] names a host service that a required capability needs and your program lacks, such as a way to ask the operator on an unattended batch host. Your own capability activation finds that gap and pushes it onto [`Requirements.missing_services`](Requirements::missing_services), since [`Environment::prepare`] never reports one. [`Requirements::refusal`] then refuses the run and names the service, because [`Requirements::merge`] drops any missing-capability entry for that capability. Provide the service, or declare the capability optional in the prompt.
+[`MissingService`] names a service that a required capability needs and your program lacks, such as a way to ask the operator when the Host is an unattended batch job. Your own capability activation finds that gap and pushes it onto [`Requirements.missing_services`](Requirements::missing_services), since [`Environment::prepare`] never reports one. [`Requirements::refusal`] then refuses the run and names the service, because [`Requirements::merge`] drops any missing-capability entry for that capability. Provide the service, or declare the capability optional in the prompt.
 
 - [`MissingService::new`]: the only way to build one, because the struct is non-exhaustive.
-- [`service`](MissingService::service): free text in your host's own words that a model will read, such as "an input broker".
+- [`service`](MissingService::service): free text in your Harness's own words that a model will read, such as "an input broker".
 
 ## ParseError
 
@@ -609,7 +611,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 
 [`RunContext`] holds what one run gets from your program: name, seed, start time, limits, cancel flag, files, and current model. Build one per run, and set its model before [`Environment::prepare`], which binds every role to it once. With no model, selecting a role fails at run time. A store handle without a working store ends the first step with [`RunErrorKind::Store`], so pass a working store or keep the default in-memory one. [Run a prompt](#run-a-prompt) teaches it.
 
-- [`RunContext::new`]: a live host passes the current time and a cryptographically random seed, which feeds a security nonce.
+- [`RunContext::new`]: a live Harness passes the current time and a cryptographically random seed, which feeds a security nonce.
 - [`RunContext::report_debug`]: turning debug mode on adds `Request` and `Response` events with the raw model bodies, which the `Chat` effect and its answer already hold.
 - [`RunContext::cancel`]: replaces the flag `new` made, so your handle, [`RunContext::cancel_handle`], and [`Run::cancel_handle`] all reach one flag.
 - [`RunContext::ui`]: installs a `ui()` global, and lets `models.get` resolve an undeclared alias as a raw model id. Without it, resolution stays strict.
@@ -619,7 +621,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 
 [`RunError`] explains why a run failed: a stable kind to match on, whether a retry may help, and the underlying cause. You get one from [`RunResult::Failure`] in [`Step::Done`], or as the refusal from [`Requirements::refusal`], whose message is exactly the notice text. A run you cancel is not a failure, since it ends as [`RunResult::Cancelled`]. Match [`RunError::kind`] in code, show the message to people, and retry only a retryable error. [Answer a model](#answer-a-model) teaches it.
 
-- [`RunError::is_cancelled`]: true only for a host interrupt. An uncaught Lua task cancellation is [`RunErrorKind::Lua`] and returns false.
+- [`RunError::is_cancelled`]: true only for a Host interrupt. An uncaught Lua task cancellation is [`RunErrorKind::Lua`] and returns false.
 - [`RunError::is_retryable`]: true for transport failures, unreadable or malformed replies, and backend statuses of 500 and up. Every lower status, 429 included, is not.
 - [`RunError::location`]: `Some` only for parse and internal failures. An internal fault points at a Rust source line, not at the prompt.
 
@@ -669,7 +671,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 
 ## RunErrorKind
 
-[`RunErrorKind`] classifies a [`RunError`] by the phase that failed, so your program can match on it when it decides how to react to a failed or refused run. `Internal` also covers host mistakes: an answer of the wrong kind, an answer for an id never issued, or a second answer to one effect. Answer each issued effect exactly once, with the answer its kind expects. [The complete program](#the-complete-program) teaches it.
+[`RunErrorKind`] classifies a [`RunError`] by the phase that failed, so your program can match on it when it decides how to react to a failed or refused run. `Internal` also covers Harness mistakes: an answer of the wrong kind, an answer for an id never issued, or a second answer to one effect. Answer each issued effect exactly once, with the answer its kind expects. [The complete program](#the-complete-program) teaches it.
 
 | Kind | What failed |
 |---|---|
@@ -684,8 +686,8 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 | [`Quota`](RunErrorKind::Quota) | The run used up its Lua log events, its log bytes, or its instructions. |
 | [`ContextExhausted`](RunErrorKind::ContextExhausted) | The compactor could not fit the conversation into the model's context window. |
 | [`Substitution`](RunErrorKind::Substitution) | A `{{ }}` placeholder in the prompt's prose could not be filled. |
-| [`Cancelled`](RunErrorKind::Cancelled) | A host interrupt, seen only inside a run. A run you cancel ends as [`RunResult::Cancelled`] instead of a failure of this kind. |
-| [`Internal`](RunErrorKind::Internal) | A broken invariant inside the run, including the host mistakes the paragraph above names. |
+| [`Cancelled`](RunErrorKind::Cancelled) | A Host interrupt, seen only inside a run. A run you cancel ends as [`RunResult::Cancelled`] instead of a failure of this kind. |
+| [`Internal`](RunErrorKind::Internal) | A broken invariant inside the run, including the Harness mistakes the paragraph above names. |
 | [`RequirementsUnmet`](RunErrorKind::RequirementsUnmet) | The refusal from [`Requirements::refusal`], for missing capabilities, missing services, conflicts, or model shortfalls. |
 
 ## RunResult
@@ -710,7 +712,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 - [tools](tools): offer tools to a run, and answer the tool calls it makes.
 - [capabilities](capabilities): name capabilities, check which tools belong to each, and give a run the Lua that capabilities add.
 - [prompt](prompt): read what a prompt declares before you run it, and pass it arguments.
-- [vfs](vfs): give a run its files, the store every section shares, host folders beside it, and rules about what the run may change.
+- [vfs](vfs): give a run its files, the store every section shares, real directories beside it, and rules about what the run may change.
 - [cancel](cancel): stop runs and tasks from any thread, one at a time or all together.
 - [timestamp](timestamp): give each run its start time, and keep that time with the run's record.
 - [metrics](metrics): read the token counts and timings of each model call.

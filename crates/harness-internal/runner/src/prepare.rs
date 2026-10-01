@@ -1,14 +1,14 @@
 //! Run preparation: everything between a prompt file on disk and a `Run`
 //! the effect loop can drive.
 //!
-//! The harness is the engine's host, so the host inputs the engine
-//! refuses to draw itself are drawn here: the run's seed from the OS
-//! CSPRNG and its `started_at` from the wall clock, both written to the
-//! run's row in the log before anything else, so the record can hand them
-//! back verbatim to a future replay. Then the ceremony the engine's
-//! `Environment` expects of a host: parse; put the prompt's declared
-//! `input:` file in place in the store (`files::stage_input`); hand the
-//! run's whole filesystem, host roots and the declared store, to the capabilities'
+//! Here the Harness draws the inputs the Engine refuses to draw itself:
+//! the run's seed from the OS CSPRNG and its `started_at` from the wall
+//! clock, both written to the run's row in the log before anything else,
+//! so the record can hand them back verbatim to a future replay. Then
+//! the ceremony the Engine's `Environment` expects of the Harness:
+//! parse; put the prompt's declared `input:` file in place in the store
+//! (`files::stage_input`); hand the run's whole filesystem, real
+//! directories and the declared store, to the capabilities'
 //! services and to the context as given; activate the prompt's declared
 //! capabilities against the caller's registry, which assembles the
 //! catalog, the preludes, and the implementation table; install the
@@ -49,15 +49,15 @@ use crate::performers::{
 use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
-/// installed capabilities, the host roots, the run's cancel flag, the
+/// installed capabilities, the real directories, the run's cancel flag, the
 /// log, the chat performer and the optional input broker that reach
 /// beyond the runner, and the session's identity for the run's row.
 pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
-    /// against; `None` is a host with no capabilities, where every
+    /// against; `None` is a Harness with no capabilities, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<CapabilityRegistry>>,
-    /// The run's whole filesystem: the host roots and the declared store,
+    /// The run's whole filesystem: the real directories and the declared store,
     /// passed straight to the context's VFS and handed to the capabilities
     /// as the run's services.
     pub vfs: VfsRef,
@@ -71,8 +71,8 @@ pub struct Services {
     pub log: SharedLog,
     /// Performs the run's `Chat` effects.
     pub chat: Arc<dyn ChatPerformer>,
-    /// The operator's input broker, when the host has someone to ask:
-    /// handed to every capability activated for the run. `None` is a host
+    /// The operator's input broker, when the Host has someone to ask:
+    /// handed to every capability activated for the run. `None` is a Host
     /// with nobody to ask.
     pub input: Option<Arc<dyn InputBroker>>,
     /// The session launching the run: the row's `session_id` and the
@@ -80,10 +80,10 @@ pub struct Services {
     pub session_id: String,
     /// The agent the session runs: the row's `agent`.
     pub agent: String,
-    /// The host's current model, when one is selected; prepare binds
+    /// The Host's current model, when one is selected; prepare binds
     /// every declared role to it and checks each role's requirements.
     pub model: Option<ModelDescriptor>,
-    /// The host-state snapshot the `ui()` global serves, when the run has
+    /// The Host snapshot the `ui()` global serves, when the run has
     /// one.
     pub ui: Option<serde_json::Value>,
 }
@@ -100,7 +100,7 @@ impl fmt::Debug for Services {
     }
 }
 
-/// A run ready for the effect loop, with the host inputs it was given.
+/// A run ready for the effect loop, with the inputs the Harness drew for it.
 #[derive(Debug)]
 pub struct Prepared {
     /// The run, built over the prepared context.
@@ -241,7 +241,7 @@ pub async fn prepare_source(
         ui,
     } = services;
 
-    // The host inputs the engine never draws itself, recorded before the
+    // The inputs the Engine leaves to the Harness, recorded before the
     // run exists so the record has them however the run ends.
     let seed: u64 = rand::random();
     let started_at = now_timestamp();
@@ -305,8 +305,8 @@ pub async fn prepare_source(
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    // The activate-prepare-refuse ceremony: the run's filesystem is the
-    // host's whole - host roots and the declared store - handed to the
+    // The activate-prepare-refuse ceremony: the run's whole filesystem,
+    // the real directories and the declared store, is handed to the
     // capabilities' services and to the context as given, so the
     // capabilities and the run share one filesystem; the activated
     // catalog is what prepare fills slots against, its preludes go to
@@ -420,10 +420,10 @@ fn prompt_hash(source: &str) -> String {
     hash
 }
 
-/// The system clock now as the engine's `Timestamp`: the host's stamp for
+/// The system clock now as the Engine's `Timestamp`: the Harness's stamp for
 /// a run's `started_at`, since the engine reads no clock of its own. A
 /// clock before the epoch or beyond `i64` milliseconds (neither reachable
-/// on a real host) saturates to the epoch rather than refusing the launch.
+/// on a real machine) saturates to the epoch rather than refusing the launch.
 fn now_timestamp() -> Timestamp {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

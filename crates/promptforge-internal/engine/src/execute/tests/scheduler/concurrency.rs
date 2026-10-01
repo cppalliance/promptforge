@@ -13,7 +13,7 @@ use std::time::Duration;
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// Builds the run context and its observing host under the given limits.
+/// Builds the run context and its observing Harness under the given limits.
 fn limited_context(
     prompt: &Prompt,
     store: &TestStore,
@@ -35,7 +35,7 @@ fn ceiling(n: usize) -> RunLimits {
 
 #[tokio::test(flavor = "current_thread")]
 async fn tasks_concurrency_clamps_to_the_host_ceiling_and_reads_the_effective_limit_back() {
-    // The main walk's parent is the host ceiling of 4: asking for 16
+    // The main walk's parent is the Harness's ceiling of 4: asking for 16
     // clamps to 4, a later 2 lowers it, the no-argument form reads the
     // current limit back, and a later 4 climbs back to the parent's
     // limit - the setter is `min(n, parent)`, never an error.

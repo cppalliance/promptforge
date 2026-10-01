@@ -342,9 +342,9 @@ impl VfsAccess for MemoryAccess {
             .filter(|ancestor| !tree.dirs.contains(*ancestor))
             .collect();
         if !recursive && !missing_ancestors.is_empty() {
-            // The field names the path that did not resolve, as the host
-            // backend reports it: the target the call addressed, not a
-            // sentence about its parent.
+            // The field names the path that did not resolve, as the
+            // real-filesystem backend reports it: the target the call
+            // addressed, not a sentence about its parent.
             return Err(VfsError::NotFound {
                 path: path.to_string(),
             });

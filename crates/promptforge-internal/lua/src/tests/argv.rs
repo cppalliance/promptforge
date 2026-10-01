@@ -151,7 +151,7 @@ fn the_frozen_argv_guard_leaves_other_globals_alone() {
 #[test]
 fn writable_argv_repairs_and_reads_back() {
     // The H1 repair pattern: malformed args start as nil argv; H1 assigns
-    // the repaired table; the host reads the repair back at the freeze.
+    // the repaired table; the Engine reads the repair back at the freeze.
     let vm = argv_vm(None, true);
     let out = run_argv(
         &vm,

@@ -1,11 +1,11 @@
 //! Cooperative cancellation for the harness's async session paths.
 //!
 //! Dropping the outer future on Ctrl-C would abandon a run mid-step, so
-//! hosts install a [`CancelHandle`] with [`scope`] and call
+//! Hosts install a [`CancelHandle`] with [`scope`] and call
 //! [`CancelHandle::cancel`] from a Ctrl-C task instead, or `select!` over
 //! [`CancelHandle::cancelled`] beside the run's effect channel. This is
-//! the tokio-aware token a host waits on; the engine itself observes only
-//! the polled flag in `promptforge::cancel`, and a host bridges
+//! the tokio-aware token a Host waits on; the Engine itself observes only
+//! the polled flag in `promptforge::cancel`, and the Harness bridges
 //! the one to the other when it launches a run.
 
 use std::future::Future;
@@ -151,8 +151,8 @@ pub fn current() -> Option<CancelHandle> {
 
 /// Completes when the task-local [`CancelHandle`] is cancelled.
 ///
-/// When no handle is installed, the future never completes (hosts that do not
-/// wire Ctrl-C keep prior behavior).
+/// When no handle is installed, the future never completes (a Host that
+/// leaves Ctrl-C unwired keeps prior behavior).
 pub async fn wait_cancelled() {
     match CURRENT.try_with(Clone::clone) {
         Ok(handle) => handle.cancelled().await,

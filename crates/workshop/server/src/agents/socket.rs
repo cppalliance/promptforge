@@ -273,7 +273,7 @@ async fn handle_frame(
             if let Some(attached) = attached.as_ref() {
                 // Cancellation is a stop reason: no reply frame of any
                 // kind. Pending waits announce their own deaths and the
-                // relaunched run re-asks. The relaunch reads the host
+                // relaunched run re-asks. The relaunch reads the Host
                 // snapshot, so the server's current state is pushed first.
                 if let Some(agents) = state.agents() {
                     agents.sync_bindings();
@@ -395,7 +395,7 @@ async fn handle_open(
 /// The text of the error frame reporting a refused launch: the refusal
 /// and its cause chain. A refusal's `Display` is only its own
 /// message, so a run log that cannot open would otherwise reach the
-/// client as the bare "run log database" with the engine's diagnosis gone.
+/// client as the bare "run log database" with the database's diagnosis gone.
 fn refusal_text(refusal: &LaunchRefusal) -> String {
     display_chain(refusal)
 }

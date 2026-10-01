@@ -6,7 +6,7 @@ todos:
     content: Delete promptforge-mcp-server and promptforge-dev (unused; recoverable from git history)
     status: completed
   - id: step-02
-    content: "Dissolve promptforge-core-tests: offline fixture suite moves into promptforge-core/tests/, scenario harness deleted"
+    content: "Dissolve promptforge-core-tests: offline fixture suite moves into promptforge-core/tests/, scenario runner deleted"
     status: completed
   - id: step-03
     content: "gateway product: rename 11 crates leaf-first, binaries, config-ui npm name"
@@ -38,7 +38,7 @@ isProject: false
 
 - **Status: complete.** All 9 todos done. Commits: `e784dc75` `74e9c401` `964ea20f` `b19ed68c` `9b6d8e3f` (step 6 no-op) `ac3babf3` `264ee42f` `4796165c`. Open findings: none.
 - Repo: `C:\Users\Vinnie\cursor\promptforge` - a Rust workspace, 32 crates under `crates/*` (verified 2026-09-02), plus two TypeScript UIs (`crates/promptforge-workshop-server/ui`, `crates/promptforge-gateway-config-ui/ui`).
-- **This plan runs ONLY AFTER the agentic-harness plan is finished.** Hard precondition: all 16 steps of [interactive_webhook_tool_9ab3c21f.plan.md](c:\Users\Vinnie\.cursor\plans\interactive_webhook_tool_9ab3c21f.plan.md) are complete (its frontmatter todos all marked completed) and its run has ended. Never run the two concurrently - the harness plan's later steps touch the workshop server and the agent crate, and a mid-run rename would collide with its step 12. At completion the tree contains `workshop-agent` (its step 7), the workshop-server dependency on it (its step 12), and `crates/promptforge-workshop-server/agents/chat.lua` (its step 15); this plan's mechanical sweep renames all of it.
+- **This plan runs ONLY AFTER the agentic-harness plan is finished.** Hard precondition: all 16 steps of [interactive_webhook_tool_9ab3c21f.plan.md](c:\Users\Vinnie\.cursor\plans\interactive_webhook_tool_9ab3c21f.plan.md) are complete (its frontmatter todos all marked completed) and its run has ended. Never run the two concurrently - the agentic-harness plan's later steps touch the workshop server and the agent crate, and a mid-run rename would collide with its step 12. At completion the tree contains `workshop-agent` (its step 7), the workshop-server dependency on it (its step 12), and `crates/promptforge-workshop-server/agents/chat.lua` (its step 15); this plan's mechanical sweep renames all of it.
 - Execution runs under `tools-public/rulebooks/vibe-rulebook.md`: one step = one commit with its verification; subagent dispatch prompts follow `tools-public/rulebooks/prompts-rulebook.md`; code follows `tools-public/rulebooks/rust-rulebook.md`. Ledger: `cabinet/_scratch/vibe-crate-rename/vibe-ledger.md`. Review file: `cabinet/_scratch/vibe-crate-rename/vibe-review.md`. Dirty worktree at start = stop and ask.
 - Verify commands: `cargo test --workspace --locked` at the repo root (the full suite - renames touch every crate, so focused testing is meaningless); `npm run typecheck && npm test` in each UI directory only if that step touched it (none do); `cargo run -p build-user-guide` after any step that changes guide inputs (steps 1, 6, 9) to regenerate the guide.
 
@@ -77,7 +77,7 @@ Three products ship after step 1 deletes the unused mcp-server product (recovera
 | promptforge-webfetch | promptforge-webfetch (unchanged) |
 | promptforge-web-search | promptforge-web-search (unchanged) |
 | promptforge-cli | promptforge-cli (unchanged; binary already `promptforge`) |
-| workshop-agent | promptforge-agent (joins the library product: cloud/headless agent hosts are anticipated, so the executor rides with the library rather than promoting out of the workshop later) |
+| workshop-agent | promptforge-agent (joins the library product: cloud/headless agent Hosts are anticipated, so the executor rides with the library rather than promoting out of the workshop later) |
 
 `promptforge-core-tests` is not renamed - step 2 dissolves it into `promptforge-core/tests/`. `promptforge-dev` is not renamed - step 1 deletes it (unused).
 
@@ -136,7 +136,7 @@ Both are unused; git history preserves them whole. `git rm -r` both crate direct
 
 ### Step 2. Dissolve promptforge-core-tests into promptforge-core/tests/
 
-The offline fixture suite is live CI coverage of core's public API; the 0.6B scenario harness never runs anywhere. Move the suite, delete the harness. Move `src/suite/` (parsing, shipped, execution) and the `prompts/` fixture tree into `promptforge-core/tests/` as integration tests - the `tests/` boundary preserves the black-box discipline the crate existed for (integration tests see only the public API). Fix the shipped-prompt smoke test's repo-root path for the new `CARGO_MANIFEST_DIR` depth. Core's dev-dependencies gain what the suite needs (`tempfile`, tokio `test-util`; picker and tools are already core dependencies). Delete the scenario harness (`src/main.rs`, `src/scenarios.rs`, `src/gateway/`, the `[[bin]]`, the reqwest/rand/signal dependencies) - recoverable from git if a self-hosted CI leg ever wants it. Remove the crate from the workspace; commit the `Cargo.lock` rewrite.
+The offline fixture suite is live CI coverage of core's public API; the 0.6B scenario runner never runs anywhere. Move the suite, delete the runner. Move `src/suite/` (parsing, shipped, execution) and the `prompts/` fixture tree into `promptforge-core/tests/` as integration tests - the `tests/` boundary preserves the black-box discipline the crate existed for (integration tests see only the public API). Fix the shipped-prompt smoke test's repo-root path for the new `CARGO_MANIFEST_DIR` depth. Core's dev-dependencies gain what the suite needs (`tempfile`, tokio `test-util`; picker and tools are already core dependencies). Delete the scenario runner (`src/main.rs`, `src/scenarios.rs`, `src/gateway/`, the `[[bin]]`, the reqwest/rand/signal dependencies) - recoverable from git if a self-hosted CI leg ever wants it. Remove the crate from the workspace; commit the `Cargo.lock` rewrite.
 - Verify: the moved suite runs green under `cargo test -p promptforge-core` with the SAME test count as `cargo test -p promptforge-core-tests` before the move (count both, record in the commit message); `cargo test --workspace --locked` green; `rg "core-tests|core_tests"` returns nothing outside git history, `design/`, `research/`, `CHANGELOG.md`.
 - Debt risk: a fixture silently dropped in the move. Mitigation: the before/after test-count comparison, plus the suite's register-by-name discipline (an unregistered fixture is a compile error, not a skip).
 
@@ -148,7 +148,7 @@ Rename the 11 gateway crates per the map, leaf-first: `gateway-protocol`, `gatew
 
 ### Step 4. library, shared, and build tooling (5 crates)
 
-Rename `workshop-agent` -> `promptforge-agent` (the crate exists on disk from the completed harness plan; it joins the library product - cloud/headless agent hosts are anticipated, so the executor rides with the library rather than promoting out of the workshop later; update its AGENTS.md charter sentence to say library product), `promptforge-progress` -> `shared-progress` (10 dependents across all three products; the `shared-` prefix marks crates no single deliverable can claim), `ui-build` -> `build-ui` (path dependency of workshop-server and gateway-config-ui - update both Cargo.tomls and the build.rs/build.mjs references), `llama-cuda-build` -> `build-llama-cuda` (update the cargo invocations in `.github/workflows/llama-cuda-blackwell.yml`; the workflow's own filename stays - it names the pipeline, not the crate), and `make-user-guide` -> `build-user-guide` (no references outside its own files and the lockfile - verified by grep). The 10 library crates keeping the `promptforge-` prefix are untouched.
+Rename `workshop-agent` -> `promptforge-agent` (the crate exists on disk from the completed agentic-harness plan; it joins the library product - cloud/headless agent Hosts are anticipated, so the executor rides with the library rather than promoting out of the workshop later; update its AGENTS.md charter sentence to say library product), `promptforge-progress` -> `shared-progress` (10 dependents across all three products; the `shared-` prefix marks crates no single deliverable can claim), `ui-build` -> `build-ui` (path dependency of workshop-server and gateway-config-ui - update both Cargo.tomls and the build.rs/build.mjs references), `llama-cuda-build` -> `build-llama-cuda` (update the cargo invocations in `.github/workflows/llama-cuda-blackwell.yml`; the workflow's own filename stays - it names the pipeline, not the crate), and `make-user-guide` -> `build-user-guide` (no references outside its own files and the lockfile - verified by grep). The 10 library crates keeping the `promptforge-` prefix are untouched.
 - Verify: `cargo test --workspace --locked` green; `rg "workshop-agent|workshop_agent|promptforge-progress|promptforge_progress|ui-build|ui_build|llama-cuda-build|llama_cuda_build|make-user-guide|make_user_guide"` returns nothing outside git history, `design/`, `research/`, `CHANGELOG.md`, and the `llama-cuda-blackwell.yml` filename.
 
 ### Step 5. workshop product (2 crates)
@@ -196,7 +196,7 @@ The content standard: every bullet earns its keep by preventing technical debt o
 
 #### Step 8 audit notes (snapshot 2026-09-01, pre-rename names)
 
-Every note below was written against the files as they existed on 2026-09-01, in pre-rename names (the rename map resolves any name; the missing-files list uses post-rename names). The harness plan completed on 2026-09-02, so the tree is stable - still, re-verify each note against the file at execution time.
+Every note below was written against the files as they existed on 2026-09-01, in pre-rename names (the rename map resolves any name; the missing-files list uses post-rename names). The agentic-harness plan completed on 2026-09-02, so the tree is stable - still, re-verify each note against the file at execution time.
 
 **Cross-cutting cuts (apply everywhere):**
 
@@ -220,8 +220,8 @@ Every note below was written against the files as they existed on 2026-09-01, in
 - **promptforge-gateway-local**: same duplication cut; keep the boundary bullets; mechanical renames.
 - **promptforge-gateway-config**: keep all four bullets (validation-before-exit is the top one).
 - **promptforge-workshop**: convert the three sections to bullets; write a real charter sentence (desktop shell: Tauri window, same-origin policy, platform bridges, lifecycle) replacing the meta preamble. The unsafe-bridge bullet is top (dense COM, the crate's only unsafe); event-loop-never-panics is second.
-- **promptforge-workshop-server**: the largest file (5.6 KB), and line-by-line review says ~70-75% is load-bearing - this is a compression job, not a prune. Convert the eleven sections to ~13-15 sorted bullets: two-zone error policy and embedding hygiene (never panic/exit) at the top; transcription boundary and the WebSocket session model (with the agent-sessions carve-out) next; then delivery contract, drop guards, feature gating, router/module ceilings, tests, asset serving. Specific cuts: the meta preamble; the embedding-hygiene overlap with the root (keep only the crate deltas: no unconditional tracing init, no argument-ignoring `OnceLock`, loopback-only binding); and the "target-state: refactor-era" line if the refactor is done by execution time. Re-read at execution time - the harness run is actively amending this file.
-- **ui**: convert to bullets; the layer-import rule (defined once, enforced three ways) is the top bullet. The vendored-code bullet may be moot if the harness plan's step 16 deletes `ui/src/chat/` - check at execution.
+- **promptforge-workshop-server**: the largest file (5.6 KB), and line-by-line review says ~70-75% is load-bearing - this is a compression job, not a prune. Convert the eleven sections to ~13-15 sorted bullets: two-zone error policy and embedding hygiene (never panic/exit) at the top; transcription boundary and the WebSocket session model (with the agent-sessions carve-out) next; then delivery contract, drop guards, feature gating, router/module ceilings, tests, asset serving. Specific cuts: the meta preamble; the embedding-hygiene overlap with the root (keep only the crate deltas: no unconditional tracing init, no argument-ignoring `OnceLock`, loopback-only binding); and the "target-state: refactor-era" line if the refactor is done by execution time. Re-read at execution time - the agentic-harness run is actively amending this file.
+- **ui**: convert to bullets; the layer-import rule (defined once, enforced three ways) is the top bullet. The vendored-code bullet may be moot if the agentic-harness plan's step 16 deletes `ui/src/chat/` - check at execution.
 - **promptforge-web-search-service**: content compliant; mechanical renames (`gateway-config`).
 
 **Missing files:** `promptforge-cli`, `promptforge-gateway-config-ui`, `promptforge-gateway-loopback`, `build-user-guide`, `build-ui`, and `build-llama-cuda` have no AGENTS.md (`promptforge-mcp-server`, `promptforge-dev`, and `promptforge-core-tests` also have none, and steps 1-2 delete them; `promptforge-gateway-build` was deleted in `ef82879f`). `whisper-ffi` (renamed `gateway-whisper-ffi` in step 3) has none and SHOULD gain one - its FFI invariants (unsafe confined, every unsafe block carries a SAFETY comment, Drop-on-raw-pointers) are exactly the constraints code cannot enforce. Otherwise create only where a real constraint exists that code cannot enforce (candidate: loopback's scope); do not create ceremonial files - absence is cheaper than ceremony.
@@ -271,7 +271,7 @@ The product division was stated by the user verbatim: "There are four products: 
 
 ## Why the deletions (step 1-2)
 
-The user's framing, verbatim: "I feel like core tests and maybe even MCP server... they're liabilities because I don't use them anymore... it's just extra crap that we're just dragging around. And we can always recreate them later... using AI could just shit out a complete implementation again. So why are we dragging these along?" Deletion was cheap because git history preserves everything and regeneration is considered nearly free. Core-tests was dissolved rather than deleted because the offline fixture suite still had value: "The offline fixture suite. Okay, but why don't we just move those into the main?" (paraphrase of intent: keep the fixtures, drop the crate and the scenario harness).
+The user's framing, verbatim: "I feel like core tests and maybe even MCP server... they're liabilities because I don't use them anymore... it's just extra crap that we're just dragging around. And we can always recreate them later... using AI could just shit out a complete implementation again. So why are we dragging these along?" Deletion was cheap because git history preserves everything and regeneration is considered nearly free. Core-tests was dissolved rather than deleted because the offline fixture suite still had value: "The offline fixture suite. Okay, but why don't we just move those into the main?" (paraphrase of intent: keep the fixtures, drop the crate and the scenario runner).
 
 ## Naming decisions and discarded alternatives
 
@@ -293,7 +293,7 @@ The audit was the user's idea, with the standard stated verbatim: "I want the pl
 
 ## Sequencing constraint
 
-The plan must run only after the agentic-harness plan finishes. This was burned in after the assistant edited the in-flight harness plan by mistake: "what the fuck? no! you just updated a plan that is already being executed... can you roll back that edit?" followed by "to be clear, this rename plan... should be written with the understanding it will run AFTER the other plan is finished executing".
+The plan must run only after the agentic-harness plan finishes. This was burned in after the assistant edited the in-flight agentic-harness plan by mistake: "what the fuck? no! you just updated a plan that is already being executed... can you roll back that edit?" followed by "to be clear, this rename plan... should be written with the understanding it will run AFTER the other plan is finished executing".
 
 ## Run-time deviations (from the run chats)
 

@@ -12,7 +12,7 @@ todos:
     content: "Commit 3: Concurrent fanout JoinSet + AtomicU32 turns + fail-fast abort + design-core/README/STATUS"
     status: completed
   - id: step-4
-    content: "Commit 4: Fanout concurrency fixture test + gateway multi-admit IT if harness allows"
+    content: "Commit 4: Fanout concurrency fixture test + gateway multi-admit IT if the test support allows"
     status: completed
 isProject: false
 ---
@@ -114,7 +114,7 @@ Test: existing suite filters still pass - `cargo test -p promptforge-core fanout
 
 Decision: fail-fast aborts siblings (not wait-all). Falsifier: authors need every arm's partial result on failure - then switch to wait-all in a later commit.
 
-Decision: no fanout-internal concurrency cap; gateway queue throttles. Falsifier: CPU-bound preamble storms without model calls - then add a host cap.
+Decision: no fanout-internal concurrency cap; gateway queue throttles. Falsifier: CPU-bound preamble storms without model calls - then add a Harness cap.
 
 ### Step 4 - Concurrency regression tests
 
@@ -122,7 +122,7 @@ Intent: a test fails if fanout becomes sequential-only again or if `--parallel` 
 
 Do:
 - Add a core-tests (or core unit) fixture: fanout of at least 2 preamble-only arms; each writes a distinct store path; assert both paths exist and reply order matches list order.
-- If [tests/it/main.rs](promptforge/crates/promptforge-gateway/tests/it/main.rs) already has a blocking-upstream concurrency harness, add one case that concurrency 2 admits two in-flight requests; if that harness cannot express it without a large rewrite, skip the IT and record the skip reason in the commit message (gateway unit tests from step 1 remain the lock).
+- If [tests/it/main.rs](promptforge/crates/promptforge-gateway/tests/it/main.rs) already has a blocking-upstream concurrency fixture, add one case that concurrency 2 admits two in-flight requests; if that fixture cannot express it without a large rewrite, skip the IT and record the skip reason in the commit message (gateway unit tests from step 1 remain the lock).
 
 Test command: `cargo test -p promptforge-core-tests fanout` and `cargo test -p promptforge-gateway`.
 

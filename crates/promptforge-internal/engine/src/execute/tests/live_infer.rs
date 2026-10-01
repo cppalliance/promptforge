@@ -27,7 +27,7 @@ async fn live_h1_infer_runs_once() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_hosts_client_serves_a_run_the_context_never_names() {
-    // The context is the engine's input; the client lives on the host's
+    // The context is the Engine's input; the client lives on the Harness's
     // `RunHost`, and `Environment::run` performs the run's completions
     // with it. Nothing about the gateway crosses the engine's boundary.
     let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
@@ -109,8 +109,8 @@ async fn shared_function_resolves_host_globals_when_called() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn shared_library_calls_host_apis_at_load_time() {
-    // The shared library replays as each section's first chunk with the full
-    // host environment installed, so top-level shared code may use `store`,
+    // The shared library replays as each section's first chunk with every
+    // Engine global installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
     let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Host Load\n\n\
@@ -174,8 +174,8 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
-    // The host pattern: the fixture capability is activated into the
-    // catalog and the host's table, and the run's tool slot fills by id.
+    // The Harness pattern: the fixture capability is activated into the
+    // catalog and the Harness's tool table; the run's tool slot fills by id.
     let out = super::run(
         &TestPrompt {
             prompt,

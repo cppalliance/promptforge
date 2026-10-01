@@ -277,10 +277,10 @@ impl Scheduler {
     }
 
     /// Orphans one in-flight leaf effect whose chain is going away: the
-    /// pending entry leaves, and the id is recorded so the host's answer,
-    /// when it arrives, is discarded rather than failing the run. The host
+    /// pending entry leaves, and the id is recorded so the Harness's answer,
+    /// when it arrives, is discarded rather than failing the run. The Harness
     /// still owes the answer: `Done` waits for every issued effect, so the
-    /// run ends only once the host has answered all of them.
+    /// run ends only once the Harness has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
         self.pending.remove(&effect);
         self.orphaned.insert(effect);

@@ -6,7 +6,7 @@
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
 //! files; and an every-Nth-instruction hook polls the run's cancel flag, so
-//! even an unbounded loop aborts promptly once the host cancels.
+//! even an unbounded loop aborts promptly once the Host cancels.
 //! Direct `print` and `warn` are unavailable. A persistent `log(message)`
 //! callback accepts one bounded, single-line UTF-8 string and reports it
 //! through the run's emitter as an `Event::Lua` checkpoint.
@@ -15,7 +15,7 @@
 //! case of the exit rule). The `var` table is read back afterward as JSON for
 //! prose substitution.
 //!
-//! The `store` table is a deterministic host capability (like `var`), always
+//! The `store` table is a deterministic Engine global (like `var`), always
 //! present and independent of tool scoping. Its methods are backed by the
 //! store view derived from the run's VFS access capability, threaded in
 //! from the executor, so every section

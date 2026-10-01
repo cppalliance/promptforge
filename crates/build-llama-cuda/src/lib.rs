@@ -1,6 +1,6 @@
 //! CUDA `llama-server` release builder.
 //!
-//! Compiles a llama.cpp checkout into a host-native CUDA `llama-server`
+//! Compiles a llama.cpp checkout into a native CUDA `llama-server`
 //! with CMake, accounts for the PE dependency closure, copies the CUDA
 //! runtime DLLs the executable imports (so the end user needs only the
 //! NVIDIA driver, not the CUDA Toolkit), emits a canonical versioned

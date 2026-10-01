@@ -198,7 +198,7 @@ Await `cancelled()` in your code; the run checks the flag on its own. Next, go b
 
 ## CancelHandle
 
-[`CancelHandle`] stops a run from any thread. Install it with [`RunContext::cancel`](crate::RunContext::cancel), and keep a clone to call `cancel` on. A cancel on a parent stops every run whose handle descends from it, as [Stop many runs at once](#stop-many-runs-at-once) shows. Nothing on it returns an error or panics. When your host runs on tokio with its own cancellation token, your code waits on that token and calls `cancel` on this flag when that token fires.
+[`CancelHandle`] stops a run from any thread. Install it with [`RunContext::cancel`](crate::RunContext::cancel), and keep a clone to call `cancel` on. A cancel on a parent stops every run whose handle descends from it, as [Stop many runs at once](#stop-many-runs-at-once) shows. Nothing on it returns an error or panics. When your Harness runs on tokio with its own cancellation token, your code waits on that token and calls `cancel` on this flag when that token fires.
 
 - [`CancelHandle::new`]: makes an uncancelled root, the same as [`CancelHandle::default`], independent of every other handle until cloned or given children.
 - [`CancelHandle::child`]: returns a new node whose own flag starts unset; it reports cancelled when its flag or any ancestor's flag is set.

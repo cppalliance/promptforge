@@ -23,7 +23,7 @@
 //! status readout, the progress stream, and queue cancellation - is
 //! bearer-authed and reachable from any peer the listener admits. Its
 //! walled tier - the config read and shadow-write routes, env, pending
-//! state, apply and revert, host metrics, the Hugging Face proxy, the
+//! state, apply and revert, machine metrics, the Hugging Face proxy, the
 //! cloud model sheet, reveal, `POST /shutdown`, and (in `config-ui`
 //! builds) the embedded SPA at `/config/` with its `GET /auth?key=`
 //! browser handoff, plus orphans, model-info, and chat-templates in
@@ -244,7 +244,7 @@ pub(crate) struct AppState {
     /// as serialized, cancellable commands; the tray and routes read its
     /// status in-process.
     commands: commands::CommandQueue,
-    /// Shared host-metrics sampler for `GET /admin/system`: one process-wide
+    /// Shared machine-metrics sampler for `GET /admin/system`: one process-wide
     /// `sysinfo::System` so CPU-utilization deltas span requests, plus the
     /// once-per-process NVML probe.
     metrics: Arc<std::sync::Mutex<system::SystemSampler>>,

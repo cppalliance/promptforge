@@ -331,7 +331,7 @@ fn two_runs_under_the_same_context_and_answers_are_identical() {
 
 #[test]
 fn answers_one_per_step_all_at_once_and_reversed_produce_the_same_per_task_record() {
-    // The batching-pairing property: however the host paces and orders
+    // The batching-pairing property: however the Harness paces and orders
     // its answers, each task's effects and events - and the text with its
     // `sys.id`s - are the same. Only the interleaving across tasks may
     // differ, so the comparison is per task.

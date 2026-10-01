@@ -33,12 +33,12 @@ The workspace at `crates/` holds 46 flat sibling crates, and the PromptForge fam
 
 ## Functional Specification
 
-Three actors interact with the result: an outside crate author who consumes PromptForge, an inside crate author who works on the machinery, and the structural harness that checks every manifest. The observable behavior is which dependency edges compile without a harness violation and which the harness reports.
+Three actors interact with the result: an outside crate author who consumes PromptForge, an inside crate author who works on the machinery, and the structural checks that read every manifest. The observable behavior is which dependency edges compile without a structural-check violation and which the checks report.
 
 - Actors and workflows:
   - Outside author (workshop crates, a future CLI): adds `promptforge-api-runtime` for behavior; may add `promptforge-api-types` directly when only vocabulary is needed and the runtime's compile cost (Lua VM, HTTP stacks, tokio) is unwanted, as `workshop-protocol` and `workshop-gateway` do today (`crates/workshop-protocol/Cargo.toml` line 12, `crates/workshop-gateway/Cargo.toml` line 17). Reaches types through `promptforge_api_runtime::types::...` or `promptforge_api_types::...`.
   - Inside author: crates under `crates/promptforge/` depend on each other and on `promptforge-api-types` and `shared-*` freely; never on `promptforge-api-runtime` (existing direction, `crates/promptforge-api/AGENTS.md` line 8).
-  - Harness: `cargo test -p build-xtask` walks `crates/` recursively, classifies each manifest by package name and by directory position, and reports violations.
+  - Structural checks: `cargo test -p build-xtask` walks `crates/` recursively, classifies each manifest by package name and by directory position, and reports violations.
 - Inputs and outputs: input is every `Cargo.toml` under `crates/` (all dependency tables: normal, dev, build, target-specific); output is a list of violation strings, empty on success.
 - States and validation: a directory directly under `crates/` with no `Cargo.toml` is a container; a directory with a `Cargo.toml` is a crate and the walker does not descend into it. A dependency edge into a container crate is legal when the dependent is in the same container or is that container's named public crate (`promptforge-api-runtime` for `crates/promptforge/`).
 - Errors and recovery: a violation reads `<package> depends on <dep>: crates/promptforge is private to its family; only promptforge-api-runtime may depend into it`. Recovery is moving the needed type into `promptforge-api-types` or calling through `promptforge-api-runtime`.
@@ -46,7 +46,7 @@ Three actors interact with the result: an outside crate author who consumes Prom
 - Acceptance criteria:
   - `crates/promptforge/` contains exactly nine crate directories and no `Cargo.toml` of its own.
   - `promptforge_api_runtime::types::observe::NullObserver` resolves from an outside crate with only `promptforge-api-runtime` declared.
-  - The harness's fixture test for an outside crate depending on a container crate fails; fixture tests for inside-to-inside, runtime-to-inside, and outside-to-runtime pass.
+  - The structural checks' fixture test for an outside crate depending on a container crate fails; fixture tests for inside-to-inside, runtime-to-inside, and outside-to-runtime pass.
   - No file outside `vibe/` names `shared-promptforge-api`, `shared_promptforge_api`, or the bare `promptforge-api` / `promptforge_api` crate identifier.
 
 </product-contract>
@@ -54,7 +54,7 @@ Three actors interact with the result: an outside crate author who consumes Prom
 
 ## Technical Design
 
-The tree becomes the boundary and the harness reads the tree. Two renames turn the existing vocabulary and runtime crates into `promptforge-api-types` and `promptforge-api-runtime`; nine moves put the machinery under a manifestless container; one re-export line gives outside authors a single dependency; one new harness rule makes the container private with a single named exception. No `.rs` module file moves relative to its own crate.
+The tree becomes the boundary and the structural checks read the tree. Two renames turn the existing vocabulary and runtime crates into `promptforge-api-types` and `promptforge-api-runtime`; nine moves put the machinery under a manifestless container; one re-export line gives outside authors a single dependency; one new structural-check rule makes the container private with a single named exception. No `.rs` module file moves relative to its own crate.
 
 - Architecture:
   - Target tree: `crates/promptforge-api-runtime/` (was `crates/promptforge-api/`), `crates/promptforge-api-types/` (was `crates/shared-promptforge-api/`), `crates/promptforge/{lua,parser,store,vfs,model-client,tool-picker,web,webfetch,web-search}/`.
@@ -79,7 +79,7 @@ The tree becomes the boundary and the harness reads the tree. Two renames turn t
   - Path literals: `.github/actions/hf-model-cache/action.yml` line 28 to `hashFiles('crates/promptforge/tool-picker/build.rs')`; Lua chunk name at `crates/promptforge-lua/src/messages.rs` line 28 to `@crates/promptforge/lua/src/__impl_messages.lua`; chunk name at `crates/promptforge-lua/src/coro.rs` line 23 to `@crates/promptforge-api-runtime/src/lua/__impl_coro.lua` with the four asserts in `crates/promptforge-api/src/lua-coro-tests.rs` lines 408, 421, 539, 548.
   - `AGENTS.md` (root): line 27 names both public crates and adds that crates under `crates/promptforge/` are private, with `promptforge-api-runtime` the only outside crate permitted to depend into them; line 29 gains a companion sentence naming PromptForge's public surface now that the types crate has left `shared-*`; line 56 lists the privacy rule among what `cargo test -p build-xtask` enforces.
   - `Cargo.lock` regenerates with the two new package names on first build and is part of the commit.
-- Data, persistence, failure, security, and privacy constraints: nothing persisted or on the wire changes; the only failure mode introduced is a harness test failure with the violation text above; `[workspace.lints]` (`missing_docs`, `unreachable_pub`) do not fire on a crate-level `pub use` re-export.
+- Data, persistence, failure, security, and privacy constraints: nothing persisted or on the wire changes; the only failure mode introduced is a structural-check test failure with the violation text above; `[workspace.lints]` (`missing_docs`, `unreachable_pub`) do not fire on a crate-level `pub use` re-export.
 
 </implementation-contract>
 <verification-contract>
@@ -138,7 +138,7 @@ Verification is the repository's existing gate set plus four new fixture tests f
 - Build command: `cargo build --locked` (default member is `crates/gateway` only; full desktop app via `cargo workshop`, low-level `cargo build -p workshop` after sidecar staging; headless gateway check `cargo check -p gateway --no-default-features`).
 - Focused test command pattern: `cargo nextest run --locked -p <crate>` for unit and `tests/` targets; `cargo test --locked -p <crate> --test it <test_name_substring>` for one integration test (crates whose `tests/it/main.rs` is the single integration target); `cargo test -p <crate> --doc` for doctests (nextest skips doctests).
 - Component test command pattern: `cargo nextest run --locked -p <crate-a> -p <crate-b> --all-features`; workshop partition is `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` plus `cargo nextest run --locked -p workshop-server --features headless` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`; UI packages via `npm test` in `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`.
-- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then the workshop partition above, then `cargo test -p build-xtask` (boundary and structural harness) and `cargo test -p gateway-stt --test it architecture` (product dependency boundaries).
+- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then the workshop partition above, then `cargo test -p build-xtask` (boundary and structural checks) and `cargo test -p gateway-stt --test it architecture` (product dependency boundaries).
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop partition `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`; supply chain `cargo deny check` and `cargo audit`; on-demand structural report `cargo xtask tidy`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook in `.githooks/`; `rustfmt.toml` sets `style_edition = "2024"`).
 - Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; user guide `mdbook build guide`.

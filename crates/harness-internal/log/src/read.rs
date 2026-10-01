@@ -14,7 +14,7 @@ impl RunLog {
     /// # Errors
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::Corrupt`] when the row does not fit the schema, and
-    /// [`LogError::Database`] when the engine cannot read it.
+    /// [`LogError::Database`] when the database cannot read it.
     pub async fn run(&self, run: RunId) -> Result<RunRow, LogError> {
         let mut rows = self.conn().query(schema::SELECT_RUN, (run.get(),)).await?;
         let Some(row) = rows.next().await? else {
@@ -54,7 +54,7 @@ impl RunLog {
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::Corrupt`] when a row does not fit the schema,
     /// [`LogError::Payload`] when a payload does not parse, and
-    /// [`LogError::Database`] when the engine cannot read.
+    /// [`LogError::Database`] when the database cannot read.
     pub async fn records(
         &self,
         run: RunId,
@@ -111,7 +111,7 @@ impl RunLog {
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::Corrupt`] when a row does not fit the schema,
     /// [`LogError::Payload`] when a payload does not parse, and
-    /// [`LogError::Database`] when the engine cannot read.
+    /// [`LogError::Database`] when the database cannot read.
     pub async fn events_for_task(
         &self,
         run: RunId,
@@ -137,7 +137,7 @@ impl RunLog {
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::Corrupt`] when a row does not fit the schema,
     /// [`LogError::Payload`] when a payload does not parse, and
-    /// [`LogError::Database`] when the engine cannot read.
+    /// [`LogError::Database`] when the database cannot read.
     pub async fn transcript(&self, run: RunId) -> Result<Vec<StoredRecord>, LogError> {
         let filter = RecordFilter {
             kind: Some(RecordKind::Event),

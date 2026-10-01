@@ -49,7 +49,7 @@ pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding
 
 /// Every tool and model alias the prompt's frontmatter declares, filled or
 /// not: the names a capability prelude's globals must not take, so whether
-/// a prelude installs does not depend on what the host could fill.
+/// a prelude installs depends only on the frontmatter.
 pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
     let frontmatter = prompt.frontmatter();
     frontmatter

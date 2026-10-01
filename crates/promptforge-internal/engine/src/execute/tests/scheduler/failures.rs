@@ -441,7 +441,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
 #[tokio::test(flavor = "current_thread")]
 async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // An answer arriving for an id the run never issued (and that is not an
-    // orphan) means the host lost track of its effects: the run must fail
+    // orphan) means the Harness lost track of its effects: the run must fail
     // with Error::Internal rather than silently discard the answer. Only an
     // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be

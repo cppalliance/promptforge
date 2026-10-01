@@ -4,8 +4,8 @@
 //! debug capture becomes one [`Event`] pushed into the run's buffer,
 //! stamped with a [`Provenance`] - the nearest enclosing task and that
 //! task's next sequence number - and drained by the run's `step` through
-//! the [`EventSink`]. Nothing in here reaches a host directly; the host
-//! reads the drained batch.
+//! the [`EventSink`]. The Harness reads each drained batch, the one path
+//! by which an event leaves this module.
 //!
 //! An [`Emitter`] is one chain's handle onto the buffer: it knows its task
 //! (the main walk is task `0`; a `call` child shares its caller's emitter,
@@ -41,7 +41,7 @@ mod tests;
 /// bodies as `Request` and `Response` events.
 ///
 /// Off by default: the bodies already travel in the `Chat` effect and its
-/// answer, so a host that logs effects has them; a host that wants the
+/// answer, so a Harness that logs effects has them; a Harness that wants the
 /// pair in the event stream too turns it on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DebugMode {
@@ -100,7 +100,7 @@ impl EventSink {
     /// A buffer whose root task (`0`) counts from `start` instead of zero.
     ///
     /// A prompt's parse reports under task `0` through its own sink before
-    /// any run exists, so a host that records the parse events and the run
+    /// any run exists, so a Harness that records the parse events and the run
     /// in one stream seeds the run's buffer with the parse's event count:
     /// the run's first root-task stamp continues the parse's sequence, and
     /// `(task, seq)` stays unique across the two. Every other task still
@@ -164,7 +164,7 @@ pub struct Emitter {
     task: TaskId,
     /// The caller-chosen run identifier stamped on every event.
     execution: Arc<str>,
-    /// Whether the host asked for raw request/response capture: the model
+    /// Whether the Harness asked for raw request/response capture: the model
     /// rounds emit `Request` and `Response` only when [`DebugMode::On`],
     /// so a run that did not opt in never clones a body.
     debug: DebugMode,
