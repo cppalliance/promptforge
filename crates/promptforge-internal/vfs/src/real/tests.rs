@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::files::atomic_write;
 use super::resolve::identity_to_virtual;
-use super::{HostBackend, map_io};
+use super::{RealBackend, map_io};
 use crate::error::VfsError;
 use crate::handle::Scope;
 use crate::path::{VfsPath, canonicalize_absolute};
@@ -38,7 +38,7 @@ impl TempDir {
     fn new() -> Result<TempDir, VfsError> {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "promptforge-vfs-host-test-{}-{}",
+            "promptforge-vfs-real-test-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
@@ -59,7 +59,7 @@ impl Drop for TempDir {
 
 /// Acquires a session on a rooted backend over `dir`.
 fn rooted_access(dir: &Path) -> Result<Box<dyn VfsAccess>, VfsError> {
-    let mut backend = HostBackend::rooted(dir)?;
+    let mut backend = RealBackend::rooted(dir)?;
     backend.acquire(&context())
 }
 
@@ -116,7 +116,7 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
     let temp = TempDir::new()?;
     fs::write(temp.path().join("keep.txt"), b"keep")
         .map_err(|err| map_io("seeding the kept file", &err))?;
-    let mut backend = HostBackend::rooted(temp.path())?.with_read_only(true);
+    let mut backend = RealBackend::rooted(temp.path())?.with_read_only(true);
     assert!(Vfs::read_only(&backend));
     let mut access = backend.acquire(&context())?;
     assert_eq!(access.read(&path("/keep.txt")?)?, b"keep");
@@ -142,15 +142,15 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
 }
 
 #[test]
-fn an_identity_backend_maps_virtual_paths_directly_to_host_paths() -> Result<(), VfsError> {
+fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(), VfsError> {
     let temp = TempDir::new()?;
-    let host_file = temp.path().join("identity.txt");
-    let virtual_spelling = identity_to_virtual(&host_file);
-    let mut backend = HostBackend::identity();
+    let real_file = temp.path().join("identity.txt");
+    let virtual_spelling = identity_to_virtual(&real_file);
+    let mut backend = RealBackend::identity();
     let mut access = backend.acquire(&context())?;
     access.write(&path(&virtual_spelling)?, b"direct")?;
     assert_eq!(
-        fs::read(&host_file).map_err(|err| map_io("reading the host file", &err))?,
+        fs::read(&real_file).map_err(|err| map_io("reading the real file", &err))?,
         b"direct"
     );
     assert_eq!(access.read(&path(&virtual_spelling)?)?, b"direct");
@@ -193,11 +193,11 @@ fn the_rooted_constructor_requires_an_existing_directory() -> Result<(), VfsErro
     let temp = TempDir::new()?;
     fs::write(temp.path().join("f.txt"), b"x").map_err(|err| map_io("seeding the file", &err))?;
     assert!(matches!(
-        HostBackend::rooted(temp.path().join("f.txt")),
+        RealBackend::rooted(temp.path().join("f.txt")),
         Err(VfsError::NotADirectory { .. })
     ));
     assert!(matches!(
-        HostBackend::rooted(temp.path().join("missing")),
+        RealBackend::rooted(temp.path().join("missing")),
         Err(VfsError::NotFound { .. })
     ));
     Ok(())

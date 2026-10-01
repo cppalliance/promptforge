@@ -274,23 +274,23 @@ fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() -> Result<(), VfsError>
     let store = MemoryBackend::new();
     let vfs = VfsRef::builder()
         .store("/", store.clone())
-        .mount("/host", MemoryBackend::new())
+        .mount("/mount", MemoryBackend::new())
         .build();
     {
         let (_access, view) = chain(&vfs);
-        view.write("host/secret.txt", b"stored")?;
+        view.write("mount/secret.txt", b"stored")?;
     }
     // The write landed in the store mount's own storage...
     let probe = VfsRef::new(store.clone());
     let probe_access = probe
         .acquire(Origin::new("store view test"))
         .expect("the probe backend acquires");
-    assert!(probe_access.exists("/host/secret.txt")?);
-    // ...and the `/host` directory mounted beneath the store never saw it.
+    assert!(probe_access.exists("/mount/secret.txt")?);
+    // ...and the `/mount` directory mounted beneath the store never saw it.
     let outer = vfs
         .acquire(Origin::new("store view test"))
         .expect("the stock backend acquires");
-    assert!(!outer.exists("/host/secret.txt")?);
+    assert!(!outer.exists("/mount/secret.txt")?);
     Ok(())
 }
 
@@ -462,9 +462,9 @@ fn acquire_store_is_a_scope_of_its_own() -> Result<(), VfsError> {
     let (_access, run_view) = chain(&vfs);
     run_view.write("claimed.md", b"run")?;
     // The Harness's view is a second scope: the live run's claim conflicts.
-    let host = vfs.acquire_store(Origin::new("acquire_store test"))?;
+    let harness = vfs.acquire_store(Origin::new("acquire_store test"))?;
     assert!(matches!(
-        host.write("claimed.md", b"host"),
+        harness.write("claimed.md", b"harness"),
         Err(VfsError::Conflict { .. })
     ));
     Ok(())

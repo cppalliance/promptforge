@@ -56,8 +56,8 @@ pub(super) fn atomic_write(dest: &Path, contents: &[u8]) -> Result<(), VfsError>
 
 /// Creates the destination's ancestor directories, matching the memory
 /// backend's materialize-on-write semantics.
-pub(super) fn create_parent(host: &Path, path: &VfsPath) -> Result<(), VfsError> {
-    if let Some(parent) = host.parent() {
+pub(super) fn create_parent(real: &Path, path: &VfsPath) -> Result<(), VfsError> {
+    if let Some(parent) = real.parent() {
         fs::create_dir_all(parent).map_err(|err| map_io(path.as_str(), &err))?;
     }
     Ok(())

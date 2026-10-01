@@ -15,14 +15,14 @@ Building a handle feels like setting up mount points on Unix: each backend serve
 
 ````
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::{HostBackend, MemoryBackend, Origin, VfsError, VfsRef};
+use promptforge::vfs::{MemoryBackend, Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RunContext};
 
-// 1. Make a host folder, mount it at `/`, and declare a memory store at `/my/store`.
+// 1. Make a real folder, mount it at `/`, and declare a memory store at `/my/store`.
 let dir = std::env::temp_dir().join(format!("vfs-tour-{}", std::process::id()));
 std::fs::create_dir_all(&dir)?;
 let vfs = VfsRef::builder()
-    .mount("/", HostBackend::rooted(&dir)?)
+    .mount("/", RealBackend::rooted(&dir)?)
     .store("/my/store", MemoryBackend::new())
     .build();
 
@@ -48,7 +48,7 @@ let run_b = RunContext::new("run-b", 7, Timestamp::UNIX_EPOCH).vfs(vfs);
 let (ctx_a, _requirements) = environment.prepare(&prompt, run_a);
 let (ctx_b, _requirements) = environment.prepare(&prompt, run_b);
 
-// 3. The first run writes the host file `greeting.txt`, and the write lands.
+// 3. The first run writes the real file `greeting.txt`, and the write lands.
 let access_a = ctx_a.vfs_handle().acquire(Origin::new("run-a"))?;
 access_a.write("/greeting.txt", b"from a")?;
 
@@ -61,7 +61,7 @@ std::fs::remove_dir_all(&dir)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-1. [`VfsRef::builder`] starts a [`VfsRefBuilder`]. [`VfsRefBuilder::mount`] puts [`HostBackend::rooted`] over the folder at `/`, and [`VfsRefBuilder::store`] mounts a [`MemoryBackend`] at `/my/store` and declares it the store. Each path goes to the mount with the longest matching prefix, which sees it with the prefix stripped, so `/my/store/note.md` reaches the store as `/note.md`.
+1. [`VfsRef::builder`] starts a [`VfsRefBuilder`]. [`VfsRefBuilder::mount`] puts [`RealBackend::rooted`] over the folder at `/`, and [`VfsRefBuilder::store`] mounts a [`MemoryBackend`] at `/my/store` and declares it the store. Each path goes to the mount with the longest matching prefix, which sees it with the prefix stripped, so `/my/store/note.md` reaches the store as `/note.md`.
 2. Step 2 prepares two runs of the crate page's greeter. [`RunContext::new`](crate::RunContext::new) takes the run's name, the seed `7`, and the `sys.when` instant [`Timestamp::UNIX_EPOCH`](crate::timestamp::Timestamp::UNIX_EPOCH); [Run a prompt](crate#run-a-prompt) explains the seed. [`RunContext::vfs`](crate::RunContext::vfs) hands each context a clone of the one handle, and [`Environment::prepare`](crate::Environment::prepare) keeps it, so both runs share the same mounts and claims.
 3. [`RunContext::vfs_handle`](crate::RunContext::vfs_handle) returns the clone you gave the context, so `acquire` here is [`VfsRef::acquire`] on the one shared handle. Step 3 acquires an [`Access`], labeled by an [`Origin`], standing in for the first run's file work. A claim is the handle's record that an access read or wrote a path, and a scope is the group of file work the handle treats as ordered, so its own claims never clash. Every `acquire` starts its own scope, and two live scopes touching one path conflict. This access's claim on `/greeting.txt` lasts until it drops, since the two contexts are prepared but never run.
 4. The second context writes the same path. The write fails with [`VfsError::Conflict`], never reaches the backend, and the file keeps `from a`. Without this check, the final text would depend on timing. Match `Conflict` to tell a race from a backend failure.
@@ -76,7 +76,7 @@ The diagram shows where each path goes.
                            v                v
           ┌──────────────────────┐   ┌──────────────────────────┐
           │ mount "/"            │   │ mount "/my/store"        │
-          │ HostBackend::rooted  │   │ MemoryBackend, the store │
+          │ RealBackend::rooted  │   │ MemoryBackend, the store │
           │ sees /greeting.txt   │   │ sees /note.md            │
           └──────────────────────┘   └──────────────────────────┘
 
@@ -291,13 +291,13 @@ The watcher sees what the rules let through, as it happens, so keep it cheap. Ne
 
 [`ExecId`] identifies one serial thread of execution, unique within the process. A custom backend sees it through [`AcquireContext::id`] and [`Vfs::release`]. It has no public constructor, and every acquire and every spawn gets a fresh id, so you cannot reuse an id to rejoin an earlier scope.
 
-## HostBackend
+## RealBackend
 
-[`HostBackend`] serves real directories behind the virtual namespace, as in `.mount("/", HostBackend::rooted(&dir)?)`. [`HostBackend::rooted`] fails with `NotFound` when `dir` is absent and `NotADirectory` when it is not a directory, spelling the path as you gave it, so create the folder before building the backend. Writes, copies, and renames are failure-atomic, so a failed write leaves the old file whole. See [Give a run its files](#give-a-run-its-files).
+[`RealBackend`] serves real directories behind the virtual namespace, as in `.mount("/", RealBackend::rooted(&dir)?)`. [`RealBackend::rooted`] fails with `NotFound` when `dir` is absent and `NotADirectory` when it is not a directory, spelling the path as you gave it, so create the folder before building the backend. Writes, copies, and renames are failure-atomic, so a failed write leaves the old file whole. See [Give a run its files](#give-a-run-its-files).
 
-- [`HostBackend::identity`]: applies no containment, so virtual paths are real paths; on Windows, virtual `/C:/a/b` is the real path `C:\a\b`.
-- `HostBackend::rooted`: checks every resolved path against the folder, denies a followed symlink that resolves outside it, and refuses removing or renaming the mounted root.
-- [`HostBackend::with_read_only`]: `true` makes every mutation fail with `PermissionDenied` naming the path; a new backend is writable.
+- [`RealBackend::identity`]: applies no containment, so virtual paths are real paths; on Windows, virtual `/C:/a/b` is the real path `C:\a\b`.
+- `RealBackend::rooted`: checks every resolved path against the folder, denies a followed symlink that resolves outside it, and refuses removing or renaming the mounted root.
+- [`RealBackend::with_read_only`]: `true` makes every mutation fail with `PermissionDenied` naming the path; a new backend is writable.
 
 ## MemoryBackend
 

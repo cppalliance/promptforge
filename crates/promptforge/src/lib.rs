@@ -146,7 +146,6 @@ pub mod vfs {
     pub use promptforge_vfs::Entry;
     pub use promptforge_vfs::ExecId;
     pub use promptforge_vfs::FileType;
-    pub use promptforge_vfs::HostBackend;
     pub use promptforge_vfs::MemoryBackend;
     pub use promptforge_vfs::Mode;
     pub use promptforge_vfs::ModeHandle;
@@ -157,6 +156,7 @@ pub mod vfs {
     pub use promptforge_vfs::Origin;
     pub use promptforge_vfs::PathReason;
     pub use promptforge_vfs::Policy;
+    pub use promptforge_vfs::RealBackend;
     pub use promptforge_vfs::Stat;
     pub use promptforge_vfs::Verdict;
     pub use promptforge_vfs::Vfs;

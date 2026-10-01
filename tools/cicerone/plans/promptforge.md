@@ -444,7 +444,7 @@ Owns:
 - item: promptforge::vfs::AllowAll
 - item: promptforge::vfs::Entry
 - item: promptforge::vfs::ExecId
-- item: promptforge::vfs::HostBackend
+- item: promptforge::vfs::RealBackend
 - item: promptforge::vfs::MemoryBackend
 - item: promptforge::vfs::ModeHandle
 - item: promptforge::vfs::ModePolicy

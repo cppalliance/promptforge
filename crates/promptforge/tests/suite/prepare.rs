@@ -16,7 +16,7 @@ use std::num::NonZeroU32;
 use promptforge::capabilities::CapabilityId;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::vfs::{HostBackend, Origin, VfsError, VfsRef};
+use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RequirementCheck};
 
 use super::support::context;
@@ -66,14 +66,14 @@ impl Drop for TempDir {
 }
 
 #[test]
-fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
+fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
     let temp = TempDir::new("shared-base");
     // The Host's handle: its base at `/` beside a declared store at
     // `/my/store` - the plan's Host shape - shared by every run.
     let vfs = VfsRef::builder()
         .mount(
             "/",
-            HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
+            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
         )
         .store("/my/store", promptforge::vfs::MemoryBackend::new())
         .build();
@@ -87,7 +87,7 @@ fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
         .expect("run a acquires");
     access_a
         .write("/shared.txt", b"from a")
-        .expect("run a writes the host file");
+        .expect("run a writes the real file");
     let access_b = ctx_b
         .vfs_handle()
         .acquire(Origin::new("run-b"))

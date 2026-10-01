@@ -11,7 +11,7 @@ use crate::path::VfsPath;
 /// How virtual paths reach real paths: verbatim, or contained under a
 /// canonicalized root.
 #[derive(Debug, Clone)]
-pub(super) enum HostRoot {
+pub(super) enum RealRoot {
     /// The virtual path is the real path (modulo the Windows drive
     /// letter spelling).
     Identity,
@@ -23,7 +23,7 @@ pub(super) enum HostRoot {
 /// the virtual spelling of `C:\Users\x` is `/C:/Users/x`: a leading
 /// slash before a drive letter is stripped.
 #[cfg(windows)]
-pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
+pub(super) fn identity_to_real(virtual_path: &str) -> PathBuf {
     let bytes = virtual_path.as_bytes();
     if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
         return PathBuf::from(&virtual_path[1..]);
@@ -33,7 +33,7 @@ pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
 
 /// Translates an identity-mode virtual path to a real path.
 #[cfg(not(windows))]
-pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
+pub(super) fn identity_to_real(virtual_path: &str) -> PathBuf {
     PathBuf::from(virtual_path)
 }
 
@@ -41,8 +41,8 @@ pub(super) fn identity_to_host(virtual_path: &str) -> PathBuf {
 /// forward slashes, and on Windows a leading slash before a drive
 /// letter (`C:\Users\x` becomes `/C:/Users/x`).
 #[cfg(windows)]
-pub(super) fn identity_to_virtual(host: &Path) -> String {
-    let spelled = host.to_string_lossy().replace('\\', "/");
+pub(super) fn identity_to_virtual(real: &Path) -> String {
+    let spelled = real.to_string_lossy().replace('\\', "/");
     let bytes = spelled.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         return format!("/{spelled}");
@@ -52,19 +52,19 @@ pub(super) fn identity_to_virtual(host: &Path) -> String {
 
 /// Translates a real path back to its identity-mode virtual spelling.
 #[cfg(not(windows))]
-pub(super) fn identity_to_virtual(host: &Path) -> String {
-    host.to_string_lossy().into_owned()
+pub(super) fn identity_to_virtual(real: &Path) -> String {
+    real.to_string_lossy().into_owned()
 }
 
 /// Joins a canonical virtual path onto a real directory. The virtual path is
 /// canonical (dot segments resolved at receipt, forward slashes), so
 /// the join cannot escape lexically.
 pub(super) fn join_virtual(root: &Path, virtual_path: &str) -> PathBuf {
-    let mut host = root.to_path_buf();
+    let mut real = root.to_path_buf();
     for segment in virtual_path.split('/').filter(|s| !s.is_empty()) {
-        host.push(segment);
+        real.push(segment);
     }
-    host
+    real
 }
 
 /// Canonicalize containment: the candidate's nearest existing ancestor

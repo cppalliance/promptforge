@@ -25,10 +25,10 @@ pub mod detail;
 mod error;
 mod glob;
 mod handle;
-mod host;
 mod memory;
 mod observe;
 mod path;
+mod real;
 mod router;
 mod stat;
 mod traits;
@@ -37,10 +37,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub use error::{PathReason, VfsError};
 pub use handle::{Access, VfsRef};
-pub use host::HostBackend;
 pub use memory::MemoryBackend;
 pub use observe::{OpEvent, OpSink, Origin};
 pub use path::{VfsPath, VfsPathBuf};
+pub use real::RealBackend;
 pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
 pub use traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
@@ -142,7 +142,7 @@ fn is_mutation(op: Op) -> bool {
 /// markdown and the case-insensitive suggestion does not apply.
 #[expect(
     clippy::case_sensitive_file_extension_comparisons,
-    reason = "virtual paths are POSIX-strict; case-insensitive extension matching is a host-OS notion"
+    reason = "virtual paths are POSIX-strict; case-insensitive extension matching is an operating-system notion"
 )]
 fn is_markdown(path: &VfsPath) -> bool {
     path.as_str().ends_with(".md")

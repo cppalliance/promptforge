@@ -11,7 +11,7 @@ use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
 use crate::parser::Prompt;
 use promptforge_types::ids::Provenance;
-use promptforge_vfs::{Access, HostBackend, Origin, VfsError, VfsRef};
+use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
 
 use super::super::context::{EXECUTION, parse, test_context};
 use super::super::serial_driver::perform_locally;
@@ -240,12 +240,12 @@ impl Drop for TempDir {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
+async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // The consistency rule: every store operation takes the leaf-yield path
     // uniformly, with no inline fast path, so a run's observable behavior
     // cannot depend on which backend serves the store mount. The same
     // fanout fixture (arm-scoped writes, a post-join glob, the ordered
-    // merge) runs over the stock memory mount and over a `HostBackend`
+    // merge) runs over the stock memory mount and over a `RealBackend`
     // rooted in a temp dir; the result and the stored contents must be
     // identical.
     const FANOUT_STORE_WRITES: &str =
@@ -264,41 +264,41 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
         .result
         .expect("the memory-backed fanout must execute offline");
 
-    let temp = TempDir::new("host-backend");
-    let host_vfs = VfsRef::builder()
+    let temp = TempDir::new("real-backend");
+    let real_vfs = VfsRef::builder()
         .store(
             "/",
-            HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
+            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
         )
         .build();
-    let host = run_fixture(
+    let real = run_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
-        "vfs-invariance-host",
+        "vfs-invariance-real",
         "",
-        Some(host_vfs),
+        Some(real_vfs),
     )
     .await;
-    let host_result = host
+    let real_result = real
         .result
-        .expect("the host-backed fanout must execute offline");
+        .expect("the real-backed fanout must execute offline");
 
     assert_eq!(
-        memory_result, host_result,
+        memory_result, real_result,
         "the run's result must not depend on the backend"
     );
     for path in ["arm-1.md", "arm-2.md", "merged.md"] {
         assert_eq!(
             memory.store.read(path).ok(),
-            host.store.read(path).ok(),
+            real.store.read(path).ok(),
             "stored contents at {path} must not depend on the backend"
         );
     }
-    // The `HostBackend` really served the mount: the arm's write landed on
+    // The `RealBackend` really served the mount: the arm's write landed on
     // the real filesystem under the root.
     assert!(
         temp.0.join("arm-1.md").is_file(),
-        "the host backend must persist the arm's write under its root"
+        "the real backend must persist the arm's write under its root"
     );
 }
 
@@ -359,7 +359,7 @@ fn a_run_ends_its_scope_at_done_while_the_host_still_holds_its_store_views() -> 
     assert!(
         held.iter()
             .any(|effect| matches!(effect, Effect::Store { .. })),
-        "the host holds the run's store views past Done: {held:?}"
+        "the Harness holds the run's store views past Done: {held:?}"
     );
     // A fresh scope reads the run's write without a conflict: the run's
     // scope ended at Done, not when the run or the Harness's views dropped.

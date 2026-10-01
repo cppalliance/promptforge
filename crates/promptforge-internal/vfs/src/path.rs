@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn backslashes_from_windows_hosts_are_separators() -> Result<(), VfsError> {
+    fn backslashes_from_windows_machines_are_separators() -> Result<(), VfsError> {
         assert_eq!(canonical("/a\\b/c")?, "/a/b/c");
         Ok(())
     }

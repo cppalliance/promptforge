@@ -1,9 +1,9 @@
 //! The real-filesystem backend, stage 1 (thin).
 //!
-//! [`HostBackend`] serves real directories behind the virtual
+//! [`RealBackend`] serves real directories behind the virtual
 //! namespace over direct `std::fs` calls. Two constructors:
-//! [`HostBackend::identity`] (the virtual path IS the real path) and
-//! [`HostBackend::rooted`] (chroot-style, with lexical plus
+//! [`RealBackend::identity`] (the virtual path IS the real path) and
+//! [`RealBackend::rooted`] (chroot-style, with lexical plus
 //! canonicalize containment). Writes, copies, and renames are
 //! failure-atomic: a sibling temp file plus rename, so a failed
 //! operation leaves source, destination, and accounting unchanged.
@@ -36,7 +36,7 @@ use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
 use files::{atomic_write, create_parent, is_dir_link, stat_of, walk, walk_root};
 use resolve::{
-    HostRoot, contain, contain_no_follow, identity_to_host, identity_to_virtual, join_virtual,
+    RealRoot, contain, contain_no_follow, identity_to_real, identity_to_virtual, join_virtual,
 };
 
 /// Maps an I/O failure to the error kind the trait surface promises.
@@ -73,25 +73,25 @@ fn map_io(path: &str, err: &std::io::Error) -> VfsError {
 /// A real-filesystem backend behind the virtual namespace.
 ///
 /// Stage 1 (thin): direct `std::fs` operations, lexical plus
-/// canonicalize containment for [`HostBackend::rooted`], and
+/// canonicalize containment for [`RealBackend::rooted`], and
 /// failure-atomic writes, copies, and renames. `ExecId` attribution is
 /// accepted as a no-op: the real filesystem holds no per-identity
 /// state.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct HostBackend {
-    root: HostRoot,
+pub struct RealBackend {
+    root: RealRoot,
     read_only: bool,
 }
 
-impl HostBackend {
+impl RealBackend {
     /// A backend whose virtual paths ARE real paths: virtual
     /// `/a/b` is real `/a/b` (on Windows, virtual `/C:/a/b` is real
     /// `C:\a\b`). No containment applies.
     #[must_use]
-    pub fn identity() -> HostBackend {
-        HostBackend {
-            root: HostRoot::Identity,
+    pub fn identity() -> RealBackend {
+        RealBackend {
+            root: RealRoot::Identity,
             read_only: false,
         }
     }
@@ -104,14 +104,14 @@ impl HostBackend {
     ///
     /// Returns [`VfsError::NotFound`] when `dir` is absent, or
     /// [`VfsError::NotADirectory`] when it is not a directory.
-    pub fn rooted(dir: impl AsRef<Path>) -> Result<HostBackend, VfsError> {
+    pub fn rooted(dir: impl AsRef<Path>) -> Result<RealBackend, VfsError> {
         let display = dir.as_ref().to_string_lossy().into_owned();
         let canonical = fs::canonicalize(dir.as_ref()).map_err(|err| map_io(&display, &err))?;
         if !canonical.is_dir() {
             return Err(VfsError::NotADirectory { path: display });
         }
-        Ok(HostBackend {
-            root: HostRoot::Rooted(canonical),
+        Ok(RealBackend {
+            root: RealRoot::Rooted(canonical),
             read_only: false,
         })
     }
@@ -119,19 +119,19 @@ impl HostBackend {
     /// Sets whether the backend rejects all mutations. The flag is a
     /// property of the mount, orthogonal to policy.
     #[must_use]
-    pub fn with_read_only(mut self, read_only: bool) -> HostBackend {
+    pub fn with_read_only(mut self, read_only: bool) -> RealBackend {
         self.read_only = read_only;
         self
     }
 }
 
-impl Vfs for HostBackend {
+impl Vfs for RealBackend {
     fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
         // Attribution is accepted as a no-op: the real filesystem holds
         // no per-identity state, and the claims model above the backend
         // enforces conflicts.
         let _ = cx;
-        Ok(Box::new(HostAccess {
+        Ok(Box::new(RealAccess {
             root: self.root.clone(),
             read_only: self.read_only,
         }))
@@ -147,20 +147,20 @@ impl Vfs for HostBackend {
     }
 }
 
-/// One identity's session with a [`HostBackend`]. The identity is
+/// One identity's session with a [`RealBackend`]. The identity is
 /// dropped on the floor: attribution is a no-op.
-struct HostAccess {
-    root: HostRoot,
+struct RealAccess {
+    root: RealRoot,
     read_only: bool,
 }
 
-impl HostAccess {
+impl RealAccess {
     /// Resolves a canonical virtual path to its real path, applying
     /// containment in rooted mode.
     fn resolve(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
-            HostRoot::Identity => Ok(identity_to_host(path.as_str())),
-            HostRoot::Rooted(root) => {
+            RealRoot::Identity => Ok(identity_to_real(path.as_str())),
+            RealRoot::Rooted(root) => {
                 let candidate = join_virtual(root, path.as_str());
                 contain(root, &candidate, path)
             }
@@ -172,8 +172,8 @@ impl HostAccess {
     /// parent in rooted mode.
     fn resolve_no_follow(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
-            HostRoot::Identity => Ok(identity_to_host(path.as_str())),
-            HostRoot::Rooted(root) => {
+            RealRoot::Identity => Ok(identity_to_real(path.as_str())),
+            RealRoot::Rooted(root) => {
                 let candidate = join_virtual(root, path.as_str());
                 contain_no_follow(root, &candidate, path)
             }
@@ -181,11 +181,11 @@ impl HostAccess {
     }
 
     /// Translates a real path back to its virtual spelling.
-    fn to_virtual(&self, host: &Path) -> String {
+    fn to_virtual(&self, real: &Path) -> String {
         match &self.root {
-            HostRoot::Identity => identity_to_virtual(host),
-            HostRoot::Rooted(root) => {
-                let relative = host.strip_prefix(root).unwrap_or(host);
+            RealRoot::Identity => identity_to_virtual(real),
+            RealRoot::Rooted(root) => {
+                let relative = real.strip_prefix(root).unwrap_or(real);
                 let mut virtual_path = String::new();
                 for component in relative.components() {
                     virtual_path.push('/');
@@ -206,33 +206,33 @@ impl HostAccess {
         if self.read_only {
             return Err(VfsError::PermissionDenied {
                 path: path.to_string(),
-                reason: format!("the host backend is read-only, so {path} cannot be mutated"),
+                reason: format!("the real backend is read-only, so {path} cannot be mutated"),
             });
         }
         Ok(())
     }
 }
 
-impl VfsAccess for HostAccess {
+impl VfsAccess for RealAccess {
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-        let host = self.resolve(path)?;
-        if host.is_dir() {
+        let real = self.resolve(path)?;
+        if real.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: path.to_string(),
             });
         }
-        fs::read(&host).map_err(|err| map_io(path.as_str(), &err))
+        fs::read(&real).map_err(|err| map_io(path.as_str(), &err))
     }
 
     fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
         // Seek, never materialize: a real file can position directly.
-        let host = self.resolve(path)?;
-        if host.is_dir() {
+        let real = self.resolve(path)?;
+        if real.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: path.to_string(),
             });
         }
-        let mut file = File::open(&host).map_err(|err| map_io(path.as_str(), &err))?;
+        let mut file = File::open(&real).map_err(|err| map_io(path.as_str(), &err))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|err| map_io(path.as_str(), &err))?;
         let mut buffer = Vec::new();
@@ -244,29 +244,29 @@ impl VfsAccess for HostAccess {
 
     fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
         self.check_writable(path)?;
-        let host = self.resolve(path)?;
-        if host.is_dir() {
+        let real = self.resolve(path)?;
+        if real.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: path.to_string(),
             });
         }
-        create_parent(&host, path)?;
-        atomic_write(&host, contents)
+        create_parent(&real, path)?;
+        atomic_write(&real, contents)
     }
 
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
         self.check_writable(path)?;
-        let host = self.resolve(path)?;
-        if host.is_dir() {
+        let real = self.resolve(path)?;
+        if real.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: path.to_string(),
             });
         }
-        create_parent(&host, path)?;
+        create_parent(&real, path)?;
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&host)
+            .open(&real)
             .map_err(|err| map_io(path.as_str(), &err))?;
         file.write_all(contents)
             .map_err(|err| map_io(path.as_str(), &err))
@@ -280,31 +280,31 @@ impl VfsAccess for HostAccess {
                 reason: "the mounted root cannot be removed".into(),
             });
         }
-        let host = self.resolve_no_follow(path)?;
-        let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
+        let real = self.resolve_no_follow(path)?;
+        let metadata = fs::symlink_metadata(&real).map_err(|err| map_io(path.as_str(), &err))?;
         // symlink_metadata does not follow links: a symlink is removed
         // as a link, never its target.
         if metadata.is_dir() {
             if recursive {
-                fs::remove_dir_all(&host)
+                fs::remove_dir_all(&real)
             } else {
-                fs::remove_dir(&host)
+                fs::remove_dir(&real)
             }
         } else if is_dir_link(&metadata) {
-            fs::remove_dir(&host)
+            fs::remove_dir(&real)
         } else {
-            fs::remove_file(&host)
+            fs::remove_file(&real)
         }
         .map_err(|err| map_io(path.as_str(), &err))
     }
 
     fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        let host = self.resolve_no_follow(path)?;
+        let real = self.resolve_no_follow(path)?;
         // symlink_metadata counts a dangling link as existing. Only a
         // confirmed absence is Ok(false); every other failure (a
         // denied permission, a genuine I/O error) surfaces as Err, as
         // the trait contract requires.
-        match fs::symlink_metadata(&host) {
+        match fs::symlink_metadata(&real) {
             Ok(_) => Ok(true),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(map_io(path.as_str(), &err)),
@@ -327,7 +327,7 @@ impl VfsAccess for HostAccess {
         walk(&root, &mut found)?;
         let mut matches: Vec<String> = found
             .iter()
-            .map(|host| self.to_virtual(host))
+            .map(|real| self.to_virtual(real))
             .filter(|virtual_path| matches_tokens(&tokens, virtual_path.as_bytes()))
             .collect();
         matches.sort_unstable();
@@ -335,8 +335,8 @@ impl VfsAccess for HostAccess {
     }
 
     fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-        let host = self.resolve(path)?;
-        let entries = fs::read_dir(&host).map_err(|err| map_io(path.as_str(), &err))?;
+        let real = self.resolve(path)?;
+        let entries = fs::read_dir(&real).map_err(|err| map_io(path.as_str(), &err))?;
         let mut result = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|err| map_io(path.as_str(), &err))?;
@@ -355,23 +355,23 @@ impl VfsAccess for HostAccess {
     }
 
     fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        let host = self.resolve_no_follow(path)?;
-        let metadata = fs::symlink_metadata(&host).map_err(|err| map_io(path.as_str(), &err))?;
+        let real = self.resolve_no_follow(path)?;
+        let metadata = fs::symlink_metadata(&real).map_err(|err| map_io(path.as_str(), &err))?;
         Ok(stat_of(&metadata))
     }
 
     fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
         self.check_writable(path)?;
-        let host = self.resolve_no_follow(path)?;
-        if fs::symlink_metadata(&host).is_ok() {
+        let real = self.resolve_no_follow(path)?;
+        if fs::symlink_metadata(&real).is_ok() {
             return Err(VfsError::AlreadyExists {
                 path: path.to_string(),
             });
         }
         if recursive {
-            fs::create_dir_all(&host)
+            fs::create_dir_all(&real)
         } else {
-            fs::create_dir(&host)
+            fs::create_dir(&real)
         }
         .map_err(|err| map_io(path.as_str(), &err))
     }
@@ -396,31 +396,31 @@ impl VfsAccess for HostAccess {
                 reason: PathReason::IntoDescendant,
             });
         }
-        let host_from = self.resolve_no_follow(from)?;
-        let host_to = self.resolve_no_follow(to)?;
+        let real_from = self.resolve_no_follow(from)?;
+        let real_to = self.resolve_no_follow(to)?;
         // Validation finishes before the rename syscall, so a failed
         // rename changes nothing; the rename itself is atomic.
-        fs::symlink_metadata(&host_from).map_err(|err| map_io(from.as_str(), &err))?;
-        create_parent(&host_to, to)?;
-        fs::rename(&host_from, &host_to).map_err(|err| map_io(from.as_str(), &err))
+        fs::symlink_metadata(&real_from).map_err(|err| map_io(from.as_str(), &err))?;
+        create_parent(&real_to, to)?;
+        fs::rename(&real_from, &real_to).map_err(|err| map_io(from.as_str(), &err))
     }
 
     fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
         self.check_writable(to)?;
-        let host_from = self.resolve(from)?;
-        let host_to = self.resolve(to)?;
-        if host_from.is_dir() {
+        let real_from = self.resolve(from)?;
+        let real_to = self.resolve(to)?;
+        if real_from.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: from.to_string(),
             });
         }
-        let bytes = fs::read(&host_from).map_err(|err| map_io(from.as_str(), &err))?;
-        if host_to.is_dir() {
+        let bytes = fs::read(&real_from).map_err(|err| map_io(from.as_str(), &err))?;
+        if real_to.is_dir() {
             return Err(VfsError::IsADirectory {
                 path: to.to_string(),
             });
         }
-        create_parent(&host_to, to)?;
-        atomic_write(&host_to, &bytes)
+        create_parent(&real_to, to)?;
+        atomic_write(&real_to, &bytes)
     }
 }

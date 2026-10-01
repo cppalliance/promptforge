@@ -145,31 +145,31 @@ return 'sibling'\n\
     );
 }
 
-/// A store declared at `/` covers only its own mount: a real directory
+/// A store declared at `/` covers only its own mount: a directory
 /// mounted beneath it lies outside the store view, so a file that
 /// directory holds reads as absent from the store.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_store_at_the_root_cannot_reach_a_host_mount_beneath_it() {
+async fn a_store_at_the_root_cannot_reach_a_mount_beneath_it() {
     let md = flow_prompt!(
         "\
 ## Only\n\n\
 ```lua\n\
-local ok, err = pcall(function() return store.read('host/secret.txt') end)\n\
-assert(ok == false, 'the host path is not in the store')\n\
-assert(err.reason == 'not_found', 'the host file is simply absent: ' .. tostring(err))\n\
+local ok, err = pcall(function() return store.read('mount/secret.txt') end)\n\
+assert(ok == false, 'the mounted path is not in the store')\n\
+assert(err.reason == 'not_found', 'the mounted file is simply absent: ' .. tostring(err))\n\
 return 'ok'\n\
 ```\n"
     );
     let vfs = promptforge_vfs::VfsRef::builder()
         .store("/", promptforge_vfs::MemoryBackend::new())
-        .mount("/host", promptforge_vfs::MemoryBackend::new())
+        .mount("/mount", promptforge_vfs::MemoryBackend::new())
         .build();
-    // The real mount holds the file; the store view reads only its own
+    // The mount holds the file; the store view reads only its own
     // mount.
-    vfs.acquire(promptforge_vfs::Origin::new("host seeding"))
+    vfs.acquire(promptforge_vfs::Origin::new("mount seeding"))
         .expect("the handle acquires")
-        .write("/host/secret.txt", b"secret")
-        .expect("the host mount seeds");
+        .write("/mount/secret.txt", b"secret")
+        .expect("the mount seeds");
     let out = run_fixture(md, "exec-flow", EXECUTION, "", Some(vfs))
         .await
         .result
@@ -317,6 +317,6 @@ return 'saved'\n\
             record,
             EffectRecord::Store { op: StoreOp::Write { path, .. } } if path == "note.txt"
         )),
-        "the captured write is performed by the host: {records:?}"
+        "the captured write is performed by the Harness: {records:?}"
     );
 }

@@ -51,9 +51,9 @@ fn make_file_link(link: &Path, target: &Path) -> Result<bool, VfsError> {
     Ok(true)
 }
 
-/// Whether `host` itself is a link, without following it.
-fn is_link(host: &Path) -> bool {
-    fs::symlink_metadata(host).is_ok_and(|metadata| metadata.file_type().is_symlink())
+/// Whether `real` itself is a link, without following it.
+fn is_link(real: &Path) -> bool {
+    fs::symlink_metadata(real).is_ok_and(|metadata| metadata.file_type().is_symlink())
 }
 
 /// Makes `link` a dangling directory link: a link to `target`, which
@@ -87,7 +87,7 @@ fn a_rooted_backend_rejects_links_that_escape_the_mount_root() -> Result<(), Vfs
     let root = TempDir::new()?;
     if !make_dir_link(&root.path().join("link"), outside.path()) {
         eprintln!(
-            "skipped: the host refused to create a directory link, so there is no link \
+            "skipped: the operating system refused to create a directory link, so there is no link \
              to escape through"
         );
         return Ok(());
