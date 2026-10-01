@@ -51,7 +51,7 @@ Grouping by task feels like grouping log lines by thread id. Unlike a thread id,
 #     loop {
 #         match run.step() {
 #             Step::Pending { effects: batch, events: reported } => {
-#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this host holds");
+#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this Harness holds");
 #                 events.extend(reported);
 #                 for (id, provenance, effect) in batch {
 #                     effects.push(provenance);
@@ -216,7 +216,7 @@ Following a task feels like joining a spawned thread. Unlike dropping a [`JoinHa
 #     loop {
 #         match run.step() {
 #             Step::Pending { effects: batch, events: reported } => {
-#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this host holds");
+#                 assert!(!batch.is_empty() || run.decided(), "the run waits on an effect this Harness holds");
 #                 events.extend(reported);
 #                 for (id, provenance, effect) in batch {
 #                     effects.push(provenance);

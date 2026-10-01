@@ -28,8 +28,8 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump to a child must start the child-level walk");
@@ -67,8 +67,8 @@ async fn child_walk_recurses_to_h4() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the child-level rule must recurse to H4");
@@ -95,8 +95,8 @@ async fn jump_to_an_off_walk_child_runs_it() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump to an off-walk child must run it");
@@ -126,8 +126,8 @@ async fn running_child_addresses_its_own_siblings_and_children() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a running child must address its own siblings and children");
@@ -148,8 +148,8 @@ async fn running_child_cannot_address_a_top_level_section() {
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a child jumping to a top-level section must fail");
@@ -173,8 +173,8 @@ async fn jump_to_a_niece_errors() {
         ### Niece\n\n\
         ```lua\nreturn 'niece-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a jump to a niece must fail");
@@ -209,8 +209,8 @@ async fn sys_id_counts_the_sections_one_chain_enters_across_a_jump_into_a_child_
         return store.read('ids.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("sys.id must count the sections the one chain enters");
@@ -247,8 +247,8 @@ async fn a_call_child_takes_ids_nested_under_its_own_chain_distinct_from_the_par
         return 'arm' .. sys.index .. ':' .. sys.id\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the call child and its fanout complete");
@@ -291,8 +291,8 @@ async fn two_runs_of_the_same_prompt_produce_identical_ids() {
     let prompt = parse(md);
     let mut outputs = Vec::new();
     for _ in 0..2 {
-        let (ctx, host) = scheduler_context(&prompt);
-        let out = TokioDriver::new(&ctx, host, None)
+        let (ctx, harness) = scheduler_context(&prompt);
+        let out = TokioDriver::new(&ctx, harness, None)
             .drive()
             .await
             .expect("the identity prompt completes");
@@ -325,8 +325,8 @@ async fn walk_never_descends_into_children() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the walk must never descend into children");

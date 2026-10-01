@@ -5,7 +5,7 @@ use super::*;
 
 use crate::RunErrorKind;
 use crate::test_support::recording::Observer;
-use crate::test_support::{RunHost, TestToolTable, run_with_host};
+use crate::test_support::{RunHarness, TestToolTable, run_with_harness};
 use crate::{Environment, RunResult};
 use promptforge_types::tools::{ToolError, ToolId, ToolOutput};
 use promptforge_vfs::VfsRef;
@@ -125,12 +125,12 @@ async fn advertising_an_unfilled_slot_fails_at_run_time() {
     let catalog = table
         .catalog()
         .expect("the fixture tools have legal wire names and distinct ids");
-    let RunResult::Failure(error) = run_with_host(
+    let RunResult::Failure(error) = run_with_harness(
         &Environment::new().tools(catalog),
         &prompt,
         "",
         context(EXECUTION),
-        RunHost::new().tools(table),
+        RunHarness::new().tools(table),
     )
     .await
     else {
@@ -158,7 +158,7 @@ async fn models_bind_is_gone_from_the_lua_surface() {
     let prompt = parse_execution_fixture(md, "exec-flow", EXECUTION, observer.as_ref());
     let env = Environment::new();
     let RunResult::Failure(error) =
-        run_with_host(&env, &prompt, "", context(EXECUTION), RunHost::new()).await
+        run_with_harness(&env, &prompt, "", context(EXECUTION), RunHarness::new()).await
     else {
         panic!("a models.bind call must fail");
     };

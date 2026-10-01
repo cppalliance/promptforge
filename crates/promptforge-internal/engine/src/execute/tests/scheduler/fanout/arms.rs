@@ -19,8 +19,8 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         ### Worker\n\n\
         ```lua\nreturn item\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let mut driver = TokioDriver::new(&ctx, host, None);
+    let (ctx, harness) = scheduler_context(&prompt);
+    let mut driver = TokioDriver::new(&ctx, harness, None);
     driver.cancel_handle().cancel();
     let result = driver.drive().await;
     assert!(
@@ -53,7 +53,7 @@ async fn model_required_when_arm_infer_has_no_binding() {
         shared,
         &test_context(EXECUTION),
     );
-    let error = TokioDriver::new(&ctx, RunHost::new(), None)
+    let error = TokioDriver::new(&ctx, RunHarness::new(), None)
         .drive()
         .await
         .expect_err("an arm infer without a model binding must fail");
@@ -101,7 +101,7 @@ async fn the_shared_replay_sees_the_arm_item() {
         shared,
         &test_context(EXECUTION),
     );
-    let out = TokioDriver::new(&ctx, RunHost::new(), None)
+    let out = TokioDriver::new(&ctx, RunHarness::new(), None)
         .drive()
         .await
         .expect("the arm must succeed");
@@ -145,8 +145,8 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         ```\n";
     let store = TestStore::new();
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump inside an arm drives a child walk");
@@ -190,8 +190,8 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         ```\n";
     let store = TestStore::new();
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump to a worker child walks the child slice");
@@ -224,8 +224,8 @@ async fn fanout_hash_collection_iterates_in_sorted_key_order() {
         return item.key .. '=' .. item.value .. '@' .. sys.index .. ':' .. sys.id\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a hash-shaped collection fans out");
@@ -264,8 +264,8 @@ async fn fanout_results_are_sealed_against_writes_and_metatable_replacement() {
         return item .. '-' .. sys.index\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the sealed results read and render");

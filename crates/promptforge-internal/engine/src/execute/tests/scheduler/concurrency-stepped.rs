@@ -35,7 +35,7 @@ fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
         Batching::AllAtOnce,
         Batching::Reversed,
     ] {
-        let (state, _host) = limited_context(
+        let (state, _harness) = limited_context(
             &prompt,
             &TestStore::new(),
             ceiling(2),
@@ -72,7 +72,7 @@ fn a_queued_task_that_can_never_be_admitted_is_reported_as_a_stall() {
         ## Child\n\n\
         ```lua\nreturn 'child'\n```\n";
     let prompt = parse(md);
-    let (state, _host) = limited_context(
+    let (state, _harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),

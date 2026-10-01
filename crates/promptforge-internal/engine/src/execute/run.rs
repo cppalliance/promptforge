@@ -109,7 +109,7 @@ impl Run {
     /// first `step` is `Done` with the failure.
     #[expect(
         clippy::needless_pass_by_value,
-        reason = "the host API takes the context by value: Run::new owns the run's inputs"
+        reason = "the public API takes the context by value: Run::new owns the run's inputs"
     )]
     #[must_use]
     pub fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {

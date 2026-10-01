@@ -81,7 +81,7 @@ fn ceiling_context(
     prompt: &Prompt,
     ceiling: usize,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
@@ -89,7 +89,7 @@ fn ceiling_context(
             RunLimits::new()
                 .max_concurrency(NonZeroUsize::new(ceiling).expect("the ceiling is non-zero")),
         ),
-        RunHost::new().observer(observer),
+        RunHarness::new().observer(observer),
     )
 }
 
@@ -123,8 +123,8 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the ceilinged fanout completes");
@@ -173,10 +173,10 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -228,12 +228,12 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = scheduler_context_on(
+    let (ctx, harness) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the nested fanout completes");
@@ -281,12 +281,12 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = scheduler_context_on(
+    let (ctx, harness) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the identity prompt completes");
@@ -385,12 +385,12 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("three looping arms complete");

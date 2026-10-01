@@ -35,8 +35,8 @@ async fn local_tool_handler_result_returns_to_the_model() {
     ])
     .await;
     let prompt = parse(&grab_loop("return 'got ' .. args.value"));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the local handler answers the model's call");
@@ -81,8 +81,8 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
          return table.concat(calls, ',') .. '|' .. msgs[#msgs].content",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both calls in the one response run");
@@ -113,12 +113,12 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     .await;
     let prompt = parse(&grab_loop("error('handler exploded')"));
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a handler Lua error must fail the tool call");
@@ -152,9 +152,9 @@ async fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
     ])
     .await;
     let prompt = parse(&grab_loop("while true do end"));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
 
-    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let canceller = driver.cancel_handle();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -186,8 +186,8 @@ async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text()
         "store.write('grab.txt', 'kept ' .. args.value)\n\
            return store.read('grab.txt')",
     ));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the handler's store calls suspend and resume inside the loop");
@@ -224,8 +224,8 @@ async fn a_handler_that_calls_jump_fails_the_run() {
          models.loop(msgs)\n\
          return 'no jump'",
     ));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("jump is refused while the handler runs");
@@ -252,8 +252,8 @@ async fn a_saved_jump_reference_is_refused_in_a_handler_the_script_calls() {
         "{SAVED_JUMP_GRAB}tools.call('grab', {{ value = 'hi' }})\n\
          return 'no jump'"
     )));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a saved reference to jump is refused inside the handler");
@@ -277,8 +277,8 @@ async fn a_saved_jump_reference_is_refused_in_a_handler_the_model_calls() {
          models.loop(msgs)\n\
          return 'no jump'"
     )));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a saved reference to jump is refused inside the handler");
@@ -297,8 +297,8 @@ async fn a_caller_that_catches_the_jump_refusal_continues_the_block() {
          assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))\n\
          return 'no jump'"
     )));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the caller catches the refusal");
@@ -319,8 +319,8 @@ async fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
          assert(tools.call('outer', {{}}) == 'inner', 'the outer handler returns')\n\
          jump('## Other')"
     )));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("jump works in the block once the outer handler returns");
@@ -343,8 +343,8 @@ async fn jump_works_in_the_same_block_after_the_loop_returns() {
          models.loop(msgs)\n\
          jump('## Other')",
     ));
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("jump is restored once the handler returns");
@@ -360,12 +360,12 @@ async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
     .await;
     let prompt = parse(&grab_loop("return { args.value }"));
     let recorder = Arc::new(Recorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a table return has no text form");

@@ -188,9 +188,9 @@ async fn drive(
     let gateway = ScriptedGateway::start(replies).await;
     let prompt = parse(md);
     let recorder = Arc::new(TurnRecorder::default());
-    let (ctx, host) =
+    let (ctx, harness) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the batch runs to the final reply");

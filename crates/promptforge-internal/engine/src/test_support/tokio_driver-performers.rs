@@ -54,7 +54,7 @@ pub(crate) fn refuse_chat() -> EffectAnswer {
 /// The `ToolCall` refusal: the id resolves to no implementation.
 pub(crate) fn refuse_tool_call() -> EffectAnswer {
     EffectAnswer::ToolCall(Err(ToolError::message(
-        "the tool the call names has no implementation in the host's table",
+        "the tool the call names has no implementation in the Harness's table",
     )))
 }
 

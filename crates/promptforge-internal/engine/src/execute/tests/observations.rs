@@ -329,10 +329,10 @@ async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
     let sink = Arc::clone(&recorder) as Arc<dyn Observer>;
-    let result = run_with_context(&fixture(md), move |ctx, host| {
+    let result = run_with_context(&fixture(md), move |ctx, harness| {
         (
             ctx.limits(RunLimits::new().lua_memory_bytes(std::num::NonZeroUsize::MIN)),
-            host.observer(sink),
+            harness.observer(sink),
         )
     })
     .await;
@@ -448,12 +448,12 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(Recorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the loop converges");

@@ -72,7 +72,7 @@ const TRACE_12_CLAMP: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\
     ## Main\n\n\
     ```lua\n\
     local n = tasks.concurrency(16)\n\
-    assert(n == 4, 'clamped to the host ceiling of 4, got ' .. n)\n\
+    assert(n == 4, 'clamped to the Harness ceiling of 4, got ' .. n)\n\
     return 'clamped:' .. n\n\
     ```\n";
 
@@ -82,11 +82,11 @@ fn serial_results_limited(prompt: &Prompt, store: &TestStore, limits: RunLimits)
     BATCHINGS
         .into_iter()
         .map(|batching| {
-            let (state, _host) = scheduler_context_from(
+            let (state, _harness) = scheduler_context_from(
                 prompt,
                 store,
                 &test_context(EXECUTION).limits(limits),
-                RunHost::new(),
+                RunHarness::new(),
             );
             drive_batched(Run::from_state(state), batching).result
         })
@@ -104,13 +104,13 @@ async fn tokio_results_limited(
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
-        let (ctx, host) = scheduler_context_from(
+        let (ctx, harness) = scheduler_context_from(
             prompt,
             store,
             &test_context(EXECUTION).limits(limits),
-            RunHost::new().observer(Arc::new(NullObserver::default())),
+            RunHarness::new().observer(Arc::new(NullObserver::default())),
         );
-        let mut driver = TokioDriver::new(&ctx, host, client());
+        let mut driver = TokioDriver::new(&ctx, harness, client());
         driver.set_shuffle_for_test(seed);
         results.push(driver.drive().await);
     }
@@ -185,7 +185,7 @@ async fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tasks_concurrency_clamps_to_the_host_ceiling() {
+async fn tasks_concurrency_clamps_to_the_harness_ceiling() {
     // Trace 12's clamp: under the Harness's ceiling of 4, asking for 16
     // yields the effective limit 4, so a prompt stays portable wherever it
     // runs, including where the ceiling is tighter.

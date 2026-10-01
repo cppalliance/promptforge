@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: s5-test-harness
     content: "Step 5: rename RunHost, run_with_host, run_host, test_support/host.rs, the host locals across the engine crate (scripted, with a keep list), the Harness-sense test names and strings, and the Harness-sense facade doctest lines"
-    status: pending
+    status: completed
   - id: s6-modules
     content: "Step 6: rename performers-host.rs to performers-builtin.rs and execute/engine.rs to walk_target.rs"
     status: pending

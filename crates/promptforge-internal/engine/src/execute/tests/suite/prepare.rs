@@ -7,7 +7,7 @@
 use std::num::NonZeroU32;
 
 use crate::parser::Prompt;
-use crate::test_support::{RunHost, run_host, run_with_host};
+use crate::test_support::{RunHarness, run_harness, run_with_harness};
 use crate::{Environment, RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
@@ -95,12 +95,12 @@ fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
 async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
     let env = Environment::new();
-    let result = run_with_host(
+    let result = run_with_harness(
         &env,
         &prompt,
         "",
         context("refuse").model(current_model(32_000, ThinkingMode::Never)),
-        RunHost::new(),
+        RunHarness::new(),
     )
     .await;
     let RunResult::Failure(error) = result else {
@@ -135,14 +135,14 @@ async fn env_run_refuses_an_unsatisfiable_prompt_with_a_model_readable_notice() 
 async fn env_run_prepares_implicitly_and_runs_a_satisfiable_prompt() {
     let prompt = parse(DECLARES_ANALYST, "declares-analyst");
     let env = Environment::new();
-    // `run_with_host` prepares implicitly, and the declared role's
+    // `run_with_harness` prepares implicitly, and the declared role's
     // requirements are met by the current model.
-    let result = run_with_host(
+    let result = run_with_harness(
         &env,
         &prompt,
         "",
         context("implicit").model(current_model(200_000, ThinkingMode::Always)),
-        RunHost::new(),
+        RunHarness::new(),
     )
     .await;
     let RunResult::Ok(text) = result else {
@@ -182,8 +182,8 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
         requirements.is_satisfied(),
         "a switchable model can turn thinking off: {requirements:?}"
     );
-    let host = RunHost::new().client(gateway_client(gateway.addr()));
-    let result = run_host(&prompt, "", ctx, host).await;
+    let harness = RunHarness::new().client(gateway_client(gateway.addr()));
+    let result = run_harness(&prompt, "", ctx, harness).await;
     let RunResult::Ok(text) = result else {
         panic!("the prepared prompt runs: {result:?}");
     };
@@ -198,12 +198,12 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
 #[tokio::test]
 async fn a_no_thinking_role_on_an_always_thinking_model_is_refused() {
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
-    let result = run_with_host(
+    let result = run_with_harness(
         &Environment::new(),
         &prompt,
         "",
         context("always").model(current_model(32_000, ThinkingMode::Always)),
-        RunHost::new(),
+        RunHarness::new(),
     )
     .await;
     let RunResult::Failure(error) = result else {
@@ -242,12 +242,12 @@ async fn an_unmet_requirement_produces_todays_model_readable_notice() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // An empty catalog: the slot's capability contributed nothing, which
     // prepare reports as the missing capability.
-    let result = run_with_host(
+    let result = run_with_harness(
         &Environment::new(),
         &prompt,
         "",
         context("notice"),
-        RunHost::new(),
+        RunHarness::new(),
     )
     .await;
     let RunResult::Failure(error) = result else {

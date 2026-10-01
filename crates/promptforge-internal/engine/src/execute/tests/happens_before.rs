@@ -249,8 +249,8 @@ fn serial_results(prompt: &Prompt, store: &TestStore) -> Vec<RunResult> {
     BATCHINGS
         .into_iter()
         .map(|batching| {
-            let (state, _host) =
-                scheduler_context_from(prompt, store, &test_context(EXECUTION), RunHost::new());
+            let (state, _harness) =
+                scheduler_context_from(prompt, store, &test_context(EXECUTION), RunHarness::new());
             drive_batched(Run::from_state(state), batching).result
         })
         .collect()
@@ -288,8 +288,8 @@ async fn tokio_results(
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
-        let (ctx, host) = scheduler_context_on(prompt, store, Arc::new(NullObserver::default()));
-        let mut driver = TokioDriver::new(&ctx, host, client());
+        let (ctx, harness) = scheduler_context_on(prompt, store, Arc::new(NullObserver::default()));
+        let mut driver = TokioDriver::new(&ctx, harness, client());
         driver.set_shuffle_for_test(seed);
         results.push(driver.drive().await);
     }

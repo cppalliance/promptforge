@@ -6,12 +6,12 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 /// Builds the run context and its silent Harness for a scheduler fanout test
 /// with the given limits, so an admission test can narrow the ceiling.
-fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunState, RunHost) {
+fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunState, RunHarness) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
         &test_context(EXECUTION).limits(limits),
-        RunHost::new(),
+        RunHarness::new(),
     )
 }
 

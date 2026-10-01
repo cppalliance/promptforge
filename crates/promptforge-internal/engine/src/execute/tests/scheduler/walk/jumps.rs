@@ -26,8 +26,8 @@ async fn jump_transfer_skips_the_jumpers_remaining_blocks() {
         return 'helped:' .. store.read('seen.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("jump must transfer control");
@@ -45,8 +45,8 @@ async fn section_cannot_jump_to_itself() {
         ## Self\n\n\
         ```lua\njump('## Self')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("self-jump must fail");
@@ -71,8 +71,8 @@ async fn jump_to_off_walk_section_runs_it() {
         ## C\n\n\
         ```lua\nreturn 'c-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump to an off-walk section must run it");
@@ -104,8 +104,8 @@ async fn var_persists_across_a_jump() {
         return var.from_a .. var.from_c\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("var must persist across the jump");
@@ -127,8 +127,8 @@ async fn a_jump_fires_section_finished_for_the_jumper_before_the_target_starts()
         ## B\n\n\
         ```lua\nreturn 'b-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the jump completes both sections");
@@ -162,8 +162,8 @@ async fn an_erroring_section_reports_started_but_not_finished() {
         ## Only\n\n\
         ```lua\nerror('expected failure')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, host, None).drive().await;
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let result = TokioDriver::new(&ctx, harness, None).drive().await;
 
     assert!(result.is_err());
     let observed = recorder.events();
@@ -190,8 +190,8 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
         ## A\n\n\
         ```lua\njump('## Missing')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let result = TokioDriver::new(&ctx, host, None).drive().await;
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let result = TokioDriver::new(&ctx, harness, None).drive().await;
 
     let error = result.expect_err("an unresolvable jump target must fail the run");
     assert!(

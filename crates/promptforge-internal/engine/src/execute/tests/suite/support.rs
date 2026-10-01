@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::parser::Prompt;
 use crate::test_support::recording::{Observation, Observer};
-use crate::test_support::{RunHost, TestTool, run_host};
+use crate::test_support::{RunHarness, TestTool, run_harness};
 use crate::{Environment, RunContext, RunError, RunResult};
 use promptforge_types::timestamp::Timestamp;
 use promptforge_vfs::{Origin, VfsError, VfsRef};
@@ -40,7 +40,7 @@ impl Record {
 }
 
 /// Owned run inputs a fixture supplies: the run name and an `Arc` observer
-/// so the offline `run` helper can build the [`RunHost`] that holds the
+/// so the offline `run` helper can build the [`RunHarness`] that holds the
 /// observer. These fixtures never reach a model, so no client or debug
 /// sink is configured.
 pub(super) struct RunOptions {
@@ -50,8 +50,8 @@ pub(super) struct RunOptions {
 
 impl RunOptions {
     /// The Harness side of the fixture run: the observer alone.
-    fn host(self) -> RunHost {
-        RunHost::new().observer(self.observer)
+    fn harness(self) -> RunHarness {
+        RunHarness::new().observer(self.observer)
     }
 }
 
@@ -65,7 +65,7 @@ pub(super) fn prepare_run(
     prompt: &Prompt,
     tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
-) -> (RunContext, RunHost, VfsRef) {
+) -> (RunContext, RunHarness, VfsRef) {
     let _ = tools;
     let env = Environment::new();
     let execution = opts.execution;
@@ -75,7 +75,7 @@ pub(super) fn prepare_run(
         "fixture prompts declare no capabilities or model roles: {requirements:?}"
     );
     let vfs = ctx.vfs_handle().clone();
-    (ctx, opts.host(), vfs)
+    (ctx, opts.harness(), vfs)
 }
 
 /// Drives a prepared context to its result through the tokio test driver.
@@ -83,9 +83,9 @@ pub(super) async fn drive(
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
-    host: RunHost,
+    harness: RunHarness,
 ) -> Result<String, RunError> {
-    match run_host(prompt, args, ctx, host).await {
+    match run_harness(prompt, args, ctx, harness).await {
         RunResult::Ok(text) => Ok(text),
         RunResult::Cancelled => panic!("offline fixture runs are never cancelled"),
         RunResult::Failure(error) => Err(error),
@@ -99,8 +99,8 @@ pub(super) async fn run(
     tools: &[Arc<dyn TestTool>],
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let (ctx, host, _vfs) = prepare_run(prompt, tools, opts);
-    drive(prompt, args, ctx, host).await
+    let (ctx, harness, _vfs) = prepare_run(prompt, tools, opts);
+    drive(prompt, args, ctx, harness).await
 }
 
 /// Runs `prompt` over a caller-built handle with no prepare pass: the raw
@@ -114,7 +114,7 @@ pub(super) async fn run_unprepared(
     opts: RunOptions,
 ) -> Result<String, RunError> {
     let execution = opts.execution;
-    drive(prompt, args, context(execution).vfs(vfs), opts.host()).await
+    drive(prompt, args, context(execution).vfs(vfs), opts.harness()).await
 }
 
 /// A synchronized observer shared by concurrent fixture runs.
@@ -216,7 +216,7 @@ pub(super) async fn run_fixture(
         .await;
         (result, vfs)
     } else {
-        let (ctx, host, vfs) = prepare_run(
+        let (ctx, harness, vfs) = prepare_run(
             &prompt,
             &[],
             RunOptions {
@@ -224,7 +224,7 @@ pub(super) async fn run_fixture(
                 observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         );
-        let result = drive(&prompt, args, ctx, host).await;
+        let result = drive(&prompt, args, ctx, harness).await;
         (result, vfs)
     };
     FixtureRun {

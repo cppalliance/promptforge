@@ -22,12 +22,12 @@ async fn a_local_lua_tool_call_issues_no_leaf_work() {
     ));
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let out = scheduler
         .drive()
         .await
@@ -64,12 +64,12 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
     ));
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let out = scheduler
         .drive()
         .await
@@ -100,12 +100,12 @@ async fn a_script_called_local_handler_uses_the_store() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the handler's store calls suspend and resume the block");
@@ -128,12 +128,12 @@ async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
     ) + "\n## Other\n\n```lua\nreturn 'jumped'\n```\n";
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the handler's raise is pcall-able at the call site");
@@ -167,12 +167,12 @@ async fn a_nested_local_call_reports_both_results_innermost_first() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a handler may call another local tool");
@@ -198,12 +198,12 @@ async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
          return out .. '|' .. tostring(tools.calls.grab) .. '|' .. tostring(tools.calls.echo)",
     );
     let prompt = parse(&md);
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         echo_tools(),
         Arc::new(NullObserver::default()) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let out = scheduler
         .drive()
         .await
@@ -228,12 +228,12 @@ async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_th
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         failing_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the handler catches its own bound call's failure");
@@ -259,12 +259,12 @@ async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, host) = tool_context(
+    let (ctx, harness) = tool_context(
         &prompt,
         always_tool("echo", Arc::new(UntrustedEchoTool)),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("both local calls answer");

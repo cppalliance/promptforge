@@ -1,14 +1,14 @@
-//! The suites' Harness bundle: [`RunHost`], the resources the suites hand the
+//! The suites' Harness bundle: [`RunHarness`], the resources the suites hand the
 //! tokio test driver.
 //!
 //! A [`Run`](crate::execute::Run) issues effects and reports events as
 //! values; it holds no client, no tool implementation, and no sink. Those
-//! belong to whoever performs the effects. `RunHost` is that bundle for
+//! belong to whoever performs the effects. `RunHarness` is that bundle for
 //! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
 //! [`TestToolTable`] a `ToolCall` effect's id resolves in, the delta hook
 //! a streaming round forwards to, and the observer and capture the run's
-//! events are replayed onto. [`performers`](RunHost::performers) and
-//! [`sink`](RunHost::sink) turn the bundle into what
+//! events are replayed onto. [`performers`](RunHarness::performers) and
+//! [`sink`](RunHarness::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
 //! effects and answers; the Harness builds its own [`Performers`] and
 //! sink in production, and activates its own capabilities.
@@ -54,7 +54,7 @@ pub trait ChatClient: Send + Sync {
 /// The suites' resources for one run driven by the tokio test driver.
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct RunHost {
+pub struct RunHarness {
     /// The progress observer every drained event is replayed onto.
     pub(crate) observer: Arc<dyn Observer>,
     /// The opt-in raw request/response capture.
@@ -69,12 +69,12 @@ pub struct RunHost {
     pub(crate) on_delta: Option<DeltaHook>,
 }
 
-impl RunHost {
+impl RunHarness {
     /// Builds the silent bundle: a null observer, no capture, no client, no
     /// tools, no delta hook.
     #[must_use]
-    pub fn new() -> RunHost {
-        RunHost {
+    pub fn new() -> RunHarness {
+        RunHarness {
             observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
@@ -85,7 +85,7 @@ impl RunHost {
 
     /// Sets the progress observer the run's events are replayed onto.
     #[must_use]
-    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunHost {
+    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunHarness {
         self.observer = observer;
         self
     }
@@ -95,7 +95,7 @@ impl RunHost {
     /// ([`RunContext::report_debug`](crate::execute::RunContext::report_debug)).
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunHost {
+    pub(crate) fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunHarness {
         self.debug = Some(debug);
         self
     }
@@ -103,7 +103,7 @@ impl RunHost {
     /// Sets the chat client `Chat` effects are performed with; without one
     /// every round fails with the disabled-gateway error.
     #[must_use]
-    pub fn client(mut self, client: impl ChatClient + 'static) -> RunHost {
+    pub fn client(mut self, client: impl ChatClient + 'static) -> RunHarness {
         self.client = Some(Arc::new(client));
         self
     }
@@ -114,7 +114,7 @@ impl RunHost {
     /// [`TestToolTable::catalog`]); in production the Harness assembles
     /// both from its activated capabilities.
     #[must_use]
-    pub fn tools(mut self, tools: TestToolTable) -> RunHost {
+    pub fn tools(mut self, tools: TestToolTable) -> RunHarness {
         self.tools = tools;
         self
     }
@@ -122,7 +122,7 @@ impl RunHost {
     /// Sets the live streaming-delta callback `models.loop` rounds forward
     /// their chunks to. The default (`None`) drops deltas at the leaf.
     #[must_use]
-    pub fn on_delta(mut self, hook: DeltaHook) -> RunHost {
+    pub fn on_delta(mut self, hook: DeltaHook) -> RunHarness {
         self.on_delta = Some(hook);
         self
     }
@@ -200,15 +200,15 @@ impl RunHost {
     }
 }
 
-impl Default for RunHost {
-    fn default() -> RunHost {
-        RunHost::new()
+impl Default for RunHarness {
+    fn default() -> RunHarness {
+        RunHarness::new()
     }
 }
 
-impl fmt::Debug for RunHost {
+impl fmt::Debug for RunHarness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunHost")
+        f.debug_struct("RunHarness")
             .field("observer", &"<dyn Observer>")
             .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())

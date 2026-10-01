@@ -146,7 +146,7 @@ assert_eq!(text, "hi there / HI THERE / task_succeeded");
 Every store operation leaves a claim on its path, and a claim clashes with one left by a chain that is not ordered with it. A store answer reporting such a clash ends the run at once, with a failure the prompt cannot catch; [vfs](crate::vfs) explains claims.
 
 ````text
-  the run asks for          your host answers with
+  the run asks for          your Harness answers with
   ───────────────────       ──────────────────────────────────────────────
   Effect::Chat         ──>  EffectAnswer::Chat        completion or error
   Effect::ToolCall     ──>  EffectAnswer::ToolCall    tool output or error

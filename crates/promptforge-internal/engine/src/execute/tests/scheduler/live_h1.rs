@@ -7,7 +7,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 /// Builds the run context for a scheduler live-H1 test: the shared model
 /// set starts empty - the live H1 pass under test records its own
 /// bindings.
-fn h1_context(prompt: &Prompt) -> (RunState, RunHost) {
+fn h1_context(prompt: &Prompt) -> (RunState, RunHarness) {
     h1_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
@@ -20,7 +20,7 @@ fn h1_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     let mut ctx = test_context(EXECUTION);
     for (label, _) in prompt.frontmatter().models().iter() {
         ctx.model_bindings.bind(
@@ -40,7 +40,7 @@ fn h1_context_on(
         LuaProgram::empty().expect("the empty chunk compiles"),
         &ctx,
     );
-    (state, RunHost::new().observer(observer))
+    (state, RunHarness::new().observer(observer))
 }
 
 mod control_flow;

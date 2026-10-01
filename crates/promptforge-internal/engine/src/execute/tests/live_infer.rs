@@ -26,15 +26,15 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_hosts_client_serves_a_run_the_context_never_names() {
+async fn the_harness_client_serves_a_run_the_context_never_names() {
     // The context is the Engine's input; the client lives on the Harness's
-    // `RunHost`, and `Environment::run` performs the run's completions
+    // `RunHarness`, and `Environment::run` performs the run's completions
     // with it. Nothing about the gateway crosses the Engine's boundary.
-    let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
+    let gateway = ScriptedGateway::start(vec![resp_text("canned answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: host-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Host Client\n\n\
+    let source = "---\nname: harness-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Harness Client\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
@@ -43,18 +43,19 @@ async fn the_hosts_client_serves_a_run_the_context_never_names() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let host = RunHost::new().client(gateway_client(addr));
-    let (ctx, _host) = to_context(silent());
-    let RunResult::Ok(out) = crate::test_support::run_with_host(&env, &prompt, "", ctx, host).await
+    let harness = RunHarness::new().client(gateway_client(addr));
+    let (ctx, _harness) = to_context(silent());
+    let RunResult::Ok(out) =
+        crate::test_support::run_with_harness(&env, &prompt, "", ctx, harness).await
     else {
-        panic!("the host's client must serve the run");
+        panic!("the Harness's client must serve the run");
     };
 
-    assert_eq!(out, "host answer");
+    assert_eq!(out, "canned answer");
     assert_eq!(
         gateway.call_count(),
         1,
-        "the completion must have gone to the host's client"
+        "the completion must have gone to the Harness's client"
     );
 }
 
@@ -126,7 +127,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
-    let (ctx, _host) = to_context(silent());
+    let (ctx, _harness) = to_context(silent());
     let (ctx, requirements) = env.prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
@@ -134,7 +135,7 @@ async fn shared_library_calls_engine_globals_at_load_time() {
     );
     let store = TestStore::from_vfs(ctx.vfs_handle().clone());
     let RunResult::Ok(out) =
-        crate::test_support::run_host(&prompt, "load-time args", ctx, RunHost::new()).await
+        crate::test_support::run_harness(&prompt, "load-time args", ctx, RunHarness::new()).await
     else {
         panic!("top-level shared Engine calls must succeed");
     };
@@ -325,10 +326,10 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
     let ctx = test_context(EXECUTION)
         .model(test_model_catalog().models()[0].clone())
         .cancel(cancel);
-    let host = RunHost::new()
+    let harness = RunHarness::new()
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .client(gateway_client(gateway.addr()));
-    let result = env_run(&env, &prompt, "", (ctx, host)).await;
+    let result = env_run(&env, &prompt, "", (ctx, harness)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"

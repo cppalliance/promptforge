@@ -55,7 +55,7 @@ use crate::{Error, Result};
 use crate::execute::EffectRecord;
 use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step, task_history};
 #[cfg(test)]
-use crate::test_support::RunHost;
+use crate::test_support::RunHarness;
 
 #[cfg(test)]
 use crate::execute::context::RunState;
@@ -167,24 +167,29 @@ pub(crate) struct TokioDriver<'a> {
 
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
-    /// and replaying its events through the `host` the suite assembled
+    /// and replaying its events through the `harness` the suite assembled
     /// itself. The bundle supplies the observer, chat client, tools, delta
     /// hook, and debug capture; `client` is the run's mock-gateway client
     /// when the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
-        host: RunHost,
+        harness: RunHarness,
         client: Option<MockGatewayClient>,
     ) -> TokioDriver<'static> {
-        let mut host = host;
+        let mut harness = harness;
         if let Some(client) = client {
-            host = host.client(client);
+            harness = harness.client(client);
         }
         let run = Run::from_state(state.clone());
         let cancel = run.cancel_handle();
         let limits = state.limits();
-        TokioDriver::over(run, host.performers(limits), host.boxed_sink(), cancel)
+        TokioDriver::over(
+            run,
+            harness.performers(limits),
+            harness.boxed_sink(),
+            cancel,
+        )
     }
 
     /// Builds the driver over an assembled run.

@@ -28,7 +28,9 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_engine::test_support::{BoxFuture, ChatClient, DeltaHook, RunHost, run_with_host};
+use promptforge_engine::test_support::{
+    BoxFuture, ChatClient, DeltaHook, RunHarness, run_with_harness,
+};
 use promptforge_engine::{Environment, RunContext, RunLimits, RunResult};
 use promptforge_model_client::client::{Completion, Message, ToolSchema};
 use promptforge_model_client::model::{CompletionError, CompletionOptions};
@@ -202,7 +204,7 @@ fn models_loop(c: &mut Criterion) {
     let env = bench_env();
     c.bench_function("models_loop", |b| {
         b.iter(|| {
-            let result = runtime.block_on(run_with_host(
+            let result = runtime.block_on(run_with_harness(
                 &env,
                 &prompt,
                 "",
@@ -212,7 +214,7 @@ fn models_loop(c: &mut Criterion) {
                     promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
                 )
                 .model(bench_catalog(131_072).models()[0].clone()),
-                RunHost::new().client(gateway.client()),
+                RunHarness::new().client(gateway.client()),
             ));
             assert!(
                 matches!(result, RunResult::Ok(_)),
@@ -240,7 +242,7 @@ fn compactors_fail(c: &mut Criterion) {
     let env = bench_env();
     c.bench_function("compactors_fail", |b| {
         b.iter(|| {
-            let result = runtime.block_on(run_with_host(
+            let result = runtime.block_on(run_with_harness(
                 &env,
                 &prompt,
                 "",
@@ -250,7 +252,7 @@ fn compactors_fail(c: &mut Criterion) {
                     promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
                 )
                 .model(bench_catalog(1).models()[0].clone()),
-                RunHost::new().client(gateway.client()),
+                RunHarness::new().client(gateway.client()),
             ));
             let RunResult::Failure(error) = result else {
                 panic!("a one-token window must exhaust at the precheck");

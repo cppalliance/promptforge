@@ -36,8 +36,8 @@ fn assert_round_trips(records: &[EffectRecord]) {
 fn effect_context(
     prompt: &Prompt,
     tools: impl Into<FixtureTools>,
-    host: RunHost,
-) -> (RunState, RunHost) {
+    harness: RunHarness,
+) -> (RunState, RunHarness) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -48,8 +48,8 @@ fn effect_context(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = loop_models();
-    let host = tools.into().install(&ctx, host);
-    (ctx, host)
+    let harness = tools.into().install(&ctx, harness);
+    (ctx, harness)
 }
 
 /// The origin of a call made by `caller` in `section` of the test run.
@@ -62,23 +62,23 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
 }
 
 /// Records every streamed delta the run forwards to the Harness.
-fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunHost) {
+fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunHarness) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
-    let host = RunHost::new().on_delta(Arc::new(move |delta| {
+    let harness = RunHarness::new().on_delta(Arc::new(move |delta| {
         sink.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(delta);
     }));
-    (seen, host)
+    (seen, harness)
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn models_infer_issues_exactly_one_chat_effect_over_one_user_message() {
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let (ctx, host) = effect_context(&prompt, ToolSet::default(), RunHost::new());
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
@@ -113,8 +113,8 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let (ctx, host) = effect_context(&prompt, echo_tools(), RunHost::new());
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "done");
@@ -148,8 +148,8 @@ async fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_tools_call_issues_exactly_one_tool_call_effect() {
     let prompt = parse(&loop_prompt("return tools.call('echo', { value = 'hi' })"));
-    let (ctx, host) = effect_context(&prompt, echo_tools(), RunHost::new());
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the call completes");
     assert_eq!(out, "echoed: hi");
@@ -174,8 +174,8 @@ async fn a_script_tool_call_records_the_section_that_made_it() {
          ## First\n\n```lua\ntools.call('echo', { value = 'a' })\n```\n\n\
          ## Second\n\n```lua\nreturn tools.call('echo', { value = 'b' })\n```\n",
     );
-    let (ctx, host) = effect_context(&prompt, echo_tools(), RunHost::new());
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let (ctx, harness) = effect_context(&prompt, echo_tools(), RunHarness::new());
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls complete");
     assert_eq!(out, "echoed: b");
@@ -205,8 +205,8 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
         "store.write('notes.md', 'kept')\n\
          return store.read('notes.md')",
     ));
-    let (ctx, host) = effect_context(&prompt, ToolSet::default(), RunHost::new());
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the store ops complete");
     assert_eq!(out, "kept");
@@ -247,12 +247,12 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
         ## Child\n\n\
         ```lua\nreturn 'quick'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(
+    let (ctx, harness) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::new(NullObserver::default()),
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, None);
+    let mut scheduler = TokioDriver::new(&ctx, harness, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the wait completes");
     assert_eq!(out, "quick");
@@ -267,7 +267,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_chat_round_streams_its_deltas_to_the_host() {
+async fn a_chat_round_streams_its_deltas_to_the_harness() {
     // The scripted gateway serves every reply as two content fragments,
     // so a streaming round forwards exactly two text deltas.
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
@@ -277,9 +277,9 @@ async fn a_chat_round_streams_its_deltas_to_the_host() {
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let (seen, delta_host) = delta_hook();
-    let (ctx, host) = effect_context(&prompt, ToolSet::default(), delta_host);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (seen, delta_harness) = delta_hook();
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler.drive().await.expect("the loop completes");
     assert_eq!(out, "answer");
     assert_eq!(
@@ -288,19 +288,19 @@ async fn a_chat_round_streams_its_deltas_to_the_host() {
             StreamDelta::Text("ans".to_owned()),
             StreamDelta::Text("wer".to_owned()),
         ],
-        "a chat round's fragments reach the host's hook live, in order"
+        "a chat round's fragments reach the Harness's hook live, in order"
     );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_nested_infer_round_streams_no_deltas_to_the_host() {
+async fn a_nested_infer_round_streams_no_deltas_to_the_harness() {
     // A nested `models.infer` consumes only the completed reply; its
     // fragments have no consumer and never reach the Harness's hook.
     let gateway = ScriptedGateway::start(vec![resp_text("answer")]).await;
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let (seen, delta_host) = delta_hook();
-    let (ctx, host) = effect_context(&prompt, ToolSet::default(), delta_host);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (seen, delta_harness) = delta_hook();
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler.drive().await.expect("the infer completes");
     assert_eq!(out, "answer");
     assert!(

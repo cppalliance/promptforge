@@ -11,8 +11,8 @@ async fn h1_only_lua_return() {
         # Title\n\n\
         ```lua\nreturn \"hello\"\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the H1-only return runs");
@@ -28,8 +28,8 @@ async fn h1_only_lua_no_return() {
         # Title\n\n\
         ```lua\nlocal x = 1\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the H1-only fall-through runs");
@@ -48,8 +48,8 @@ async fn h1_scalar_return_short_circuits_the_walk() {
         ## Never\n\n\
         ```lua\nerror('the walk must not start after an H1 return')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the H1 return short-circuits the run");
@@ -73,8 +73,8 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 infer of its prose ends the run");
@@ -103,8 +103,8 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         return models.infer(prose)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 prose and H2 prose each infer explicitly");
@@ -145,8 +145,8 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ## Result\n\n\
         ```lua\nreturn 'ok'\n```\n";
     let prompt = parse(unread);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("unread H1 prose must not require a model");
@@ -157,8 +157,8 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
         ask\n\n\
         ```lua\nreturn models.infer(prose)\n```\n";
     let prompt = parse(reading);
-    let (ctx, host) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("an explicit infer of H1 prose with no binding must fail");
@@ -189,8 +189,8 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         return var.first .. ':' .. var.executions\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("live H1 prose infers explicitly");

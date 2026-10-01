@@ -115,7 +115,7 @@ fn offline_run(
 ) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();
-    let (ctx, host, vfs) = prepare_run(
+    let (ctx, harness, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -123,7 +123,7 @@ fn offline_run(
             observer: recorder,
         },
     );
-    let run = async move { drive(&prompt, "", ctx, host).await };
+    let run = async move { drive(&prompt, "", ctx, harness).await };
     (vfs, run)
 }
 
@@ -145,7 +145,7 @@ return store.read('handoff.txt')\n\
 ```\n";
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let (ctx, host, vfs) = prepare_run(
+    let (ctx, harness, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -153,7 +153,7 @@ return store.read('handoff.txt')\n\
             observer: recorder,
         },
     );
-    let result = drive(&prompt, "", ctx, host)
+    let result = drive(&prompt, "", ctx, harness)
         .await
         .expect("the run threads the prepared handle through both sections");
     assert_eq!(result, "across the reset");
@@ -348,8 +348,8 @@ fn drive_holding_effects(vfs: &VfsRef) -> (Run, RunResult, Vec<Effect>) {
 }
 
 #[test]
-fn a_run_ends_its_scope_at_done_while_the_host_still_holds_its_store_views() -> Result<(), VfsError>
-{
+fn a_run_ends_its_scope_at_done_while_the_harness_still_holds_its_store_views()
+-> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, result, held) = drive_holding_effects(&vfs);
     assert!(
@@ -393,7 +393,7 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 }
 
 #[test]
-fn dropping_a_run_before_done_ends_its_scope_while_the_host_still_holds_its_store_views()
+fn dropping_a_run_before_done_ends_its_scope_while_the_harness_still_holds_its_store_views()
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let mut run = held_store_run(&vfs);

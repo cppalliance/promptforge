@@ -162,7 +162,8 @@ fn a_malformed_opts_argument_is_the_calls_error() {
 async fn the_tokio_driver_answers_a_history_read_from_its_own_events() {
     let prompt = parse(OWNER_READS_CHILD);
     let RunResult::Ok(text) =
-        crate::test_support::run_host(&prompt, "", test_context(EXECUTION), RunHost::new()).await
+        crate::test_support::run_harness(&prompt, "", test_context(EXECUTION), RunHarness::new())
+            .await
     else {
         panic!("the run succeeds through the tokio driver");
     };
@@ -201,7 +202,7 @@ fn owner_prompt(tail: &str) -> String {
 /// `chat` round in order.
 pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
     let prompt = parse(md);
-    let (state, _host) = model_task_context_with(
+    let (state, _harness) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(SlowTool),

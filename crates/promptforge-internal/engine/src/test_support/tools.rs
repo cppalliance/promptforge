@@ -9,7 +9,7 @@
 //! effect with, so these are the test doubles: the same method shapes as
 //! the Harness's trait (so a fixture reads like a production tool), built
 //! into the [`Performers`] the tokio test driver takes by
-//! [`RunHost`](super::RunHost). Nothing here reaches the Engine.
+//! [`RunHarness`](super::RunHarness). Nothing here reaches the Engine.
 //!
 //! The async methods are declared in the boxed form
 //! `#[async_trait::async_trait]` expands an `async fn` to, so a suite

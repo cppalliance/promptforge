@@ -17,8 +17,8 @@ async fn call_from_h1_runs_the_target_as_a_contained_chain() {
         ## Answer\n\n\
         ```lua\nreturn 'called from h1'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("call from H1 runs the target section");
@@ -45,8 +45,8 @@ async fn a_call_from_h1_and_a_call_from_the_first_walked_section_take_consecutiv
         ## Answer\n\n\
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a call from H1 and a call from the walk both complete");
@@ -66,8 +66,8 @@ async fn call_from_h1_to_an_unknown_section_is_a_catchable_error() {
         # Test prompt\n\n\
         ```lua\nlocal ok, err = pcall(call, '## Nope'); return tostring(ok) .. ':' .. tostring(err)\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the caught call failure is the run's result");
@@ -90,8 +90,8 @@ async fn jump_from_h1_starts_the_walk_at_the_target() {
         ## Target\n\n\
         ```lua\nreturn 'jumped'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("jump from H1 starts the walk at the target");
@@ -105,8 +105,8 @@ async fn jump_from_h1_to_an_unknown_section_fails_the_run() {
         # Test prompt\n\n\
         ```lua\njump('## Nope')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("jump from H1 to an unknown section must fail");
@@ -132,8 +132,8 @@ async fn fanout_from_h1_runs_the_worker_over_the_collection() {
         ## Worker\n\n\
         ```lua\nreturn 'item:' .. item\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("fanout from H1 joins the arms");
@@ -168,8 +168,8 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         ## Result\n\n\
         ```lua\nreturn var.verdict\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 decision-tool idiom runs");
@@ -198,8 +198,8 @@ async fn list_from_section_works_on_the_h1() {
         - one\n\
         - two\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("list_from_section from H1 reads the target's items");

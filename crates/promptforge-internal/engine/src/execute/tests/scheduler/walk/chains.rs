@@ -19,8 +19,8 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
         ## B\n\n\
         ```lua\nerror('the return must end the chain before the parent resumes')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a return in the child walk ends the whole chain");
@@ -48,8 +48,8 @@ async fn jump_inside_call_is_contained_in_the_chain() {
         ## Peer\n\n\
         ```lua\nreturn 'peer-ran'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump inside call must be followed within the chain");
@@ -80,8 +80,8 @@ async fn jump_inside_a_call_chain_moves_within_the_chain() {
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a jump inside the chain must move within the chain");
@@ -124,8 +124,8 @@ async fn call_chain_jumps_to_a_child_and_returns_the_chain_result() {
         return 's2-result'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the call chain must jump, fall through, and return its final text");
@@ -159,8 +159,8 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         return 'p'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the outer walk must resume at the section after the caller");
@@ -191,8 +191,8 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         ## After\n\n\
         ```lua\nerror('a return must end the chain before fall-through')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a return must end the chain, not the run");
@@ -221,8 +221,8 @@ async fn call_to_a_child_starts_a_contained_chain() {
         return 'after-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("call to a child must start a contained chain");
@@ -255,8 +255,8 @@ async fn a_jump_descent_does_not_consume_call_depth() {
         return call('### X')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("the depth cap must fail the run");
@@ -285,7 +285,7 @@ fn a_chain_started_past_index_0_names_its_start_section_before_its_first_entry()
         ## B\n\n\
         ```lua\nreturn 'b'\n```\n";
     let prompt = parse(md);
-    let (state, _host) = scheduler_context(&prompt);
+    let (state, _harness) = scheduler_context(&prompt);
     let mut run = Run::from_state(state);
     let scheduler = run.scheduler_for_test();
 

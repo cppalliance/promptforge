@@ -20,8 +20,8 @@ async fn live_h1_infer_runs_once() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the H1 pass must run on the scheduler");
@@ -46,8 +46,8 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("H1 models.infer must run on the scheduler");
@@ -87,8 +87,8 @@ async fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the H1 chunk takes root entry 0 and the first walked section root entry 1");
@@ -111,8 +111,8 @@ async fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
         ```lua\nreturn 'unexpected'\n```\n";
     let prompt = parse(md);
     let store = TestStore::new();
-    let (ctx, host) = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a failed H1 assertion must fail the run");
@@ -143,8 +143,8 @@ async fn an_uncaught_h1_assertion_reports_the_chunk_failed() {
         assert(false, 'the gate cannot hold')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("the failed gate must fail the run");
@@ -173,8 +173,8 @@ async fn an_h1_scalar_return_still_reads_var_back() {
         return 'early'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a reassigned `var` global must fail the run");
@@ -216,7 +216,7 @@ async fn a_shared_replay_failure_in_h1_keeps_its_lua_kind() {
         shared,
         &test_context(EXECUTION),
     );
-    let error = TokioDriver::new(&ctx, RunHost::new(), None)
+    let error = TokioDriver::new(&ctx, RunHarness::new(), None)
         .drive()
         .await
         .expect_err("a failing shared replay must fail the run");
@@ -244,8 +244,8 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
         ## Only\n\n\
         ```lua\nreturn 'done-now'\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = h1_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the pass and the walk complete");

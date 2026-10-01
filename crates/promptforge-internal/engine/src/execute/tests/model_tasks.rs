@@ -31,7 +31,7 @@ pub(super) fn task(id: &str) -> TaskId {
 pub(super) fn model_task_context(
     prompt: &Prompt,
     recorder: &Arc<TaskRecorder>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     model_task_context_with(
         prompt,
         Arc::clone(recorder) as Arc<dyn Observer>,
@@ -47,7 +47,7 @@ pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
     park: Arc<dyn TestTool>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     let (catalog, table) = fixture_tools(&[park]);
     let (prepared, requirements) = Environment::new()
         .tools(catalog)
@@ -56,7 +56,7 @@ pub(super) fn model_task_context_with(
         requirements.is_satisfied(),
         "the model-task prompt declares nothing the host must supply: {requirements:?}"
     );
-    let host = RunHost::new().observer(observer).tools(table);
+    let harness = RunHarness::new().observer(observer).tools(table);
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -70,7 +70,7 @@ pub(super) fn model_task_context_with(
     *ctx.tool_set()
         .lock()
         .expect("the tool set mutex is not poisoned") = ToolSet::default();
-    (ctx, host)
+    (ctx, harness)
 }
 
 /// A two-section prompt: `Only` runs the model loop under `frontmatter`
@@ -120,8 +120,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the model starts and inspects its task");
@@ -175,8 +175,8 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the refusal is the call's content, not a raise");
@@ -215,8 +215,8 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -271,8 +271,8 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -345,8 +345,8 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -397,8 +397,8 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -444,8 +444,8 @@ async fn the_model_sees_only_its_own_tasks() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the author's cancel ends its task before the chain ends");
@@ -468,8 +468,8 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool-free round completes");

@@ -32,7 +32,7 @@ pub(super) fn writer_models() -> ModelSet {
 
 /// Builds the run context and its silent Harness for a scheduler test: the
 /// parsed prompt, an empty shared library, and the model set pre-filled.
-fn scheduler_context(prompt: &Prompt) -> (RunState, RunHost) {
+fn scheduler_context(prompt: &Prompt) -> (RunState, RunHarness) {
     scheduler_context_on(prompt, &TestStore::new(), Arc::new(NullObserver::default()))
 }
 
@@ -43,26 +43,26 @@ pub(super) fn scheduler_context_on(
     prompt: &Prompt,
     store: &TestStore,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     scheduler_context_from(
         prompt,
         store,
         &test_context(EXECUTION),
-        RunHost::new().observer(observer),
+        RunHarness::new().observer(observer),
     )
 }
 
-/// Builds the run context from a finished `RunContext` and its `RunHost` on
+/// Builds the run context from a finished `RunContext` and its `RunHarness` on
 /// the given store: the parsed prompt, an empty shared library, and the
 /// model set pre-filled. Every scheduler-side context builder routes through
 /// here so a test that needs an observer, limits, or both composes the
-/// `RunContext` and the `RunHost` itself.
+/// `RunContext` and the `RunHarness` itself.
 pub(super) fn scheduler_context_from(
     prompt: &Prompt,
     store: &TestStore,
     run_context: &RunContext,
-    host: RunHost,
-) -> (RunState, RunHost) {
+    harness: RunHarness,
+) -> (RunState, RunHarness) {
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
@@ -73,7 +73,7 @@ pub(super) fn scheduler_context_from(
     *ctx.model_set()
         .lock()
         .expect("the model set mutex is not poisoned") = writer_models();
-    (ctx, host)
+    (ctx, harness)
 }
 
 /// The prompt in each gateway request, in arrival order.

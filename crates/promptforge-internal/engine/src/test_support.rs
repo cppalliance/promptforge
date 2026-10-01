@@ -14,8 +14,8 @@
 //! the timer wheel, and hands every event to the caller's sink. It is the
 //! Harness for the Engine's own suites.
 //!
-//! [`RunHost`] bundles a suite's resources for one run - an observer, a
-//! client, a fixture tool table, a delta hook - and [`run_with_host`] is
+//! [`RunHarness`] bundles a suite's resources for one run - an observer, a
+//! client, a fixture tool table, a delta hook - and [`run_with_harness`] is
 //! the implicit-prepare path over the tokio driver: prepare, refuse or
 //! run. The tool fixtures implement
 //! the stand-in trait [`TestTool`]; the production trait is the Harness's,
@@ -39,7 +39,7 @@ use crate::execute::{
 };
 use crate::parser::Prompt;
 
-pub(crate) mod host;
+pub(crate) mod harness;
 #[cfg(test)]
 #[path = "test_support/mock-gateway-client.rs"]
 pub(crate) mod mock_gateway_client;
@@ -47,7 +47,7 @@ pub mod recording;
 pub(crate) mod tokio_driver;
 pub(crate) mod tools;
 
-pub use host::{ChatClient, DeltaHook, RunHost};
+pub use harness::{ChatClient, DeltaHook, RunHarness};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestTool, TestToolTable};
@@ -167,40 +167,45 @@ pub fn drive(
 }
 
 /// The implicit-prepare path over the tokio driver: prepares and runs
-/// `prompt` with the resources `host` bundles.
+/// `prompt` with the resources `harness` bundles.
 ///
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on `host` ([`RunHost::tools`]). Capability activation
+/// implementations on `harness` ([`RunHarness::tools`]). Capability activation
 /// is the Harness's and never happens here.
 ///
 /// An unsatisfiable prompt - a missing required capability or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.
-pub async fn run_with_host(
+pub async fn run_with_harness(
     env: &Environment,
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
-    host: RunHost,
+    harness: RunHarness,
 ) -> RunResult {
     let (ctx, requirements) = env.prepare(prompt, ctx);
     if let Some(refusal) = requirements.refusal() {
         return RunResult::Failure(refusal);
     }
-    run_host(prompt, args, ctx, host).await
+    run_harness(prompt, args, ctx, harness).await
 }
 
 /// Runs an already-prepared `prompt` under `ctx` with the resources
-/// `host` bundles, on the tokio driver: the bundle's
-/// [`performers`](RunHost::performers) perform the effects under the
+/// `harness` bundles, on the tokio driver: the bundle's
+/// [`performers`](RunHarness::performers) perform the effects under the
 /// context's limits, and every event is replayed onto its observer and
 /// capture.
-pub async fn run_host(prompt: &Prompt, args: &str, ctx: RunContext, host: RunHost) -> RunResult {
+pub async fn run_harness(
+    prompt: &Prompt,
+    args: &str,
+    ctx: RunContext,
+    harness: RunHarness,
+) -> RunResult {
     let limits = ctx.limits;
     let run = Run::new(Arc::new(prompt.clone()), args, ctx);
     let cancel = run.cancel_handle();
-    drive_tokio(run, host.performers(limits), host.sink(), cancel).await
+    drive_tokio(run, harness.performers(limits), harness.sink(), cancel).await
 }

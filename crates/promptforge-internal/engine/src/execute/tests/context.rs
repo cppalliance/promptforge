@@ -235,22 +235,22 @@ impl TestStore {
     }
 }
 
-/// Builds a [`RunContext`] and its [`RunHost`] from the test-local
+/// Builds a [`RunContext`] and its [`RunHarness`] from the test-local
 /// [`RunOptions`], for the tests that call [`Environment::run`] directly.
 /// The context sets the test model as the current selection, so prepare's
 /// trivial fill binds every declared role to it; the observer, client, and
 /// capture go on the Harness the driver performs and reports through.
-pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHost) {
+pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHarness) {
     let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
-    let mut host = RunHost::new().observer(opts.observer);
+    let mut harness = RunHarness::new().observer(opts.observer);
     if let Some(client) = opts.client {
-        host = host.client(client);
+        harness = harness.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        host = host.debug(debug);
+        harness = harness.debug(debug);
     }
-    (ctx, host)
+    (ctx, harness)
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -303,7 +303,7 @@ pub(super) async fn run(
     opts: RunOptions,
 ) -> Result<String> {
     let mut env = Environment::new();
-    let mut host = RunHost::new().observer(opts.observer);
+    let mut harness = RunHarness::new().observer(opts.observer);
     // The test store's handle is the run's whole filesystem: the context
     // takes it as given, so post-run assertions read what the run
     // actually wrote.
@@ -316,7 +316,7 @@ pub(super) async fn run(
         // Harness assembles from its activated capabilities.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
-        host = host.tools(table);
+        harness = harness.tools(table);
     }
     // The Harness pattern: the context holds the current model, and
     // prepare's trivial fill binds every declared role to it.
@@ -324,48 +324,48 @@ pub(super) async fn run(
         ctx = ctx.model(model.clone());
     }
     if let Some(client) = opts.client {
-        host = host.client(client);
+        harness = harness.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        host = host.debug(debug);
+        harness = harness.debug(debug);
     }
-    match crate::test_support::run_with_host(&env, &test.prompt, args, ctx, host).await {
+    match crate::test_support::run_with_harness(&env, &test.prompt, args, ctx, harness).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
 }
 
-/// The test-support driver ([`crate::test_support::run_with_host`]) with the
+/// The test-support driver ([`crate::test_support::run_with_harness`]) with the
 /// context and Harness [`to_context`] assembled (observer, client, capture).
 pub(super) async fn env_run(
     env: &Environment,
     prompt: &Prompt,
     args: &str,
-    prepared: (RunContext, RunHost),
+    prepared: (RunContext, RunHarness),
 ) -> RunResult {
-    let (ctx, host) = prepared;
-    crate::test_support::run_with_host(env, prompt, args, ctx, host).await
+    let (ctx, harness) = prepared;
+    crate::test_support::run_with_harness(env, prompt, args, ctx, harness).await
 }
 
 /// Runs a fixture offline through the test-support driver
-/// ([`crate::test_support::run_with_host`]) with a caller-customized
-/// [`RunContext`] and [`RunHost`], returning the typed [`RunError`]
+/// ([`crate::test_support::run_with_harness`]) with a caller-customized
+/// [`RunContext`] and [`RunHarness`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
 pub(super) async fn run_with_context(
     test: &TestPrompt,
-    configure: impl FnOnce(RunContext, RunHost) -> (RunContext, RunHost),
+    configure: impl FnOnce(RunContext, RunHarness) -> (RunContext, RunHarness),
 ) -> std::result::Result<String, RunError> {
     let env = Environment::new();
-    let (mut ctx, host) = configure(test_context(EXECUTION), RunHost::new());
+    let (mut ctx, harness) = configure(test_context(EXECUTION), RunHarness::new());
     ctx = ctx.vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
     {
         ctx = ctx.model(model.clone());
     }
-    match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await {
+    match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),

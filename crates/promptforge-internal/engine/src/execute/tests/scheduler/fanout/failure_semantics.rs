@@ -20,8 +20,8 @@ async fn fanout_empty_collection_errors_before_any_scheduling() {
         ### Worker\n\n\
         ```lua\nstore.write('ran.txt', 'yes')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, recorder.clone());
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, recorder.clone());
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("an empty collection must error");
@@ -54,8 +54,8 @@ async fn fanout_worker_that_is_a_list_section_errors() {
         - a\n\
         - b\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a list section is not a worker template");
@@ -95,8 +95,8 @@ async fn fanout_depth_cap_reads_the_chain_field() {
         return call('## Alpha')\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context(&prompt);
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("the fanout depth cap must fail the run");
@@ -155,12 +155,12 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
     );
     let prompt = parse(&md);
     let recorder = Arc::new(Recorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("an exhausted arm must not fail the fanout");
@@ -230,9 +230,9 @@ async fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violatio
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) =
+    let (ctx, harness) =
         scheduler_context_on(&prompt, &store, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let error = TokioDriver::new(&ctx, host, None)
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("two arms writing one path must terminate the run");
@@ -293,8 +293,8 @@ async fn two_live_arms_appending_one_path_terminate_with_a_determinism_violation
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("two arms appending one path must terminate the run");

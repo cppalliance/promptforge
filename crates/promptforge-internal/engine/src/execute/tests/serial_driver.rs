@@ -80,11 +80,11 @@ fn echo_chat(effect: &Effect) -> EffectAnswer {
 /// suites build one.
 fn model_run(md: &str) -> Run {
     let prompt = parse(md);
-    let (state, _host) = scheduler_context_from(
+    let (state, _harness) = scheduler_context_from(
         &prompt,
         &TestStore::new(),
         &test_context(EXECUTION),
-        RunHost::new(),
+        RunHarness::new(),
     );
     Run::from_state(state)
 }
@@ -372,7 +372,7 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
         return models.infer('child work')\n\
         ```\n";
     let prompt = parse(md);
-    let (state, _host) = model_task_context_with(
+    let (state, _harness) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
         Arc::new(SlowTool),

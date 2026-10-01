@@ -54,13 +54,13 @@ impl FixtureTools {
         &self.set
     }
 
-    /// Installs the set on the run state and returns `host` carrying the
+    /// Installs the set on the run state and returns `harness` carrying the
     /// implementations the driver's tool performer resolves.
-    pub(in super::super) fn install(&self, ctx: &RunState, host: RunHost) -> RunHost {
+    pub(in super::super) fn install(&self, ctx: &RunState, harness: RunHarness) -> RunHarness {
         *ctx.tool_set()
             .lock()
             .expect("the tool set mutex is not poisoned") = self.set.clone();
-        host.tools(self.table.clone())
+        harness.tools(self.table.clone())
     }
 }
 
@@ -74,30 +74,30 @@ impl From<crate::lua::ToolSet> for FixtureTools {
 }
 
 /// Arms the run state's shared tool set with `bindings` (every alias
-/// prompt-wide through `always`) and returns `host` carrying the
+/// prompt-wide through `always`) and returns `harness` carrying the
 /// implementations, so `TokioDriver::new` performs the calls.
 pub(in super::super) fn arm_tools(
     ctx: &RunState,
-    host: RunHost,
+    harness: RunHarness,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> RunHost {
+) -> RunHarness {
     let always = bindings
         .iter()
         .map(|(binding, _)| binding.alias().to_owned())
         .collect();
-    arm_tools_scoped(ctx, host, bindings, always)
+    arm_tools_scoped(ctx, harness, bindings, always)
 }
 
 /// Arms the run state's shared tool set with `bindings` and exactly
-/// `always` as the prompt-wide scope, returning `host` carrying the
+/// `always` as the prompt-wide scope, returning `harness` carrying the
 /// implementations.
 pub(in super::super) fn arm_tools_scoped(
     ctx: &RunState,
-    host: RunHost,
+    harness: RunHarness,
     bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
     always: Vec<String>,
-) -> RunHost {
-    FixtureTools::new(bindings, always).install(ctx, host)
+) -> RunHarness {
+    FixtureTools::new(bindings, always).install(ctx, harness)
 }
 
 /// The test's tools as the two halves the Harness assembles from its

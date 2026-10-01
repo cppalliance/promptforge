@@ -310,7 +310,7 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 /// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]
-fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
+fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let descriptor = ToolDescriptor::new(

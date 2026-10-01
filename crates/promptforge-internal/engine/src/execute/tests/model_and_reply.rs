@@ -39,8 +39,8 @@ Ask again.\n\n\
             ThinkingMode::Switchable,
         ),
     );
-    let host = RunHost::new().client(gateway_client(addr));
-    let out = match crate::test_support::run_host(&prompt, "", ctx, host).await {
+    let harness = RunHarness::new().client(gateway_client(addr));
+    let out = match crate::test_support::run_harness(&prompt, "", ctx, harness).await {
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
     };

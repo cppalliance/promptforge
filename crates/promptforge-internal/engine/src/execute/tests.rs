@@ -25,7 +25,7 @@ use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{RunHost, TestTool, TestToolTable};
+use crate::test_support::{RunHarness, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
@@ -240,7 +240,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_context(&fixture(md), |ctx, host| (ctx.cancel(handle), host))
+    let error = run_with_context(&fixture(md), |ctx, harness| (ctx.cancel(handle), harness))
         .await
         .expect_err("a pre-cancelled handle must fail the run");
     assert!(
@@ -306,11 +306,12 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
         let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
         let env = Environment::new().tools(catalog);
         let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
-        let host = RunHost::new().tools(table);
+        let harness = RunHarness::new().tools(table);
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let out = match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await
+        let out = match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness)
+            .await
         {
             RunResult::Ok(out) => out,
             other => panic!("the echo run succeeds: {other:?}"),

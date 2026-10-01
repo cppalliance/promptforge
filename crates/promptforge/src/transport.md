@@ -93,7 +93,7 @@ let stream_round = |body: serde_json::Value, max_bytes: u64| {
     block_on(read_completion_stream(&mut source, body, max_bytes, on_delta, started, now))
 };
 
-// 3. The host loop's chat arm builds the body from the effect, streams the reply, and checks what came back.
+// 3. The Harness loop's chat arm builds the body from the effect, streams the reply, and checks what came back.
 # let result = loop {
 #     match run.step() {
 #         Step::Pending { effects, .. } => {
