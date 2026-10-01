@@ -29,7 +29,7 @@ const PARKED: Duration = Duration::from_secs(1);
 
 /// Every task observation the recorder saw, as `(label, task id)` pairs in
 /// order, so a test can pair each started arm with its terminals.
-fn task_events(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
+fn task_lifecycle(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
     recorder
         .records()
         .into_iter()
@@ -48,7 +48,7 @@ fn task_events(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
 /// task appears (with an empty list when it has no terminal); a terminal
 /// for a task that never started fails the test.
 fn terminals_per_started_task(recorder: &TaskRecorder) -> BTreeMap<TaskId, Vec<&'static str>> {
-    let events = task_events(recorder);
+    let events = task_lifecycle(recorder);
     let mut terminals: BTreeMap<TaskId, Vec<&'static str>> = BTreeMap::new();
     for (label, task) in &events {
         if *label == "started" {
@@ -199,7 +199,7 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
             (task("0.1"), vec!["cancelled"]),
         ]),
         "each started arm has exactly one terminal and the queued arm never started: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }
 
@@ -254,7 +254,7 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
             (task("0.1.1"), vec!["succeeded"]),
         ]),
         "two outer and four inner arms each start and succeed once: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }
 
@@ -290,7 +290,7 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         .drive()
         .await
         .expect("the identity prompt completes");
-    let succeeded = task_events(&recorder)
+    let succeeded = task_lifecycle(&recorder)
         .into_iter()
         .filter(|(label, _)| *label == "succeeded")
         .map(|(_, task)| task)
@@ -441,6 +441,6 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
             (task("0.2"), vec!["succeeded"]),
         ]),
         "three arms each succeed once: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }

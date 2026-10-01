@@ -48,8 +48,7 @@
 //! task built-ins (`task`, `task_cancel`, `task_status`) answered over
 //! the arena and advertised once a section runs `tools.allow_tasks`,
 //! `await_tasks` the fourth built-in, the model's wait over its live
-//! tasks, `task_events` the fifth, the Harness-answered history read the
-//! author's `tasks.events` shares, `notices` the model-task notices
+//! tasks, `notices` the model-task notices
 //! (queued at a model task's end, drained into the owner's next round or
 //! its `await_tasks` answer), `tasks` the task arena and the `spawn` arm,
 //! `admission` the admission limits, `task_end` the chain-end rules for
@@ -74,7 +73,6 @@ mod notices;
 mod pending;
 mod step;
 mod task_end;
-mod task_events;
 mod tasks;
 #[cfg(test)]
 pub(crate) mod test_hooks;

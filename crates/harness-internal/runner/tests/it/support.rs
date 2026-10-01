@@ -9,11 +9,8 @@ use std::time::Duration;
 use harness_log::{RunId, RunOutcome};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::performers::{
-    BoxFuture, ChatPerformer, Performers, StorePerformer, TaskEventsPerformer, TimerPerformer,
-    ToolPerformer,
+    BoxFuture, ChatPerformer, Performers, StorePerformer, TimerPerformer, ToolPerformer,
 };
-use promptforge::event::Event;
-use promptforge::ids::TaskId;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
@@ -130,12 +127,6 @@ impl TimerPerformer for Unused {
     }
 }
 
-impl TaskEventsPerformer for Unused {
-    fn events(&self, _task: TaskId, _last: Option<u32>) -> BoxFuture<Vec<Event>> {
-        unreachable!("no test issues a TaskEvents effect")
-    }
-}
-
 /// The bundle with every slot unused; a test overrides the kinds it
 /// issues.
 pub(crate) fn unused() -> Performers {
@@ -144,8 +135,7 @@ pub(crate) fn unused() -> Performers {
         chat: unused.clone(),
         tool: unused.clone(),
         store: unused.clone(),
-        timer: unused.clone(),
-        task_events: unused,
+        timer: unused,
     }
 }
 

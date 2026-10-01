@@ -132,13 +132,7 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let bodies = gateway.requests();
     assert_eq!(
         advertised(&bodies[0]),
-        vec![
-            "task",
-            "task_cancel",
-            "task_status",
-            "await_tasks",
-            "task_events"
-        ],
+        vec!["task", "task_cancel", "task_status", "await_tasks"],
         "allow_tasks advertises exactly the answered built-ins: {bodies:?}"
     );
     let records = recorder.records();

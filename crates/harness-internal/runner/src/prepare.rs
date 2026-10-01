@@ -43,9 +43,7 @@ use sha2::{Digest as _, Sha256};
 use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};
 use crate::files::{InputFileError, stage_input};
-use crate::performers::{
-    ActivatedTools, ChatPerformer, LogTaskEvents, Performers, TokioTimer, VfsStore,
-};
+use crate::performers::{ActivatedTools, ChatPerformer, Performers, TokioTimer, VfsStore};
 use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
@@ -333,7 +331,6 @@ pub async fn prepare_source(
         tool: Arc::new(ActivatedTools::new(activation.tools)),
         store: Arc::new(VfsStore),
         timer: Arc::new(TokioTimer),
-        task_events: Arc::new(LogTaskEvents::new(Arc::clone(&log), run_id)),
     };
     Ok(Prepared {
         run,

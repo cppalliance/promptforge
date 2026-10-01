@@ -16,7 +16,7 @@ A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and
 - An open question that a session has asked the operator, and is waiting on, is a *wait*.
 - One small piece of a reply, sent while the model is still writing, is a *delta*.
 
-An agent never reaches the outside world by itself. When it needs outside work done, it asks the Harness your program drives. That Harness work is a model round, a tool call (a question to the operator included), or a read or write of a file in the agent's [store](vfs). An agent that starts background tasks can also ask for a timer and a read of a task's history. Every event, reply, and question a session sends you comes from that Harness work.
+An agent never reaches the outside world by itself. When it needs outside work done, it asks the Harness your program drives. That Harness work is a model round, a tool call (a question to the operator included), or a read or write of a file in the agent's [store](vfs). An agent that starts background tasks can also ask for a timer. Every event, reply, and question a session sends you comes from that Harness work.
 
 Here is the smallest agent a Host can launch, placed in `desk`'s agents folder:
 

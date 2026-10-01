@@ -25,13 +25,13 @@
 //! `SectionVm::run_chunk` as a Lua-category error.
 //!
 //! In scheduler mode the VM also holds `tasks`, the shims for spawning,
-//! waiting on, checking, noting, and cancelling tasks and reading their
-//! event history. Capability preludes are the Lua source an activated
-//! capability contributes: each runs once per VM in an environment of its
-//! own before the shared library replays, and its globals are checked
-//! against the reserved-name list and raw-set into `_G`. The `input` table
-//! that `promptforge/user-input` defines is one: `input.ask()` is an
-//! ordinary tool call to that capability's ask tool.
+//! waiting on, checking, noting, and cancelling tasks. Capability preludes
+//! are the Lua source an activated capability contributes: each runs once
+//! per VM in an environment of its own before the shared library replays,
+//! and its globals are checked against the reserved-name list and raw-set
+//! into `_G`. The `input` table that `promptforge/user-input` defines is
+//! one: `input.ask()` is an ordinary tool call to that capability's ask
+//! tool.
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade

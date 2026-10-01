@@ -113,10 +113,10 @@ Builds on: lib.md
 Primer sources: none
 
 ### Tour: Answer every kind of effect
-- How: How do I answer each of the five kinds of effect a run can ask for?
+- How: How do I answer each of the four kinds of effect a run can ask for?
 - What if: What happens when I answer an effect the run never issued, or answer one effect twice?
 - Why: Why can I answer a step's effects in any order without changing the result?
-- Example: one canned prompt that asks for a model round, a tool call, a store operation, a timer, and a task history read, with each step's answers given in reverse order.
+- Example: one canned prompt that asks for a model round, a tool call, a store operation, and a timer, with each step's answers given in reverse order.
 - Diagram: each kind of effect beside the kind of answer it takes.
 
 ### Tour: Log effects and answers

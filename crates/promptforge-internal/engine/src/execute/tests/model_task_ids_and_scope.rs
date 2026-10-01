@@ -13,7 +13,7 @@ use std::time::Duration;
 use promptforge_types::ids::TaskId;
 
 use super::model_task_acceptance::{
-    LATER, SOON, count_under, model_starts, task_events, two_child_prompt,
+    LATER, SOON, count_under, model_starts, task_lifecycle, two_child_prompt,
 };
 use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
 use super::model_tasks::{model_task_context_with, owner_prompt, task};
@@ -54,7 +54,7 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
         .await
         .expect("both tasks end inside the two waits");
     let records = recorder.events();
-    let succeeded = task_events(&records)
+    let succeeded = task_lifecycle(&records)
         .into_iter()
         .filter(|(label, _)| *label == "succeeded")
         .map(|(_, task)| task)

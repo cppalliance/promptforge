@@ -2,9 +2,8 @@
 //!
 //! The loop is `step -> record -> perform -> await an answer -> record ->
 //! resume`. Every step's events are appended to the run log before any of
-//! the step's effects is issued, because a running task may read its own
-//! history back through a `TaskEvents` effect and must see everything
-//! reported before the read. Each effect is appended as its
+//! the step's effects is issued, so an effect's record never precedes the
+//! events its step reported. Each effect is appended as its
 //! [`EffectRecord`](promptforge::effect::EffectRecord) and then
 //! started through the tagged spawn wrapper: a plain task for the
 //! asynchronous kinds, the blocking pool for a store operation (the VFS is
@@ -50,9 +49,10 @@ mod answering;
 
 use answering::{AnswerSender, Answering, perform_store};
 
-/// The run log as the loop and the performers share it: the loop is the
-/// writer, a `TaskEvents` performer a reader, and the mutex serializes
-/// them. Asynchronous because an append is awaited under it.
+/// The run log as the loop and its other users share it: the loop is the
+/// writer during a run, the session transcript views and reconnect are
+/// the readers, and the mutex serializes them. Asynchronous because an
+/// append is awaited under it.
 pub type SharedLog = Arc<Mutex<RunLog>>;
 
 /// Why the loop stopped without an outcome.
@@ -335,12 +335,6 @@ impl<'a> Driver<'a> {
                 spawn_tagged(tag, async move {
                     sleep.await;
                     answer.post(EffectAnswer::Timer);
-                })
-            }
-            Effect::TaskEvents { task, last } => {
-                let read = self.performers.task_events.events(task, last);
-                spawn_tagged(tag, async move {
-                    answer.post(EffectAnswer::TaskEvents(read.await));
                 })
             }
         };

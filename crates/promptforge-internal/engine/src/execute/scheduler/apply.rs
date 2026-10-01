@@ -8,8 +8,7 @@
 //! [`Answer`] on the caller's thread, emitting the round's events there:
 //! the model turn's boundaries and content, the tool call's
 //! succeeded/failed event and `ToolResult` under the trust rule, the store
-//! operation's outcome, a task history read's events as the shim's
-//! sequence or the model's untrusted text. A timer's firing completes its
+//! operation's outcome. A timer's firing completes its
 //! slot and wakes the waiter instead of resuming a chain. A `Dropped`
 //! answer resumes the chain with the cancelled error, whatever it was
 //! parked on.
@@ -41,7 +40,6 @@ fn dropped_answer(resume: &Continuation) -> Answer<Error> {
         // A timer's drop never reaches here; the cancelled store answer
         // is the harmless stand-in should it ever do so.
         Continuation::Store(_) | Continuation::Timer => Answer::Store(Err(Error::Interrupted)),
-        Continuation::TaskEvents(reader) => reader.dropped(),
     }
 }
 
@@ -93,9 +91,6 @@ impl Scheduler {
                 }
             }
             (Continuation::Timer, EffectAnswer::Timer) => return self.fire_timer(id),
-            (Continuation::TaskEvents(reader), EffectAnswer::TaskEvents(events)) => {
-                self.accept_task_events(chain, &reader, events)
-            }
             _ => {
                 return Err(Error::internal(
                     "an effect's answer must be of the effect's own kind",

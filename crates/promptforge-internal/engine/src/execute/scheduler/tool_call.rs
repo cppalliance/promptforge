@@ -4,14 +4,12 @@
 //! tool call.
 //!
 //! Three things resolve on the driver thread before any leaf work: the
-//! five reserved model built-in names (`task`, `task_cancel`, `task_status`,
-//! `task_events`, `await_tasks`) are recognized before alias lookup - a
-//! model-issued call to the first three is answered by the `builtins`
-//! module over the task arena, `await_tasks` by its own module (answered
-//! at once or parked on the chain's model tasks), `task_events` by its
-//! own module (issued as a `TaskEvents` effect the Harness answers from its
-//! log), and a script call to any of them answers as unbound; a local Lua
-//! tool is answered with its handler; a bound tool resolves against the
+//! four reserved model built-in names (`task`, `task_cancel`, `task_status`,
+//! `await_tasks`) are recognized before alias lookup - a model-issued call
+//! to the first three is answered by the `builtins` module over the task
+//! arena, `await_tasks` by its own module (answered at once or parked on
+//! the chain's model tasks), and a script call to any of them answers as
+//! unbound; a local Lua tool is answered with its handler; a bound tool resolves against the
 //! run's full bound catalog (a script call may also name any catalog tool
 //! by its full id), its attempt is counted, and the call is
 //! issued as a `ToolCall` effect whose answer the driver applies through
@@ -50,15 +48,8 @@ use super::{ChainIndex, Continuation, Scheduler, ToolCallContinuation};
 /// The model built-in names the `tasks` namespace answers from this arm,
 /// recognized before alias lookup so no bound or local tool can shadow
 /// them. A model-issued call to any of them is answered over the task
-/// arena (`task_events` through a Harness-answered effect); a script call
-/// to any of them is unbound.
-const RESERVED_TOOL_NAMES: [&str; 5] = [
-    "task",
-    "task_cancel",
-    "task_status",
-    "task_events",
-    "await_tasks",
-];
+/// arena; a script call to any of them is unbound.
+const RESERVED_TOOL_NAMES: [&str; 4] = ["task", "task_cancel", "task_status", "await_tasks"];
 
 /// How one `tool_call` dispatch resolved: a bound call issued as an effect
 /// and parked on the pending table, an answer settled on the driver thread

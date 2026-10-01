@@ -170,24 +170,6 @@ fn a_timer_effect_records_its_seconds() {
     assert_eq!(round_trip(&record), record);
 }
 
-#[test]
-fn a_task_events_effect_records_its_task_and_last_bound() {
-    let task: promptforge_types::ids::TaskId = "0.2".parse().expect("a task id parses");
-    let effect = Effect::TaskEvents {
-        task: task.clone(),
-        last: Some(4),
-    };
-    let record = effect.record();
-    assert_eq!(
-        record,
-        EffectRecord::TaskEvents {
-            task,
-            last: Some(4)
-        }
-    );
-    assert_eq!(round_trip(&record), record);
-}
-
 /// A run over one section whose only Lua block is `body`, capability-free.
 fn run_of(body: &str, ctx: RunContext) -> Run {
     let source = format!(

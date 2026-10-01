@@ -35,7 +35,6 @@ use promptforge_types::event::Event;
 use crate::Error;
 use crate::execute::{
     Effect, EffectAnswer, EffectId, Environment, Run, RunContext, RunError, RunResult, Step,
-    task_history,
 };
 use crate::parser::Prompt;
 
@@ -89,11 +88,8 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// every event it reported, in order.
 ///
 /// The driver is the simplest correct Harness. After each `step` it answers
-/// the step's effects in issue order - each through `perform`, except a
-/// [`Effect::TaskEvents`] read, which it answers from the events it has
-/// collected so far (the step's own events are collected before its
-/// effects are answered, so a task reading its history sees everything
-/// reported before the read) - and steps again. Once the run has decided
+/// the step's effects in issue order, each through `perform`, and steps
+/// again. Once the run has decided
 /// its outcome ([`Run::decided`]), the effects it still issues are
 /// answered [`EffectAnswer::Dropped`] without reaching `perform`, as a
 /// Harness abandoning a cancelled run would answer them.
@@ -132,15 +128,15 @@ pub fn drive(
     mut run: Run,
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,
 ) -> (RunResult, Vec<Event>) {
-    let mut history = Vec::new();
+    let mut reported = Vec::new();
     loop {
         match run.step() {
             Step::Done { result, events } => {
-                history.extend(events);
-                return (result, history);
+                reported.extend(events);
+                return (result, reported);
             }
             Step::Pending { effects, events } => {
-                history.extend(events);
+                reported.extend(events);
                 if effects.is_empty() {
                     // Every effect is answered the step it is issued, so a
                     // pending step that issued nothing has nothing to wait
@@ -148,14 +144,12 @@ pub fn drive(
                     let error = Error::internal(
                         "the serial driver was handed a pending run with no effect to answer",
                     );
-                    return (RunResult::Failure(RunError::from(error)), history);
+                    return (RunResult::Failure(RunError::from(error)), reported);
                 }
                 let decided = run.decided();
                 for (id, _, effect) in effects {
                     let answer = if decided {
                         EffectAnswer::Dropped
-                    } else if let Effect::TaskEvents { task, last } = &effect {
-                        EffectAnswer::TaskEvents(task_history(&history, task, *last))
                     } else {
                         perform(id, &effect)
                     };

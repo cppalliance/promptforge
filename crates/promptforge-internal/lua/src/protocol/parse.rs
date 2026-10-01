@@ -16,7 +16,7 @@ use chat::parse_chat;
 use store::parse_store;
 use tasks::{
     parse_cancel, parse_concurrency, parse_join_any, parse_note, parse_pending, parse_ready,
-    parse_status, parse_task_events, parse_timer,
+    parse_status, parse_timer,
 };
 
 use crate::tools::tool_alias;
@@ -205,9 +205,6 @@ impl Request {
                 Answer::Concurrency(Err(error))
             }),
             "cancel" => classify(parse_cancel(table), |error| Answer::Cancel(Err(error))),
-            "task_events" => classify(parse_task_events(table), |error| {
-                Answer::TaskEvents(Err(error))
-            }),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
             }),

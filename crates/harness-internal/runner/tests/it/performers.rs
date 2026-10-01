@@ -1,14 +1,13 @@
 //! The runner's own performers under the effect loop: a tokio timer fires
 //! after its duration and is torn down by a cancel, a store operation
-//! runs through the Engine's store facade, and a task-events read returns
-//! the task's slice from the run log, narrowed by `last`.
+//! runs through the Engine's store facade.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use harness_log::{RecordKind, RunLog, RunMeta, RunOutcome};
 use harness_runner::effect_loop::{SharedLog, drive_run};
-use harness_runner::performers::{BoxFuture, LogTaskEvents, TokioTimer, ToolPerformer, VfsStore};
+use harness_runner::performers::{BoxFuture, TokioTimer, ToolPerformer, VfsStore};
 use promptforge::cancel::CancelHandle;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::{Value, json};
@@ -209,75 +208,4 @@ async fn the_vfs_store_performs_the_operation_the_effect_names() {
         "kept and more|false|true",
         "writes land, reads see them, and a missing path is the store's own failure"
     );
-}
-
-#[tokio::test]
-async fn task_events_returns_the_tasks_slice_and_last_narrows_it_to_later_events() {
-    let (log, run_id) = begun_log().await;
-    let mut performers = unused();
-    performers.task_events = Arc::new(LogTaskEvents::new(Arc::clone(&log), run_id));
-
-    // The owner reads the child's whole record, then everything after the
-    // first event; every event names the child's task.
-    let main = "local t = tasks.spawn('## Child')\n\
-        tasks.join_any({ t })\n\
-        local all = tasks.events(t)\n\
-        local same = true\n\
-        for _, e in ipairs(all) do same = same and e.provenance.task == t.task end\n\
-        local later = tasks.events(t, { last = all[1].provenance.seq })\n\
-        local none = tasks.events(t, { last = all[#all].provenance.seq })\n\
-        return all[#all].kind .. '|' .. #all .. '|' .. #later .. '|' .. #none .. '|' .. tostring(same)";
-    let outcome = drive_run(
-        run_with_child(main, "return 'done'"),
-        performers,
-        Arc::clone(&log),
-        run_id,
-        CancelHandle::new(),
-        |_event| {},
-    )
-    .await
-    .unwrap();
-    let text = completed(outcome);
-    let parts: Vec<&str> = text.split('|').collect();
-    assert_eq!(
-        parts[0], "task_succeeded",
-        "the terminal is the last event of the task's own record: {text}"
-    );
-    let all: usize = parts[1].parse().expect("a count");
-    let later: usize = parts[2].parse().expect("a count");
-    let none: usize = parts[3].parse().expect("a count");
-    assert!(
-        all >= 2,
-        "the child reports its chunk and its terminal: {text}"
-    );
-    assert_eq!(
-        later,
-        all - 1,
-        "`last` drops exactly the events already seen"
-    );
-    assert_eq!(none, 0, "`last` at the final event reads nothing new");
-    assert_eq!(parts[4], "true", "every event names the child's task");
-}
-
-#[tokio::test]
-async fn task_events_of_a_task_that_never_logged_reads_as_empty() {
-    let (log, run_id) = begun_log().await;
-    let mut performers = unused();
-    performers.task_events = Arc::new(LogTaskEvents::new(Arc::clone(&log), run_id));
-
-    // The main walk reads itself before anything but its own start is
-    // logged, and after `last` past every seq it has.
-    let outcome = drive_run(
-        run("local mine = tasks.events(sys.taskid)\n\
-             local none = tasks.events(sys.taskid, { last = 1000000 })\n\
-             return tostring(#mine > 0) .. '|' .. #none"),
-        performers,
-        Arc::clone(&log),
-        run_id,
-        CancelHandle::new(),
-        |_event| {},
-    )
-    .await
-    .unwrap();
-    assert_eq!(completed(outcome), "true|0");
 }

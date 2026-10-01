@@ -8,9 +8,8 @@
 //! that posts its answer on a channel under the effect's id; the loop
 //! resumes the run with each arriving answer and steps again. The
 //! driver performs the engine-internal kinds itself: a `Store` operation
-//! runs on the blocking pool (the VFS is synchronous by design), a `Timer`
-//! sleeps on tokio's timer wheel, and a `TaskEvents` read is answered at
-//! issue from the driver's own history of forwarded events.
+//! runs on the blocking pool (the VFS is synchronous by design), and a
+//! `Timer` sleeps on tokio's timer wheel.
 //!
 //! When the run reports itself decided ([`Run::decided`]) every performer
 //! still out is aborted and joined - a blocking-pool store operation runs
@@ -53,7 +52,7 @@ use crate::{Error, Result};
 
 #[cfg(test)]
 use crate::execute::EffectRecord;
-use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step, task_history};
+use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
 #[cfg(test)]
 use crate::test_support::RunHarness;
 
@@ -155,11 +154,6 @@ pub(crate) struct TokioDriver<'a> {
     /// delivers answers in arrival order.
     #[cfg(test)]
     shuffle: Option<u64>,
-    /// Every event the run has reported, in step order: the history a
-    /// `TaskEvents` effect is answered from. A step's events are appended
-    /// before its effects are performed, so a task reading its own record
-    /// sees everything reported before the read.
-    history: Vec<Event>,
     /// Test-only: the record of every effect performed, in issue order.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
@@ -208,7 +202,6 @@ impl<'a> TokioDriver<'a> {
             rx,
             outstanding: HashMap::new(),
             cancel,
-            history: Vec::new(),
             #[cfg(test)]
             tap: None,
             #[cfg(test)]
@@ -256,14 +249,8 @@ impl<'a> TokioDriver<'a> {
                         self.drop_outstanding().await;
                         continue;
                     }
-                    let mut answered_inline = false;
                     for (id, _, effect) in effects {
-                        answered_inline |= !self.perform(id, effect);
-                    }
-                    if answered_inline {
-                        // An effect answered at issue re-queued its chain:
-                        // step again before waiting on anything.
-                        continue;
+                        self.perform(id, effect);
                     }
                     if self.outstanding.is_empty() {
                         // The run reports a stall itself; reaching here
@@ -348,20 +335,16 @@ impl<'a> TokioDriver<'a> {
         while self.rx.try_recv().is_ok() {}
     }
 
-    /// Hands one step's events to the sink and appends them to the history
-    /// `TaskEvents` reads answer from.
+    /// Hands one step's events to the sink.
     fn forward(&mut self, events: Vec<Event>) {
         for event in events {
-            (self.sink)(event.clone());
-            self.history.push(event);
+            (self.sink)(event);
         }
     }
 
     /// Performs one effect: spawns the performer that will post the
-    /// effect's answer under `id` and returns `true`, or answers at once
-    /// and returns `false` for a `TaskEvents` read, which is answered from
-    /// the history.
-    fn perform(&mut self, id: EffectId, effect: Effect) -> bool {
+    /// effect's answer under `id`.
+    fn perform(&mut self, id: EffectId, effect: Effect) {
         let tx = self.tx.clone();
         let handle = match effect {
             Effect::Chat { .. } => {
@@ -397,17 +380,8 @@ impl<'a> TokioDriver<'a> {
                     post(&tx, id, EffectAnswer::Timer);
                 })
             }
-            Effect::TaskEvents { task, last } => {
-                // Answered from the driver's own history, at issue: the
-                // step's events are already appended, so the read sees
-                // everything reported before it.
-                let events = task_history(&self.history, &task, last);
-                self.run.resume(id, EffectAnswer::TaskEvents(events));
-                return false;
-            }
         };
         self.outstanding.insert(id, handle);
-        true
     }
 }
 

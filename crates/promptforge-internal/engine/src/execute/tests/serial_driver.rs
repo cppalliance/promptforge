@@ -6,8 +6,8 @@
 //! delivered one per step, all at once, and shuffled within a batch
 //! produce identical per-task effects and events), and a model task whose
 //! owner ends first reporting `abandoned` in both its event and its
-//! notice. The helpers here - the canned completions and the local
-//! performer - are shared with the `task_events` suite.
+//! notice. The helpers here - the canned completions, the local
+//! performer, and the scripted driver - are shared with the other suites.
 
 use std::collections::BTreeMap;
 
@@ -18,7 +18,6 @@ use super::model_tasks::model_task_context_with;
 use super::scheduler::scheduler_context_from;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
-use crate::execute::task_history;
 use crate::lua::run_store_op;
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
@@ -67,8 +66,32 @@ pub(super) fn perform_locally(
         )))),
         Effect::Store { access, op } => EffectAnswer::Store(run_store_op(access, op.clone())),
         Effect::Timer { .. } => EffectAnswer::Timer,
-        Effect::TaskEvents { .. } => panic!("the driver answers a history read itself"),
     }
+}
+
+/// The text of a run that succeeded; panics on any other outcome.
+pub(super) fn text_of(result: RunResult) -> String {
+    match result {
+        RunResult::Ok(text) => text,
+        other => panic!("the run succeeds: {other:?}"),
+    }
+}
+
+/// Drives `md` with the model played by `rounds`, one canned answer per
+/// `chat` round in order.
+pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
+    let prompt = parse(md);
+    let (state, _harness) = model_task_context_with(
+        &prompt,
+        Arc::new(NullObserver::default()),
+        Arc::new(SlowTool),
+    );
+    let mut rounds = rounds.into_iter();
+    drive(Run::from_state(state), |_, effect| {
+        perform_locally(effect, &mut |_| {
+            rounds.next().expect("the script covers every round")
+        })
+    })
 }
 
 /// A chat performer that echoes the infer prompt back as `r(<prompt>)`.
@@ -185,25 +208,20 @@ pub(super) fn drive_batched(mut run: Run, batching: Batching) -> Outcome {
                     !outstanding.is_empty(),
                     "a pending run has an effect to answer"
                 );
-                let answer = |effect: &Effect, events: &[Event]| match effect {
-                    Effect::TaskEvents { task, last } => {
-                        EffectAnswer::TaskEvents(task_history(events, task, *last))
-                    }
-                    other => perform_locally(other, &mut echo_chat),
-                };
+                let answer = |effect: &Effect| perform_locally(effect, &mut echo_chat);
                 match batching {
                     Batching::OnePerStep => {
                         let (id, effect) = outstanding.remove(0);
-                        run.resume(id, answer(&effect, &events));
+                        run.resume(id, answer(&effect));
                     }
                     Batching::AllAtOnce => {
                         for (id, effect) in std::mem::take(&mut outstanding) {
-                            run.resume(id, answer(&effect, &events));
+                            run.resume(id, answer(&effect));
                         }
                     }
                     Batching::Reversed => {
                         for (id, effect) in std::mem::take(&mut outstanding).into_iter().rev() {
-                            run.resume(id, answer(&effect, &events));
+                            run.resume(id, answer(&effect));
                         }
                     }
                 }

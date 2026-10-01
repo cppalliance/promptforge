@@ -418,7 +418,6 @@ mod run_termination;
 mod scheduler;
 mod serial_driver;
 mod suite;
-mod task_events;
 mod tasks;
 mod timeouts;
 mod tool_call_arm;

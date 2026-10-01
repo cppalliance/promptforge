@@ -767,8 +767,6 @@ pub promptforge::effect::AnswerRecord::Chat::0: core::result::Result<promptforge
 pub promptforge::effect::AnswerRecord::Dropped
 pub promptforge::effect::AnswerRecord::Store(..)
 pub promptforge::effect::AnswerRecord::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, alloc::string::String>
-pub promptforge::effect::AnswerRecord::TaskEvents(..)
-pub promptforge::effect::AnswerRecord::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
 pub promptforge::effect::AnswerRecord::Timer
 pub promptforge::effect::AnswerRecord::ToolCall(..)
 pub promptforge::effect::AnswerRecord::ToolCall::0: core::result::Result<promptforge::effect::ToolAnswerRecord, alloc::string::String>
@@ -785,9 +783,6 @@ pub promptforge::effect::Effect::Chat::tools: alloc::vec::Vec<promptforge::model
 pub promptforge::effect::Effect::Store { .. }
 pub promptforge::effect::Effect::Store::access: alloc::sync::Arc<promptforge::vfs::Access>
 pub promptforge::effect::Effect::Store::op: promptforge::vfs::StoreOp
-pub promptforge::effect::Effect::TaskEvents { .. }
-pub promptforge::effect::Effect::TaskEvents::last: core::option::Option<u32>
-pub promptforge::effect::Effect::TaskEvents::task: promptforge::ids::TaskId
 pub promptforge::effect::Effect::Timer { .. }
 pub promptforge::effect::Effect::Timer::seconds: f64
 pub promptforge::effect::Effect::ToolCall { .. }
@@ -800,8 +795,6 @@ pub promptforge::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxe
 pub promptforge::effect::EffectAnswer::Dropped
 pub promptforge::effect::EffectAnswer::Store(..)
 pub promptforge::effect::EffectAnswer::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::VfsError>
-pub promptforge::effect::EffectAnswer::TaskEvents(..)
-pub promptforge::effect::EffectAnswer::TaskEvents::0: alloc::vec::Vec<promptforge::event::Event>
 pub promptforge::effect::EffectAnswer::Timer
 pub promptforge::effect::EffectAnswer::ToolCall(..)
 pub promptforge::effect::EffectAnswer::ToolCall::0: core::result::Result<promptforge::tools::ToolOutput, promptforge::tools::ToolError>
@@ -815,9 +808,6 @@ pub promptforge::effect::EffectRecord::Chat::thinking: core::option::Option<bool
 pub promptforge::effect::EffectRecord::Chat::tools: alloc::vec::Vec<alloc::string::String>
 pub promptforge::effect::EffectRecord::Store { .. }
 pub promptforge::effect::EffectRecord::Store::op: promptforge::vfs::StoreOp
-pub promptforge::effect::EffectRecord::TaskEvents { .. }
-pub promptforge::effect::EffectRecord::TaskEvents::last: core::option::Option<u32>
-pub promptforge::effect::EffectRecord::TaskEvents::task: promptforge::ids::TaskId
 pub promptforge::effect::EffectRecord::Timer { .. }
 pub promptforge::effect::EffectRecord::Timer::seconds: f64
 pub promptforge::effect::EffectRecord::ToolCall { .. }

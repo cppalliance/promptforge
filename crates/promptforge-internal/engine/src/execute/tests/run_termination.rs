@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use promptforge_types::ids::{AbandonReason, TaskId};
 
-use super::model_task_acceptance::{task_events, terminals_per_started_task};
+use super::model_task_acceptance::{task_lifecycle, terminals_per_started_task};
 use super::scheduler::scheduler_context_on;
 use super::serial_driver::{perform_locally, text_reply};
 use super::tasks::TaskRecorder;
@@ -96,7 +96,7 @@ fn cancelling_a_run_settles_every_live_task_with_one_terminal_before_the_run_end
         terminals_per_started_task(&records),
         BTreeMap::from([(child.clone(), vec!["abandoned"])]),
         "the stranded task has exactly one terminal, and it is abandoned: {:?}",
-        task_events(&records)
+        task_lifecycle(&records)
     );
     assert!(
         records.iter().any(|(_, observation)| matches!(

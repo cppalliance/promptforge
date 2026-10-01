@@ -15,18 +15,16 @@
 //! into it. The store performer is synchronous: the VFS is synchronous by
 //! design, and the loop runs the call on tokio's blocking pool.
 //!
-//! The runner supplies four performers itself - [`TokioTimer`],
-//! [`VfsStore`], [`LogTaskEvents`], and [`ActivatedTools`] - because each
-//! is machinery it already holds: tokio's timer wheel, the Engine's store
-//! operation, the run log, and the tool table run preparation activated.
-//! The chat performer lives with what it reaches, the gateway client.
+//! The runner supplies three performers itself - [`TokioTimer`],
+//! [`VfsStore`], and [`ActivatedTools`] - because each is machinery it
+//! already holds: tokio's timer wheel, the Engine's store operation, and
+//! the tool table run preparation activated. The chat performer lives
+//! with what it reaches, the gateway client.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use promptforge::event::Event;
-use promptforge::ids::TaskId;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
@@ -40,7 +38,7 @@ mod builtin;
 #[path = "performers-tools.rs"]
 mod tools;
 
-pub use builtin::{LogTaskEvents, TokioTimer, VfsStore};
+pub use builtin::{TokioTimer, VfsStore};
 pub use tools::ActivatedTools;
 
 /// A boxed, sendable, owning future: what an asynchronous performer
@@ -101,14 +99,6 @@ pub trait TimerPerformer: Send + Sync {
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;
 }
 
-/// Performs a `TaskEvents` effect: one read of a task's reported history.
-pub trait TaskEventsPerformer: Send + Sync {
-    /// Every event of `task` with a sequence number after `last` (all of
-    /// them when `last` is `None`), in sequence order, as the Harness's log
-    /// holds them.
-    fn events(&self, task: TaskId, last: Option<u32>) -> BoxFuture<Vec<Event>>;
-}
-
 /// The Harness's performers, one per effect kind.
 ///
 /// Shared handles, so the loop can move a performer into the task it
@@ -123,8 +113,6 @@ pub struct Performers {
     pub store: Arc<dyn StorePerformer>,
     /// Performs `Timer` effects.
     pub timer: Arc<dyn TimerPerformer>,
-    /// Performs `TaskEvents` effects.
-    pub task_events: Arc<dyn TaskEventsPerformer>,
 }
 
 impl std::fmt::Debug for Performers {

@@ -21,7 +21,7 @@ Beside the core globals, the VM holds:
   while the shared library loads and a yield shim inside a block.
 - `messages`, the conversation builders and the chainable `messages.new()`.
 - `tasks`, the scheduler-mode shims for spawning, waiting on, checking,
-  noting, and cancelling tasks and reading their event history.
+  noting, and cancelling tasks.
 - Capability preludes: the Lua source an activated capability contributes,
   run once per VM in an environment of its own before the shared library
   replays, with its globals checked against the reserved list and raw-set

@@ -51,7 +51,7 @@ impl WaitRecorder {
     }
 
     /// Every task observation naming `task`, in order.
-    pub(super) fn task_events(&self, task: &TaskId) -> Vec<Observation> {
+    pub(super) fn observations_of(&self, task: &TaskId) -> Vec<Observation> {
         self.records()
             .into_iter()
             .map(|(_, event)| event)

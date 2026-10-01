@@ -234,7 +234,7 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     let md = arm_prompt(
         "tools.add_local('task_status', 'shadow', {}, function() return 'shadowed' end)\n\
          local kinds = {}\n\
-         for _, name in ipairs({ 'task', 'task_cancel', 'task_status', 'task_events', 'await_tasks' }) do\n\
+         for _, name in ipairs({ 'task', 'task_cancel', 'task_status', 'await_tasks' }) do\n\
            local ok, err = pcall(tools.call, name, {})\n\
            assert(not ok, name .. ' must be refused')\n\
            kinds[#kinds + 1] = err.kind .. ':' .. err.name\n\
@@ -255,7 +255,7 @@ async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     assert_eq!(
         out,
         "unbound_tool:task,unbound_tool:task_cancel,unbound_tool:task_status,\
-         unbound_tool:task_events,unbound_tool:await_tasks"
+         unbound_tool:await_tasks"
     );
     let lines = recorder.lines();
     assert!(

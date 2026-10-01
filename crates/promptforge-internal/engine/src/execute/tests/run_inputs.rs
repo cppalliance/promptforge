@@ -8,7 +8,7 @@
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
-use super::task_events::text_of;
+use super::serial_driver::text_of;
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;

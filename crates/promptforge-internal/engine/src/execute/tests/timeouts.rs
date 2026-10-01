@@ -64,7 +64,7 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
         "the fired timer's slot was delivered to the wait"
     );
     assert!(
-        recorder.task_events(&task("0.1")).is_empty(),
+        recorder.observations_of(&task("0.1")).is_empty(),
         "the internal timer reports no task observations: {:?}",
         recorder.records()
     );
@@ -102,7 +102,7 @@ async fn join_any_cancels_the_timer_when_a_member_wins() {
         "the member's win cancelled the timer"
     );
     assert!(
-        recorder.task_events(&task("0.1")).is_empty(),
+        recorder.observations_of(&task("0.1")).is_empty(),
         "the internal timer reports no task observations: {:?}",
         recorder.records()
     );

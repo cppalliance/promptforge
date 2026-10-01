@@ -1,5 +1,5 @@
 //! The fixed schemas of the model's task built-ins, and the one function
-//! that appends them to a round's advertised scope. The five are the
+//! that appends them to a round's advertised scope. The four are the
 //! Engine's own: the descriptions name what each call does and what the
 //! answer looks like, and the `task` description names the allowlisted
 //! targets so the model copies a heading the arm will accept. The arms
@@ -15,14 +15,14 @@ use crate::model::ToolSchema;
 use crate::{Error, Result};
 use promptforge_model_client::detail::{tool_schema_name, tool_schema_new};
 
-/// One built-in's fixed schema; the five are the Engine's own, so a
+/// One built-in's fixed schema; the four are the Engine's own, so a
 /// refusal by the validated constructor is an internal fault.
 fn builtin_schema(name: &str, description: String, parameters: Value) -> Result<ToolSchema> {
     tool_schema_new(name.to_owned(), description, parameters)
         .map_err(|_| Error::internal("a task built-in's fixed schema validates"))
 }
 
-/// Appends the five task built-ins to a round's advertised `schemas` and
+/// Appends the four task built-ins to a round's advertised `schemas` and
 /// `dispatch` map under `allowlist`, whose targets the `task` description
 /// names so the model copies a heading the arm will accept.
 ///
@@ -103,28 +103,6 @@ pub(crate) fn advertise_task_builtins(
                         "description": "Optional: the most seconds to wait."
                     }
                 }
-            }),
-        )?,
-        builtin_schema(
-            "task_events",
-            "Read what a task you started has reported so far: its sections, model \
-             turns, tool calls, and their content, one JSON event per line in order. \
-             With `last` (the `seq` of the last event you read), return only later \
-             events."
-                .to_owned(),
-            json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "The task id, exactly as `task` returned it."
-                    },
-                    "last": {
-                        "type": "integer",
-                        "description": "Optional: the `provenance.seq` of the last event already read."
-                    }
-                },
-                "required": ["id"]
             }),
         )?,
     ];

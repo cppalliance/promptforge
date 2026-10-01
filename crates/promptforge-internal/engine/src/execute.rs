@@ -141,26 +141,5 @@ pub enum RunResult {
     Failure(RunError),
 }
 
-/// One task's history out of the Harness's event log: every event whose
-/// provenance names `task` with a sequence number after `last` (every one
-/// of the task's events when `last` is `None`), in log order - which is
-/// sequence order within one task, since a task's events are pushed in
-/// the order its counter stamps them. The answer to a
-/// [`Effect::TaskEvents`] read, shared by the test drivers.
-#[cfg(any(test, feature = "test-support"))]
-pub(crate) fn task_history(
-    log: &[promptforge_types::event::Event],
-    task: &promptforge_types::ids::TaskId,
-    last: Option<u32>,
-) -> Vec<promptforge_types::event::Event> {
-    log.iter()
-        .filter(|event| {
-            let provenance = event.provenance();
-            provenance.task == *task && last.is_none_or(|last| provenance.seq > last)
-        })
-        .cloned()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests;

@@ -8,7 +8,6 @@
 //! request's answer is an ordinary [`Answer::ToolCallResult`]: the text
 //! on success, the error for a rejected return.
 
-use promptforge_types::event::Event;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
@@ -230,11 +229,6 @@ pub enum Answer<E> {
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
     Cancel(std::result::Result<(), E>),
-    /// The task's reported events for a `task_events` request, in task
-    /// sequence order; the shim resumes each as a plain table in the
-    /// event's serialized shape. Empty when nothing has been reported
-    /// after the caller's `last`.
-    TaskEvents(std::result::Result<Vec<Event>, E>),
     /// The chain's undelivered model-task notices in arrival order, for a
     /// `drain_task_notices` request; the shim appends each as a message
     /// record. Empty when nothing ended since the last drain.
@@ -269,7 +263,6 @@ impl<E> Answer<E> {
             Answer::Concurrency(result) => Answer::Concurrency(result.map_err(map)),
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
-            Answer::TaskEvents(result) => Answer::TaskEvents(result.map_err(map)),
             Answer::DrainTaskNotices(result) => Answer::DrainTaskNotices(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),

@@ -12,7 +12,6 @@ use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
 
 use super::ChainIndex;
-use super::task_events::TaskEventsReader;
 
 /// The driver-side half of one issued leaf effect: how its answer resumes
 /// the chain parked on it.
@@ -36,9 +35,6 @@ pub(super) enum Continuation {
     /// slot backed by the effect and wakes its waiting owner; no chain
     /// resumes.
     Timer,
-    /// A task history read: the shim's event sequence, or the model's
-    /// untrusted text.
-    TaskEvents(TaskEventsReader),
 }
 
 /// What a store answer is applied with: the operation the chain yielded,

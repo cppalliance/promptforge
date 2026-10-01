@@ -22,8 +22,6 @@
 use std::sync::Arc;
 
 use promptforge_model_client::detail::tool_schema_name;
-use promptforge_types::event::Event;
-use promptforge_types::ids::TaskId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -115,19 +113,6 @@ pub enum Effect {
         /// The duration in seconds, non-negative and finite.
         seconds: f64,
     },
-    /// One read of a task's reported history: every event whose
-    /// provenance names `task` with a sequence number after `last` (all of
-    /// them when `last` is `None`), in sequence order. The Harness answers
-    /// from its log - the events it was handed by earlier steps, which it
-    /// commits before performing the step's effects, so a task reading its
-    /// history sees everything reported before the read was issued.
-    TaskEvents {
-        /// The task whose events are read.
-        task: TaskId,
-        /// The highest sequence number the reader has already seen, when
-        /// it has seen any.
-        last: Option<u32>,
-    },
 }
 
 /// One value's serde wire form. Every type recorded here serializes
@@ -177,10 +162,6 @@ impl Effect {
             },
             Effect::Store { op, .. } => EffectRecord::Store { op: op.clone() },
             Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
-            Effect::TaskEvents { task, last } => EffectRecord::TaskEvents {
-                task: task.clone(),
-                last: *last,
-            },
         }
     }
 }
@@ -233,13 +214,6 @@ pub enum EffectRecord {
         /// The duration in seconds.
         seconds: f64,
     },
-    /// One read of a task's reported history.
-    TaskEvents {
-        /// The task whose events are read.
-        task: TaskId,
-        /// The highest sequence number the reader has already seen.
-        last: Option<u32>,
-    },
 }
 
 /// Who made one tool call and where: the run's execution, the section
@@ -284,9 +258,6 @@ pub enum EffectAnswer {
     Store(std::result::Result<StoreOutcome, VfsError>),
     /// The timer fired.
     Timer,
-    /// The task's events after the read's `last`, in sequence order, as
-    /// the Harness's log holds them.
-    TaskEvents(Vec<Event>),
     /// The Harness dropped the effect without performing it (a cancelled
     /// run, or an effect whose task ended first): the chain, if it still
     /// waits, resumes with a cancelled error. A drop is an answer like any
@@ -318,7 +289,6 @@ impl EffectAnswer {
                 Err(error) => Err(error.to_string()),
             }),
             EffectAnswer::Timer => AnswerRecord::Timer,
-            EffectAnswer::TaskEvents(events) => AnswerRecord::TaskEvents(events.clone()),
             EffectAnswer::Dropped => AnswerRecord::Dropped,
         }
     }
@@ -338,8 +308,6 @@ pub enum AnswerRecord {
     Store(std::result::Result<StoreOutcome, String>),
     /// The timer fired.
     Timer,
-    /// The task's events after the read's `last`, in sequence order.
-    TaskEvents(Vec<Event>),
     /// The Harness dropped the effect without performing it.
     Dropped,
 }
