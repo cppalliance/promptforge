@@ -35,12 +35,12 @@ use promptforge::vfs::Access;
 use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
 use serde_json::Value;
 
-#[path = "performers-host.rs"]
-mod host;
+#[path = "performers-builtin.rs"]
+mod builtin;
 #[path = "performers-tools.rs"]
 mod tools;
 
-pub use host::{LogTaskEvents, TokioTimer, VfsStore};
+pub use builtin::{LogTaskEvents, TokioTimer, VfsStore};
 pub use tools::ActivatedTools;
 
 /// A boxed, sendable, owning future: what an asynchronous performer

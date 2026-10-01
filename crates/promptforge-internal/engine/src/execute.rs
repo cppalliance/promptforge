@@ -12,7 +12,6 @@
 //! - `bindings` - the run's journaled [`ModelBindings`] and [`ToolBindings`].
 //! - `config` - the public [`RunContext`] and [`RunLimits`].
 //! - `context` - the ambient `RunState` run state.
-//! - `engine` - the walk-target resolution helpers.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
 //!   against the Harness-supplied catalog; capability activation itself is the
 //!   Harness's, in `harness-capabilities`.
@@ -35,11 +34,11 @@
 //!   fanout arm.
 //! - `support` - shared helpers.
 //! - `tools` - the nested-inference round's answer.
+//! - `walk_target` - the walk-target resolution helpers.
 
 mod bindings;
 mod config;
 pub(crate) mod context;
-mod engine;
 mod environment;
 mod error;
 mod fill;
@@ -52,6 +51,7 @@ mod section_context;
 pub(crate) mod section_vm;
 mod support;
 mod tools;
+mod walk_target;
 
 // Public API surface.
 pub use bindings::{ModelBindings, ToolBindings};

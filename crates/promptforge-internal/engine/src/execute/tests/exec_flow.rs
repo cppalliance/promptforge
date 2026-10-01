@@ -130,7 +130,7 @@ fn list_from_section_ambiguous_error_is_loud() {
         synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
         synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
     ];
-    let error = super::super::engine::list_items_from_visible("### Dup", &visible)
+    let error = super::super::walk_target::list_items_from_visible("### Dup", &visible)
         .expect_err("two visible sections with one address must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
@@ -145,7 +145,7 @@ fn duplicate_top_level_section_names_error_loudly() {
         synthetic_section("Dup", 2, Vec::new(), Vec::new()),
         synthetic_section("Dup", 2, Vec::new(), Vec::new()),
     ];
-    let error = super::super::engine::resolve_jump_target("## Dup", &sections, &sections[0])
+    let error = super::super::walk_target::resolve_jump_target("## Dup", &sections, &sections[0])
         .expect_err("two visible sections with one name must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");

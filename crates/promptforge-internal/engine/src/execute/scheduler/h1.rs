@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use promptforge_types::ids::ChainId;
 
-use crate::execute::engine::section_position;
 use crate::execute::support::GENERIC_COMPLETION;
+use crate::execute::walk_target::section_position;
 use crate::heading_address;
 use crate::{Error, Result};
 

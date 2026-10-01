@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: s6-modules
     content: "Step 6: rename performers-host.rs to performers-builtin.rs and execute/engine.rs to walk_target.rs"
-    status: pending
+    status: completed
   - id: s7-ui
     content: "Step 7: rename the DOM container names, LazyPanelHost, the harness() test helpers and config-ui harness.mjs in the TypeScript UIs, with exact wording for every check text"
     status: pending

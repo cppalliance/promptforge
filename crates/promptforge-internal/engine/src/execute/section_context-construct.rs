@@ -14,8 +14,8 @@ use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::execute::context::RunState;
-use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
+use crate::execute::walk_target::{list_items_from_visible, visible_sections};
 use crate::lua::SectionVm;
 use crate::parser::Section;
 use promptforge_types::event::lifecycle;
