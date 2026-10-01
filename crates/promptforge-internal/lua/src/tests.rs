@@ -262,7 +262,7 @@ fn section_vm_with_bindings(
     section_vm_with_set(&shared_set(bindings.clone()), emitter, section)
 }
 
-/// Builds a section VM through the engine's startup order for a shared
+/// Builds a section VM through the Engine's startup order for a shared
 /// library: construction, Engine injection, persistent Engine globals, then
 /// the shared replay. Tests that need control globals or captured bindings
 /// add them by hand.

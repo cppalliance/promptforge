@@ -1,13 +1,13 @@
-//! The synchronous cancellation handle the engine observes.
+//! The synchronous cancellation handle the Engine observes.
 //!
-//! The engine is a pure state machine, so it polls a flag between chain
+//! The Engine is a pure state machine, so it polls a flag between chain
 //! steps and from the Lua instruction hook rather than awaiting a
 //! cancellation; when the Host cancels, the Harness sets that flag from
 //! whichever thread it likes. [`CancelHandle`] is that flag, arranged as a
 //! tree so a run-level cancel reaches every task while one task can be
 //! cancelled without touching its siblings or its owner.
 //!
-//! This is the handle the engine's `RunContext` holds and the one
+//! This is the handle the Engine's `RunContext` holds and the one
 //! `RunServices` hands a capability; the tokio-aware token a Host selects
 //! over is `harness::cancel::CancelHandle`, defined in `harness-runner`,
 //! and it bridges to this flag. A Harness that steps the Engine and must
@@ -49,7 +49,7 @@ static NEXT_WAITER: AtomicU64 = AtomicU64::new(0);
 ///   waiter, dropped when the cancel fires them or the waiter drops.
 ///
 /// Reading walks the ancestor chain, one atomic load per level. The chain is
-/// as deep as the run's task nesting, which the engine caps, so a poll from
+/// as deep as the run's task nesting, which the Engine caps, so a poll from
 /// the instruction hook stays a handful of loads.
 ///
 /// # Examples

@@ -17,7 +17,7 @@
 //! (the request body builder, the read loop over a transport's chunk
 //! source, and the error type it builds a [`CompletionError`] from) is not:
 //! the facade publishes it from `promptforge-model-client` directly, and
-//! the engine's own test client imports it from there. The engine itself
+//! the Engine's own test client imports it from there. The Engine itself
 //! never performs a completion.
 
 pub(crate) use promptforge_model_client::client::{

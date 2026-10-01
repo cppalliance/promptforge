@@ -1,4 +1,4 @@
-//! harness-runner - the harness effect loop: prepares an engine `Run`
+//! harness-runner - the Harness effect loop: prepares an Engine `Run`
 //! from a prompt file (drawing the inputs the Engine refuses to draw
 //! itself, putting the declared input file in place, activating
 //! capabilities, opening the run's row), steps it,
@@ -8,7 +8,7 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -17,8 +17,8 @@
 //!   edit.
 //! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`],
 //!   [`spawn::spawn_session`], and [`spawn::spawn_blocking_launch`] are
-//!   the only sites in the harness that call
-//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other harness crate's
+//!   the only sites in the Harness that call
+//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other Harness crate's
 //!   `clippy.toml` bans the raw calls, and `cargo test -p build-xtask`
 //!   checks the bans are declared.
 //! - The log is written in loop order: a step's events before the step's

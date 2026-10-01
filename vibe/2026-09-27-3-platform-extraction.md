@@ -54,7 +54,7 @@ The Workshop SPA's framework (commands, menus, keybindings, context keys, servic
   - Dictation recording lights and dims the red LED exactly as before.
   - The default layout, the tree tab without a close button, the run tab shimmer, and multiple agent instances all behave as before.
 - Constraints:
-  - Target repository: `promptforge` at `C:\Users\Vinnie\cursor\promptforge`, on `master`. The operator redirected the run here from the `promptforge2` worktree, which sat at the same commit. Every path in this plan is relative to its root. The base is `master` at `ee28be77` ("Close plan: look-fork-debts"). `vibe2`, which carries the look fork and its debt removal, was rebased onto `master`'s engine commits and fast-forwarded into `master`. The engine commits don't touch the Workshop TypeScript packages, so every file and line reference below, taken from the pre-rebase tree, still applies.
+  - Target repository: `promptforge` at `C:\Users\Vinnie\cursor\promptforge`, on `master`. The operator redirected the run here from the `promptforge2` worktree, which sat at the same commit. Every path in this plan is relative to its root. The base is `master` at `ee28be77` ("Close plan: look-fork-debts"). `vibe2`, which carries the look fork and its debt removal, was rebased onto `master`'s Engine commits and fast-forwarded into `master`. The Engine commits don't touch the Workshop TypeScript packages, so every file and line reference below, taken from the pre-rebase tree, still applies.
   - `platform` is TypeScript browser code only. It has no `Cargo.toml`, like `crates/workshop/ui` and `crates/workshop/look`; `workshop-server`'s build script bundles whatever `ui` imports. Node and npm are build-time and test-time tools only.
   - Recording must not break. User: "be certain you dont break recording".
   - No saved-layout compatibility is required. User: "I dont care about saved layouts, no one is using this yet!"
@@ -128,7 +128,7 @@ flowchart LR
     agent[agent view] -->|passes SttStatus| stt
 ```
 
-  - The inference LED is driven by the server. Agent sessions run in the harness inside `workshop-server`, and the server's per-session status reporter (`crates/workshop/server/src/agents/status.rs` lines 68-73) publishes thinking and generating on the status bus. The SPA receives them as `/ws` status frames; the browser agent view never touches the LED. `platform` can't own that LED, because the frame type is product protocol (`crates/workshop/ui/src/services/protocol.ts`), so `platform` provides the slot and the product's status part owns the activity LED.
+  - The inference LED is driven by the server. Agent sessions run in the Harness inside `workshop-server`, and the server's per-session status reporter (`crates/workshop/server/src/agents/status.rs` lines 68-73) publishes thinking and generating on the status bus. The SPA receives them as `/ws` status frames; the browser agent view never touches the LED. `platform` can't own that LED, because the frame type is product protocol (`crates/workshop/ui/src/services/protocol.ts`), so `platform` provides the slot and the product's status part owns the activity LED.
 - Modules and interfaces:
   - **`@workshop/platform` contents** (flat package root, one `exports` entry per file):
     - `event`, `lifecycle` and `result` (`Result<T, E>`, `ok`, `err`);
@@ -314,7 +314,7 @@ The design rests on four decisions. Browser-side mechanics become a family packa
   - **A Rust crate for `platform`:** it has no server-side behavior. Revisit: never; server mechanics belong in the Rust vocabulary crates.
   - **A full field survey** instead of the targeted check: the same references had been surveyed that month, and the plan was settled. Revisit before designing the agent-view package.
 - Assumptions, risks, and notes:
-  - **Base drift:** file and line references were taken before `vibe2` was rebased onto `master`. The rebase added only engine commits, so the Workshop TypeScript is unchanged. If a reference doesn't match, re-locate it by content before editing.
+  - **Base drift:** file and line references were taken before `vibe2` was rebased onto `master`. The rebase added only Engine commits, so the Workshop TypeScript is unchanged. If a reference doesn't match, re-locate it by content before editing.
   - **Prior-art references,** pinned: VS Code `6ed05a17ea68d096e122f0866e8ee3aec612f2c5`, Theia `8b94967c4cfa0dcf688a345d28b3ac2e0d7e298a`, JupyterLab `3daf43dac618ef494341b29d18c8095a70c11586`, Lumino `d9b39db2c6d609af334729eeba2ab9376a11c0a7`.
   - **Deviation:** VS Code's tab menu doesn't override `activeEditor`; it sets resource keys. Workshop panels have no resource URI, so overriding `activeEditor` for the clicked tab stands in for per-tab identity.
   - **Registration order is safe today.** `main.ts` line 36 statically imports `parts/menu/index.ts`, whose line 10 imports `workbench.contributions.ts`, so every contribution runs before `applyLayoutOrDefault` (`main.ts` line 235). Changing that import to a lazy one would break panel restore; a comment at the import must say so.

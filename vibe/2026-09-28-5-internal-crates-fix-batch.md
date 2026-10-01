@@ -6,7 +6,7 @@ todos:
     content: "Types: Cancelled deregisters on drop; fold ModelCatalog::from_validated; event test gaps"
     status: pending
   - id: model-client
-    content: "Model client: validating from_result/from_parts with their engine test and facade doctest callers; linear SSE scan; null error field; #[non_exhaustive] ClientError with wildcard arms; re-bless listing"
+    content: "Model client: validating from_result/from_parts with their Engine test and facade doctest callers; linear SSE scan; null error field; #[non_exhaustive] ClientError with wildcard arms; re-bless listing"
     status: pending
   - id: lua-cancel
     content: "Lua cancellation: skip the author xpcall handler under cancel; refuse __gc metatables and __mode on _G; tests"
@@ -78,7 +78,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
 
 - Problem and users:
   - Host operators, cancellation. An author `xpcall` whose message handler loops keeps a cancelled run alive.
-    - The engine runs Lua 5.5.0, from the `lua-src` crate at version 550.1.1 (`Cargo.lock`, lines 3710 to 3712), selected by the `lua55` and `vendored` mlua features in the root `Cargo.toml`. The C files cited below are in that crate's `lua-5.5.0/` directory, inside the Cargo registry (for example `~/.cargo/registry/src/<index>/lua-src-550.1.1/lua-5.5.0/`), not in this repository.
+    - The Engine runs Lua 5.5.0, from the `lua-src` crate at version 550.1.1 (`Cargo.lock`, lines 3710 to 3712), selected by the `lua55` and `vendored` mlua features in the root `Cargo.toml`. The C files cited below are in that crate's `lua-5.5.0/` directory, inside the Cargo registry (for example `~/.cargo/registry/src/<index>/lua-src-550.1.1/lua-5.5.0/`), not in this repository.
     - Lua 5.5.0 runs the current message handler with hooks disabled when the error was raised from inside a hook (`ldo.c`, lines 457 to 463; `ldebug.c`, lines 840 to 847). The cancellation error is raised from the instruction hook (`crates/promptforge-internal/lua/src/hardening.rs`).
     - The shim's `protected_xcall` (`crates/promptforge-internal/lua/src/__impl_coro.lua`, lines 92 to 99) calls the author handler, and only afterwards does `xpcall_outcome` (lines 87 to 90) re-raise under cancellation.
     - A table finalizer (`__gc`) that loops has the same effect, because Lua runs finalizers with hooks disabled (`lgc.c` lines 977 to 986).
@@ -120,7 +120,7 @@ The six crates in `crates/promptforge-internal/` have places where a cancelled r
   - Each crate's test count after its splits is no lower than before them, and the API listing diff contains only the changes File and public API changes names.
 - Constraints:
   - Each fix is the smallest change that satisfies its finding. Any change beyond that, including a new public item, a changed contract, or a platform-specific rule, needs the user's decision first. User's words: "make sure we are not building out too much for example for the frontmatter compliance, without direct input from me. I dont want a decision like \"require the capability\" to unexpectedly turn into writing a lot of code that assumes a lot of things."
-  - The engine stays sans-IO. Every existing behavior test keeps passing except the ones this plan changes on purpose.
+  - The Engine stays sans-IO. Every existing behavior test keeps passing except the ones this plan changes on purpose.
   - Error messages state required versus actual, per `AGENTS.md`.
   - Splits follow the flat-directory rule in `AGENTS.md`. Moved items take the narrowest visibility that compiles (`pub(super)` or `pub(crate)`). No public path changes.
   - The facade firewall, the `#[doc(hidden)]` ban, and the API listing gate stay in force.
@@ -226,14 +226,14 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
       - An entry is either a bare string or a map with a required `ref` and optional `optional` and `config` (`CapabilityDeclVisitor` in `contract.rs`, lines 150 to 274). Both forms decode through `parse_capability_id` into a `GlobalName`.
       - Two entries are duplicates when their decoded ids are equal. `CapabilityId` and `GlobalName` equality is exact over the stored segments, with no normalization (`crates/promptforge-internal/types/src/capabilities.rs`, lines 32 to 66; `crates/promptforge-internal/types/src/names.rs`). Uppercase ids are already refused at parse, so a case-only difference cannot produce two distinct ids for one capability.
       - Entries that differ only in `optional` or `config` are still duplicates.
-      - No prompt, agent program, guide example, or test fixture in the repository lists a capability twice. That was checked across `prompts/`, `local/`, `guide/src/`, and `crates/`, including `crates/harness-internal/sessions/agents/chat.md`, so nothing in the tree breaks. Nothing in `prompts/` or `local/` declares an optional capability. Guide examples and test fixtures that declare one bind no tool slot to it, so nothing in the tree breaks. The engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) is then correct as written and stays.
+      - No prompt, agent program, guide example, or test fixture in the repository lists a capability twice. That was checked across `prompts/`, `local/`, `guide/src/`, and `crates/`, including `crates/harness-internal/sessions/agents/chat.md`, so nothing in the tree breaks. Nothing in `prompts/` or `local/` declares an optional capability. Guide examples and test fixtures that declare one bind no tool slot to it, so nothing in the tree breaks. The Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) is then correct as written and stays.
     - Span documentation. The facade's `ParseError::span` doc (`crates/promptforge/src/lib.md`) and `error.rs` say the range is byte offsets in the source. It is relative to the document body after the frontmatter and a leading BOM, with CRLF normalized to LF. `line()` and `column()` locate the error in the original file (`with_prompt_context`, `error.rs` lines 104 to 114). Both docs say so. No code changes.
     - `build.rs`, `split_frontmatter` (line 281): the closer test `line.trim() == "---"` becomes `line.trim_end() == "---"`, so only a `---` at column 0 closes the frontmatter.
     - `build.rs`, `collect_headings` (lines 354 to 387): track nesting depth over `Tag::BlockQuote` and `Tag::Item` start and end events. Footnotes need no tracking: the parser runs `pulldown-cmark` with `Options::empty()` (`build.rs`, line 366), which leaves them off. A `Tag::Heading` inside either container is not a section boundary. Its text stays in the enclosing section's prose. No test, guide example, or in-tree prompt relies on the old behavior.
     - Structural error locations: the orphan heading and empty heading errors (`build.rs`, lines 483 to 500) are raised with `Error::parse`, which clears span and line (`error.rs`, lines 74 to 83). They are built the way the duplicate-sibling error is (`build.rs`, lines 532 to 541), carrying the heading's span, so `with_prompt_context` fills in line and column. The heading is already in hand at both raise sites (`build.rs`, lines 483 and 497), and its span is body-relative. The "`lua shared` outside H1" error (`parse.rs`, lines 134 to 146) carries the fence's range the same way: `shared_fences` already holds body byte offsets from `exact_shared_openings`. The unclosed-fence error (`fence.rs`, line 148) is left as it is: its callers hold the opening offset relative to the section's content, not the body, so a span there needs new offset plumbing (see Deferred and Out of Scope).
   - `promptforge-model-client` (`crates/promptforge-internal/model-client/src/`):
     - Validating constructors (`client/wire-canned.rs`, lines 16 to 47). `from_result(result: CompletionResult, model: impl Into<String>)` and `from_parts(id: impl Into<String>, name: impl Into<String>, arguments: Value)` return `Result<_, ClientError>`. They apply the rules in Functional Specification by calling the checks `normalize.rs` already uses, with no second copy. Where a check is written inline in `normalize.rs`, it is extracted into a small function that both call. `normalize.rs` does not call either constructor. The argument types stay as they are.
-      - Every caller changes in the same change, because each stops compiling: the engine tests `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` (lines 28 and 37 to 38) and `crates/promptforge-internal/engine/src/execute/run/effect-tests.rs` (line 92), and the compiled facade doc examples in `crates/promptforge/src/model.md` (line 81, and lines 328 to 333) and `crates/promptforge/src/effect.md` (lines 64 and 174). No harness, workshop, or facade integration test calls them.
+      - Every caller changes in the same change, because each stops compiling: the Engine tests `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` (lines 28 and 37 to 38) and `crates/promptforge-internal/engine/src/execute/run/effect-tests.rs` (line 92), and the compiled facade doc examples in `crates/promptforge/src/model.md` (line 81, and lines 328 to 333) and `crates/promptforge/src/effect.md` (lines 64 and 174). No Harness, workshop, or facade integration test calls them.
       - The facade prose that introduces the two constructors (`model.md`, line 322) gains one sentence: they refuse the inputs listed in Functional Specification with a `ClientError`.
     - `client/stream.rs`, `SseScanner::next_data` (lines 60 to 74): lines end only on `\n` (line 62), and each call rescans from the buffer start. The scanner keeps the offset it already scanned without finding `\n` and resumes there, resetting it on drain. A CRLF split across two reads still works, because the `\r` stays buffered until the `\n` arrives (lines 63 to 65).
     - `client/stream.rs`, error envelope (lines 162 to 170): `chunk.get("error")` counts a present `null`. It becomes a present, non-null value.
@@ -253,7 +253,7 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
   - `promptforge-engine` (`crates/promptforge-internal/engine/`):
     - Surface. Nothing outside the crate uses these except the bench and the `lib.md` doctests:
       - In `src/lib.rs`, `pub mod model` and `pub mod parser` (lines 8 and 9) become `pub(crate)`.
-      - The root re-exports of `CompletionError`, `CompletionErrorKind`, `ParseError`, `ParseErrorKind`, `Prompt`, and `promptforge_version` (within lines 22 to 30) stop being public. Where engine code imports them through the crate root (`crate::Prompt` and similar), they become `pub(crate) use` instead of being deleted, so no internal import has to be rewritten.
+      - The root re-exports of `CompletionError`, `CompletionErrorKind`, `ParseError`, `ParseErrorKind`, `Prompt`, and `promptforge_version` (within lines 22 to 30) stop being public. Where Engine code imports them through the crate root (`crate::Prompt` and similar), they become `pub(crate) use` instead of being deleted, so no internal import has to be rewritten.
       - `StoreOp` and `StoreOutcome` (`src/execute.rs`, line 71) become `pub(crate)`.
       - `benches/models_loop.rs` (lines 31 to 35) imports from `promptforge_model_client` and `promptforge_parser`, which are normal dependencies already.
       - The `lib.md` doctests (lines 12 and 26) use `promptforge::` paths through the doctest-only facade dev-dependency.
@@ -295,7 +295,7 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
     - a line naming what the crate may depend on, matching the dependency lists in `crates/promptforge-internal/README.md`. The template's Tier wording names workshop tiers, which do not apply here, so it is left out;
     - "Every file in this crate stays under 500 lines; split first, then edit."
 
-    The engine's crate docs come from `#![doc = include_str!("lib.md")]`, so its marker goes in `src/lib.rs` as `//!` lines beside that attribute. The other five crates already use `//!` docs. For a crate outside the `workshop-*` and `harness-*` families, the marker switches on only `file_ceiling_violations` and `lint_inheritance_violations` (`tidy.rs`, lines 51 to 74 and 177 to 367). All six crates already inherit `[lints] workspace = true`.
+    The Engine's crate docs come from `#![doc = include_str!("lib.md")]`, so its marker goes in `src/lib.rs` as `//!` lines beside that attribute. The other five crates already use `//!` docs. For a crate outside the `workshop-*` and `harness-*` families, the marker switches on only `file_ceiling_violations` and `lint_inheritance_violations` (`tidy.rs`, lines 51 to 74 and 177 to 367). All six crates already inherit `[lints] workspace = true`.
 - File and public API changes:
   - Facade listing (`crates/promptforge/public-api.txt`):
     - the new signatures of `Completion::from_result` and `ToolCall::from_parts`;
@@ -325,7 +325,7 @@ Each fix stays inside the crate that owns the behavior, and no crate or dependen
 
 ## Testing Plan
 
-Each cancellation and sandbox fix gets a test that drives the exact construct that failed, and each claims gap gets a two-task test in both orders. The constructor changes are covered in the model client and by the engine tests and facade doc examples that build completions. The splits are proven behavior-free by an unchanged test count and an unchanged listing, after which the existing ceiling check guards all six crates. The exit gates are the repository's full set.
+Each cancellation and sandbox fix gets a test that drives the exact construct that failed, and each claims gap gets a two-task test in both orders. The constructor changes are covered in the model client and by the Engine tests and facade doc examples that build completions. The splits are proven behavior-free by an unchanged test count and an unchanged listing, after which the existing ceiling check guards all six crates. The exit gates are the repository's full set.
 
 - Unit:
   - Lua cancellation, in `crates/promptforge-internal/lua/src/`:
@@ -338,7 +338,7 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
   - Lua cleanup:
     - `var.k = nil` removes `k` from `var` and from its snapshot.
     - `the_models_namespace_has_no_bind` (`crates/promptforge-internal/lua/src/models-tests.rs`) is updated for the removed Rust placeholder.
-    - Every engine test that calls `models.infer` passes unchanged. That is about 130 call sites across 23 test files, including `crates/promptforge-internal/engine/src/execute/tests/live_infer.rs` and `tests/scheduler/live_h1.rs`, which cover sections and the live H1 pass. This is the guard that removing the placeholder does not remove `models.infer`.
+    - Every Engine test that calls `models.infer` passes unchanged. That is about 130 call sites across 23 test files, including `crates/promptforge-internal/engine/src/execute/tests/live_infer.rs` and `tests/scheduler/live_h1.rs`, which cover sections and the live H1 pass. This is the guard that removing the placeholder does not remove `models.infer`.
   - VFS real-filesystem backend, skipping with a logged reason where the machine lacks symlink privilege:
     - A dangling link inside the root refuses `append`, `write`, `read`, and `list`, and no file appears at the link's target.
     - `remove` and `exists` still act on the dangling link itself.
@@ -376,7 +376,7 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
     - A capability prelude global that collides with `tools`, `store`, or `models` is refused (`crates/promptforge-internal/lua/src/prelude-tests.rs`).
   - build-xtask: fixture manifests using each newly caught dependency table form are refused by the `promptforge-vfs` manifest test.
 - Integration and end-to-end:
-  - The engine tests that build completions move to the validating constructors: `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` (lines 28 and 37 to 38) and `crates/promptforge-internal/engine/src/execute/run/effect-tests.rs` (line 92).
+  - The Engine tests that build completions move to the validating constructors: `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` (lines 28 and 37 to 38) and `crates/promptforge-internal/engine/src/execute/run/effect-tests.rs` (line 92).
   - The facade doc examples that build completions compile and pass against the validating constructors: `cargo test --locked --doc -p promptforge --all-features` covers `crates/promptforge/src/model.md` and `effect.md`.
   - The reserved-name drift test keeps passing.
 - Regression, security, and performance:
@@ -390,7 +390,7 @@ Each cancellation and sandbox fix gets a test that drives the exact construct th
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
-  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, including the engine's private-item docs job
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, including the Engine's private-item docs job
   - `cargo test -p build-xtask`
   - `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`), passing against the listing as re-blessed by each API-changing change with `cargo +nightly-2026-09-05 xtask api --bless`, with the cumulative diff matching File and public API changes
   - `cargo deny check`, which CI runs (`.github/workflows/ci.yml`, lines 340 to 341)
@@ -411,7 +411,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - The file splits and ceiling enforcement join this batch. User's words: "I want it all, in the plan we just made ... break the files up and turn on enforcement."
   - Each crate gains its marker in the change that brings its last file under the ceiling, so the check never fails the build on arrival.
   - Splits are pure moves, kept apart from fix changes, and a file's fixes land before its split. The "split first, then edit" rule in `AGENTS.md` binds only crates that already carry the marker, and none of the six does until its split is done.
-  - The split work runs as nine steps, each small enough for one sub-agent to read every file it cuts and for one reviewer to read its diff: no split step covers much more than 4,700 lines. The engine alone holds 14,827 oversized lines, so one step per crate would not fit. The test-count check runs per crate inside each split step, so no step depends on a number recorded by another. User's choice: "Apply all of them, including the finer split steps and the copied survey (Recommended)".
+  - The split work runs as nine steps, each small enough for one sub-agent to read every file it cuts and for one reviewer to read its diff: no split step covers much more than 4,700 lines. The Engine alone holds 14,827 oversized lines, so one step per crate would not fit. The test-count check runs per crate inside each split step, so no step depends on a number recorded by another. User's choice: "Apply all of them, including the finer split steps and the copied survey (Recommended)".
   - The Project Survey is carried over from the previous plan in this repository (`vibe/2026-09-28-4-internal-crates-critical-fixes.md`), with the facts that plan's run changed brought up to date, so the run does not re-survey.
   - Cancellation: the `xpcall` handler is skipped under cancellation, and `__gc` is refused outright. Lua 5.5.0 runs both with hooks disabled, so no cancel check can interrupt them. `__close` needs nothing, because hooks are restored before it runs.
   - Dangling links are refused rather than resolved and contained. It is the smallest change, and it is consistent with the README's rule that containment denies a link that resolves outside the root.
@@ -436,10 +436,10 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - A parameters-schema check in `ToolCatalog::new`. Reason: it needs a new public `ToolCatalogError` variant, and `tool_schema_new` already refuses a non-object schema when the tool is advertised. Revisit: if schema errors need to surface at assembly, as a user decision on the new variant.
   - One wire-name rule shared by `ToolCatalog::new` and `tool_schema_new`. Reason: `validate_identifier` (`crates/promptforge-internal/types/src/tools/ids.rs`, lines 194 to 216) has no caller besides the catalog's wire-name check (`tools/registry.rs`, line 62), so sharing the rule would delete it and `ToolIdError::reason` and leave `ToolIdErrorKind::Separator` produced by nothing. It would also make the catalog refuse wire names the facade documents as accepted ("Uppercase and other printable characters are accepted in a wire name", `crates/promptforge/src/tools.md`, line 373), a facade contract change. A name the catalog accepts but `tool_schema_new` refuses still fails when the tool is advertised. Revisit: if the Harness needs that failure at catalog assembly, as a documented contract change.
   - Naming the rejected value in `ModelIdError`, `GlobalNameError`, and `CapabilityIdError`. Reason: the facade documents their `Display` text as a fixed prefix and reason (`crates/promptforge/src/model.md`, line 431; `crates/promptforge/src/capabilities.md`, lines 317 and 361), four facade doc examples assert it exactly (`model.md`, line 124; `capabilities.md`, lines 40, 127, and 131), and the guide quotes the parser message that wraps it (`guide/src/language/12-tools.md`, line 180). That parser message already names the id, so it would print it twice. Hosts calling `ModelId::new` hold their inputs. Revisit: if a Host reports an id error it cannot trace to its input.
-  - Making `Backend`'s body private behind a bounding constructor. Reason: the harness already caps and escapes before building it (`crates/harness-internal/models/src/transport.rs`, lines 352 to 363), and the user chose `#[non_exhaustive]` only. Revisit: when an outside transport exists.
+  - Making `Backend`'s body private behind a bounding constructor. Reason: the Harness already caps and escapes before building it (`crates/harness-internal/models/src/transport.rs`, lines 352 to 363), and the user chose `#[non_exhaustive]` only. Revisit: when an outside transport exists.
   - Fixing glob across nested mounts, or Windows aliasing, now. Reason: the user deferred both. Revisit: when a Host nests mounts or mounts `HostBackend` on Windows.
   - Leaving the alias unbound with a warning for an optional-capability slot, or keeping the run-time refusal with better wording. Reason: the user chose a parse-time refusal. Revisit: if prompts need optional tools, as a new frontmatter form.
-  - Removing the engine's `test-support` feature and bench. Reason: the bench is the only benchmark of the model loop. Revisit: if the bench moves to the facade.
+  - Removing the Engine's `test-support` feature and bench. Reason: the bench is the only benchmark of the model loop. Revisit: if the bench moves to the facade.
   - A separate later plan for the splits, adding all six markers first, or splitting before fixing. Reason: the user wants the splits in this batch; markers first would fail the build at once; and fixes mixed into moved code are hard to review. Revisit: never.
   - `impl Drop for Cancelled`, with a re-bless in the types change. Reason: it adds a public trait impl the user has not approved and a listing change outside File and public API changes, for no behavior the private field lacks. Revisit: if the user wants the impl public, add it to File and public API changes and re-bless in the types change.
 - Assumptions, risks, and notes:
@@ -485,26 +485,26 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. CI adds `cargo nextest run --locked -p workshop-workspace --all-features`, `cargo nextest run --locked -p workshop-server --features headless`, the gateway process-ownership race tests, and the UI `npm test` runs. The workspace run includes `build-xtask`, the structural checks.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features`, `cargo deny check`, and `cargo audit` (CI's `supply-chain` job; `cargo-deny` 0.20.2 and `cargo-audit` 0.22.2 are installed locally). Per-package pattern for scoped runs: `cargo clippy --locked -p <package> --all-targets --all-features -- -D warnings`. The UI typechecks (`npm run typecheck --workspaces --if-present` from `crates/workshop`, `npm run typecheck` from `crates/gateway/config-ui/ui`) apply only to UI changes. `.githooks/` holds a pre-commit hook (the formatter check) and a pre-push hook (the headless check, the workspace clippy, `cargo deny check`); neither is installed in this clone, since `core.hooksPath` is unset.
 - Formatter check command: `cargo fmt --all --check` (`rustfmt.toml` sets `style_edition = "2024"`). No UI formatter or JS linter is configured.
-- Docs command: with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the facades alone with default features, `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`, then the engine's private items, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. These are CI's `docs` job; CI's `check-workshop` job also builds `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Per-package pattern: `cargo doc --locked --no-deps --all-features -p <package>` under the same flag. The facade surface check is `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`, installed locally), compared against the committed `crates/promptforge/public-api.txt`; `cargo +nightly-2026-09-05 xtask api --bless` rewrites it. User guide: `cargo xtask site --books-only`; the combined guide regenerates with `cargo run --locked -q -p build-user-guide`.
+- Docs command: with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the facades alone with default features, `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`, then the Engine's private items, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. These are CI's `docs` job; CI's `check-workshop` job also builds `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Per-package pattern: `cargo doc --locked --no-deps --all-features -p <package>` under the same flag. The facade surface check is `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`, installed locally), compared against the committed `crates/promptforge/public-api.txt`; `cargo +nightly-2026-09-05 xtask api --bless` rewrites it. User guide: `cargo xtask site --books-only`; the combined guide regenerates with `cargo run --locked -q -p build-user-guide`.
 - Test placement and naming conventions:
   - Unit tests sit in a sibling file `<module>-tests.rs`, wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;` (for example `engine/src/execute/requirements-tests.rs`, `lua/src/prelude-tests.rs`, `types/src/event-tests.rs`, `model-client/src/client/stream-tests.rs`). Small modules keep an inline `#[cfg(test)] mod tests {}` at the bottom (`engine/src/execute/config-limits.rs`, `parser/src/list.rs`), and `promptforge-vfs` uses inline blocks throughout (`vfs/src/host.rs` from line 707, whose helper `make_dir_link` makes a junction on Windows through `mklink /J` and a symlink on Unix). VFS tests return `Result<(), VfsError>`.
   - `promptforge-engine`'s behavior suite is `src/execute/tests/`, declared by `execute/tests.rs`: one file per area (`model_task_notices.rs`, `model_tasks.rs`, `local_tools.rs`, `models_loop_compactors.rs`, `tool_loop.rs`, `run_termination.rs`, and others) plus `scheduler/` (`concurrency.rs`, `walk.rs`, `failures.rs`, `fanout.rs`, `live_h1.rs`, `store_gate.rs`) and `suite/`. These tests drive whole runs through the `test_support` drivers against canned or scripted models. `cancel_during_in_flight_tool_call_returns_promptly` (`tool_loop.rs`, line 470) is the mid-run cancel pattern: a multi-thread tokio test, `TokioDriver::cancel_handle`, a cancel after 100 ms, and an `Err(crate::Error::Interrupted)` assertion within 5 seconds. `engine/tests/prompts/` holds fixture prompts, not a test target.
   - `promptforge-lua` keeps one large `src/tests.rs` beside its `<module>-tests.rs` siblings, `protocol/tests/`, and `tools/tests.rs`; shared helpers sit in `tests-recording.rs`. Its cancellation tests, `long_running_lua_block_cancels_cooperatively` and `a_pre_cancelled_run_aborts_a_tight_loop_promptly`, are in `tests.rs`. `prelude-tests.rs`'s `section_vm_with_var` builds a section VM with the scheduler control globals and coroutine shims installed, the setup under which the shim's `pcall` and `xpcall` replacements are live.
-  - Integration targets: `tests/suite/` in the `promptforge` and `harness` facades, `tests/it/` in harness and workshop crates. Each `main.rs` opens with `#![expect(clippy::expect_used, clippy::unwrap_used, reason = ...)]`.
+  - Integration targets: `tests/suite/` in the `promptforge` and `harness` facades, `tests/it/` in Harness and workshop crates. Each `main.rs` opens with `#![expect(clippy::expect_used, clippy::unwrap_used, reason = ...)]`.
   - Shared fixtures live in `test_support` modules behind a `test-support` feature (engine, lua, parser, runner, sessions) or a `test-fixtures` feature (gateway and workshop crates).
   - Test functions are snake_case sentences stating the behavior, such as `a_rooted_backend_rejects_links_that_escape_the_mount_root`. `clippy.toml` allows `unwrap` and `expect` in tests; the workspace lints deny both elsewhere.
   - Benches: `engine/benches/models_loop.rs` and `lua/benches/surface.rs`, both requiring `test-support`. Both are under 500 lines.
 - Directory map:
   - `crates/`: every Rust crate and UI package. Its root is the public layer: the `promptforge` facade (`src/`, `tests/suite/`, `public-api.txt`), the `harness` facade, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS, not a crate), the `build-*` tooling crates, and `workspace-hack`.
   - `crates/promptforge-internal/`: a manifestless container holding `engine` (`src/execute/` with `run/`, `scheduler/`, and `tests/`, `src/test_support/` with `recording/`, `src/lua/`, `src/model/`, `src/lib.md` as the crate doc, `benches/`, `tests/prompts/`), `lua` (the section VM, the Lua shims `__impl_coro.lua`, `__impl_fanout.lua`, `__impl_messages.lua`, `__impl_store.lua`, `__impl_tasks.lua`, plus `protocol/` and `tools/`), `vfs` (a flat `src/`, std only), `model-client` (`client/`, `model/`), `types` (`tools/`), and `parser` (`contract/`). Each crate has `AGENTS.md`, `Cargo.toml`, and `README.md`; the container's `README.md` describes the six.
-  - `crates/harness-internal/`, `crates/workshop/`, and `crates/gateway/`: the other family containers (the harness runner, models, capabilities, log, sessions, and web crates; the Workshop desktop app, server, and UI npm workspaces; the gateway app and its subsystems, including the nested `stt/`).
+  - `crates/harness-internal/`, `crates/workshop/`, and `crates/gateway/`: the other family containers (the Harness runner, models, capabilities, log, sessions, and web crates; the Workshop desktop app, server, and UI npm workspaces; the gateway app and its subsystems, including the nested `stt/`).
   - `guide/`: user guide chapter sources (`src/language/` among them), mdBook books, and the combined `guide/promptforge-language-guide.md`. `prompts/`: sample prompts. `tools/`: Node and Python maintenance scripts.
   - `vibe/`: `archdoc.md`, dated plan and run records (`YYYY-MM-DD-N-slug.md`), reference notes, and a gitignored `scratch/`.
   - `.github/workflows/ci.yml` (jobs `fmt`, `clippy`, `test`, `docs`, `check-workshop`, `check-workshop-linux`, `ui`, `supply-chain`, `api-surface`, and the aggregate `ci-green`), `.githooks/`, `.config/nextest.toml`, `.cargo/config.toml`, and at the root `Cargo.toml` (an explicit container member list; `default-members` is the gateway app), `rust-toolchain.toml` (stable), `clippy.toml`, `rustfmt.toml`, and `deny.toml`.
 - Component boundaries:
-  - `promptforge` is a facade of single-item re-exports over `crates/promptforge-internal/*` and the only promptforge crate that code outside the family may name. `promptforge-*` crates depend on no gateway, workshop, or harness crate; an internal crate may list `promptforge` as a dev-dependency only so its doc examples compile.
-  - Inside the container dependencies run one way: `promptforge-vfs` depends on nothing, which its manifest test enforces; `promptforge-types` depends on no sibling; `promptforge-model-client` on types; `promptforge-lua` on model-client, types, and vfs; `promptforge-parser` on lua and types; `promptforge-engine` on all five. The engine performs no I/O and names tokio only behind `test-support`.
-  - `harness` fronts `crates/harness-internal/*`, whose crates depend only on `promptforge`. Workshop crates may name `harness`, `promptforge`, the gateway public pair, and `shared-*`. Gateway private crates depend on no promptforge, harness, or workshop crate. `shared-*` crates depend on no product crate.
+  - `promptforge` is a facade of single-item re-exports over `crates/promptforge-internal/*` and the only promptforge crate that code outside the family may name. `promptforge-*` crates depend on no gateway, workshop, or Harness crate; an internal crate may list `promptforge` as a dev-dependency only so its doc examples compile.
+  - Inside the container dependencies run one way: `promptforge-vfs` depends on nothing, which its manifest test enforces; `promptforge-types` depends on no sibling; `promptforge-model-client` on types; `promptforge-lua` on model-client, types, and vfs; `promptforge-parser` on lua and types; `promptforge-engine` on all five. The Engine performs no I/O and names tokio only behind `test-support`.
+  - `harness` fronts `crates/harness-internal/*`, whose crates depend only on `promptforge`. Workshop crates may name `harness`, `promptforge`, the gateway public pair, and `shared-*`. Gateway private crates depend on no promptforge, Harness, or workshop crate. `shared-*` crates depend on no product crate.
   - `cargo test -p build-xtask` enforces the topology, the `## Invariants` markers in workshop-* and harness-* crates, lint inheritance, and the 500-line ceiling in marker crates. None of the six internal crates carries the marker until this plan's split steps add it. `cargo xtask api --check` enforces the facade surface.
 - Conventions summary:
   - Rust 2024 edition on the stable toolchain. Workspace lints every member inherits: `unsafe_code = "forbid"`; `missing_docs`, `missing_debug_implementations`, and `unreachable_pub` warn; clippy `all` and `pedantic` denied; `unwrap_used` and `expect_used` denied; broken and private intra-doc links denied, so removing an item a doc comment links to fails the docs build.
@@ -526,23 +526,23 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Found during decomposition and built into the steps:
   - `Cancelled` is on the facade and the listing renders `Drop` impls, so Step 1 deregisters through a private field and leaves the listing unchanged (see the Decision Record).
   - `crates/promptforge/src/model.md` also says, at lines 569 and 601, that the two constructors cannot fail. Step 2 corrects both.
-  - Narrowing the engine's `model` and `parser` modules sets off `unreachable_pub`, `unused_imports`, and private intra-doc link failures under the `-D warnings` gates. Step 10 resolves them.
+  - Narrowing the Engine's `model` and `parser` modules sets off `unreachable_pub`, `unused_imports`, and private intra-doc link failures under the `-D warnings` gates. Step 10 resolves them.
 - Component order, with the reason for each placement. Components 9 to 12 do not depend on one another, because a split changes no public path, so they keep the plan's order:
   1. **Types** (`types`), Step 1 - first. `promptforge-types` depends on no sibling, and no other step needs anything from it, so it keeps the plan's place.
-  2. **Model client** (`model-client`), Step 2 - its constructor callers and `ClientError` wildcard arms sit in engine, Lua, `harness-models`, and facade files, so it lands before any of those crates is split.
+  2. **Model client** (`model-client`), Step 2 - its constructor callers and `ClientError` wildcard arms sit in Engine, Lua, `harness-models`, and facade files, so it lands before any of those crates is split.
   3. **Lua sandbox** (`lua-cancel`, `lua-cleanup`), Steps 3 and 4 - `promptforge-lua` sits on types and model-client but needs nothing from Steps 1 and 2, so it keeps the plan's place.
   4. **VFS safety** (`vfs-host`, `vfs-claims`), Steps 5 and 6 - `promptforge-vfs` depends on nothing, so no earlier step feeds it. It keeps the plan's place, ahead of Step 7, which also edits `handle.rs`.
-  5. **Dead API removal** (`dead-api`), Step 7 - it edits the VFS crate, the engine, and the facade, and depends on no other step. It keeps the plan's place after the VFS fixes and is the second of the two listing changes.
-  6. **Parser validation** (`parser-frontmatter`, `parser-structure`), Steps 8 and 9 - `promptforge-parser` sits on types and lua and needs nothing from Steps 1 to 7. It lands before the engine fixes, so the engine suite in Steps 10 and 11 parses its fixtures through the fixed parser.
+  5. **Dead API removal** (`dead-api`), Step 7 - it edits the VFS crate, the Engine, and the facade, and depends on no other step. It keeps the plan's place after the VFS fixes and is the second of the two listing changes.
+  6. **Parser validation** (`parser-frontmatter`, `parser-structure`), Steps 8 and 9 - `promptforge-parser` sits on types and lua and needs nothing from Steps 1 to 7. It lands before the Engine fixes, so the Engine suite in Steps 10 and 11 parses its fixtures through the fixed parser.
   7. **Engine fixes** (`engine-surface`, `engine-scheduler`), Steps 10 and 11 - the engine depends on all five siblings, so its fixes come last among the crate fixes. Step 10 also adds a test to the Lua crate's `prelude-tests.rs`.
-  8. **Housekeeping** (`housekeeping`), Step 12 - last fix. Its comment sweep reaches five of the six crates, including files earlier steps edit, such as the engine's `src/error.rs` (Step 2), so it follows every fix and precedes every split, and each file is split once.
+  8. **Housekeeping** (`housekeeping`), Step 12 - last fix. Its comment sweep reaches five of the six crates, including files earlier steps edit, such as the Engine's `src/error.rs` (Step 2), so it follows every fix and precedes every split, and each file is split once.
   9. **Small-crate ceiling** (`split-small`), Step 13 - first split, after every fix. Types, model client, and parser hold 4,405 oversized lines together, few enough for one step with their three markers.
   10. **Lua ceiling** (`split-lua-tests`, `split-lua-rest`), Steps 14 and 15.
   11. **Engine ceiling** (`split-engine-source`, `split-engine-exec-flow`, `split-engine-scheduler-tests`, `split-engine-other-tests`), Steps 16 to 19.
   12. **VFS ceiling** (`split-vfs-handle`, `split-vfs-rest`), Steps 20 and 21 - last, because `handle.rs` is the riskiest split and Step 21 runs the full exit gate.
 - Standing rules for every step. They are for the session that runs the plan. Each sub-agent reads only its own contract ranges and its step, so every rule a step needs also appears in Technical Design, the Project Survey, or the step itself, and each step's Read line names only those.
   - Each step is one commit holding its code, docs, and tests, and leaves every gate it runs passing.
-  - Line numbers are at `a05d5cbd`. Steps shift lines in files later steps edit, such as the engine's `src/error.rs` (Steps 2 and 12), `vfs/src/handle.rs` (Steps 6 and 7), and the facade's `lib.md` (Steps 7 and 9), so re-locate each reference by the function, item, or heading it names.
+  - Line numbers are at `a05d5cbd`. Steps shift lines in files later steps edit, such as the Engine's `src/error.rs` (Steps 2 and 12), `vfs/src/handle.rs` (Steps 6 and 7), and the facade's `lib.md` (Steps 7 and 9), so re-locate each reference by the function, item, or heading it names.
   - Verification: on its own, the verifier runs the focused tests and the touched packages' nextest and doctest suites, adds the formatter and clippy only at a component's last step, and runs docs and the API check only in Step 21's full run. It also runs every command a step's Tests line names, as written. So each step ends its Tests line with a Gate commands list holding every other check it needs:
     - the formatter check and clippy for each touched package, so no step's lint or format fix lands in a later commit;
     - the suites of untouched packages the step can break;
@@ -578,9 +578,9 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `event-tests.rs`: every `Event` variant round-trips (nine do today, lines 47 to 143), and an exhaustive `match` maps every payload-free variant to its lifecycle constant from `event-lifecycle.rs`, so a new variant fails to compile until it is mapped.
   - Focused command: `cargo nextest run --locked -p promptforge-types --all-features`.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-types --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`; `cargo +nightly-2026-09-05 xtask api --check`.
-- Verify: `promptforge-types`, plus the engine suite, whose cancellation tests await `Cancelled` futures. `xtask api --check` passing with no listing change confirms the `Drop` placement.
+- Verify: `promptforge-types`, plus the Engine suite, whose cancellation tests await `Cancelled` futures. `xtask api --check` passing with no listing change confirms the `Drop` placement.
 - Commit: one commit with the three items and their tests.
-- Done when: the new tests pass, the types and engine suites pass, and the listing is unchanged.
+- Done when: the new tests pass, the types and Engine suites pass, and the listing is unchanged.
 
 </step-1>
 
@@ -589,7 +589,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 ### Step 2: Validate Harness-built completions, fix the SSE scan, and mark `ClientError` non-exhaustive [completed]
 
 - Component: Model client
-- Piece: the `promptforge-model-client` fixes, built jointly in one commit. The validating constructors must land with every caller they break, and `#[non_exhaustive]` with every wildcard arm it forces. One test set covers the whole item: the crate's unit tests with the engine tests and facade doctests that build completions.
+- Piece: the `promptforge-model-client` fixes, built jointly in one commit. The validating constructors must land with every caller they break, and `#[non_exhaustive]` with every wildcard arm it forces. One test set covers the whole item: the crate's unit tests with the Engine tests and facade doctests that build completions.
 - Todo: `model-client`
 - Depends on: nothing
 - Read: Technical Design, the `promptforge-model-client` bullets and File and public API changes; Project Survey.
@@ -633,7 +633,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-lua --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`.
 - Verify: `promptforge-lua`, plus the component test pattern for `promptforge-engine`, whose suite runs every section through these shims.
 - Commit: one commit with the two shim changes and the tests.
-- Done when: the looping-handler test ends as interrupted instead of running into the nextest timeout, and the Lua and engine suites pass.
+- Done when: the looping-handler test ends as interrupted instead of running into the nextest timeout, and the Lua and Engine suites pass.
 
 </step-3>
 
@@ -655,12 +655,12 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Tests:
   - `var.k = nil` removes `k` from `var` and from its snapshot. This pins the traced path, which already removes the key.
   - `the_models_namespace_has_no_bind` (`lua/src/models-tests.rs`, lines 70 to 84) no longer expects `install_models` alone to define `models.infer`.
-  - Every engine test that calls `models.infer` passes unchanged: about 130 call sites in 23 files, including `execute/tests/live_infer.rs` and `execute/tests/scheduler/live_h1.rs`. This is the guard that `models.infer` itself survives.
+  - Every Engine test that calls `models.infer` passes unchanged: about 130 call sites in 23 files, including `execute/tests/live_infer.rs` and `execute/tests/scheduler/live_h1.rs`. This is the guard that `models.infer` itself survives.
   - Focused commands: `cargo nextest run --locked -p promptforge-lua --all-features` and `cargo nextest run --locked -p promptforge-engine --all-features`.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-lua -p promptforge-engine --all-targets --all-features -- -D warnings`.
 - Verify: `promptforge-lua` and `promptforge-engine`.
 - Commit: one commit with the deletions, the doc corrections, and the tests.
-- Done when: the Lua and engine suites pass, and `ModelsInferHook`, `call_models_infer_hook`, and `clear_infer_hook` appear nowhere under `crates/`.
+- Done when: the Lua and Engine suites pass, and `ModelsInferHook`, `call_models_infer_hook`, and `clear_infer_hook` appear nowhere under `crates/`.
 
 </step-4>
 
@@ -712,7 +712,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-vfs --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`.
 - Verify: `promptforge-vfs`, plus the component test pattern for `promptforge-engine`, since the new checks can turn a passing concurrent prompt into a claims conflict.
 - Commit: one commit with the three checks and the tests.
-- Done when: each conflicting pair conflicts in both orders, the non-conflicting and joined cases pass, and the VFS and engine suites pass.
+- Done when: each conflicting pair conflicts in both orders, the non-conflicting and joined cases pass, and the VFS and Engine suites pass.
 
 </step-6>
 
@@ -732,7 +732,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `crates/promptforge-internal/engine/src/execute/environment.rs`: remove the `max_depth` field, default, setter, and `Debug` entry (lines 34, 51, 61 to 62, and 144), and drop every test call of the setter. The call depth cap stays the `MAX_CALL_DEPTH` constant in `scheduler/tasks.rs`.
   - `crates/promptforge/src/lib.md`: remove the `max_depth` text (line 398).
   - Run `cargo +nightly-2026-09-05 xtask api --bless`. The diff removes only the grep items (lines 74 to 76, 185 to 187, 310 to 312, 645, 683, 1290 to 1300, and 1310) and `Environment::max_depth` (line 420).
-- Tests: none added. The grep tests leave with the code, and the remaining VFS, engine, and facade suites, the docs builds that deny broken intra-doc links, and the listing check cover the removals.
+- Tests: none added. The grep tests leave with the code, and the remaining VFS, Engine, and facade suites, the docs builds that deny broken intra-doc links, and the listing check cover the removals.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-vfs -p promptforge-engine -p promptforge`, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, and `cargo doc --locked --no-deps -p promptforge`; `cargo +nightly-2026-09-05 xtask api --check`.
 - Verify: the workspace clippy command without the workshop trio, which compiles every crate that could name a removed item; the component test pattern for `promptforge-vfs`, `promptforge-engine`, and `promptforge`; the docs commands for the same three; `xtask api --check` against the re-blessed listing.
 - Commit: one commit with both removals, their docs, and the re-blessed listing.
@@ -756,7 +756,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `parser/src/parse.rs`: call the duplicate check, then the slot check, next to the existing alias check (lines 93 to 94), after the frontmatter is decoded.
   - `guide/src/language/12-tools.md`: "Declaring capabilities" says each capability is declared once, and it and "Tool slots and Tool objects" say a tool slot requires its capability, so an optional capability cannot back one. `guide/src/language/02-file-structure.md`, "Frontmatter rules and errors", gains both refusals.
   - Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`.
-  - Nothing in the tree lists a capability twice or binds a slot to an optional capability, so no prompt, fixture, or guide example changes, and the engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) stays.
+  - Nothing in the tree lists a capability twice or binds a slot to an optional capability, so no prompt, fixture, or guide example changes, and the Engine's run-time refusal in `crates/promptforge-internal/engine/src/execute/fill.rs` (lines 42 to 54) stays.
 - Tests, in `parser/src/contract/tests.rs`:
   - the slot refusal with its exact message, and a prompt that declares an optional capability without a slot still parses;
   - the duplicate refusal with its exact message for two plain entries, two optional ones, one of each, and two map entries that differ only in `config`; a duplicate that also backs a slot reports the duplicate; a list of distinct capabilities still parses.
@@ -764,7 +764,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-parser --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`; `cargo run --locked -q -p build-user-guide`, then `git diff --exit-code -- guide/promptforge-language-guide.md`.
 - Verify: `promptforge-parser`, plus the component test pattern for `promptforge-engine`, whose suite parses every fixture prompt.
 - Commit: one commit with the checks, the guide text, the regenerated combined guide, and the tests.
-- Done when: the new tests pass, the parser and engine suites pass, and rerunning `build-user-guide` leaves no diff.
+- Done when: the new tests pass, the parser and Engine suites pass, and rerunning `build-user-guide` leaves no diff.
 
 </step-8>
 
@@ -791,21 +791,21 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-parser --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-parser -p promptforge` and `cargo doc --locked --no-deps -p promptforge`.
 - Verify: `promptforge-parser`, plus the component test pattern for `promptforge-engine` and `promptforge` and the facade docs commands, since the facade's `lib.md` changed.
 - Commit: one commit with the three code fixes, the two span docs, and the tests.
-- Done when: the new tests pass and the parser, engine, and facade suites pass.
+- Done when: the new tests pass and the parser, Engine, and facade suites pass.
 
 </step-9>
 
 <step-10>
 
-### Step 10: Narrow the engine's unused public surface and fill two test gaps [completed]
+### Step 10: Narrow the Engine's unused public surface and fill two test gaps [completed]
 
 - Component: Engine fixes
 - Piece: the surface narrowing with its test gaps, the first of two pieces built sequentially. Both pieces edit `src/lib.rs`, and their tests are separate.
 - Todo: `engine-surface`
 - Depends on: nothing
-- Read: Technical Design, the engine Surface and `Cargo.toml` bullets; Project Survey.
+- Read: Technical Design, the Engine Surface and `Cargo.toml` bullets; Project Survey.
 - Build, under `crates/promptforge-internal/engine/`:
-  - `src/lib.rs`: `pub mod model` and `pub mod parser` (lines 8 and 9) become `pub(crate)`. The root re-exports of `CompletionError`, `CompletionErrorKind`, `ParseError`, `ParseErrorKind`, `Prompt`, and `promptforge_version` (lines 29 and 30) stop being public: `pub(crate) use` where engine code imports them through the crate root, deleted otherwise. `StoreOp` and `StoreOutcome` leave the public `pub use crate::execute::{..}` list (lines 22 to 28).
+  - `src/lib.rs`: `pub mod model` and `pub mod parser` (lines 8 and 9) become `pub(crate)`. The root re-exports of `CompletionError`, `CompletionErrorKind`, `ParseError`, `ParseErrorKind`, `Prompt`, and `promptforge_version` (lines 29 and 30) stop being public: `pub(crate) use` where Engine code imports them through the crate root, deleted otherwise. `StoreOp` and `StoreOutcome` leave the public `pub use crate::execute::{..}` list (lines 22 to 28).
   - `src/execute.rs` (line 71): `pub use promptforge_lua::{StoreOp, StoreOutcome}` becomes `pub(crate) use`, and its comment (lines 68 to 70) stops saying the Harness names them here. `perform_store_op` stays public, and the facade already takes both types from `promptforge_lua` (`crates/promptforge/src/lib.rs`, lines 140 to 142).
   - Lint fallout: once the modules are `pub(crate)`, `unreachable_pub` reports the `pub use` lists in `src/model.rs` (lines 23 to 35) and `src/parser.rs` (lines 23 to 29). Each becomes `pub(crate) use`, and any name `unused_imports` then reports is deleted.
   - Doc fallout: the crate docs in `src/lib.md` link `parser::Prompt`, `parser`, `model`, `promptforge_version`, and `Prompt` (lines 3, 5, and 9), which become private intra-doc links that the docs gate refuses. Each is pointed at its home crate, such as `promptforge_parser::Prompt`, or unlinked, and so is any other public doc link into the narrowed items that the docs gate reports.
@@ -817,9 +817,9 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `crates/promptforge-internal/lua/src/prelude-tests.rs`: a capability prelude global that collides with `tools`, `store`, or `models` is refused.
   - Focused commands: `cargo nextest run --locked -p promptforge-engine --all-features requirements` and `cargo nextest run --locked -p promptforge-lua --all-features prelude`.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine -p promptforge-lua -p promptforge --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-engine` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo +nightly-2026-09-05 xtask api --check`.
-- Verify: `promptforge-engine`, whose `--all-targets` clippy run builds the bench, and `promptforge-lua`; the facade's clippy build, which compiles it against the narrowed engine; the engine's docs builds; `xtask api --check` with no listing change.
+- Verify: `promptforge-engine`, whose `--all-targets` clippy run builds the bench, and `promptforge-lua`; the facade's clippy build, which compiles it against the narrowed Engine; the Engine's docs builds; `xtask api --check` with no listing change.
 - Commit: one commit with the narrowing, its lint and doc fallout, the bench and doctest paths, the `Cargo.toml` comment, and the two tests.
-- Done when: nothing outside the engine names the narrowed items, the listing is unchanged, and every listed gate passes.
+- Done when: nothing outside the Engine names the narrowed items, the listing is unchanged, and every listed gate passes.
 
 </step-10>
 
@@ -831,7 +831,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Piece: the scheduler fixes, the second piece, built after Step 10, which also edits `src/lib.rs`.
 - Todo: `engine-scheduler`
 - Depends on: nothing
-- Read: Technical Design, the engine `entered`, `start_live_h1`, `drive.rs`, and `fanout.rs` bullets and the Renamed item under File and public API changes; Project Survey.
+- Read: Technical Design, the Engine `entered`, `start_live_h1`, `drive.rs`, and `fanout.rs` bullets and the Renamed item under File and public API changes; Project Survey.
 - Build, under `crates/promptforge-internal/engine/src/`:
   - `execute/scheduler/chain.rs` (line 77) and `execute/scheduler/h1.rs` (line 64): initialize `entered` from the section at the chain's start index, falling back to the prompt title when the index is past the slice.
   - `start_live_h1` (`h1.rs`, lines 48 to 81) and `start_chain` (`chain.rs`, lines 78 to 111) build their `Chain` through one shared constructor.
@@ -842,7 +842,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`.
 - Verify: `promptforge-engine`, including its private-items docs build, since the rename moves intra-doc link targets.
 - Commit: one commit with the four scheduler changes and the test.
-- Done when: the new test passes, the engine suite passes, and no `crate::fanout` path remains.
+- Done when: the new test passes, the Engine suite passes, and no `crate::fanout` path remains.
 
 </step-11>
 
@@ -860,7 +860,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - `crates/build-xtask/src/api/`: move `listing-compact.rs` to `listing/compact.rs`, `listing-tests.rs` to `listing/tests.rs`, and `listing-compact-tests.rs` to `listing/compact-tests.rs`. `listing.rs` (lines 101 to 106) drops its `#[path]` attributes, and `compact.rs` wires its tests with `#[path = "compact-tests.rs"]`, as `run/effect.rs` wires `effect-tests.rs`.
   - `crates/promptforge-internal/vfs/src/lib.rs` (lines 172 to 211): `is_dependency_table` and `the_manifest_declares_no_dependencies` also catch `[target.<cfg>.dev-dependencies]`, `[target.<cfg>.build-dependencies]`, and `[target.<cfg>.dependencies.<name>]` tables.
   - The comment sweep across the six crates: restate audit tags such as `F3`, and history wording such as "legacy", "used to", "retired", and "formerly", as present-tense constraints, or delete them, per the comment rule in `AGENTS.md`.
-    - Known sites: the engine's `src/error.rs` (lines 97, 948, and 974), `src/test_support/recording.rs` (line 36), `src/test_support/tokio_driver.rs` (line 36), and `src/execute/tests/scheduler/walk.rs`, and `model-client/src/detail.rs` (`(F7)` in the `tool_schema_new` doc).
+    - Known sites: the Engine's `src/error.rs` (lines 97, 948, and 974), `src/test_support/recording.rs` (line 36), `src/test_support/tokio_driver.rs` (line 36), and `src/execute/tests/scheduler/walk.rs`, and `model-client/src/detail.rs` (`(F7)` in the `tool_schema_new` doc).
     - Find the rest with `rg -n -g '*.rs' '(//|//!|///).*(\bF\d+\b|legacy|used to|retired|formerly)' crates/promptforge-internal`. At `a05d5cbd` it matched about 140 lines in 40 files, in every crate except `promptforge-vfs`, and 43 of those lines, in 19 files, hold audit tags. A match that is already present-tense prose, such as "the key used to look up", stays.
 - Tests: fixture manifests using each newly caught form are refused by the manifest test. The folds and the sweep add no test, and the moved `build-xtask` tests pass unchanged.
   - Focused commands: `cargo test -p build-xtask` and `cargo nextest run --locked -p promptforge-vfs --all-features manifest`.
@@ -942,7 +942,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 ### Step 16: Split the `promptforge-engine` source files to the ceiling [completed]
 
 - Component: Engine ceiling
-- Piece: the engine's source files, the first of four pieces built sequentially, each sized for one sub-agent: the source files (3,556 lines at `a05d5cbd`), `exec_flow.rs` (2,641), the scheduler tests (4,237), and the other tests (4,393). The engine's 14,827 oversized lines do not fit one step, and the marker waits for the last piece.
+- Piece: the Engine's source files, the first of four pieces built sequentially, each sized for one sub-agent: the source files (3,556 lines at `a05d5cbd`), `exec_flow.rs` (2,641), the scheduler tests (4,237), and the other tests (4,393). The Engine's 14,827 oversized lines do not fit one step, and the marker waits for the last piece.
 - Todo: `split-engine-source`
 - Depends on: Steps 2, 4, 7, 10, 11, and 12, every fix that edits `promptforge-engine`.
 - Read: Technical Design, Structure and Split method; Project Survey.
@@ -955,7 +955,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-engine` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo +nightly-2026-09-05 xtask api --check`.
 - Verify: `promptforge-engine`, including its private-items docs build.
 - Commit: one commit with the moves.
-- Done when: every file cut from these five is at most 500 lines, the test count holds, and the engine suite passes.
+- Done when: every file cut from these five is at most 500 lines, the test count holds, and the Engine suite passes.
 
 </step-16>
 
@@ -976,7 +976,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine --all-targets --all-features -- -D warnings`.
 - Verify: `promptforge-engine`.
 - Commit: one commit with the move.
-- Done when: every file cut from `exec_flow.rs` is at most 500 lines, the test count holds, and the engine suite passes.
+- Done when: every file cut from `exec_flow.rs` is at most 500 lines, the test count holds, and the Engine suite passes.
 
 </step-17>
 
@@ -997,7 +997,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine --all-targets --all-features -- -D warnings`.
 - Verify: `promptforge-engine`.
 - Commit: one commit with the moves.
-- Done when: every scheduler test file is at most 500 lines, the test count holds, and the engine suite passes.
+- Done when: every scheduler test file is at most 500 lines, the test count holds, and the Engine suite passes.
 
 </step-18>
 
@@ -1012,7 +1012,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
 - Read: Technical Design, Structure, Split method, and Enforcement; Project Survey.
 - Build, under `crates/promptforge-internal/engine/src/`:
   - Count, and read the crate's test count, first.
-  - Under `execute/tests/`: `model_and_reply.rs` (788 lines at `a05d5cbd`), `tasks.rs` (727), `happens_before.rs` (670), `model_task_notices.rs` (594), `tool_call_arm.rs` (547), `context.rs` (542), and `debug_and_counts.rs` (525) split by their topic groups. Any other engine file the count finds over 500 joins this step.
+  - Under `execute/tests/`: `model_and_reply.rs` (788 lines at `a05d5cbd`), `tasks.rs` (727), `happens_before.rs` (670), `model_task_notices.rs` (594), `tool_call_arm.rs` (547), `context.rs` (542), and `debug_and_counts.rs` (525) split by their topic groups. Any other Engine file the count finds over 500 joins this step.
   - Marker: `//!` lines in `lib.rs` beside `#![doc = include_str!("lib.md")]`: may depend on `promptforge-types`, `promptforge-lua`, `promptforge-parser`, `promptforge-vfs`, and `promptforge-model-client`.
 - Tests: none added. The test count after is no lower, and the coder's return states both counts.
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-engine --all-targets --all-features -- -D warnings`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-engine` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`; `cargo test -p build-xtask`.
@@ -1039,7 +1039,7 @@ Every change is the smallest one that satisfies its finding. Where a finding's f
   - Gate commands: `cargo fmt --all --check`; `cargo clippy --locked -p promptforge-vfs --all-targets --all-features -- -D warnings`; `cargo nextest run --locked -p promptforge-engine --all-features`; under the survey's `RUSTDOCFLAGS` setting, cleared afterwards, `cargo doc --locked --no-deps --all-features -p promptforge-vfs`; `cargo +nightly-2026-09-05 xtask api --check`.
 - Verify: `promptforge-vfs`, plus the component test pattern for `promptforge-engine`, which runs every store operation through the split ledger.
 - Commit: one commit with the move.
-- Done when: every file cut from `handle.rs` is at most 500 lines, the test count holds, and the VFS and engine suites pass.
+- Done when: every file cut from `handle.rs` is at most 500 lines, the test count holds, and the VFS and Engine suites pass.
 
 </step-20>
 

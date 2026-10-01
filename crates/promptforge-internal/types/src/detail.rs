@@ -1,4 +1,4 @@
-//! Operations on the identity types that only the engine performs.
+//! Operations on the identity types that only the Engine performs.
 //!
 //! The `promptforge` facade never re-exports this module, so only Engine
 //! crates reach it. Each function builds an identity without validating

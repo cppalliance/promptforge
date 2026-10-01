@@ -1,5 +1,5 @@
 //! The agent socket's framing helpers: the pure render functions that
-//! map the harness's wait and delta vocabulary onto Workshop's wire
+//! map the Harness's wait and delta vocabulary onto Workshop's wire
 //! shapes, and the durable-event framing that drains a session's
 //! transcript past the per-client cursor. Split out of the `socket`
 //! module so each stays under the 500-line ceiling.
@@ -13,8 +13,8 @@ use super::socket::Attached;
 use crate::agents::wire::{AgentDeltaFrame, AgentDeltaKind, AgentEventFrame};
 use crate::websocket::send_frame;
 
-/// Renders a harness wait frame as the protocol's input frame: the one
-/// place the harness's wait vocabulary meets Workshop's wire shape.
+/// Renders a Harness wait frame as the protocol's input frame: the one
+/// place the Harness's wait vocabulary meets Workshop's wire shape.
 pub(crate) fn input_frame(frame: WaitFrame) -> InputFrame {
     match frame {
         WaitFrame::Required { token } => InputFrame::Required { token },
@@ -22,7 +22,7 @@ pub(crate) fn input_frame(frame: WaitFrame) -> InputFrame {
     }
 }
 
-/// Renders a harness delta as the protocol's delta frame, the reply stamp
+/// Renders a Harness delta as the protocol's delta frame, the reply stamp
 /// passed through; `None` for a side channel the wire has no label for,
 /// dropped like a lagged delta because the completed-reply event repairs
 /// the transcript.

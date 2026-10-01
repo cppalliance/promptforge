@@ -24,7 +24,7 @@
 //! timer fired first; `nothing to wait for` when the model has no live
 //! task, no timeout, and no notice pending; a plain sleep ending in
 //! `slept N seconds` when only a timeout was given. Every shape is the
-//! engine's own text, so it resumes trusted.
+//! Engine's own text, so it resumes trusted.
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use serde_json::Value;

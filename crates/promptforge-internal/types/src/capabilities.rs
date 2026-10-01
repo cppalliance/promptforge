@@ -1,19 +1,19 @@
 //! The capability identity vocabulary: [`CapabilityId`] and its parse
 //! error, plus [`Prelude`], the Lua source an activated capability hands
-//! the engine.
+//! the Engine.
 //!
 //! A capability is the activation unit: code that runs at run setup and
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`GlobalName`] - kind is encoded by arity, so a capability id is
 //! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. The engine knows capabilities by identity alone:
+//! `namespace/pack/name`. The Engine knows capabilities by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
 //! records the conflicts of the capability that contributed it. The
 //! activation contract - the `Capability` trait, the services it is handed,
-//! and the contribution it returns - is the harness's, in
-//! `harness-capabilities`; the engine never activates anything.
+//! and the contribution it returns - is the Harness's, in
+//! `harness-capabilities`; the Engine never activates anything.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
@@ -218,7 +218,7 @@ impl CapabilityIdError {
 /// of a run.
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
-/// reach the capability's own tools through `tools.call`. The engine runs
+/// reach the capability's own tools through `tools.call`. The Engine runs
 /// it as data: it never learns what the capability is, only its id, which
 /// names the prelude in tracebacks and error messages.
 #[derive(Debug, Clone, PartialEq, Eq)]

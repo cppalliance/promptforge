@@ -21,7 +21,7 @@ isProject: false
 
 ## Target
 
-A `FileStore` that implements the existing `Store` trait, backed by a real directory. The caller provides the path explicitly - no defaults, no derivation. The prompt engine remains a pure executor.
+A `FileStore` that implements the existing `Store` trait, backed by a real directory. The caller provides the path explicitly - no defaults, no derivation. The prompt Engine remains a pure executor.
 
 ## What exists
 
@@ -76,7 +76,7 @@ No new constructor on `StoreRef`. No convenience method. The caller does the plu
 
 Each caller decides its own policy:
 
-- **Dev runner**: derive the store path from the prompt file: same directory, same stem, no extension, as a subdirectory (e.g. `prompts/research-person.md` -> `prompts/research-person/`). This is the dev runner's policy, not the engine's. Pass to `FileStore::new`. Remove the post-run dump reconcile (store is already on disk). The `dump/` module simplifies or dies.
+- **Dev runner**: derive the store path from the prompt file: same directory, same stem, no extension, as a subdirectory (e.g. `prompts/research-person.md` -> `prompts/research-person/`). This is the dev runner's policy, not the Engine's. Pass to `FileStore::new`. Remove the post-run dump reconcile (store is already on disk). The `dump/` module simplifies or dies.
 - **CLI**: add a `--store <dir>` flag. Required for persistence; without it, use `StoreRef::memory()` (ephemeral, same as today). No default path.
 - **MCP server**: use `StoreRef::memory()` by default (runs are independent). Add optional `[run].store_dir` config if needed later. Not in this plan.
 
@@ -84,9 +84,9 @@ Each caller decides its own policy:
 
 `FileStore` reuses the existing `StorePath::parse` validation (already rejects traversal, `..`, absolute paths, device names). Additionally, the FS mapping function (from dev dump's `safe_relative_path` or equivalent) ensures no escape from `root`. A logical path that fails the FS safety check returns `StoreError` rather than silently skipping.
 
-### No new behavior in the engine
+### No new behavior in the Engine
 
-`execute::run` receives a `&StoreRef`. It does not know or care whether the backend is memory or files. The `Store` trait contract is unchanged. Resume logic (`store.exists` then skip) is prompt-author code in Lua, not engine behavior.
+`execute::run` receives a `&StoreRef`. It does not know or care whether the backend is memory or files. The `Store` trait contract is unchanged. Resume logic (`store.exists` then skip) is prompt-author code in Lua, not Engine behavior.
 
 ## Steps
 

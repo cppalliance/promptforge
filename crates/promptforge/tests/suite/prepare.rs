@@ -7,8 +7,8 @@
 //! support, so they sit in that crate's own suite.
 //!
 //! Capability activation - resolving a prompt's declarations against a
-//! registry, conflict checking, and catalog assembly - is the harness's,
-//! and its suite lives with it in `harness-capabilities`; the engine's
+//! registry, conflict checking, and catalog assembly - is the Harness's,
+//! and its suite lives with it in `harness-capabilities`; the Engine's
 //! prepare only ever sees the catalog the Harness hands it.
 
 use std::num::NonZeroU32;
@@ -307,7 +307,7 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 
 /// The step's first test: `prepare` fills a slot by identity against a
 /// catalog the Harness supplied directly - no registry, no activation, no
-/// implementation anywhere near the engine - and the binding journals the
+/// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]
 fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
@@ -344,7 +344,7 @@ fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
 fn an_exact_slot_whose_capability_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // An empty catalog and no declaration: the slot's capability
-    // contributed nothing the engine can fill against.
+    // contributed nothing the Engine can fill against.
     let (ctx, requirements) = Environment::new().prepare(&prompt, context("fill-orphan"));
     // The exact path's first two segments name its capability.
     assert_eq!(
@@ -372,6 +372,6 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
     );
     assert!(requirements.is_satisfied());
     // The alias stays unbound; advertising it fails at run time with the
-    // alias named. The engine reaches no logger, so nothing else records it.
+    // alias named. The Engine reaches no logger, so nothing else records it.
     assert!(ctx.tool_bindings().is_empty());
 }

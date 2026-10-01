@@ -183,7 +183,7 @@ fn frontmatter_without_input_output_still_parses() {
 
 #[test]
 fn promptforge_zero_is_accepted() {
-    // `promptforge: 0` is the active engine major: it parses, is exposed on
+    // `promptforge: 0` is the active Engine major: it parses, is exposed on
     // the frontmatter, and is reported by version detection.
     let src = "---\nname: x\ndescription: d\npromptforge: 0\n---\n\n# T\n\n## S\n\np\n";
     let prompt = parse(src).expect("promptforge: 0 must parse");

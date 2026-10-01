@@ -487,7 +487,7 @@ A `tools.call` that names neither a local tool nor a bound alias raises an error
 tool "{name}" is not bound in this run; bound aliases: [...]
 ````
 
-Five names belong to tools the engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, `task_events`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
+Five names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, `task_events`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
 
 These argument errors raise at the call, where `pcall` catches them:
 
@@ -579,10 +579,10 @@ A caught tool error is read through `err.kind`, through `err.name` on `unbound_t
 | Kind | Raised when | `name` field | Message |
 |---|---|---|---|
 | `tool` | a called tool fails on its own in a script call | none | `tool call failure: {message}` |
-| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the five engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
+| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the five Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
 | `out_of_scope_tool` | the model calls a name outside the round's scope | the name | `tool "{name}" is not in this section's scope; in-scope aliases: [...]` |
 
-`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the five engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
+`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the five Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
 
 Uncaught, these failures end the run with run error kind [`Tool`](17-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
 
@@ -643,7 +643,7 @@ The end of the message tells a real tool from a typo:
 
 ## Local tools
 
-`tools.add_local` makes a tool out of a Lua function. A local tool needs nothing in the frontmatter, no `tools:` or `capabilities:` entry, and the engine answers its calls itself. This prompt gives the model a note-taking tool that writes to the store:
+`tools.add_local` makes a tool out of a Lua function. A local tool needs nothing in the frontmatter, no `tools:` or `capabilities:` entry, and the Engine answers its calls itself. This prompt gives the model a note-taking tool that writes to the store:
 
 ````markdown
 ---

@@ -32,7 +32,7 @@ use crate::model::{Completion, CompletionError, CompletionOptions, Message, Tool
 pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
 
 /// What the test driver performs a `Chat` round on: a stand-in for the
-/// harness's model client, which the engine never holds and this crate
+/// Harness's model client, which the Engine never holds and this crate
 /// never names. The suites' implementation speaks the wire vocabulary to
 /// an axum mock gateway over a dev-only HTTP client; a scripted
 /// implementation can answer from a table.
@@ -90,7 +90,7 @@ impl RunHost {
         self
     }
 
-    /// Sets the opt-in raw request/response capture. The engine reports
+    /// Sets the opt-in raw request/response capture. The Engine reports
     /// the raw pair only when the context asks for it
     /// ([`RunContext::report_debug`](crate::execute::RunContext::report_debug)).
     #[cfg(test)]
@@ -109,7 +109,7 @@ impl RunHost {
     }
 
     /// Sets the implementations `ToolCall` effects resolve their ids in.
-    /// The catalog the engine binds against is the caller's to install on
+    /// The catalog the Engine binds against is the caller's to install on
     /// the [`Environment`](crate::execute::Environment) (see
     /// [`TestToolTable::catalog`]); in production the Harness assembles
     /// both from its activated capabilities.
@@ -173,7 +173,7 @@ impl RunHost {
                     return EffectAnswer::Dropped;
                 };
                 // Resolved by the stable identity against the suites'
-                // fixture table, as the harness resolves it against its
+                // fixture table, as the Harness resolves it against its
                 // activated capabilities; the alias is the record's, not
                 // the resolver's.
                 let Some(tool) = tools.get(&tool) else {

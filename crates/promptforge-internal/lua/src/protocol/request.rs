@@ -146,7 +146,7 @@ pub enum Request {
         last: Option<u32>,
     },
     /// The loop shim's per-round drain of the chain's undelivered
-    /// model-task notices: the engine's sentences telling the model how
+    /// model-task notices: the Engine's sentences telling the model how
     /// the tasks it started ended, answered at once in arrival order and
     /// appended to the author's message list ahead of the round's `chat`.
     /// Shim-produced and argument-free: the shim yields it for every

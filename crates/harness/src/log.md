@@ -1,4 +1,4 @@
-Read back the history a harness saves for each session, and tell its failures apart.
+Read back the history a Harness saves for each session, and tell its failures apart.
 
 You need this when you read back what a session recorded, or handle a failure to read its saved history.
 
@@ -14,7 +14,7 @@ A session begins a new run each time it restarts: after you cancel a turn, or af
 
 A session's history is like a log file on disk: it outlives the client that watched it. Unlike a plain log file, each entry is a saved event filed under a numbered run, and reading one back can fail on its own.
 
-That log file is a Turso database under the `state_dir` you gave [`HarnessConfig`](crate::HarnessConfig). Every session that harness launches shares it, and this page calls it the *run log*.
+That log file is a Turso database under the `state_dir` you gave [`HarnessConfig`](crate::HarnessConfig). Every session that Harness launches shares it, and this page calls it the *run log*.
 
 Every event a session has recorded, in order, is its *transcript*. Each entry is a [`SessionEvent`](crate::SessionEvent), whose `index` is its place in the transcript and whose `event` is the event itself, as saved JSON. [Stream a reply](crate#stream-a-reply) shows what its `reply` holds.
 
@@ -108,7 +108,7 @@ A history outlives your client, and its run ids mean something only in the log t
 
 A history call failed, and your Host must decide what to report: disk trouble, a damaged record, or a run the log did not expect.
 
-You meet [`LogError`] in two places. [`Session::transcript`](crate::Session::transcript) returns `LogError` directly. [`Harness::launch`](crate::Harness::launch) returns it wrapped in [`LaunchError::Log`](crate::LaunchError::Log), and only when the run log cannot be opened. The harness opens the run log on the first launch, and a failed open is tried again by the next launch. A state directory that cannot be created is one way the open fails, and it reaches you as `Io` inside `LaunchError::Log`.
+You meet [`LogError`] in two places. [`Session::transcript`](crate::Session::transcript) returns `LogError` directly. [`Harness::launch`](crate::Harness::launch) returns it wrapped in [`LaunchError::Log`](crate::LaunchError::Log), and only when the run log cannot be opened. The Harness opens the run log on the first launch, and a failed open is tried again by the next launch. A state directory that cannot be created is one way the open fails, and it reaches you as `Io` inside `LaunchError::Log`.
 
 `LogError` works like [`io::Error`](std::io::Error) and its kind: you branch on the variant first. Unlike `io::Error`, the useful detail sits in the `source()` chain, not the message: `Database` keeps its cause behind [`DatabaseSource`], and `Payload` behind [`JsonSource`].
 
@@ -150,7 +150,7 @@ assert!(matches!(failure, LogError::UnknownRun(id) if id == never));
 ````
 
 1. Step 1 prints the whole chain with [`display_chain`](crate::display_chain).
-2. Step 2 matches the variant. [`LogError::Database`] means the database refused an operation, and [`LogError::Io`] means an I/O operation failed. Those two point at the disk or the database. `Payload` means a record's JSON would not serialize on the way in or parse on the way out, and `Corrupt` means a stored row disagrees with the schema. Those point at the data. The `UnknownRun` and `RunEnded` arms word their messages as instructions, but `desk` has nothing to follow them with, because the harness writes the history itself and no public call of yours takes a [`RunId`] or writes a record. Treat those two messages as a report of what the log saw. `LogError` is `#[non_exhaustive]`, so a match outside the crate needs a wildcard arm.
+2. Step 2 matches the variant. [`LogError::Database`] means the database refused an operation, and [`LogError::Io`] means an I/O operation failed. Those two point at the disk or the database. `Payload` means a record's JSON would not serialize on the way in or parse on the way out, and `Corrupt` means a stored row disagrees with the schema. Those point at the data. The `UnknownRun` and `RunEnded` arms word their messages as instructions, but `desk` has nothing to follow them with, because the Harness writes the history itself and no public call of yours takes a [`RunId`] or writes a record. Treat those two messages as a report of what the log saw. `LogError` is `#[non_exhaustive]`, so a match outside the crate needs a wildcard arm.
 3. Step 3 downcasts the `Database` source to `DatabaseSource`, calls [`DatabaseSource::as_inner`], and gets the database's own [`turso::Error`](https://docs.rs/turso/latest/turso/enum.Error.html).
 4. Step 4 asks the history nothing. It builds [`LogError::UnknownRun`] by hand from `RunId::from_raw(-1)`, the value the log returns when asked about a run it never began. No public call takes a `RunId`, so a Host cannot make the log answer this itself.
 5. Step 5 asserts the failure is `UnknownRun` carrying the id step 4 built.
@@ -201,7 +201,7 @@ Match the variant to learn what failed, then downcast the source to learn why. [
 
 ## RunId
 
-[`RunId`] names one run within one run log, as the row number the log gave the run when it began. Every session of the same harness shares that log, and the id means nothing against any other run log. No public call accepts a `RunId`. Store its number only to recognize the run later, in [`Session::run_ids`](crate::Session::run_ids) or in an `UnknownRun` or `RunEnded` message. [Read a session's history](#read-a-sessions-history) shows the round trip.
+[`RunId`] names one run within one run log, as the row number the log gave the run when it began. Every session of the same Harness shares that log, and the id means nothing against any other run log. No public call accepts a `RunId`. Store its number only to recognize the run later, in [`Session::run_ids`](crate::Session::run_ids) or in an `UnknownRun` or `RunEnded` message. [Read a session's history](#read-a-sessions-history) shows the round trip.
 
 - [`RunId::from_raw`] wraps any `i64` with no check, including zero and negative values, so a successful call does not mean the run exists.
 - [`RunId::get`] returns the raw run number, the value to store.

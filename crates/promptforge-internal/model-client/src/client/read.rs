@@ -4,7 +4,7 @@
 //!
 //! No HTTP happens here and no clock is read. The transport supplies the
 //! chunks and the clock; this module applies the one rule set every
-//! transport shares, so the harness's gateway client and the engine's
+//! transport shares, so the Harness's gateway client and the Engine's
 //! test client differ only in how they send. A transport that grew its own
 //! copy of this loop would be one more place the byte cap, the sentinel
 //! rule, and the timing arithmetic could drift.

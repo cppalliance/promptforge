@@ -9,7 +9,7 @@
 //! [`ToolCatalog`] of descriptors [`Environment::prepare`] fills slots
 //! against, the [`Prelude`]s every section VM installs, and the
 //! [`ToolTable`] of implementations the Harness's tool performer resolves a
-//! `ToolCall` effect's id in. The engine sees only the first two.
+//! `ToolCall` effect's id in. The Engine sees only the first two.
 //!
 //! [`Environment::prepare`]: promptforge::Environment::prepare
 

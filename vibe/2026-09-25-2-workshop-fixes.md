@@ -108,7 +108,7 @@ Each defect below has an observable before and after. Save As, the directory lis
   - **Quit ordering.** Today `quit_everything` posts the gateway's `/shutdown` and exits (`crates/workshop/desktop/src/quit.rs:36-45`), and the supervisor stops only later in the `RunEvent::Exit` handler (`crates/workshop/desktop/src/main.rs:152-158`). A supervisor probe in that gap relaunches a gateway the user asked to quit. After: `quit_everything` takes the supervisor out of its slot and shuts it down before posting `/shutdown`. The Exit handler then finds the slot empty, which `continue_teardown` already treats as done (`main.rs:180-192`).
   - **Bind failure leaves a sidecar file.** Today `serve_thread` reopens the last workspace before binding (`crates/workshop/server/src/serve.rs:262-264`), so a failed bind leaves the `.pfwork` file's `-wal` sidecar behind. The loopback refusal also only fires after full state composition. After: `spawn` rejects a non-loopback address before the server thread starts or any state is composed, and the listener binds before `reopen_last_workspace`. The readiness signal stays where it is.
 - Security and privacy behavior:
-  - **Revoked roots reach running agent sessions (inferred).** Today `bindings::forward` pushes roots to the harness only when the gateway binding, the chat catalog, or the menu changes (`crates/workshop/server/src/agents/bindings.rs:89-135`), so a revoke doesn't reach a running session. After: every grant, revoke, and workspace switch pushes fresh roots to the harness.
+  - **Revoked roots reach running agent sessions (inferred).** Today `bindings::forward` pushes roots to the Harness only when the gateway binding, the chat catalog, or the menu changes (`crates/workshop/server/src/agents/bindings.rs:89-135`), so a revoke doesn't reach a running session. After: every grant, revoke, and workspace switch pushes fresh roots to the Harness.
   - **Traversal stays refused.** With the second decode gone, a real `..` still fails the lexical check, and a literal `%2e%2e` segment is an ordinary filename that confinement resolves inside a grant or refuses. No request returns content outside a grant.
   - **The jail's Windows paths run in CI.** Today the workspace crate is tested only in the ubuntu job (`.github/workflows/ci.yml:96`). The windows job tests only `-p workshop -p workshop-server -p workshop-server-api` (`:189`), which doesn't run a dependency's own tests. So the Windows jail tests (`crates/workshop/workspace/src/workspace/tests/jail.rs:52-163`), the alternate-data-stream test (`crates/workshop/workspace/src/workspace/tests.rs:114`), and the Windows symlink branches run nowhere. After: they run in the windows job.
 - Acceptance criteria:
@@ -161,7 +161,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
   - **Quit.** The extracted quit ordering calls the supervisor stop before the shutdown request.
   - **Supervisor.** A supervisor that has been shut down launches nothing when its gateway later disappears (`crates/workshop/desktop/src/gateway/tests/shutdown.rs`).
 - Integration and end-to-end:
-  - **Revoke.** A revoke during a running agent session pushes roots without the revoked folder to the harness (under `crates/workshop/server/tests/it/`).
+  - **Revoke.** A revoke during a running agent session pushes roots without the revoked folder to the Harness (under `crates/workshop/server/tests/it/`).
   - **Non-loopback bind.** `spawn` with a non-loopback address fails before any workspace file is opened or any temp sweep runs, and the existing reopen-before-readiness tests still pass (`crates/workshop/server/src/serve-tests.rs`).
   - **Grant race.** A grant racing a workspace open never answers 200 and then loses the grant. Reproduce first.
   - **Chat quiet check.** `assert_chat_quiet` (`crates/workshop/server/tests/it/chat_gate.rs:264-269`) stops using `Duration::ZERO` with a sync frame from a different socket. It syncs on a reply from the same `/agents/ws` socket, so socket ordering puts any premature frame first. If that socket has no request that gets an in-order reply, restore a bounded window and say why in a comment.
@@ -256,10 +256,10 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 - Test placement and naming conventions: unit tests sit in `#[cfg(test)]` modules, either inline or in sibling `<stem>-tests.rs` files wired with `#[path = "<stem>-tests.rs"] mod tests;` (split further as `<stem>-tests-<label>.rs`); a group of three or more moves into a `src/.../tests/` subdirectory (for example `engine/src/execute/tests/`). Each crate has one integration binary at `tests/it/main.rs` with topic modules `tests/it/<topic>.rs` and `<topic>/` subdirectories (the facade uses `tests/suite/main.rs` plus `tests/prompts/` fixtures; `workshop-server` adds `tests/common/`). Test functions are descriptive snake_case sentences such as `a_direct_launch_recovers_the_lease_from_a_terminated_owner`. The Workshop UI keeps Node `node:test` files in `crates/workshop/ui/test/<feature>.mjs`; the gateway config UI and `tools/` keep `<name>.test.mjs` beside the source. Nextest caps the STT crates in a `heavy` test group. Behavior changes ship with tests in the same change.
 - Directory map:
   - `crates/` root: the public layer (`promptforge` facade, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), build tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), and `shared-ui` (a TypeScript and CSS package, not a Rust crate).
-  - `crates/promptforge-internal/`: private engine family - `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
+  - `crates/promptforge-internal/`: private Engine family - `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
   - `crates/gateway/`: private gateway family - `app` (package `gateway`), `cloud-providers`, `config`, `config-ui` (with its `ui/` TypeScript package), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/` (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: private Workshop family - `desktop` (Tauri package `workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and `ui/` (the TypeScript SPA with `src/base`, `src/services`, `src/parts`, and `test/`).
-  - `crates/harness/`: private harness family - `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`.
+  - `crates/harness/`: private Harness family - `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`.
   - `guide/`: mdBook user guide (`book.toml`, `src/`) plus the language, agent, and gateway guides and `CONTRIBUTING.md`.
   - `prompts/`: example prompt pipelines. `tools/`: Node scripts for sidecar staging and a live TTS check, with tests.
   - `.github/workflows/`: `ci.yml` (fmt, clippy, test, docs, Windows and Linux workshop checks, UI, supply chain, api-surface, `ci-green` gate) plus guide, release, nightly, and specialty workflows. `.githooks/`: pre-commit fmt, pre-push headless check, clippy, and cargo deny.
@@ -267,8 +267,8 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
   - `vibe/`: plans, `archdoc.md`, and run scratch. `local/`: developer-local gateway and profile config and fixtures. `images/`: README art. `target/`, `target-msrv/`: build output.
 - Component boundaries:
   - executor (`promptforge-engine` behind the `promptforge` facade): sans-I/O state machine; depends on store, the Lua VM boundary, and shared substrate. Outside crates depend only on `promptforge`.
-  - harness (behind `harness-api`): depends on `promptforge`, `gateway-api-types`, `gateway-api-discovery`, and shared-*; never on workshop or private gateway crates. Workshop reaches harness only through `harness-api`.
-  - gateway (behind `gateway-api-types` and `gateway-api-discovery`): depends on shared substrate only; never on promptforge, workshop, or harness crates.
+  - Harness (behind `harness-api`): depends on `promptforge`, `gateway-api-types`, `gateway-api-discovery`, and shared-*; never on workshop or private gateway crates. Workshop reaches Harness only through `harness-api`.
+  - gateway (behind `gateway-api-types` and `gateway-api-discovery`): depends on shared substrate only; never on promptforge, workshop, or Harness crates.
   - Workshop: depends on `harness-api`, `promptforge`, the gateway public pair, and shared-*; the desktop app depends on `workshop-server-api`, never `workshop-server`. Internal tiers flow server, then features, then services, then vocabulary. The SPA flows `parts` to `services` to `base`, and lazy panels never import the entry bundle.
   - store depends on the VFS layer; the VFS layer and shared-* depend on no product crate.
   - Family containers are private: a container crate may depend only on `crates/` root crates and its own siblings; build-* crates are exempt. `cargo test -p build-xtask` enforces the matrix, and `cargo xtask api --check` enforces the facade surface against `crates/promptforge/public-api.txt`.
@@ -537,13 +537,13 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 - Piece: roots signal, one joint change, because the registry trait, the workspace adapter, and the server wake loop don't compile apart.
 - Artifacts: `WorkspaceRoots` and `WorkspaceRootsAdapter` in `crates/workshop/registry/src/traits.rs`; `register` in `crates/workshop/workspace/src/handles.rs`; `Workspace::grant` and `Workspace::revoke` in `crates/workshop/workspace/src/workspace.rs` and the switch paths in `crates/workshop/workspace/src/workspace/backing.rs`; `forward` in `crates/workshop/server/src/agents/bindings.rs`; `crates/workshop/registry/tests/it/main.rs`; `crates/workshop/server/src/agents/bindings-tests.rs`; a new revoke test module under `crates/workshop/server/tests/it/agents/`.
 - Work:
-  - This bug is inferred. First write the integration test showing that a revoke during a running agent session doesn't reach the harness. If no deterministic reproduction exists, record that in this plan's repository copy and skip the code change.
+  - This bug is inferred. First write the integration test showing that a revoke during a running agent session doesn't reach the Harness. If no deterministic reproduction exists, record that in this plan's repository copy and skip the code change.
   - `WorkspaceRoots` gains `subscribe`, returning a `tokio::sync::watch::Receiver<u64>` whose value is a grant-set generation. `WorkspaceRootsAdapter::new` takes the receiver source beside its roots closure.
   - `Workspace` owns the generation sender and bumps it on every grant, revoke, and workspace switch. `register` passes the receiver source to the adapter.
   - `bindings::forward` adds the roots receiver as a fourth wake source beside the gateway binding, chat catalog, and menu watches, and its module doc lists all four.
   - Keep `workspace.rs` and `backing.rs` at or under 500 physical lines. If `workspace.rs` would pass and Step 6 didn't split it, move tree listing into `workspace/tree.rs` first.
 - Tests:
-  - A revoke during a running agent session pushes roots without the revoked folder to the harness.
+  - A revoke during a running agent session pushes roots without the revoked folder to the Harness.
   - `cargo nextest run --locked -p workshop-registry --all-features`, `cargo nextest run --locked -p workshop-workspace --all-features`, `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, and `cargo test -p build-xtask`, which must stay green.
 - Commit: the trait change, every call site, and the tests.
 
@@ -662,7 +662,7 @@ Each fix gets a focused test that fails before it and passes after. Timing-sensi
 - Piece: server and desktop docs, after the subsystem piece. Sequential; the private-items docs gate and the workshop doctests cover these crates, not the workspace docs gate.
 - Artifacts and edits (cited lines are at `ce10a8eb`; locate by content):
   - `crates/workshop/server/src/lib.rs`, the line reading "The server's WebSocket origin policy is applied to every upgrade": `/v1/realtime` uses a stricter same-origin check.
-  - `crates/workshop/server/Cargo.toml:24-26` (shifted by Step 8): the status reporter, plus the prompts route as an engine user.
+  - `crates/workshop/server/Cargo.toml:24-26` (shifted by Step 8): the status reporter, plus the prompts route as an Engine user.
   - `crates/workshop/server/build.rs:6`: name the Node.js and `npm ci` requirement directly.
   - `crates/workshop/server/src/cross_site.rs:13-14`: three upgrade handlers.
   - `crates/workshop/server/src/routes.rs:3`: add `/user/state`.

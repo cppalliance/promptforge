@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness sessions: agent discovery, session state, input waits, and the supervisor state machine behind the harness public API"
+description = "PromptForge Harness sessions: agent discovery, session state, input waits, and the supervisor state machine behind the Harness public API"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "sessions"]
 categories = ["development-tools", "api-bindings"]
@@ -31,7 +31,7 @@ harness-runner.workspace = true
 # The first-party `promptforge/web` capability (fetch and search): this
 # crate is the one place a provider crate is named, at registration.
 harness-web.workspace = true
-# The engine's public API: the run context, the run limits, the events
+# The Engine's public API: the run context, the run limits, the events
 # and deltas a session forwards, and the run's VFS handle.
 promptforge.workspace = true
 # Wait tokens and session ids are 128 bits from the OS CSPRNG:
@@ -60,7 +60,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
 # `Harness::log`, the run log handle the integration suites read records
-# through; nothing here reaches the harness proper.
+# through; nothing here reaches the Harness proper.
 test-support = []
 
 [lints]

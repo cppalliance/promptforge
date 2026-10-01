@@ -150,7 +150,7 @@ impl fmt::Display for Reserved {
 /// each kind: the globals a section or H1 VM holds once section setup
 /// ends, before any capability prelude installs, and the Lua 5.5 keywords.
 ///
-/// A global section setup installs must be listed here: the engine's
+/// A global section setup installs must be listed here: the Engine's
 /// section setup tests compare this list against a set-up VM's globals in
 /// both directions.
 pub const RESERVED_NAMES: [(&str, Reserved); 60] = [

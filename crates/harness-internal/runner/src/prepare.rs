@@ -14,7 +14,7 @@
 //! catalog, the preludes, and the implementation table; install the
 //! catalog and the preludes and prepare the context; merge activation's
 //! report into prepare's and refuse an
-//! unsatisfiable prompt with the engine's model-readable notice; and
+//! unsatisfiable prompt with the Engine's model-readable notice; and
 //! build the `Run` beside its performers.
 //!
 //! A refusal (or a prompt that fails to parse, or an input file that
@@ -65,7 +65,7 @@ pub struct Services {
     /// run, when the launch supplied one.
     pub input_text: Option<String>,
     /// The run's cancel flag: handed to the context, to every capability
-    /// activated for the run, and polled by the engine.
+    /// activated for the run, and polled by the Engine.
     pub cancel: CancelHandle,
     /// The run log the row is opened in and the loop will write to.
     pub log: SharedLog,
@@ -152,7 +152,7 @@ pub enum PrepareError {
     },
     /// The environment cannot satisfy the prompt: a required capability
     /// is missing, two declared capabilities conflict, or the current
-    /// model falls short of a role's requirements. The engine's
+    /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run's
     /// row is closed as failed with that notice.
     #[error("the environment cannot satisfy the prompt")]
@@ -421,7 +421,7 @@ fn prompt_hash(source: &str) -> String {
 }
 
 /// The system clock now as the Engine's `Timestamp`: the Harness's stamp for
-/// a run's `started_at`, since the engine reads no clock of its own. A
+/// a run's `started_at`, since the Engine reads no clock of its own. A
 /// clock before the epoch or beyond `i64` milliseconds (neither reachable
 /// on a real machine) saturates to the epoch rather than refusing the launch.
 fn now_timestamp() -> Timestamp {

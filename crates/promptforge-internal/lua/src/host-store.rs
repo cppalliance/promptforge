@@ -106,7 +106,7 @@ pub fn store_error_message(
     }
 }
 
-/// Records a store conflict in the shared slot the engine reads when a
+/// Records a store conflict in the shared slot the Engine reads when a
 /// shared library load returns: a conflict the author caught with `pcall`
 /// must still end the run with a determinism violation, so the direct
 /// closures write it here rather than only raising it.
@@ -147,7 +147,7 @@ fn record_store_conflict<T>(
 /// spawned from the caller's, so two unordered arms touching one path
 /// surface the conflict as [`VfsError::Conflict`]. A conflict these direct
 /// closures see - during a shared library load, before the yield shims
-/// install - is recorded in `conflicts`, the shared slot the engine reads
+/// install - is recorded in `conflicts`, the shared slot the Engine reads
 /// when the load returns, so the run ends with a determinism violation
 /// even if author code caught the error.
 ///

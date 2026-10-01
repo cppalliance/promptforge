@@ -1,4 +1,4 @@
-//! The [`ToolDescriptor`]: everything an engine needs to know about a tool
+//! The [`ToolDescriptor`]: everything an Engine needs to know about a tool
 //! except how to run it.
 
 use serde::{Deserialize, Serialize};
@@ -14,10 +14,10 @@ use crate::capabilities::CapabilityId;
 ///
 /// The Harness assembles descriptors from its activated capabilities into a
 /// [`ToolCatalog`](super::ToolCatalog) and keeps the implementations in a
-/// table of its own keyed by [`ToolId`]; the engine fills its tool slots
+/// table of its own keyed by [`ToolId`]; the Engine fills its tool slots
 /// against the descriptors, advertises them, and issues each call as an
 /// effect naming the id, so the Harness resolves the implementation and the
-/// engine never holds one.
+/// Engine never holds one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {

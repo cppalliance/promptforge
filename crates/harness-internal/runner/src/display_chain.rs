@@ -14,7 +14,7 @@ use std::error::Error;
 ///
 /// A cause whose text the accumulated rendering already contains is
 /// skipped: some variants copy their source's text into their own
-/// message (an engine `LuaRuntime { message, source }`, for one), and
+/// message (an Engine `LuaRuntime { message, source }`, for one), and
 /// appending that cause again would print it twice. The check is a plain
 /// substring test on the text rendered so far.
 #[must_use]

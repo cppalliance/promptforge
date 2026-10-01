@@ -63,7 +63,7 @@ Three coordinated changes to `promptforge-core`:
 
 ## Target end-state: the two-type architecture (after all recorded passes)
 
-The engine converges on exactly two context types, replacing all five of today's (`RunFrame`, `ControlContext`, `FanoutContext`, `ArmInputs`, `SectionProgress`):
+The Engine converges on exactly two context types, replacing all five of today's (`RunFrame`, `ControlContext`, `FanoutContext`, `ArmInputs`, `SectionProgress`):
 
 **`RunContext`** - the run. Ambient, immutable, constructed once in `run`, shared by reference or `Arc` everywhere. NEVER cloned, NEVER forked, by any code path: not at the H1-to-H2 boundary (views ride across, `when` set at start, conflicts live on bindings), not in `execute()`/`jump` chains (synchronous detours; only call data changes), not in fanout (see below).
 

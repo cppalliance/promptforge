@@ -9,7 +9,7 @@ streamed body into one `Completion`, the model catalog (`ModelCatalog`,
 declarations against. The model catalog types are defined in
 `promptforge-types` and re-exported by this crate's `model` module. No
 transport: the HTTP client that sends a round to
-the gateway is the harness's (`harness-models`).
+the gateway is the Harness's (`harness-models`).
 
 A round is always streamed. The transport asks for
 `stream_options.include_usage`, hands each SSE `data:` payload to the
@@ -28,5 +28,5 @@ transport measured on its own clock. The metrics vocabulary (`Usage`,
 `StreamDelta` are canonical in `promptforge-types`; this crate uses them
 from there and does not re-export them. A
 malformed metadata section degrades to `None` with a diagnostic line that
-the engine reports as a `model_metadata_degraded` event; it never fails
+the Engine reports as a `model_metadata_degraded` event; it never fails
 the call.

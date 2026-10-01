@@ -7,7 +7,7 @@
 //! retained transcript. A requested close cancels the run and then drains
 //! it: the effect loop answers every outstanding effect `Dropped` and
 //! steps the run to `Done` before the session reports `Closed`, so
-//! nothing is left in flight when the session leaves its harness. The
+//! nothing is left in flight when the session leaves its Harness. The
 //! synthetic terminal frame for that interrupt is decided by
 //! [`effective_interrupt`] and rendered in one place, after the drain.
 //!
@@ -140,7 +140,7 @@ impl Supervisor {
     }
 
     /// Supervises the session until it closes, then drains its last run
-    /// and removes the session from its harness.
+    /// and removes the session from its Harness.
     pub(crate) async fn run(mut self) {
         let mut state = SupervisorState::new(self.latest_gateway.generation());
         let mut pending = Some(self.initial_catalog_event());
@@ -425,7 +425,7 @@ fn classify(
     }
 }
 
-/// Waits for a watch to change; a dropped sender (the harness is gone)
+/// Waits for a watch to change; a dropped sender (the Harness is gone)
 /// pends forever, so the session ends through its own lifecycle.
 async fn changed(watch: &mut watch::Receiver<Option<u64>>) {
     if watch.changed().await.is_err() {

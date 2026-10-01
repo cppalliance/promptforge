@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness capabilities: the capability registry, activation, and the Capability and Tool traits the first-party capability crates implement"
+description = "PromptForge Harness capabilities: the capability registry, activation, and the Capability and Tool traits the first-party capability crates implement"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "tools"]
 categories = ["development-tools", "api-bindings"]
@@ -14,7 +14,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 async-trait.workspace = true
-# The engine's public API: the prompt and requirements activation reads,
+# The Engine's public API: the prompt and requirements activation reads,
 # the tool vocabulary a capability contributes, and the run's VFS handle.
 promptforge.workspace = true
 serde_json.workspace = true

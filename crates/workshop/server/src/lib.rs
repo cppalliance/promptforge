@@ -4,7 +4,7 @@
 //! and the axum router. Start at
 //! [`Config::load`] for configuration, `AgentSessions` for the
 //! agent-session opener behind `/agents/ws` (every session runs in the
-//! harness, reached through `harness`), and [`router`] for the HTTP
+//! Harness, reached through `harness`), and [`router`] for the HTTP
 //! API; [`spawn`] runs the whole server in-process on its own thread for
 //! embedding binaries.
 //!
@@ -20,7 +20,7 @@
 //! `workshop-registry`, `workshop-support`) are assembled in `app`
 //! (helpers in `app::compose`), where every subsystem self-registers its
 //! routes, state handles, and push channels into the registry - the
-//! harness among them.
+//! Harness among them.
 //!
 //! ## Invariants
 //!
@@ -28,8 +28,8 @@
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-user-state`,
-//!   `workshop-workspace`), the harness's public API `harness`, and
-//!   the engine's public API `promptforge`. Read the repository-root
+//!   `workshop-workspace`), the Harness's public API `harness`, and
+//!   the Engine's public API `promptforge`. Read the repository-root
 //!   `AGENTS.md` and `crates/workshop/server/AGENTS.md` before adding
 //!   an import.
 //! - Every file in this crate stays under 500 lines; split first, then

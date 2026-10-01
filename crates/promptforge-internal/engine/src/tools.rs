@@ -3,7 +3,7 @@
 //! The Engine fills its tool slots by identity against the Harness-supplied
 //! [`ToolCatalog`] of descriptors and issues each call as a `ToolCall`
 //! effect naming the [`ToolId`], which the Harness resolves against its own
-//! implementations (the harness's `Tool` trait, in
+//! implementations (the Harness's `Tool` trait, in
 //! `harness-capabilities`). The runtime-agnostic vocabulary -
 //! [`ToolCatalog`], [`ToolId`], the output and error types - sits in the
 //! `promptforge-types` crate's `tools` module; this module is the

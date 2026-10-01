@@ -4,7 +4,7 @@
 //! [`AppState`] delegates subsystem state to the [`Registry`]: each
 //! extracted subsystem owns its state behind a narrow handle registered
 //! there, and consumers fetch the handles through the registry's
-//! type-keyed state collection. The harness every agent session runs in
+//! type-keyed state collection. The Harness every agent session runs in
 //! is registered the same way. What remains here is the server's own
 //! runtime infrastructure - the shared reconnect backoff - plus the
 //! registration guards keeping every self-registration alive.
@@ -252,7 +252,7 @@ pub enum Omit {
     Gateway,
     /// `workshop_workspace::register`.
     Workspace,
-    /// `agents::register`: the agent-sessions routes, the harness, and
+    /// `agents::register`: the agent-sessions routes, the Harness, and
     /// the agent-session opener.
     AgentSessions,
     /// `workshop_user_state::register`.

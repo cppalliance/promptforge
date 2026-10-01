@@ -119,7 +119,7 @@ return item .. '!'\n\
 }
 
 /// A jump inside a fanout arm transfers control: the arm's remaining blocks
-/// are skipped, a child walk runs from the target under the engine's
+/// are skipped, a child walk runs from the target under the Engine's
 /// chain-slice rule (continuing the arm chain's `sys.id` sequence, falling
 /// through to the
 /// target's following siblings), and the child walk's reply becomes the arm's

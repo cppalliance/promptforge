@@ -1,6 +1,6 @@
 //! Fixture tests for the `test-support` leak guard, plus the live check
 //! over this workspace: no non-dev dependency table anywhere enables a
-//! promptforge or harness crate's `test-support` feature.
+//! promptforge or Harness crate's `test-support` feature.
 
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,7 @@ fn write_crate(root: &Path, dir: &str, name: &str, manifest: &str) {
         .expect("lib.rs writes");
 }
 
-/// A fake workspace holding three container engine crates, each exposing
+/// A fake workspace holding three container Engine crates, each exposing
 /// a `test-support` feature, so a fixture can add one consumer and see
 /// only that consumer's findings.
 fn engine_root() -> tempfile::TempDir {
@@ -55,7 +55,7 @@ fn engine_root() -> tempfile::TempDir {
     root
 }
 
-/// `engine_root` plus one container harness crate, `harness-runner`,
+/// `engine_root` plus one container Harness crate, `harness-runner`,
 /// exposing a `test-support` feature.
 fn guarded_root() -> tempfile::TempDir {
     let root = engine_root();

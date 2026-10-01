@@ -1,7 +1,7 @@
 //! Catalog assembly and conflict checks: activation assembles the
 //! activated capabilities' contributed tools into the run's catalog in
 //! declaration order, enforcing tool prefix-containment at assembly, and
-//! rejects capability co-activation conflicts naming both; the engine's
+//! rejects capability co-activation conflicts naming both; the Engine's
 //! prepare fills exact slots against the catalog it is handed.
 
 use std::sync::Arc;

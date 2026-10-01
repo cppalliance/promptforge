@@ -1,4 +1,4 @@
-//! Operations on the wire types that only the engine performs.
+//! Operations on the wire types that only the Engine performs.
 //!
 //! The `promptforge` facade never re-exports this module, so only Engine
 //! crates reach it. Each function stands in for what would
@@ -19,7 +19,7 @@ use crate::error::Error;
 /// `role` is one of the wire roles (`system`, `user`, `assistant`, `tool`).
 /// `content` is the raw wire content value - a string for a plain message
 /// or an `OpenAI` content-parts array for a multimodal one - and serializes
-/// into the request verbatim. For each chat round the engine sends, its Lua
+/// into the request verbatim. For each chat round the Engine sends, its Lua
 /// protocol layer validates the author-built message tables once and hands
 /// the validated parts here.
 #[must_use]
@@ -131,7 +131,7 @@ pub fn completion_vllm_metrics(completion: &Completion) -> Option<&VllmMetrics> 
 
 /// Returns one line per response metadata section that was present but
 /// malformed and so degraded to `None` (or a body naming no string
-/// `model`), for the engine to report as `model_metadata_degraded` events.
+/// `model`), for the Engine to report as `model_metadata_degraded` events.
 #[must_use]
 pub fn completion_metadata_diagnostics(completion: &Completion) -> &[String] {
     &completion.metadata_diagnostics

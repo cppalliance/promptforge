@@ -22,13 +22,13 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 mlua.workspace = true
-# The one runtime the engine names, and only for the tokio test driver
-# behind `test-support`; the engine proper performs no I/O.
+# The one runtime the Engine names, and only for the tokio test driver
+# behind `test-support`; the Engine proper performs no I/O.
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"], optional = true }
 workspace-hack.workspace = true
 
 [features]
-# The engine's own test drivers, for `benches/models_loop.rs` alone, which
+# The Engine's own test drivers, for `benches/models_loop.rs` alone, which
 # names this feature in `required-features`: the serial sans-IO driver
 # (`test_support::drive`) that performs a run's effects through a caller's
 # closure with no runtime and no HTTP, and the tokio driver
@@ -51,9 +51,9 @@ criterion.workspace = true
 promptforge.workspace = true
 promptforge-lua = { workspace = true, features = ["test-support"] }
 promptforge-parser = { workspace = true, features = ["test-support"] }
-# The suites' mock-gateway chat client: the one HTTP the engine's own
+# The suites' mock-gateway chat client: the one HTTP the Engine's own
 # tests do, speaking the wire vocabulary to the axum mock. Dev-only; the
-# engine never performs a round.
+# Engine never performs a round.
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

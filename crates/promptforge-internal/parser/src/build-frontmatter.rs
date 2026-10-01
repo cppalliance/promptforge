@@ -45,7 +45,7 @@ pub struct Frontmatter {
     pub(crate) name: String,
     /// One-line description shown in prompt listings and name retrieval.
     pub(crate) description: String,
-    /// The promptforge engine major this file targets. Its presence marks the
+    /// The promptforge Engine major this file targets. Its presence marks the
     /// file as a promptforge prompt; `None` means the file is not one. Optional.
     #[serde(default)]
     pub(crate) promptforge: Option<u32>,
@@ -154,7 +154,7 @@ impl Frontmatter {
         &self.description
     }
 
-    /// Returns the declared promptforge engine major, when present.
+    /// Returns the declared promptforge Engine major, when present.
     #[must_use]
     pub fn promptforge(&self) -> Option<u32> {
         self.promptforge
@@ -247,7 +247,7 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
     Ok((yaml, body, line_count))
 }
 
-/// Reports the promptforge engine major declared in `source`'s frontmatter.
+/// Reports the promptforge Engine major declared in `source`'s frontmatter.
 ///
 /// Returns `Some(major)` when `source` opens with a YAML frontmatter block that
 /// declares a `promptforge:` key, and `None` otherwise. The check is lenient by

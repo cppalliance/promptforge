@@ -327,7 +327,7 @@ A Lua syntax error's position is inside its message: the Lua compiler's diagnost
 
 ### Failures after the parse
 
-Only parse failures have a prompt location. An `Internal` failure names an engine source file and line instead, and every other run error kind reports no location. For the prompt line a runtime Lua error names in its message, see [Error locations in the prompt file](05-lua-environment.md#error-locations-in-the-prompt-file).
+Only parse failures have a prompt location. An `Internal` failure names an Engine source file and line instead, and every other run error kind reports no location. For the prompt line a runtime Lua error names in its message, see [Error locations in the prompt file](05-lua-environment.md#error-locations-in-the-prompt-file).
 
 ## Errors caught in Lua
 
@@ -351,7 +351,7 @@ The message text is what tells them apart. A failed `store` operation is not in 
 
 - a model call failure: an HTTP transport failure (a receive timeout included), a backend error status, a malformed reply (an oversized one included), a missing or invalid environment variable, invalid client configuration, or a disabled gateway
 - the missing-model error, raised when a model round has no model selected ([Choosing a section's model](10-models.md#choosing-a-sections-model))
-- a fault in the engine or in the Lua runtime's own machinery
+- a fault in the Engine or in the Lua runtime's own machinery
 
 An ordinary failed `store` call is kind `store`, not `internal`. Its message text says what failed, and its `reason` and fields let a prompt branch on the failure mode ([Store errors](09-the-store.md#store-errors)).
 
@@ -366,7 +366,7 @@ An error kind is what Lua sees at the call. A run error kind is what the Host re
 | `err.kind` | Its own fields | Uncaught, ends the run as |
 |---|---|---|
 | `lua` | none | `Lua`, or `Quota` for a refused `log` call |
-| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an engine fault |
+| `internal` | none | `Completion` for a model call failure, `Binding` for the missing-model error, `Internal` for an Engine fault |
 | `cancelled` | `task`, for a cancelled task | the cancelled outcome for a Host cancel; `Lua` for a cancelled task's error value raised again right after its wait |
 | `context_exhausted` | `reason` | `ContextExhausted` |
 | `empty_model_reply` | `finish_reason`, only when the backend gave one | `Completion` |
@@ -413,7 +413,7 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
 | `ContextExhausted` | the compactor ran out of the model's context window | `context exhausted: {reason}` |
-| `Internal` | an engine invariant broke | `internal invariant violated: {message}` |
+| `Internal` | an Engine invariant broke | `internal invariant violated: {message}` |
 | `RequirementsUnmet` | prepare refused the run, or the H1 pass failed its hard gate | the requirements notice, or the Lua error text |
 
 Nothing reruns a failed run automatically. [Model call and environment failures](#model-call-and-environment-failures) lists the failures worth running again.
@@ -447,12 +447,12 @@ tool-call loop did not converge
 - A failed `{{ }}` substitution ends the run as `Lua` with the substitution's own message, or as `RequirementsUnmet` in the H1 pass. Substitution has no run error kind of its own.
 - `Quota`: a section VM runs out the log event quota or the log byte quota. Only the two log quotas lead to `Quota`: running past the memory ceiling is `Lua`, and no instruction count can run out.
 
-### Store and engine failures
+### Store and Engine failures
 
 - An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
 - `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
 - `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the Host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
-- `Internal`: an engine invariant broke, a fault in the engine rather than a mistake in the prompt. Its location names an engine source file and line.
+- `Internal`: an Engine invariant broke, a fault in the Engine rather than a mistake in the prompt. Its location names an Engine source file and line.
 
 ### The H1 pass hard gate
 
@@ -574,7 +574,7 @@ Nothing in this prompt ends the loop, and no limit does either. When the Host ca
 
 ### How a cancel reaches running Lua
 
-- Every 10,000 Lua instructions, running Lua checks the run's cancel flag. The check covers each section VM's main code and every block coroutine, so it reaches every block of every section, the H1 pass included. The engine also checks the flag between steps.
+- Every 10,000 Lua instructions, running Lua checks the run's cancel flag. The check covers each section VM's main code and every block coroutine, so it reaches every block of every section, the H1 pass included. The Engine also checks the flag between steps.
 - Every section VM and every activated capability share the same cancel flag.
 - Once the flag is set, the running block fails with the interrupted error: kind `cancelled`, message `interrupted by Ctrl-C` whatever the Host's actual trigger was, and no source location. It never appears as an ordinary Lua runtime error, and it wins over any error value the block had raised.
 - The cancel stops every block in the run, not only the first. After a cancel, a block with a bounded loop such as `for i = 1, 100000 do end` followed by `return "done"` never returns `done`.
@@ -608,7 +608,7 @@ return out
 
 A cancel during the tool call gives `ok == false`, `out.kind == 'cancelled'`, and `tostring(out) == 'interrupted by Ctrl-C'`. A `models.loop` round cut short the same way raises an error value whose `kind` is `cancelled` and whose `message` is `interrupted by Ctrl-C`, so `tostring(err)` gives exactly that message.
 
-Catching a cancel does not keep the run going. Once the Host cancels, running Lua is stopped by the instruction check and the engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
+Catching a cancel does not keep the run going. Once the Host cancels, running Lua is stopped by the instruction check and the Engine's next step tears every chain down, so the run still ends with the cancelled outcome. Raise the caught value again, as above, rather than trying to continue.
 
 ### Work in flight
 

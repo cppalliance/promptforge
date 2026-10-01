@@ -8,7 +8,7 @@
 //! transcript from index zero and re-announces every unresolved input
 //! wait. While attached, the loop streams four families: durable
 //! `agent_event` frames drained from the session's transcript by a
-//! per-client cursor (the harness's event broadcast is only the wakeup,
+//! per-client cursor (the Harness's event broadcast is only the wakeup,
 //! so a lagged receiver loses nothing), ephemeral `agent_delta` frames
 //! from the session's delta channel (drops repair via the superseding
 //! event), the durable `input_required` / `input_cancelled` wait frames,
@@ -21,7 +21,7 @@
 //!
 //! One task owns the socket: a single `select!` loop reads and writes
 //! the same handle, per the server's socket rule; the session table
-//! behind it is the harness's, [`super`]'s documented carve-out.
+//! behind it is the Harness's, [`super`]'s documented carve-out.
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};

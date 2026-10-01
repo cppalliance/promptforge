@@ -171,7 +171,7 @@ export interface CallMetrics {
 /**
  * One durable record of something that happened during an agent run,
  * mirroring `AgentEvent` in workshop-server (src/agents/wire.rs): the
- * engine's content event projected onto the wire. `content` and every other
+ * Engine's content event projected onto the wire. `content` and every other
  * free-text field is untrusted model-, tool-, or user-authored data. Absent
  * optional fields are omitted keys on the wire, never `null`.
  */

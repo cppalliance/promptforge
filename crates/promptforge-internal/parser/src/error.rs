@@ -292,7 +292,7 @@ impl ParseError {
         self.column
     }
 
-    /// Unwraps the internal error; the engine reaches it through
+    /// Unwraps the internal error; the Engine reaches it through
     /// [`crate::detail::parse_error_into_inner`].
     #[must_use]
     pub(crate) fn into_inner(self) -> Error {

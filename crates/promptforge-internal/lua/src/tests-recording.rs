@@ -1,7 +1,7 @@
 //! Test-only read-back of the events this crate's seams emit, in the shape
 //! the suites assert on: `(execution, section, Observation)` records.
 //!
-//! The engine reports as [`Event`] values through an [`Emitter`]; a suite
+//! The Engine reports as [`Event`] values through an [`Emitter`]; a suite
 //! that wants to assert on the boundaries a VM crossed drains the emitter's
 //! sink and folds each event to its kind. [`Recorder`] is that fold with
 //! the emitter beside it, and [`null_emitter`] is an emitter whose sink is

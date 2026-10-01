@@ -25,10 +25,10 @@ workspace-hack.workspace = true
 # other crates see; only this crate's doctest run executes them.
 promptforge.workspace = true
 # The property tests' adversarial content and Harness-style random seeds;
-# the engine itself reads no RNG.
+# the Engine itself reads no RNG.
 rand.workspace = true
 # The reference the std-only `Timestamp::to_rfc3339` formatter is checked
-# against; the engine itself never depends on `time`.
+# against; the Engine itself never depends on `time`.
 time.workspace = true
 
 [lints]

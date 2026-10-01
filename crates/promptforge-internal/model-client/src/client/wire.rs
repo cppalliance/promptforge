@@ -91,7 +91,7 @@ impl Message {
     }
 
     /// Returns the message text, or `""` when the content is a
-    /// content-parts array rather than a string (only the engine builds
+    /// content-parts array rather than a string (only the Engine builds
     /// that form).
     #[must_use]
     pub fn content(&self) -> &str {
@@ -108,10 +108,10 @@ impl Message {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ToolSchema {
-    /// The tool's wire name; the engine reads it through
+    /// The tool's wire name; the Engine reads it through
     /// [`crate::detail::tool_schema_name`].
     pub(crate) name: String,
-    /// A one-sentence description shown to the model; the engine reads it
+    /// A one-sentence description shown to the model; the Engine reads it
     /// through [`crate::detail::tool_schema_description`].
     pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
@@ -120,7 +120,7 @@ pub struct ToolSchema {
 
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
-/// `ToolSchema` is built only inside the engine (from the executor's `Tool`
+/// `ToolSchema` is built only inside the Engine (from the executor's `Tool`
 /// contract, through [`crate::detail::tool_schema_new`]), so the raw-`Value`
 /// validation and its error stay off the facade. The type is public so
 /// `promptforge-engine` can box it as an error source.
@@ -304,7 +304,7 @@ pub struct Completion {
     pub(crate) client_timing: Option<ClientTiming>,
     /// One line per response metadata section that was present but
     /// malformed and degraded to `None`; empty for a well-formed body. The
-    /// engine reports each line as a `model_metadata_degraded` event.
+    /// Engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
     /// The JSON body sent to the gateway.
     pub(crate) request_body: Value,

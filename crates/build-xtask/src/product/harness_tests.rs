@@ -1,4 +1,4 @@
-//! Harness-family fixtures: outside their family, harness crates depend on
+//! Harness-family fixtures: outside their family, Harness crates depend on
 //! `promptforge` and `workspace-hack` only, and outside crates reach the
 //! family only through `harness`.
 

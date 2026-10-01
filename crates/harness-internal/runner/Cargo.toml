@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness runner: the effect loop that drives an engine Run on tokio, the performer traits, cancellation, supervision, and the one instrumented spawn wrapper"
+description = "PromptForge Harness runner: the effect loop that drives an Engine Run on tokio, the performer traits, cancellation, supervision, and the one instrumented spawn wrapper"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "tokio"]
 categories = ["development-tools", "asynchronous"]
@@ -15,7 +15,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 harness-capabilities.workspace = true
 harness-log.workspace = true
-# The engine's public API: the Run this crate drives, the effects and
+# The Engine's public API: the Run this crate drives, the effects and
 # answers it correlates, and the run's VFS handle.
 promptforge.workspace = true
 # The run seed is drawn from the OS CSPRNG at preparation: it is the
@@ -40,8 +40,8 @@ async-trait.workspace = true
 tempfile.workspace = true
 
 [features]
-# Fixtures for other harness crates' tests (`test_support::mock_tag`);
-# nothing here reaches the harness proper.
+# Fixtures for other Harness crates' tests (`test_support::mock_tag`);
+# nothing here reaches the Harness proper.
 test-support = []
 
 [lints]

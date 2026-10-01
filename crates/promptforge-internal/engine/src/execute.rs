@@ -15,7 +15,7 @@
 //! - `engine` - the walk-target resolution helpers.
 //! - `environment` - the public [`Environment`], whose `prepare` fills slots
 //!   against the Harness-supplied catalog; capability activation itself is the
-//!   harness's, in `harness-capabilities`.
+//!   Harness's, in `harness-capabilities`.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's tool- and model-slot fill functions.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
@@ -83,7 +83,7 @@ pub(crate) use promptforge_lua::{StoreOp, StoreOutcome};
 /// # Errors
 /// Returns the store's own structured failure for the operation (path
 /// validation, not-found, anchor, range, conflict, or backend failure),
-/// which the engine raises at the author's call site when the answer is
+/// which the Engine raises at the author's call site when the answer is
 /// resumed.
 pub fn perform_store_op(
     access: &promptforge_vfs::Access,

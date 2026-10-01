@@ -11,7 +11,7 @@
 //! Every integer that is a `u64` in Rust (`seed`, `effect_id`) is stored
 //! as its two's-complement `i64` reinterpretation, since SQLite integers
 //! are signed; see `append::signed` and `append::unsigned`. `task_id` is
-//! the engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
+//! the Engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
 //! text, since a path of unbounded depth has no integer form. Timestamps
 //! are UTC milliseconds since the Unix epoch.
 

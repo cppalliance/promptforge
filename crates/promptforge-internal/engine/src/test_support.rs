@@ -18,8 +18,8 @@
 //! client, a fixture tool table, a delta hook - and [`run_with_host`] is
 //! the implicit-prepare path over the tokio driver: prepare, refuse or
 //! run. The tool fixtures implement
-//! the stand-in trait [`TestTool`]; the production trait is the harness's,
-//! which no engine crate names.
+//! the stand-in trait [`TestTool`]; the production trait is the Harness's,
+//! which no Engine crate names.
 //! [`Observer`](recording::Observer) and
 //! [`Observation`](recording::Observation) are the suites' recording
 //! vocabulary, and [`forward`] is the adapter that replays returned events
@@ -173,7 +173,7 @@ pub fn drive(
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
 /// implementations on `host` ([`RunHost::tools`]). Capability activation
-/// is the harness's and never happens here.
+/// is the Harness's and never happens here.
 ///
 /// An unsatisfiable prompt - a missing required capability or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding

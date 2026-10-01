@@ -246,7 +246,7 @@ fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
 }
 
 /// The section's effective binding's `(temperature, max_tokens)`, read the
-/// way the engine's Chat-effect sites read it.
+/// way the Engine's Chat-effect sites read it.
 fn effective_sampling(
     set: &std::sync::Mutex<ModelSet>,
     runtime: &std::sync::Mutex<ModelRuntime>,

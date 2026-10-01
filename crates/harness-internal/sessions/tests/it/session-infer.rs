@@ -1,6 +1,6 @@
 //! The mock-gateway session round trip: a model-backed agent prompt drives
 //! real inference- and chat-origin `assistant_reply` events through the
-//! harness, and the tool-less infer reproduction pins the reply between the
+//! Harness, and the tool-less infer reproduction pins the reply between the
 //! completed turn and the section chunk success.
 
 use super::*;
@@ -57,7 +57,7 @@ fn reply_stream() -> String {
 }
 
 /// The catalog the mock gateway serves at `GET /v1/models`: the one
-/// inference model the harness binds its roles to.
+/// inference model the Harness binds its roles to.
 fn catalog_body() -> serde_json::Value {
     serde_json::json!({
         "data": [{
@@ -70,7 +70,7 @@ fn catalog_body() -> serde_json::Value {
 }
 
 /// Serves the model catalog and a streaming chat completion on a loopback
-/// port, returning the base URL to bind a harness to.
+/// port, returning the base URL to bind a Harness to.
 async fn mock_gateway() -> String {
     async fn models() -> axum::Json<serde_json::Value> {
         axum::Json(catalog_body())
@@ -89,7 +89,7 @@ async fn mock_gateway() -> String {
     format!("http://{addr}")
 }
 
-/// A harness over a fresh `<dir>/agents` directory holding `name.md` with
+/// A Harness over a fresh `<dir>/agents` directory holding `name.md` with
 /// `program`, bound to `base_url` with a catalog whose one chat-capable entry
 /// names the mock gateway's model.
 fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness {
@@ -112,7 +112,7 @@ fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness
     harness
 }
 
-/// A harness holding `mixed.md`: [`harness_for`] with [`MIXED`].
+/// A Harness holding `mixed.md`: [`harness_for`] with [`MIXED`].
 fn mixed_harness(dir: &Path, base_url: &str) -> Harness {
     harness_for(dir, base_url, "mixed", MIXED)
 }
@@ -125,7 +125,7 @@ const INFERS: &str = "---\nname: infers\ndescription: infers only\npromptforge: 
     # Infers\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\nreturn models.infer('prose')\n```\n";
 
-/// A harness holding `infers.md` that makes one tool-less infer call and
+/// A Harness holding `infers.md` that makes one tool-less infer call and
 /// returns: [`harness_for`] with [`INFERS`].
 fn infer_harness(dir: &Path, base_url: &str) -> Harness {
     harness_for(dir, base_url, "infers", INFERS)

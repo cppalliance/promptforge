@@ -1,11 +1,11 @@
 //! The [`Tool`] trait: the implementation contract behind a
-//! [`ToolDescriptor`] the engine binds against.
+//! [`ToolDescriptor`] the Engine binds against.
 //!
-//! The engine's catalog is descriptors
+//! The Engine's catalog is descriptors
 //! ([`ToolCatalog`](promptforge::tools::ToolCatalog)), and a
-//! `ToolCall` effect names a [`ToolId`]; the harness resolves the id in
+//! `ToolCall` effect names a [`ToolId`]; the Harness resolves the id in
 //! its [`ToolTable`](crate::ToolTable) and calls the implementation here.
-//! Some tools run locally in the harness process (fetching and rendering a
+//! Some tools run locally in the Harness process (fetching and rendering a
 //! web page), others proxy through the gateway so a shared credential never
 //! leaves the server; both share this trait so the tool performer dispatches
 //! them uniformly.
@@ -16,7 +16,7 @@ use promptforge::tools::{ToolDescriptor, ToolError, ToolId, ToolOutput};
 #[path = "tool-tests.rs"]
 mod tests;
 
-/// A tool the harness can dispatch during a model's tool-call loop.
+/// A tool the Harness can dispatch during a model's tool-call loop.
 ///
 /// # Implementing
 ///
@@ -131,7 +131,7 @@ pub trait Tool: Send + Sync {
         false
     }
 
-    /// The tool as data: the descriptor the harness derives from this
+    /// The tool as data: the descriptor the Harness derives from this
     /// implementation when it assembles the run's catalog, with no
     /// conflicts recorded (the contributing capability's are added at
     /// assembly).

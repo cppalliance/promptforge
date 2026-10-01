@@ -158,7 +158,7 @@ All paths are relative to the `promptforge` repository root.
 
 ## Testing Plan
 
-- DEBT-LTC-C1 regression, the main engine test:
+- DEBT-LTC-C1 regression, the main Engine test:
   - Round 1 returns two calls: `c1`, a local `grab` whose handler calls `models.infer`, and `c2`, a bound `echo` from `echo_tools()`. The handler's inference gets its own scripted text reply, and round 2 returns final text.
   - Observe the events through a recording observer that captures the turn on `Event::AssistantToolCalls` and `Event::ToolResult`.
   - Assert the batch turn, `c1`'s result turn, and `c2`'s result turn are equal. Before the fix, `c2` reports the next turn.
@@ -170,7 +170,7 @@ All paths are relative to the `promptforge` repository root.
   - Parse tests for the `turn` field: absent gives `None`, a valid integer gives `Some`, and a negative number, float, or string is a malformed yield.
   - A render test that the chat result carries `turn`.
   - A shim walk showing that the loop's `tool_call` yield carries the same `turn` as the chat result that requested it.
-- DEBT-LTC-X1, new engine tests:
+- DEBT-LTC-X1, new Engine tests:
   - A saved reference: the block runs `local j = jump`, then registers a handler that calls `j('## Other')`. Through a script `tools.call` and through `models.loop`, the run fails with the refusal message and does not jump.
   - A caught refusal: the caller wraps `tools.call` in `pcall` around that handler, and the block then returns `'no jump'`. The run returns `'no jump'`, proving that no jump was recorded.
   - Nesting: an outer handler calls an inner local tool. `jump` is still refused in the outer handler after the inner one returns, and works in the block once the outer one returns.
@@ -179,10 +179,10 @@ All paths are relative to the `promptforge` repository root.
   - The shim walk in `crates/promptforge-internal/engine/src/lua/tests/shims.rs` (lines 186-197): replace the `jump == nil` check with a `pcall(jump, ...)` inside the handler that fails with the refusal.
   - `a_script_caller_catches_the_handlers_own_error_and_jump_is_restored` in `crates/promptforge-internal/engine/src/execute/tests/tool_call_arm.rs` (lines 337-358): its `type(jump)` clause proves nothing once the global is never swapped. Replace it with a check that the block's `jump` transfers after the caught failure.
   - `jump_works_in_the_same_block_after_the_loop_returns` in `local_tools.rs` stays as written.
-- DEBT-LTC-X2: a new engine test in `local_tools.rs`. A handler raises inside `models.loop`, and the recorder shows `TOOL_CALL_FAILED` with no `tool_result` for that call id. The run fails with the handler's error.
+- DEBT-LTC-X2: a new Engine test in `local_tools.rs`. A handler raises inside `models.loop`, and the recorder shows `TOOL_CALL_FAILED` with no `tool_result` for that call id. The run fails with the handler's error.
 - Regression: every other existing test passes without edits, except for mechanical additions where a test builds `ChatResult` or `Request::ToolCall` literals. That includes:
   - `crates/promptforge-internal/lua/src/dispatch-tests.rs`
-  - the engine's `tool_call_arm.rs`, `local_tools.rs`, and `models_loop.rs`
+  - the Engine's `tool_call_arm.rs`, `local_tools.rs`, and `models_loop.rs`
   - the task built-in, `await_tasks`, and `task_events` tests
 - Exit checks:
   - the workspace test suite and doctests;
@@ -267,14 +267,14 @@ All paths are relative to the `promptforge` repository root.
   - Unit tests live in the crate under `#[cfg(test)]`, in one of three shapes that follow the flat-directory rule: an inline `mod tests { ... }`; a kebab sibling `foo-tests.rs` wired as `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;`; or, for three or more files, a `foo/tests/` directory of snake_case topic files wired by `#[cfg(test)] mod tests;` (for example `engine/src/execute/tests/`, `lua/src/protocol/tests/`, `workshop/workspace/src/workspace/tests/`).
   - Test helpers sit in a `test_support` module (engine `src/test_support.rs` plus `src/test_support/`), a `tests-*.rs` sibling (lua `tests-recording.rs`), or a `fixtures.rs` among the topic files. Hook functions are named `*_for_test`: crate-private ones under `#[cfg(test)]`, cross-crate ones exposed through a test feature. Cross-crate test seams use a `test-fixtures` feature (gateway and workshop families), `test-support` (promptforge-internal crates, `harness-runner`), or `test-helpers` (`gateway-routing`); `gateway` and `workshop-server-api` dev-depend on themselves with that feature so gate commands need no `--features` flag.
   - Integration tests are one binary per crate at `tests/it/main.rs` with snake_case topic modules (a large topic becomes `topic.rs` plus `topic/`); the `promptforge` facade uses `tests/suite/main.rs`. A few crates keep loose single-file binaries instead (`gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway-cloud-providers`, `build-workshop`). Shared helpers go in `support.rs` (`common/mod.rs` in workshop-server), JSON fixtures in `tests/fixtures/`, and prompt-program fixtures are `.md` files under `tests/prompts/{valid,invalid,execution}/`. Benches are criterion files under `benches/` (engine `models_loop.rs`, lua `surface.rs`).
-  - Test functions are snake_case sentences stating the behavior (`a_process_lifetime_lease_recovers_after_its_owner_is_terminated`). `unwrap` and `expect` are allowed in tests only (root `clippy.toml`, restated in each harness crate's own `clippy.toml`).
+  - Test functions are snake_case sentences stating the behavior (`a_process_lifetime_lease_recovers_after_its_owner_is_terminated`). `unwrap` and `expect` are allowed in tests only (root `clippy.toml`, restated in each Harness crate's own `clippy.toml`).
   - JavaScript: Workshop UI tests are `crates/workshop/ui/test/<topic>.mjs`, config UI tests sit beside their sources as `src/**/<name>.test.mjs`, and tool tests are `tools/<script>.test.mjs`. Both UI packages run tests with `node --test` and use jsdom for the DOM.
   - Behavior changes ship with tests in the same change; product and behavior tests are preserved through refactors.
 - Directory map:
   - `crates/`: every Rust crate plus the UI packages. The root holds the public layer (`promptforge`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), `build-*` tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), `shared-ui` (a TypeScript and CSS package, not a crate), and `README.md` describing each root crate.
-  - `crates/promptforge-internal/`: private engine family (`engine`, `lua`, `parser`, `store`, `vfs`, `model-client`, `types`).
+  - `crates/promptforge-internal/`: private Engine family (`engine`, `lua`, `parser`, `store`, `vfs`, `model-client`, `types`).
   - `crates/gateway/`: private gateway family (`app`, `cloud-providers`, `config`, `config-ui` with its `ui/` SPA, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem of `api`, `engine`, `backend-whisper`, and `whisper-ffi`).
-  - `crates/harness/`: private harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
+  - `crates/harness/`: private Harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
   - `crates/workshop/`: private workshop family (`desktop` is the Tauri app; `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`; `ui/` is the npm and esbuild SPA).
   - `guide/`: user guide sources (`src/{language,gateway,workshop}` plus `introduction.md`, `books/`, `landing/`, `chrome/`), `CONTRIBUTING.md` for guide authors, and the three per-book `promptforge-*-guide.md` exports.
   - `prompts/`: sample prompt programs. `tools/`: Node scripts (gateway sidecar staging, live TTS probe) with their tests, plus `dokuman-promptforge.md`. `images/`: README banners.
@@ -287,9 +287,9 @@ All paths are relative to the `promptforge` repository root.
   - Local only and gitignored: `local/` (operator profiles, prompts, stores, gateway config, STT fixtures), `target/`, `target-msrv/`.
 - Component boundaries:
   - Runtime shape: the executor (`promptforge-engine`) is a sans-I/O state machine with no I/O and no clock, driven through `Run::new`, `step`, `resume`, and `cancel`. The Harness, its only production caller, steps it and owns the tokio runtime, the effect performers, sessions, and the Turso run log. The gateway is a separate server process that owns model routing and vendor credentials. The Workshop drives sessions through `harness-api` and attaches over the gateway protocol. `vibe/archdoc.md` also lists a CLI component, but no CLI crate or binary exists in the workspace.
-  - PromptForge: `promptforge` is the one public crate, a facade over `crates/promptforge-internal/` whose surface is committed in `crates/promptforge/public-api.txt`. Inside, the engine depends on lua, parser, store, model-client, types, and vfs; parser on lua and types; lua on store, model-client, and types; store on vfs; model-client on types; types and vfs on nothing. The family depends on no gateway, workshop, or harness crate.
+  - PromptForge: `promptforge` is the one public crate, a facade over `crates/promptforge-internal/` whose surface is committed in `crates/promptforge/public-api.txt`. Inside, the engine depends on lua, parser, store, model-client, types, and vfs; parser on lua and types; lua on store, model-client, and types; store on vfs; model-client on types; types and vfs on nothing. The family depends on no gateway, workshop, or Harness crate.
   - Harness: `harness-api` is the only public surface over `crates/harness/`. Harness crates may depend on `promptforge`, the gateway public pair, and shared-* crates, never on workshop or private gateway crates, and spawn tasks only through `harness-runner`'s instrumented wrapper.
-  - Gateway: the public pair is `gateway-api-types` (types only) and `gateway-api-discovery` (discovery file, launch lock, health probe); everything else is private under `crates/gateway/`, and the STT subsystem exposes only `gateway-stt` to the rest of the family. Gateway crates depend on no promptforge, workshop, or harness crate.
+  - Gateway: the public pair is `gateway-api-types` (types only) and `gateway-api-discovery` (discovery file, launch lock, health probe); everything else is private under `crates/gateway/`, and the STT subsystem exposes only `gateway-stt` to the rest of the family. Gateway crates depend on no promptforge, workshop, or Harness crate.
   - Workshop: private under `crates/workshop/`; may name `promptforge`, the gateway public pair, and `harness-api` only. The desktop app depends on `workshop-server-api`, never on `workshop-server`. Internal tiers flow one way: server, then features, then services, then vocabulary.
   - Shared: shared-* crates depend on no product crate.
   - Composed rule: a crate in a family container may depend only on crates at the `crates/` root and its own siblings; `build-*` crates are exempt. The rules bind normal, dev, build, and target-specific dependencies (one exception: promptforge-internal crates may dev-depend on `promptforge` for doc examples only), and `cargo test -p build-xtask` enforces them.
@@ -326,7 +326,7 @@ All paths are relative to the `promptforge` repository root.
   - `Request::ToolCall` in `crates/promptforge-internal/lua/src/protocol/request.rs` gains `turn: Option<u32>`.
   - `parse_tool_call` in `crates/promptforge-internal/lua/src/protocol/parse.rs` reads `turn` as a shim-produced field: absent or nil gives `None`, an integer within `u32` range gives `Some`, and anything else is a malformed yield.
   - `prepare_tool_call` accepts the new field but does not use it yet, so reported turns are unchanged by this step.
-  - Mechanical literal additions wherever tests build `ChatResult` or `Request::ToolCall`, including `crates/promptforge-internal/lua/src/dispatch-tests.rs` and the engine's `tool_call_arm.rs`, `local_tools.rs`, and `models_loop.rs`.
+  - Mechanical literal additions wherever tests build `ChatResult` or `Request::ToolCall`, including `crates/promptforge-internal/lua/src/dispatch-tests.rs` and the Engine's `tool_call_arm.rs`, `local_tools.rs`, and `models_loop.rs`.
 - Tests:
   - Parse tests: absent `turn` gives `None`, a valid integer gives `Some`, and a negative number, a float, and a string are each a malformed yield.
   - A render test showing the chat result table carries `turn`.
@@ -349,7 +349,7 @@ All paths are relative to the `promptforge` repository root.
   - `crates/promptforge/src/event.md` line 398: change "the round that dispatched the call" to the round that requested the call, and state that a script-issued call reports the counter's value when the script dispatched it.
   - Mechanical literal additions in the task built-in, `await_tasks`, and `task_events` tests.
 - Tests:
-  - Main engine regression: round 1 returns `c1`, a local `grab` whose handler calls `models.infer` (with its own scripted text reply), and `c2`, a bound `echo` from `echo_tools()`; round 2 returns final text. A recording observer captures the turn on `Event::AssistantToolCalls` and `Event::ToolResult`, and the batch turn, `c1`'s result turn, and `c2`'s result turn are equal.
+  - Main Engine regression: round 1 returns `c1`, a local `grab` whose handler calls `models.infer` (with its own scripted text reply), and `c2`, a bound `echo` from `echo_tools()`; round 2 returns final text. A recording observer captures the turn on `Event::AssistantToolCalls` and `Event::ToolResult`, and the batch turn, `c1`'s result turn, and `c2`'s result turn are equal.
   - Variant: the handler runs its own `models.loop` with one inner tool call. The inner result reports the inner round's turn, and `c2` reports the outer batch's turn.
   - Variant: the handler uses `call` into a section that runs `models.infer`. `c2` reports the outer turn.
   - Variant: `c2` is a task built-in. Cover `task_status`, and add a case where `c2` is a parked `await_tasks` answer so the stored turn is exercised.
@@ -398,7 +398,7 @@ All paths are relative to the `promptforge` repository root.
   - In `crates/promptforge/src/event.md`, amend lines 204, 380, 396, and 397 to state the exception for a model-issued call to a Lua-local tool: when its handler raises or returns an unsupported value, the call reports `ToolCallFailed` and no `ToolResult`, and the failure propagates to the caller of `models.loop` and ends the loop unless the author catches it. Every other rule in those lines stays as written.
   - No code change. `dispatch_local_tool_done` in `tool_call.rs` keeps its current behavior.
 - Tests:
-  - A new engine test in `local_tools.rs`: a handler raises inside `models.loop`, the recorder shows `TOOL_CALL_FAILED` with no `tool_result` for that call id, and the run fails with the handler's error.
+  - A new Engine test in `local_tools.rs`: a handler raises inside `models.loop`, the recorder shows `TOOL_CALL_FAILED` with no `tool_result` for that call id, and the run fails with the handler's error.
 - Verification, the exit list from the Testing Plan:
   - Build the gateway in the same profile first (`cargo build --locked -p gateway --no-default-features`), because the workshop crate's build script stages it.
   - Tests: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, `cargo nextest run --locked -p workshop-server --features headless`, and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`.

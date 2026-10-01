@@ -53,7 +53,7 @@ pub(crate) enum TaskState {
     Delivered,
     /// The owner cancelled the task.
     Cancelled,
-    /// The owner ended while the task was live, so the engine ended it.
+    /// The owner ended while the task was live, so the Engine ended it.
     Abandoned,
 }
 

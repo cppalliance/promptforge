@@ -1,4 +1,4 @@
-//! The adapter from the engine's [`Event`] values to the suites' recording
+//! The adapter from the Engine's [`Event`] values to the suites' recording
 //! seams: each event replayed onto the [`Observer`] and, for the debug
 //! variants, the [`DebugCapture`].
 //!

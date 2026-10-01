@@ -47,7 +47,7 @@ impl fmt::Display for SessionId {
     }
 }
 
-/// What a client asks the harness to launch.
+/// What a client asks the Harness to launch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchRequest {
     /// The agent's name, as discovered under the configured agents path.
@@ -78,7 +78,7 @@ pub struct SessionEvent {
     /// content kinds and omitted elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<u64>,
-    /// The logged engine event, in its persisted shape.
+    /// The logged Engine event, in its persisted shape.
     pub event: serde_json::Value,
 }
 

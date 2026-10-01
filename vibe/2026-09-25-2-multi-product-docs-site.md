@@ -15,7 +15,7 @@ todos:
     content: "Create site.yml (full build + deploy on push/dispatch; path-filtered PR build with --books-only, own cancel-in-progress concurrency group, not required); facade documentation= URLs; tools/document.md, CONTRIBUTING.md, crates/README.md, .gitignore edits; move guide.yml and retired guide files to cabinet/_trash"
     status: pending
   - id: verify
-    content: Run tests + clippy, cargo xtask site twice, click-through over file://, confirm harness crates.js isolation and clean git status
+    content: Run tests + clippy, cargo xtask site twice, click-through over file://, confirm Harness crates.js isolation and clean git status
     status: pending
 isProject: false
 ---
@@ -195,7 +195,7 @@ pull_request:
     - Delete `guide/src/workshop/01-stub.md` when the first real Workshop chapter lands. The authoring tooling writes `NN-<chapter>.md`, so otherwise the stub sits beside `01-<real>.md` and both appear in the book.
 - Data, persistence, failure, security, and privacy constraints:
   - The site build writes only under `target/`. The checked-in tree stays clean.
-  - The separate `target/site-doc` keeps the banner flag from invalidating the developer's normal `target/doc`. The cost is one extra check build of the harness dependency tree, which the CI cache absorbs.
+  - The separate `target/site-doc` keeps the banner flag from invalidating the developer's normal `target/doc`. The cost is one extra check build of the Harness dependency tree, which the CI cache absorbs.
   - Deploy-only permissions and steps never run on PR events.
   - Link rule for the whole site: every link targets a file, never a folder - `gateway/index.html`, not `gateway/`. Under `file://` a folder link opens a directory listing instead of the page. This applies to the landing links, the banner, the back-link script, and the rustdoc redirects.
   - All written copy uses plain English and never uses em dashes or double dashes.
@@ -380,17 +380,17 @@ The owner chose one assembled Pages site with a separate site per product and a 
 - Test placement and naming conventions: Rust unit tests live in a kebab sibling `<module>-tests.rs` (or `tests-<label>.rs` inside a module subdirectory) wired with `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;`; integration tests live in one `tests/it/main.rs` target per crate with submodules beside it; shared test helpers sit in `test_support.rs` or `*-test-support.rs`; UI tests are `<name>.test.mjs` beside the TypeScript source (plus `test/**/*.mjs` in the workshop UI) run by `node --test`; nextest is the runner, with `.config/nextest.toml` capping the heavy STT suites
 - Directory map:
   - `crates/` holds every Rust crate plus the TypeScript packages; public root crates (`promptforge`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), build tooling (`build-xtask`, `build-ui`, `build-user-guide`, `build-workshop`, `build-llama-cuda`), the `workspace-hack` hakari crate, and the `shared-ui` TypeScript and CSS package
-  - `crates/promptforge-internal/` is the private engine family: engine, types, vfs, lua, parser, store, model-client
+  - `crates/promptforge-internal/` is the private Engine family: engine, types, vfs, lua, parser, store, model-client
   - `crates/gateway/` is the private gateway family: app (the `gateway` binary), cloud-providers, config, config-ui (with its `ui/` TypeScript SPA), local, logging, progress, protocol, routing, web-search, and the nested `stt/` subsystem (api, engine, backend-whisper, whisper-ffi)
-  - `crates/harness/` is the private harness family: runner, models, capabilities, log, sessions, web, webfetch, web-search
+  - `crates/harness/` is the private Harness family: runner, models, capabilities, log, sessions, web, webfetch, web-search
   - `crates/workshop/` is the private workshop family: desktop (Tauri app, package `workshop`), server, server-api, gateway, menu, protocol, registry, status, support, user-state, workspace, and the `ui/` TypeScript SPA
   - `guide/` is the mdBook user guide (`book.toml`, `src/` with agent, gateway, and language chapters, plus standalone guide files)
   - `prompts/` holds example prompt pipelines; `tools/` holds Node staging scripts and a docs-tool prompt; `images/` holds README and marketing art
   - `vibe/` holds architecture notes (`archdoc.md`), dated plans, and research; `.github/workflows/` holds CI, release, guide, nightly, and CUDA or STT jobs; `.githooks/` holds the fmt pre-commit and clippy pre-push hooks
 - Component boundaries:
   - Four products (PromptForge, Gateway, Harness, Workshop) each expose a small public root layer and keep everything else in a manifestless private container; a container crate may depend only on `crates/` root crates and its own siblings
-  - `promptforge` is the single facade over `promptforge-internal/*`; promptforge crates never depend on gateway, harness, or workshop crates
-  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; gateway crates never depend on promptforge, harness, or workshop crates
+  - `promptforge` is the single facade over `promptforge-internal/*`; promptforge crates never depend on gateway, Harness, or workshop crates
+  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; gateway crates never depend on promptforge, Harness, or workshop crates
   - Harness depends on `promptforge`, the gateway public pair, and shared-* crates; its only public crate is `harness-api`
   - Workshop depends on the gateway public pair, `promptforge`, and `harness-api`; the desktop app depends on `workshop-server-api`, never `workshop-server`
   - shared-* crates depend on no product crate; build-* crates are exempt from container privacy

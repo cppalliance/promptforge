@@ -1,6 +1,6 @@
 //! The performers the runner supplies itself: the timer, the store, and
 //! the task-events read. Each is machinery the runner already holds -
-//! tokio's timer wheel, the engine's store operation over the effect's
+//! tokio's timer wheel, the Engine's store operation over the effect's
 //! own access, and the run log the loop writes - so none needs a crate of
 //! its own. The chat and tool performers reach outward (a gateway and the
 //! activated capabilities) and live with what they reach.
@@ -30,14 +30,14 @@ impl TimerPerformer for TokioTimer {
     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
         // The protocol bounds `seconds` to a non-negative, finite value
         // within `Duration`'s range before the effect is issued; anything
-        // outside that fires at once rather than never, as the engine's
+        // outside that fires at once rather than never, as the Engine's
         // own tokio test driver does.
         let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO);
         Box::pin(tokio::time::sleep(duration))
     }
 }
 
-/// Performs a store operation through the engine's store facade over the
+/// Performs a store operation through the Engine's store facade over the
 /// store view the effect carries.
 ///
 /// Synchronous: the loop runs it on the blocking pool. When the access
@@ -57,7 +57,7 @@ impl StorePerformer for VfsStore {
 /// The loop commits a step's events before it issues the step's effects,
 /// so a read issued in a step sees everything reported before it. The
 /// events come back in the task's sequence order, narrowed to those after
-/// `last` as the engine's `tasks.events` promises (`last` is the highest
+/// `last` as the Engine's `tasks.events` promises (`last` is the highest
 /// sequence number the caller has already seen).
 ///
 /// A log that refuses the read, or a stored payload that no longer parses

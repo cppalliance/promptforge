@@ -1,5 +1,5 @@
 //! The launch surface a client builds through the public API: the
-//! engine's filesystem handle, named through `harness::vfs`, and the
+//! Engine's filesystem handle, named through `harness::vfs`, and the
 //! output error a session reports.
 
 use harness::vfs::{VfsError, VfsRef};

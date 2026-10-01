@@ -2,7 +2,7 @@
 //! prompt binds models. No transport.
 //!
 //! [`client`] holds the chat-completions protocol vocabulary: the wire
-//! types that go out of the engine in a `Chat` effect and come back in its
+//! types that go out of the Engine in a `Chat` effect and come back in its
 //! answer ([`client::Message`], [`client::ToolSchema`],
 //! [`client::Completion`]), the request body builder, and the SSE
 //! reassembly that folds a streamed body into a [`client::Completion`]

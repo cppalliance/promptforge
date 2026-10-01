@@ -35,16 +35,16 @@ A Rust developer building a program that runs agents through the Harness for a p
 <page-lib>
 
 Purpose: Teach a Rust developer to run PromptForge agents through the Harness as long-running sessions an operator talks to.
-Core idea: Your program tells the harness where models live, launches agents by name, and relays what each session says and asks.
+Core idea: Your program tells the Harness where models live, launches agents by name, and relays what each session says and asks.
 Need this when: always; start here.
 Builds on: none
 Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04-how-a-prompt-runs.md, guide/src/language/05-lua-environment.md, guide/src/language/10-models.md
 
 ### Tour: Launch an agent
-- How: How do I set up the harness, point it at a model server, and launch an agent by name?
+- How: How do I set up the Harness, point it at a model server, and launch an agent by name?
 - What if: What happens when I launch before any model server is bound?
 - Why: Why must I wait for the session to close before I read its output text?
-- Example: build the harness over an agents folder, bind the stub model server and a selected model, launch `chat` with one line of input, wait for `Closed`, and assert the output text.
+- Example: build the Harness over an agents folder, bind the stub model server and a selected model, launch `chat` with one line of input, wait for `Closed`, and assert the output text.
 - Diagram: none
 
 ### Tour: Stream a reply
@@ -78,7 +78,7 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 ### Tour: The complete program
 - How: How do the pieces from every tour fit into one Host?
 - What if: What happens when my program never answers an open question?
-- Why: Why does the harness take its model server and model choice as values you push in, rather than reading them itself?
+- Why: Why does the Harness take its model server and model choice as values you push in, rather than reading them itself?
 - Example: the whole `desk` Host, every line visible.
 - Diagram: the Host loop, from launch to streaming, answering, and closing.
 

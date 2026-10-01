@@ -16,7 +16,7 @@ impl SectionVm {
     /// Installs the captured tool and model alias globals.
     ///
     /// Each bound slot becomes a bare global holding its handle userdata.
-    /// The engine calls this after [`replay_shared`](Self::replay_shared), so
+    /// The Engine calls this after [`replay_shared`](Self::replay_shared), so
     /// a declared alias wins over a same-named shared global; the raw install
     /// also bypasses any metatable the shared library set on `_G`. The raw
     /// install never replaces an Engine global only because the parser refuses

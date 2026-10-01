@@ -1,7 +1,7 @@
 //! The `Chat` performer: one model round through the gateway client, with
 //! the round's live deltas streamed to the session as they arrive.
 //!
-//! The run's `Event` sink receives what the engine reports once it applies
+//! The run's `Event` sink receives what the Engine reports once it applies
 //! the round's answer (the turn, the reply, the tool calls); the deltas
 //! are the live view of the reply forming, and they travel on their own
 //! channel so a session can render them without a fragment ever reaching
@@ -24,7 +24,7 @@ use crate::GatewayClient;
 /// reply travels in the effect's answer regardless.
 pub type DeltaSink = mpsc::UnboundedSender<StreamDelta>;
 
-/// Performs the engine's `Chat` effects on a [`GatewayClient`], streaming
+/// Performs the Engine's `Chat` effects on a [`GatewayClient`], streaming
 /// each delta of a section's own round to a [`DeltaSink`].
 ///
 /// The client arrives configured: the caller applies the run's request

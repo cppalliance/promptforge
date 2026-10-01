@@ -1,5 +1,5 @@
 //! Run preparation: a prompt whose requirements the environment cannot
-//! meet is refused with the engine's own notice and its row closed as
+//! meet is refused with the Engine's own notice and its row closed as
 //! failed; a prompt that does not parse fails the same way under the
 //! `Parse` kind; each preparation draws a fresh seed and start, both
 //! written to `runs`; and the prepared tool performer resolves a

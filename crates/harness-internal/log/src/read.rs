@@ -104,7 +104,7 @@ impl RunLog {
 
     /// The `Event` payloads of one task (named by its rendered path), in
     /// `task_seq` order: what the `TaskEvents` performer hands back to the
-    /// engine. `last` keeps only the final `n`. A task that never logged
+    /// Engine. `last` keeps only the final `n`. A task that never logged
     /// reads as empty.
     ///
     /// # Errors

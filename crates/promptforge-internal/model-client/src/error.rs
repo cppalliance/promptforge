@@ -38,7 +38,7 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 ///   [`MalformedResponse`](Error::MalformedResponse) or
 ///   [`MalformedResponseSource`](Error::MalformedResponseSource)
 ///
-/// The read loop, the completion constructors, and the engine raise the
+/// The read loop, the completion constructors, and the Engine raise the
 /// rest. The enum is `#[non_exhaustive]`: a `match` over it outside this
 /// crate needs a wildcard arm.
 #[derive(Debug, thiserror::Error)]
@@ -144,7 +144,7 @@ pub enum Error {
 
     /// A lock on the shared model set was poisoned.
     ///
-    /// `Display` is the bare message so the engine can reclassify the
+    /// `Display` is the bare message so the Engine can reclassify the
     /// failure onto its own Lua-layer variant without a wording change.
     #[error("{0}")]
     ModelSetLock(String),

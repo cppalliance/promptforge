@@ -21,7 +21,7 @@
 //! plain tables in each event's serialized shape. The model receives one
 //! JSON event per line, nonce-wrapped as untrusted under the reader's run
 //! nonce, because a task's history includes model, tool, and user text -
-//! the one built-in answer that is not the engine's own words. A task
+//! the one built-in answer that is not the Engine's own words. A task
 //! that has reported nothing new answers the model with a trusted sentence
 //! saying so, since there is nothing to wrap.
 

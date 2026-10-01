@@ -48,7 +48,7 @@ fn idless_chat_model() -> serde_json::Value {
     serde_json::json!({ "kind": "chat" })
 }
 
-/// A harness over a fresh agents directory holding `asks.md`, with a
+/// A Harness over a fresh agents directory holding `asks.md`, with a
 /// usable (never contacted) gateway and no catalog bound yet.
 fn unbound_harness(dir: &Path) -> Harness {
     let agents = dir.join("agents");

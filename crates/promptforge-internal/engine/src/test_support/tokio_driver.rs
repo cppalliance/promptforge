@@ -211,7 +211,7 @@ impl<'a> TokioDriver<'a> {
         }
     }
 
-    /// Drives the run to its end and returns its result as the engine's
+    /// Drives the run to its end and returns its result as the Engine's
     /// own error type: `Ok(text)` for a completed run, `Err(Interrupted)`
     /// for a cancelled one, and the failure's error otherwise.
     ///
@@ -375,7 +375,7 @@ impl<'a> TokioDriver<'a> {
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&access, op);
-                    // Hygiene only, as in the harness's `perform_store`:
+                    // Hygiene only, as in the Harness's `perform_store`:
                     // the run ends its scope at `Done`, so a post-run
                     // fresh-scope read never meets the run's claims
                     // however long the view is held.

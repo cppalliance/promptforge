@@ -71,7 +71,7 @@ impl ModelBindings {
 /// Written by [`prepare`](super::Environment::prepare)'s slot fill: exact
 /// slots fill by identity against the Harness-supplied catalog, and every
 /// fill is journaled here so the Host and evals see what each alias resolved
-/// to. The bindings hold descriptors, never implementations: the engine
+/// to. The bindings hold descriptors, never implementations: the Engine
 /// advertises and calls a tool by its data, and the Harness resolves the id
 /// a `ToolCall` effect names. The model only ever sees the prompt-local
 /// alias, never the global path. Handles resolve alias -> id -> descriptor.

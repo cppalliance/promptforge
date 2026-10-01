@@ -89,7 +89,7 @@ fn reply_stream() -> String {
 }
 
 /// Serves the mock gateway on a loopback port, spawned under the
-/// harness's tagged wrapper, and returns a keyed client at its `/v1`
+/// Harness's tagged wrapper, and returns a keyed client at its `/v1`
 /// root beside what it saw.
 async fn mock_gateway() -> (GatewayClient, Seen) {
     async fn completions(

@@ -1,7 +1,7 @@
 //! One performer trait per effect kind, and the bundle the effect loop
 //! performs a run's effects through.
 //!
-//! The engine issues an [`Effect`](promptforge::effect::Effect) as a
+//! The Engine issues an [`Effect`](promptforge::effect::Effect) as a
 //! value and waits for its
 //! [`EffectAnswer`](promptforge::effect::EffectAnswer); a performer is
 //! the Harness code that turns the one into the other. Each trait takes the
@@ -17,7 +17,7 @@
 //!
 //! The runner supplies four performers itself - [`TokioTimer`],
 //! [`VfsStore`], [`LogTaskEvents`], and [`ActivatedTools`] - because each
-//! is machinery it already holds: tokio's timer wheel, the engine's store
+//! is machinery it already holds: tokio's timer wheel, the Engine's store
 //! operation, the run log, and the tool table run preparation activated.
 //! The chat performer lives with what it reaches, the gateway client.
 
@@ -90,7 +90,7 @@ pub trait StorePerformer: Send + Sync {
     /// derives, widens, or retains store scope from it.
     ///
     /// # Errors
-    /// Returns the store's own structured failure, which the engine
+    /// Returns the store's own structured failure, which the Engine
     /// raises at the author's call site as a store error.
     fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, VfsError>;
 }

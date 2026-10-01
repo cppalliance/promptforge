@@ -445,7 +445,7 @@ fn outcome_of(result: RunResult) -> RunOutcome {
     }
 }
 
-/// The log's failed outcome for an engine error: `runs.error_kind` is the
+/// The log's failed outcome for an Engine error: `runs.error_kind` is the
 /// kind's debug name and `runs.error_message` the error's text with its
 /// cause chain. The one derivation for a run that failed under the loop
 /// and a run preparation refused, so the two agree in the log.

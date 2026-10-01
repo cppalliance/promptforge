@@ -237,7 +237,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 <project-review>
 1. Does the commit implement only its numbered step?
 2. Does every behavior have a regression test that fails without it?
-3. Is `promptforge:` engine gating unchanged and fully tested?
+3. Is `promptforge:` Engine gating unchanged and fully tested?
 4. Is author `version` absent after step 3 without removing unrelated protocol or package versions?
 5. Does every observer report carry the correct execution ID without changing execution decisions?
 6. Does observer synchronization remain inside each concrete observer, with no core-global logging mutex?

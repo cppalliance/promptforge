@@ -1,5 +1,5 @@
 //! The user-input wait: the [`WaitRegistry`] of single-use wait tokens,
-//! the session's input broker (the harness's `InputBroker`) handed to
+//! the session's input broker (the Harness's `InputBroker`) handed to
 //! each run the session launches, and the producer seam that completes a
 //! wait with the operator's text.
 //!
@@ -16,7 +16,7 @@
 //! dead token. Unresolved waits are retained across socket loss and
 //! re-announced on reconnect: sessions outlive sockets.
 //!
-//! The frames are harness data: the client that owns the socket
+//! The frames are Harness data: the client that owns the socket
 //! (Workshop's `/agents/ws`) renders each into its own protocol frame.
 
 #[path = "input-tool.rs"]

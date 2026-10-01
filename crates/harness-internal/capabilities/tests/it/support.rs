@@ -32,7 +32,7 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
         .expect("the fixture prompt parses")
 }
 
-/// The harness's activate-then-prepare ceremony spelled out, so a test can
+/// The Harness's activate-then-prepare ceremony spelled out, so a test can
 /// inspect what the run path folds into one refusal: activates the
 /// prompt's declared capabilities against `registry` with the run's own
 /// services - its filesystem handle and cancel flag - installs the
@@ -54,7 +54,7 @@ pub(super) fn prepare_activated(
     (ctx, requirements, activation)
 }
 
-/// The harness's run path with capabilities: activates against
+/// The Harness's run path with capabilities: activates against
 /// `registry`, installs the catalog, prepares, merges the activation
 /// report, refuses an unsatisfiable prompt, and otherwise drives the run
 /// on the store-only loop below (no fixture here performs a chat, tool,

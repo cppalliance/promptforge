@@ -15,7 +15,7 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -24,7 +24,7 @@
 //!   edit.
 //! - The gateway bearer token is never written to logs or `Debug` output;
 //!   only the request builder reads it, to set the `Authorization` header.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 

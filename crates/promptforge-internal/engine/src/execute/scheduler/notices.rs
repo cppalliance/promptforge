@@ -1,7 +1,7 @@
 //! Model-task notices: how the model learns that a task it started ended.
 //!
 //! An author waits on a task through the `tasks` namespace; the model has
-//! no wait primitive of its own beyond `await_tasks`, so the engine tells
+//! no wait primitive of its own beyond `await_tasks`, so the Engine tells
 //! it. When a model-origin task reaches a terminal state, one sentence is
 //! queued on the owner chain - `Task id=N (## Heading) completed: ...`,
 //! `failed: ...`, `was canceled: the author cancelled it`, or
@@ -20,7 +20,7 @@
 //! A completed task's final text is cross-chain model text reaching a
 //! model without the author in between, so it is nonce-wrapped as
 //! untrusted under the owner's run nonce; the rest of every sentence is
-//! the engine's own and stays bare.
+//! the Engine's own and stays bare.
 
 use std::sync::atomic::Ordering;
 

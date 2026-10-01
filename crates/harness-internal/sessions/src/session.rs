@@ -227,7 +227,7 @@ impl Session {
 
     /// Ends the session: the run is cancelled for good, its outstanding
     /// effects are answered `Dropped`, and once it reports `Done` the
-    /// state is `Closed` and the session leaves its harness.
+    /// state is `Closed` and the session leaves its Harness.
     pub fn close(&self) {
         self.core.interrupted();
         self.core.lifecycle.close();

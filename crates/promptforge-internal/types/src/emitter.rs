@@ -1,6 +1,6 @@
 //! The run-level event buffer and the task-scoped emitter over it.
 //!
-//! The engine reports as values: every boundary, content report, and
+//! The Engine reports as values: every boundary, content report, and
 //! debug capture becomes one [`Event`] pushed into the run's buffer,
 //! stamped with a [`Provenance`] - the nearest enclosing task and that
 //! task's next sequence number - and drained by the run's `step` through
@@ -15,7 +15,7 @@
 //! lock, so a task's sequence is dense from zero however its chains and
 //! the run's leaf tasks interleave.
 //!
-//! The emitter is the one reporting seam every engine crate takes: the
+//! The emitter is the one reporting seam every Engine crate takes: the
 //! parser reports parse-time compilation through it, the section VM its
 //! chunk boundaries, the tool-dispatch body its results, the scheduler
 //! everything else. It sits in this crate so those crates can name it
@@ -153,7 +153,7 @@ impl EventSink {
 /// stamped with the task's next sequence number under the run's execution
 /// id. Cheap to clone; a clone shares the task and the buffer.
 ///
-/// Every report is write-only: the engine never reads an event back
+/// Every report is write-only: the Engine never reads an event back
 /// through this path, so recording every event or dropping them all
 /// leaves a run's outputs, errors, and ordering unchanged.
 #[derive(Clone, Debug)]

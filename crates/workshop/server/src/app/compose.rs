@@ -187,7 +187,7 @@ fn register_user_state(
     }
 }
 
-/// The harness (agent-sessions) subsystem: the harness, the agent-session
+/// The Harness (agent-sessions) subsystem: the Harness, the agent-session
 /// opener, and their route state, plus the routes and bindings task it
 /// self-registers.
 fn register_sessions(

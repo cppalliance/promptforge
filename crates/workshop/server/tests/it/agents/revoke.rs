@@ -9,7 +9,7 @@ use super::*;
 
 /// The roots agent: every run opens with a model round naming the `ui()`
 /// snapshot's workspace root, so each launch and relaunch reports the
-/// roots the harness held when it started, then echoes inputs.
+/// roots the Harness held when it started, then echoes inputs.
 const ROOTS_MD: &str = r"---
 name: roots
 description: The roots test agent on the unified runtime.

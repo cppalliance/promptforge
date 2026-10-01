@@ -1,15 +1,15 @@
-//! The engine's event vocabulary: everything a run reports, as values.
+//! The Engine's event vocabulary: everything a run reports, as values.
 //!
 //! An [`Event`] is one thing that happened during a run, returned to the
 //! Harness from `Run::step` beside the effects the run wants performed. It is
 //! the one report-only vocabulary: lifecycle boundaries, content the model,
 //! tools, and user produced, and the opt-in debug capture, in one
-//! serializable enum. The engine emits through an
+//! serializable enum. The Engine emits through an
 //! [`Emitter`](crate::emitter::Emitter), the Harness appends to its log, and
-//! nothing is ever read back into the engine by this path: recording every
+//! nothing is ever read back into the Engine by this path: recording every
 //! event or dropping them all leaves a run's outputs, errors, and ordering
 //! unchanged. The payload-free lifecycle variants have named constructors
-//! in [`lifecycle`] for the engine's emit sites.
+//! in [`lifecycle`] for the Engine's emit sites.
 //!
 //! Every variant includes three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
@@ -195,7 +195,7 @@ events! {
         ModelMetadataDegraded {
             /// The model-turn counter the response was served under.
             turn: u32,
-            /// The engine's sentence naming the section and why it did not
+            /// The Engine's sentence naming the section and why it did not
             /// parse; it may quote backend-supplied values.
             message: String,
         },
@@ -330,7 +330,7 @@ events! {
             task: TaskId,
         },
         /// Terminal: the task's owner chain ended while the task was live,
-        /// so the engine ended the task. Distinct from a cancellation: the
+        /// so the Engine ended the task. Distinct from a cancellation: the
         /// task lost its owner rather than being stopped on purpose.
         TaskAbandoned {
             /// The task's id.
@@ -400,9 +400,9 @@ events! {
             trusted: bool,
         },
         /// One model-task notice as it is queued for the task's owner: the
-        /// engine's own sentence telling the model how a task it started
+        /// Engine's own sentence telling the model how a task it started
         /// ended. A completed task's final text is embedded nonce-wrapped
-        /// as untrusted; the rest of the sentence is the engine's.
+        /// as untrusted; the rest of the sentence is the Engine's.
         /// Reported under the owner's section.
         TaskNotice {
             /// The owner's model-turn counter when the notice was queued.
@@ -414,7 +414,7 @@ events! {
         },
         /// Reserved for a task setting its own progress note through
         /// `tasks.note`, the text its owner reads through `task_status`,
-        /// under the task's target section. Not yet produced: the engine
+        /// under the task's target section. Not yet produced: the Engine
         /// stores the note on the chain without reporting it.
         TaskNote {
             /// The task that set the note.

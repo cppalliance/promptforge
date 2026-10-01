@@ -61,7 +61,7 @@ const VISIBLE_GLOBALS: [&str; 19] = [
 /// the prelude's table and refuses writes; any other value installs as it
 /// is.
 ///
-/// The engine's section setup calls this after the coroutine yield shims
+/// The Engine's section setup calls this after the coroutine yield shims
 /// install and before the shared library replays. The chunk is not a
 /// coroutine, so a prelude that calls `tools.call` while loading fails.
 ///

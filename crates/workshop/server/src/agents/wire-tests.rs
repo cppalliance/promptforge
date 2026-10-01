@@ -33,13 +33,13 @@ fn provenance() -> Provenance {
 }
 
 /// The operator's message in the `chat` section, as a script's ask
-/// result: the fixture's `agent_event_minimal` entry as the engine event
+/// result: the fixture's `agent_event_minimal` entry as the Engine event
 /// it projects from.
 fn operator_message(text: &str) -> Event {
     tool_result("", harness::USER_INPUT_ASK_TOOL, text)
 }
 
-/// The fixture's `agent_event_stamped` entry as the engine event it
+/// The fixture's `agent_event_stamped` entry as the Engine event it
 /// projects from, every metrics section populated.
 fn stamped_fixture_event() -> Event {
     Event::AssistantReply {

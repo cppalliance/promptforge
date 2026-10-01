@@ -163,7 +163,7 @@ impl AgentSessionFrame {
 /// | [`Thinking`](Self::Thinking) | `agent_thought` |
 /// | [`UserInput`](Self::UserInput) | `user_message` |
 ///
-/// Exactly the engine's content [`Event`] variants a transcript renders;
+/// Exactly the Engine's content [`Event`] variants a transcript renders;
 /// lifecycle, task, and debug events never frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
@@ -220,7 +220,7 @@ pub(crate) struct AgentEvent {
 }
 
 impl AgentEvent {
-    /// Projects one engine event onto the wire shape, or `None` for a
+    /// Projects one Engine event onto the wire shape, or `None` for a
     /// variant the transcript does not render (lifecycle, task, and debug
     /// events). A script's call to the ask tool, [`USER_INPUT_ASK_TOOL`],
     /// frames as the operator's `user_message`, because its result is the

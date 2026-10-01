@@ -17,7 +17,7 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -30,7 +30,7 @@
 //! - No request includes an ambient identity on any hop: the client has
 //!   no proxy, no cookie store, no automatic `Referer`, and no default
 //!   credentials.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 

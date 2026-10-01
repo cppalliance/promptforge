@@ -35,7 +35,7 @@ const FORGETS: &str = "---\nname: forgets\ndescription: never writes its output\
 const PLAIN: &str = "---\nname: plain\ndescription: declares no files\npromptforge: 0\n---\n\n\
     # Plain\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
-/// A harness over `dir` whose agents directory also holds `name.md`.
+/// A Harness over `dir` whose agents directory also holds `name.md`.
 fn harness_with(dir: &Path, name: &str, source: &str) -> Harness {
     let harness = harness(dir);
     std::fs::write(dir.join("agents").join(format!("{name}.md")), source).unwrap();

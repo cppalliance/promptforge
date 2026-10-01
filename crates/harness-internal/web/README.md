@@ -4,10 +4,10 @@ The first-party `promptforge/web` capability: one activation unit
 contributing the `promptforge/web/fetch` and `promptforge/web/search`
 tools. A research prompt wants both or neither, so a prompt declares one
 frontmatter line (`capabilities: [promptforge/web]`) and gets the pair.
-The harness registers it in its capability registry; the engine never
-names this crate. Private to the harness family in
+The Harness registers it in its capability registry; the Engine never
+names this crate. Private to the Harness family in
 `crates/harness-internal/`; clients reach it through the `harness`
-facade. Like every harness crate, it may depend only on `promptforge`
+facade. Like every Harness crate, it may depend only on `promptforge`
 and its container siblings.
 
 ```rust

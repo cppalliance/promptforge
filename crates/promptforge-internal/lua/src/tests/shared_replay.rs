@@ -39,7 +39,7 @@ fn jump_during_shared_replay_is_a_hard_error() {
 #[test]
 fn call_with_a_non_string_target_errors() {
     // The control callback resolves its target through the same
-    // `resolve_section_target` boundary as the engine: a number is not a
+    // `resolve_section_target` boundary as the Engine: a number is not a
     // heading, and the error says so.
     let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &fresh_access())

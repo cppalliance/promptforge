@@ -1,4 +1,4 @@
-//! The session's input broker: the harness's [`InputBroker`], which
+//! The session's input broker: the Harness's [`InputBroker`], which
 //! suspends an agent prompt's wait for input until its operator answers,
 //! guarded so a dying wait is an outcome, never silence.
 
@@ -44,7 +44,7 @@ impl Drop for WaitGuard {
     }
 }
 
-/// The session's wait registry behind the harness's input broker: what
+/// The session's wait registry behind the Harness's input broker: what
 /// the `promptforge/user-input` ask tool, called by the script-side
 /// `input.ask()`, suspends on.
 ///

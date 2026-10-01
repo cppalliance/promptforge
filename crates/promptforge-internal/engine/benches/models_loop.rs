@@ -35,7 +35,7 @@ use promptforge_model_client::model::{CompletionError, CompletionOptions};
 use promptforge_parser::Prompt;
 use promptforge_types::models::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 
-// The suites' mock-gateway chat client, shared by path: the engine holds no
+// The suites' mock-gateway chat client, shared by path: the Engine holds no
 // client of its own, and the bench performs its rounds the way the
 // in-crate suites do.
 #[path = "../src/test_support/mock-gateway-client.rs"]

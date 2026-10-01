@@ -57,7 +57,7 @@ flowchart TD
 - Concurrent with: `2026-09-20-2-gateway-api-types-progress` Steps 4-5 on `vibe2`, which rewrite `admin/progress.rs`, `admin/progress-tests.rs`, `admin/status.rs`, edit progress sites in `commands.rs` (24), `boot_load.rs` (30), `runner.rs` (12), `cache.rs` (8), `config_apply.rs` (7), delete `render.rs`, and rename `shared_progress` to `gateway_progress`.
 - Steps 1-4 here run now. Expected rebase cost against their Steps 4-5: one hunk each in `lib.rs` (do not re-add `mod render`), `admin/status.rs` (add their `progress` field to the typed struct), `admin/progress.rs` and `admin/progress-tests.rs` (modify/delete: take their content at the new `admin/open/` path), plus a `rg` sweep for `shared_progress`.
 - Steps 5 and 6 are gated on the progress plan's Step 5 commit (`Move progress into the gateway family as gateway-progress`). Step 5 here moves the `apply_config` body that their Step 4 edits in 7 places; concurrent execution would force a manual re-application of those edits inside a moved function. Do not start Step 5 or 6 until that commit is on `vibe2` and this branch is rebased onto it.
-- Their Steps 6-7 (harness marker, webfetch split, tidy rule) touch nothing in the gateway app and may land in any order relative to this plan.
+- Their Steps 6-7 (Harness marker, webfetch split, tidy rule) touch nothing in the gateway app and may land in any order relative to this plan.
 
 ## Repo conventions that bind this plan
 

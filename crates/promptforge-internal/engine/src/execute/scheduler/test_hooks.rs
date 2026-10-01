@@ -1,7 +1,7 @@
 //! Test-only hooks over the scheduler's private state: the seams the
 //! `execute::tests` suites drive the scheduler's edge paths through
 //! (overflow bounds, inline answers, and task slots). Compiled only under
-//! test; nothing here exists in a shipped engine.
+//! test; nothing here exists in a shipped Engine.
 
 use promptforge_types::ids::{ChainId, TaskId};
 

@@ -952,4 +952,4 @@ Two more limits depend on who is reading. A task never reads its own terminal ev
 
 ### Events never steer the run
 
-The engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the Harness serves from its log, so a Harness that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a Harness may stream live never become events.
+The Engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the Harness serves from its log, so a Harness that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a Harness may stream live never become events.

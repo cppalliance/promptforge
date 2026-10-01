@@ -75,7 +75,7 @@ impl Access {
     }
 
     /// The identity every operation through this capability is
-    /// attributed to. Crate-internal: the engine reads it through
+    /// attributed to. Crate-internal: the Engine reads it through
     /// [`crate::detail::access_id`].
     pub(crate) const fn exec_id(&self) -> ExecId {
         self.id

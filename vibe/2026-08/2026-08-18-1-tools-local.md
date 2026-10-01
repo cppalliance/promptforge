@@ -81,7 +81,7 @@ Parameter declaration forms:
 { name = {"string", "Section heading text"}, count = "integer" }
 ```
 
-The engine converts the params table into JSON Schema:
+The Engine converts the params table into JSON Schema:
 
 ```json
 {
@@ -111,7 +111,7 @@ Rules:
 - **Same VM:** The handler runs in the section VM that declared it, sharing globals, store handle, and closures. This enables the accumulator pattern (handler appends to a table the epilog reads).
 - **Handlers can call `execute()`, `fanout`, and `model:infer`:** Local tool handlers can call `execute()` to spawn subagent sections, `fanout` for parallel work, and `model:infer` for direct inference on a model handle. This is the primary use case - a tool that combines deterministic Lua data with one-shot inference. `execute()` from a handler works because the tool loop is suspended while the handler runs. The inner section runs to completion and returns its reply as the tool result.
 - **Two inference paths:** `handle:infer(prompt)` runs inference with that specific model, fresh context, no tools. `models.infer(prompt)` uses the section's current model, fresh context, no tools. Both are direct gateway calls, not tool loops. `models.get(alias)` returns the handle for a pre-declared model without changing the section's model.
-- **Handlers cannot call `jump`:** `jump` from a handler would set the jump slot but not take effect until the current prose block finishes - the model's response would complete, then the jump fires. That's confusing semantics. When calling a local handler, the engine temporarily nils `jump` and restores it after. Normal Lua chunks keep full `jump` access.
+- **Handlers cannot call `jump`:** `jump` from a handler would set the jump slot but not take effect until the current prose block finishes - the model's response would complete, then the jump fires. That's confusing semantics. When calling a local handler, the Engine temporarily nils `jump` and restores it after. Normal Lua chunks keep full `jump` access.
 - **Sequential dispatch:** Multiple local tool calls in one response execute sequentially, same as external tools. Fine for store operations.
 
 ## Companion refactor: install control globals once
@@ -142,7 +142,7 @@ This is a prerequisite simplification that makes the whole system cleaner before
 
 - `crates/promptforge-core/src/execute/engine.rs` (`run_execute_section`): Already takes `last_reply: Option<&str>` - pass `None` instead of the captured value.
 
-**Impact on `tools.local` handlers:** With control globals installed once and always live, a local tool handler CAN see `jump`/`execute`/`fanout`/`models.infer`. Handlers are allowed to call `execute`, `fanout`, and `models.infer`. Only `jump` is blocked - the engine nils it before calling the handler and restores after. The infer hook stays live (handlers may call `models.infer`).
+**Impact on `tools.local` handlers:** With control globals installed once and always live, a local tool handler CAN see `jump`/`execute`/`fanout`/`models.infer`. Handlers are allowed to call `execute`, `fanout`, and `models.infer`. Only `jump` is blocked - the Engine nils it before calling the handler and restores after. The infer hook stays live (handlers may call `models.infer`).
 
 **Net effect:** ~80-100 lines deleted (install/clear machinery, per-chunk closure creation), ~30 lines changed (execute callback simplification), net ~50-70 lines simpler.
 

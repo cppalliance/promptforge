@@ -1,6 +1,6 @@
 //! The runner's own performers under the effect loop: a tokio timer fires
 //! after its duration and is torn down by a cancel, a store operation
-//! runs through the engine's store facade, and a task-events read returns
+//! runs through the Engine's store facade, and a task-events read returns
 //! the task's slice from the run log, narrowed by `last`.
 
 use std::sync::Arc;

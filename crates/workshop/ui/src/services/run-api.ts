@@ -63,7 +63,7 @@ export interface RunContractModel {
 export interface RunContract {
   readonly name: string;
   readonly description: string;
-  /** The declared promptforge engine major; null when absent. */
+  /** The declared promptforge Engine major; null when absent. */
   readonly promptforge: number | null;
   /** The declared tool-loop cap; null for the runtime default. */
   readonly maxToolIterations: number | null;

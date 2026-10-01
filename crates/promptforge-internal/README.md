@@ -16,7 +16,7 @@ The sandboxed Lua runtime: the section VM, the coroutine protocol, and the Engin
 
 ## promptforge-parser
 
-The prompt document parser: YAML frontmatter, the H1 and nested-section tree, and exact lua fence splitting. It is the engine's first stop for every prompt file. Depends on promptforge-types and promptforge-lua.
+The prompt document parser: YAML frontmatter, the H1 and nested-section tree, and exact lua fence splitting. It is the Engine's first stop for every prompt file. Depends on promptforge-types and promptforge-lua.
 
 ## promptforge-vfs
 

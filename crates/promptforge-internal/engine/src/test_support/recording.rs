@@ -1,9 +1,9 @@
 //! The suites' recording observer vocabulary: [`Observer`], the callback
-//! shape the engine's tests were written against, and [`Observation`], the
+//! shape the Engine's tests were written against, and [`Observation`], the
 //! payload-free view of the
 //! [`Event`](promptforge_types::event::Event) values a run returns.
 //!
-//! The engine reports as values and never through a callback. The suites,
+//! The Engine reports as values and never through a callback. The suites,
 //! though, assert on sequences of `(execution, section, observation)`
 //! records and on the `on_*` content hooks, so this module keeps that
 //! vocabulary as a test fixture. [`forward()`] replays a returned batch onto

@@ -1,8 +1,8 @@
 //! The tool performer: resolves a `ToolCall` effect's id in the run's
 //! activated [`ToolTable`] and calls the implementation.
 //!
-//! The engine binds tool slots against descriptors and issues a call as a
-//! [`ToolId`]; the implementations sit on the harness side, in the table
+//! The Engine binds tool slots against descriptors and issues a call as a
+//! [`ToolId`]; the implementations sit on the Harness side, in the table
 //! activation assembled for the run. An id the table does not hold is a
 //! Harness fault (the Engine bound a slot the catalog advertised, so the
 //! table should hold it), answered as the call's own failure so the run

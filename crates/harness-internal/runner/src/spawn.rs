@@ -1,6 +1,6 @@
-//! The harness's one spawn site.
+//! The Harness's one spawn site.
 //!
-//! Every tokio task the harness starts passes through [`spawn_tagged`],
+//! Every tokio task the Harness starts passes through [`spawn_tagged`],
 //! [`spawn_blocking_tagged`], [`spawn_session`], or
 //! [`spawn_blocking_launch`]. The first two open a `tracing` span
 //! stamped with the effect the task performs - its [`EffectId`] and
@@ -9,7 +9,7 @@
 //! supervisor, whose span records the session id, and a launch's
 //! filesystem work, whose span records the agent name. Each is a
 //! permitted caller of the raw tokio method it wraps, and no other
-//! harness code is.
+//! Harness code is.
 
 use promptforge::effect::EffectId;
 use promptforge::ids::Provenance;
@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tracing::Instrument;
 
 /// What a spawned task is tagged with: the effect it performs and the
-/// provenance the engine stamped on that effect.
+/// provenance the Engine stamped on that effect.
 pub type Tag = (EffectId, Provenance);
 
 /// Spawns `fut` on the tokio runtime inside a span tagged `tag`.
@@ -53,7 +53,7 @@ where
 /// records the session id under `session`.
 ///
 /// A supervisor performs no effect, so it has no [`Tag`]; it is the one
-/// long-lived task the harness starts per session, and the tasks it starts
+/// long-lived task the Harness starts per session, and the tasks it starts
 /// for the session's effects are tagged through [`spawn_tagged`] inside
 /// its span.
 ///

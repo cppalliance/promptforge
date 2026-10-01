@@ -182,7 +182,7 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_bound_alias_with_no_implementation_in_the_host_table_resumes_as_a_tool_error() {
-    // The binding names an identity the engine advertises and journals,
+    // The binding names an identity the Engine advertises and journals,
     // but the Harness's tool table holds nothing under it: the performer
     // answers the effect with the error instead of a call, and a script
     // call raises it at the call site.

@@ -1,11 +1,11 @@
 //! The session run's environment: the bindings a client pushes through
 //! the public API (the gateway, the chat catalog, the Host snapshot), the
-//! resources the harness builds from one gateway generation (the
+//! resources the Harness builds from one gateway generation (the
 //! capability registry of first-party capabilities and the model client),
 //! and the launch-time resolution of the client's selected model into the
 //! run's context.
 //!
-//! Everything here arrives as data. The harness never resolves a gateway,
+//! Everything here arrives as data. The Harness never resolves a gateway,
 //! reads a menu, or names a workspace crate: the client pushes a
 //! [`GatewayBinding`] at startup and on every replacement, a
 //! [`CatalogBinding`] whenever its chat-capable model list changes, and a
@@ -25,12 +25,12 @@ use harness_web::Web;
 use promptforge::model::{ModelDescriptor, ModelId};
 use tokio::sync::watch;
 
-/// One generation of the gateway a client has bound the harness to.
+/// One generation of the gateway a client has bound the Harness to.
 ///
 /// The client pushes a binding at startup and on every gateway
-/// replacement; the harness rebuilds its capability registry and model
+/// replacement; the Harness rebuilds its capability registry and model
 /// client when `generation` changes. The binding is data pushed through
-/// the public API: the harness never resolves a gateway itself.
+/// the public API: the Harness never resolves a gateway itself.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GatewayBinding {
     /// The gateway's base URL.
@@ -152,7 +152,7 @@ pub fn gateway_client(binding: &GatewayBinding) -> Option<GatewayClient> {
     Some(GatewayClient::new(endpoint, key))
 }
 
-/// What the harness builds from one gateway generation and shares across
+/// What the Harness builds from one gateway generation and shares across
 /// every run launched under it: the registry of first-party capabilities
 /// and the model client. Rebuilt whole when the generation changes.
 #[derive(Clone)]
@@ -215,7 +215,7 @@ impl GatewayResources {
     }
 }
 
-/// The bindings one harness holds for every session it serves, each
+/// The bindings one Harness holds for every session it serves, each
 /// replaceable by the client and each watched by the sessions.
 ///
 /// A generation watch holds the latest generation (`None` before the

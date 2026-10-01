@@ -3,7 +3,7 @@
 //! guard, and `setmetatable` and `getmetatable` behave as the base
 //! functions for every other value. Also the reserved-name list's own
 //! shape: each name once, and each keyword a word the compiler refuses as
-//! a name. The list against a set-up VM's globals is the engine's test,
+//! a name. The list against a set-up VM's globals is the Engine's test,
 //! over its real section setup.
 
 use std::sync::Arc;

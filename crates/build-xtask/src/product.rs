@@ -5,9 +5,9 @@
 //! target-specific) are checked against the matrix:
 //!
 //! - `promptforge`/`promptforge-*` crates must not depend on gateway,
-//!   workshop, or harness crates.
+//!   workshop, or Harness crates.
 //! - `gateway`/`gateway-*` crates must not depend on promptforge,
-//!   workshop, or harness crates.
+//!   workshop, or Harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
 //!   except the family's public pair (`gateway-api-types`,
 //!   `gateway-api-discovery`).
@@ -18,7 +18,7 @@
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through `promptforge`, and a crate outside the
-//!   harness family on that family only through `harness`. The `build-*`
+//!   Harness family on that family only through `harness`. The `build-*`
 //!   crates are bound too.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
@@ -134,11 +134,11 @@ const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
-/// The harness family's facade: the only harness crate outside crates may
+/// The Harness family's facade: the only Harness crate outside crates may
 /// name, and the one outside crate permitted into
 /// `crates/harness-internal/`.
 const PUBLIC_HARNESS: &str = "harness";
-/// The hakari feature-unification crate: the one unaffiliated crate harness
+/// The hakari feature-unification crate: the one unaffiliated crate Harness
 /// crates may name.
 const WORKSPACE_HACK: &str = "workspace-hack";
 

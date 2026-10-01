@@ -29,7 +29,7 @@ async fn live_h1_infer_runs_once() {
 async fn the_hosts_client_serves_a_run_the_context_never_names() {
     // The context is the Engine's input; the client lives on the Harness's
     // `RunHost`, and `Environment::run` performs the run's completions
-    // with it. Nothing about the gateway crosses the engine's boundary.
+    // with it. Nothing about the gateway crosses the Engine's boundary.
     let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
     let addr = gateway.addr();
 

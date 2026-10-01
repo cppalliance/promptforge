@@ -2,7 +2,7 @@
 //! with no transport attached.
 //!
 //! The wire types ([`Message`], [`ToolSchema`], [`ToolCall`],
-//! [`Completion`], [`CompletionResult`]) go out of the engine in a `Chat`
+//! [`Completion`], [`CompletionResult`]) go out of the Engine in a `Chat`
 //! effect and come back in its answer. Beside them sit the
 //! protocol pieces every transport shares: the request body builder, so
 //! one JSON shape leaves for the gateway no matter who sends it; the SSE
@@ -15,9 +15,9 @@
 //! reached only through the read loop.
 //!
 //! Nothing here opens a connection or reads a clock. The HTTP client that
-//! sends the body and yields the chunks is the harness's
-//! (`harness-models`); the engine's own suites drive the same protocol
-//! through a dev-only client against a mock gateway. The engine itself
+//! sends the body and yields the chunks is the Harness's
+//! (`harness-models`); the Engine's own suites drive the same protocol
+//! through a dev-only client against a mock gateway. The Engine itself
 //! never performs a round: a model round is a `Chat` effect the Harness
 //! performs and answers.
 

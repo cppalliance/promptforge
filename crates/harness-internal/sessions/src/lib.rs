@@ -1,11 +1,11 @@
-//! harness-sessions - the harness session layer: agent discovery, the
-//! harness handle and its bindings, session state, the input wait
+//! harness-sessions - the Harness session layer: agent discovery, the
+//! Harness handle and its bindings, session state, the input wait
 //! registry, and the supervisor state machine that takes a run from alive
 //! through closing to closed.
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -19,7 +19,7 @@
 //!   rule applied to both.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrappers in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 //! - The input broker reaches a run only as the input service in its

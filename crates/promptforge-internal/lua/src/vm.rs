@@ -122,7 +122,7 @@ pub struct SectionVm {
     raw_model_ids: bool,
     /// Test-support only: the live-section-VM tally guard. Its presence
     /// counts this VM as live from construction until the VM drops (its
-    /// teardown); the engine's scheduler suite reads the tally to pin the
+    /// teardown); the Engine's scheduler suite reads the tally to pin the
     /// admission ceiling's cost - a queued task holds no VM.
     #[cfg(feature = "test-support")]
     _vm_tally: vm_tally::Guard,
@@ -130,7 +130,7 @@ pub struct SectionVm {
 
 /// Test-support only: a per-thread tally of live section VMs.
 ///
-/// The engine's scheduler suite drives one run on the test's own thread
+/// The Engine's scheduler suite drives one run on the test's own thread
 /// (the tokio driver is `current_thread`), and Rust's test harness gives
 /// each test its own thread, so thread-locals keep concurrent tests
 /// independent. A test resets the peak, drives a run, and reads back the

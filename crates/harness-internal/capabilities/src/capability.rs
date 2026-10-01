@@ -5,7 +5,7 @@
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`CapabilityId`] - kind is encoded by arity, so a capability id is
 //! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. Before a run is prepared, the harness activates
+//! `namespace/pack/name`. Before a run is prepared, the Harness activates
 //! each declared capability by calling [`Capability::create`] with the
 //! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
 //! optional Lua prelude, and grows without redesign. An activation failure
@@ -31,7 +31,7 @@ mod tests;
 ///
 /// A capability is delivered in a pack (a crate now, a DLL via an adapter
 /// later) and declared in a prompt's frontmatter by its
-/// [`id`](Capability::id). Before a run is prepared, the harness calls
+/// [`id`](Capability::id). Before a run is prepared, the Harness calls
 /// [`create`](Capability::create) once per declared capability, in
 /// declaration order, and assembles the returned [`Contribution`] into the
 /// run's tool catalog and its preludes.
@@ -123,12 +123,12 @@ pub trait Capability: Send + Sync {
 }
 
 /// A run service a capability can need: the closed set of optional
-/// services the harness supplies through [`RunServices`].
+/// services the Harness supplies through [`RunServices`].
 ///
 /// A capability names what it needs through [`Capability::needs`], and
 /// activation checks each one with [`RunServices::provides`]. The run's
 /// filesystem and cancel signal are always present, so they are not
-/// listed here. Adding a service is a harness change.
+/// listed here. Adding a service is a Harness change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Service {
@@ -167,7 +167,7 @@ pub struct RunServices {
     /// The run's whole filesystem: the real directories and the declared
     /// store, handed over by the Harness before activation.
     pub vfs: VfsRef,
-    /// The run's cancellation flag: the same synchronous handle the engine
+    /// The run's cancellation flag: the same synchronous handle the Engine
     /// polls, so a capability observes the Host's cancel by polling too.
     pub cancel: CancelHandle,
     /// The operator's input broker, when the Host has someone to ask.

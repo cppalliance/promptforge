@@ -181,8 +181,8 @@ Existing suites are the invariant; each debt ID adds one behavior check that fai
   - Behavior changes ship with tests in the same change; refactors keep product and behavior tests.
 - Directory map:
   - `crates/` root: the public layer. Facades `promptforge` and `harness`, gateway public pair `gateway-api-types` and `gateway-api-discovery`, shared crates `shared-error-source` and `shared-loopback`, `workspace-hack` (cargo-hakari), and meta tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`. `crates/shared-ui` is a TypeScript and CSS package for the gateway config UI, not a crate.
-  - `crates/promptforge-internal/`: private engine family (`engine`, `types`, `vfs`, `lua`, `parser`, `model-client`).
-  - `crates/harness-internal/`: private harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
+  - `crates/promptforge-internal/`: private Engine family (`engine`, `types`, `vfs`, `lua`, `parser`, `model-client`).
+  - `crates/harness-internal/`: private Harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
   - `crates/gateway/`: private gateway family; `app` builds the `promptforge-gateway` binary, plus `cloud-providers`, `config`, `config-ui` (with its `ui/` TypeScript app), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api` as `gateway-stt`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: private Workshop family; `desktop` (Tauri app, package `workshop`, binary `promptforge-workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and an npm workspace of `ui` (the SPA: `src/base`, `src/parts`, `src/services`, `src/tokens`, `src/main.ts`), `platform` (`@workshop/platform`), and `look` (`@workshop/look`).
   - `guide/`: user guide books and sources, built by `cargo xtask site`.
@@ -193,7 +193,7 @@ Existing suites are the invariant; each debt ID adds one behavior check that fai
   - `.github/workflows/`: CI and release pipelines. `.githooks/`: pre-commit (fmt) and pre-push (headless check, clippy, deny). `.config/`: nextest and hakari config. `.cargo/config.toml`: `cargo xtask` and `cargo workshop` aliases and the Windows `rust-lld` and static CRT settings.
   - `target/` and `target-msrv/`: build output.
 - Component boundaries:
-  - Executor (`promptforge` facade over `promptforge-internal`): sans-I/O state machine; depends on the Lua VM boundary and shared substrate. promptforge crates must not depend on gateway, workshop, or harness crates, and outside crates reach the family only through `promptforge`.
+  - Executor (`promptforge` facade over `promptforge-internal`): sans-I/O state machine; depends on the Lua VM boundary and shared substrate. promptforge crates must not depend on gateway, workshop, or Harness crates, and outside crates reach the family only through `promptforge`.
   - Harness (`harness` facade over `harness-internal`): the executor's only production caller, which steps it and performs its effects; harness-* crates depend only on `promptforge`, and outside crates reach the family only through `harness`.
   - Gateway: independent server process; its public surface is `gateway-api-types` and `gateway-api-discovery`, and gateway crates must not depend on promptforge or workshop crates.
   - Workshop: depends on `harness`, the gateway public pair, the `promptforge` facade, and shared crates, never on gateway family crates. The desktop app depends on `workshop-server-api`, never `workshop-server`. Tiers flow one way: server, then features, then services, then vocabulary.

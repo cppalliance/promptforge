@@ -6,7 +6,7 @@ todos:
     content: "Step 1 (chunk-names): repoint TASKS/FANOUT/MESSAGES chunk names to crates/promptforge-internal/lua/src/; content-match tests in coro-tests.rs and messages-tests.rs"
     status: pending
   - id: step-2
-    content: "Step 2 (test-support): harness-capabilities suite on a store-only Run::step/resume loop; engine drive_tokio example on engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
+    content: "Step 2 (test-support): harness-capabilities suite on a store-only Run::step/resume loop; Engine drive_tokio example on Engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
     status: pending
   - id: step-3
     content: "Step 3 (doctest-cycle): doctest-only facade dev-dependency exception in AGENTS.md line 35; amend the six crate statements"
@@ -23,7 +23,7 @@ isProject: false
 
 ## Product Requirements
 
-The API firewall commits (`75245481..9eac5f3b`) left four debts that are still in the tree. They are stale Lua chunk names, a surface listing that misses compatibility-breaking edits, a test-only feature and module on the public facade, and doctest dev-dependencies that contradict the repository's dependency rule and six crate notes. The people affected are contributors and agents reading the code, reviewers of the facade surface, and the harness test suites; no outside Host exists yet. When the plan is done, the facade has no test surface, the listing records what dependents rely on, and the documentation matches the dependency graph.
+The API firewall commits (`75245481..9eac5f3b`) left four debts that are still in the tree. They are stale Lua chunk names, a surface listing that misses compatibility-breaking edits, a test-only feature and module on the public facade, and doctest dev-dependencies that contradict the repository's dependency rule and six crate notes. The people affected are contributors and agents reading the code, reviewers of the facade surface, and the Harness test suites; no outside Host exists yet. When the plan is done, the facade has no test surface, the listing records what dependents rely on, and the documentation matches the dependency graph.
 
 - Problem and users:
   - Scope: the promptforge repository on branch `master`.
@@ -50,7 +50,7 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
     - The facade uses none of it, yet line 35 of its manifest gates its own test suite on the feature.
     - Consumers:
       - `crates/harness/capabilities/Cargo.toml` line 27, used from `crates/harness/capabilities/tests/it/support.rs` lines 15 and 78.
-      - The engine's `drive_tokio` doc example (`crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`, around line 84), reached through `crates/promptforge-internal/engine/Cargo.toml` line 53.
+      - The Engine's `drive_tokio` doc example (`crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`, around line 84), reached through `crates/promptforge-internal/engine/Cargo.toml` line 53.
     - Because the feature exists, the surface check builds rustdoc twice: `report` in `crates/build-xtask/src/api.rs` (from line 166) iterates the `Build` enum in `crates/build-xtask/src/api/load.rs` (lines 42-71). It also makes `crates/build-xtask/src/facade_shape.rs` lines 31, 187, and 247-253 admit a cfg attribute on the facade.
     - The firewall plan deferred removal until after it landed (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 373), and it has now landed.
   - `doctest-cycle` (introduced by `799a1bbc`; notes restated by `2cee387a`):
@@ -69,7 +69,7 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
       - `crates/promptforge-internal/types/AGENTS.md` line 7
       - `crates/promptforge-internal/README.md` line 11
     - The firewall plan logged the cycle as a medium risk (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 349) but never recorded an exception.
-    - Impact: readers get a false picture of the dependency graph. Focused test builds of the leaf crates also compile the engine plus vendored Lua (inferred from the dependency graph, not measured).
+    - Impact: readers get a false picture of the dependency graph. Focused test builds of the leaf crates also compile the Engine plus vendored Lua (inferred from the dependency graph, not measured).
 - Goals:
   - `chunk-names`: every Lua chunk name renders the path of the source it embeds, and a test fails when one drifts.
   - `listing-fidelity`: the committed listing changes whenever a facade type's exhaustiveness, hidden-field status, or struct or variant kind changes.
@@ -95,7 +95,7 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
 
 ## Functional Specification
 
-Behavior changes only where the debts touch observable output. That means traceback text for three Lua chunks, the lines of the committed surface listing, the facade's feature set, and the crate notes contributors read. Every other behavior stays as it is: the facade's reachable items, the run engine, persisted logs, and the wire.
+Behavior changes only where the debts touch observable output. That means traceback text for three Lua chunks, the lines of the committed surface listing, the facade's feature set, and the crate notes contributors read. Every other behavior stays as it is: the facade's reachable items, the run Engine, persisted logs, and the wire.
 
 - Actors and workflows:
   - Engine developers read Lua tracebacks. A frame from the tasks, fanout, or messages chunk names a file that exists and holds that chunk's source.
@@ -132,8 +132,8 @@ Behavior changes only where the debts touch observable output. That means traceb
 The four fixes are independent and touch different components. They overlap in only four shared files: `AGENTS.md`, `crates/promptforge-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. The facade's public interface shrinks: one Cargo feature and one feature-gated module go away, and nothing is added. `build-xtask`'s surface check drops to one build and renders three more facts per type line. The dependency graph keeps its doctest-only upward dev edges, which repository policy now names as an exception.
 
 - Architecture:
-  - Graph: the five internal crates keep their `promptforge` dev-dependency for doctests only, but the engine's entry no longer enables `test-support`. `harness-capabilities` loses its facade dev-dependency; its normal `promptforge` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
-  - The engine keeps its own `test_support` module, gated by `#[cfg(any(test, feature = "test-support"))]` (`crates/promptforge-internal/engine/src/lib.rs` line 13). The `models_loop` bench keeps its own `required-features = ["test-support"]`.
+  - Graph: the five internal crates keep their `promptforge` dev-dependency for doctests only, but the Engine's entry no longer enables `test-support`. `harness-capabilities` loses its facade dev-dependency; its normal `promptforge` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
+  - The Engine keeps its own `test_support` module, gated by `#[cfg(any(test, feature = "test-support"))]` (`crates/promptforge-internal/engine/src/lib.rs` line 13). The `models_loop` bench keeps its own `required-features = ["test-support"]`.
 - Modules and interfaces:
   - `promptforge` (the facade) exports exactly the items in its re-blessed listing, all of them reachable with default features. Its `[features]` table disappears if it ends up empty.
   - `harness-capabilities` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
@@ -174,7 +174,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `listing-fidelity`: `cargo +nightly-2026-09-05 xtask api --bless`, then `cargo +nightly-2026-09-05 xtask api --check`, passes with one build. In the listing diff, only the new annotations change and the set of listed items is unchanged.
   - `doctest-cycle`: `cargo tree --workspace -e dev -i promptforge --locked --depth 1` lists the facade's direct dev-dependents.
     - Among them, the crates under `crates/promptforge-internal/` are exactly types, model-client, parser, store, and engine.
-    - The harness crates it also lists are outside this check: `harness-log` stays, and `harness-capabilities` disappears once the test-support change removes its edge.
+    - The Harness crates it also lists are outside this check: `harness-log` stays, and `harness-capabilities` disappears once the test-support change removes its edge.
     - Each of the six statements, and `AGENTS.md` line 35, agrees with that output.
 - Regression, security, and performance:
   - `listing-fidelity`: a check-mode fixture blesses a fixture facade, adds `#[non_exhaustive]` to a unit struct in it, and asserts that `--check` reports a difference.
@@ -263,8 +263,8 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - `crates/harness/capabilities/tests/it/support.rs` lines 61-65 state that no fixture performs a chat, tool, or input effect.
     - A future fixture that needs more adds a branch to the test loop, never a facade export.
   - The pinned nightly's rustdoc JSON is assumed to populate `Attribute::NonExhaustive` and `has_stripped_fields` as `rustdoc-types` 0.61.0 declares them. The new fixtures prove this before the re-bless.
-  - Accepted consequences of the doctest exception: leaf-crate test builds still compile the engine and vendored Lua. No check catches a future upward dev dependency or a non-doctest use of the facade inside the container.
-  - The engine's `drive_tokio` example ends up mixing `promptforge::` imports with `promptforge_engine::test_support` imports. They name the same types, because the facade re-exports engine items.
+  - Accepted consequences of the doctest exception: leaf-crate test builds still compile the Engine and vendored Lua. No check catches a future upward dev dependency or a non-doctest use of the facade inside the container.
+  - The Engine's `drive_tokio` example ends up mixing `promptforge::` imports with `promptforge_engine::test_support` imports. They name the same types, because the facade re-exports Engine items.
   - The debt analysis behind this plan was static; no builds or tests were run. It rejected 60 candidates:
     - 23 residual but acceptable: user-approved plan choices, private `build-xtask` constants, test-only fixture duplication, and stale comments.
     - 16 weak or speculative: no demonstrated consequence.
@@ -296,9 +296,9 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"` (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), then facade docs `cargo doc -p promptforge --no-deps` under the same flag and without `--all-features`; user guide: `mdbook build guide`.
 - Test placement and naming conventions: Unit tests mostly live in a sibling file `<module>-tests.rs` wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;` (about 150 such files); small modules use an inline `#[cfg(test)] mod tests { ... }`; directory modules may hold a `tests/` subdirectory (for example `engine/src/execute/tests/`) or `tests-<topic>.rs` splits. Integration tests use one binary per crate at `tests/it/main.rs` pulling in topic files (the `promptforge` facade uses `tests/suite/`), with prompt fixtures under `tests/prompts/`. Test functions are descriptive snake_case sentences (for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`). UI tests are `*.test.mjs` beside source in `src/` or under `test/`, run by `node --test`. `.config/nextest.toml` puts the STT FFI suites in a throttled `heavy` group.
 - Directory map:
-  - `crates/` root: the public and shared layer. `promptforge` (engine facade with committed `public-api.txt`), `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a Rust crate), `workspace-hack` (cargo-hakari), and build tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`.
-  - `crates/promptforge-internal/`: private engine family (types, engine, lua, parser, store, vfs, model-client).
-  - `crates/harness/`: private harness family (runner, models, capabilities, log, sessions, web, webfetch, web-search).
+  - `crates/` root: the public and shared layer. `promptforge` (Engine facade with committed `public-api.txt`), `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a Rust crate), `workspace-hack` (cargo-hakari), and build tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`.
+  - `crates/promptforge-internal/`: private Engine family (types, engine, lua, parser, store, vfs, model-client).
+  - `crates/harness/`: private Harness family (runner, models, capabilities, log, sessions, web, webfetch, web-search).
   - `crates/gateway/`: private gateway family (app, cloud-providers, config, config-ui with its `ui/` SPA, local, logging, progress, protocol, routing, web-search, and the nested `stt/` subsystem: api, engine, backend-whisper, whisper-ffi).
   - `crates/workshop/`: private workshop family (shell, the Tauri app package `workshop`; server, server-api, gateway, menu, protocol, registry, status, support, user-state, workspace; and the `ui/` SPA).
   - `guide/`: mdBook user guide sources plus per-product guides.
@@ -309,9 +309,9 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `.github/workflows/`: CI, nightly, and release pipelines. `.githooks/`: pre-commit format check; pre-push headless gateway check, clippy, and cargo deny. `.config/`: nextest and hakari. `.cargo/config.toml`: `workshop` and `xtask` aliases and rust-lld with static CRT on Windows.
   - `target/`, `target-msrv/`: build output.
 - Component boundaries:
-  - `promptforge` is the only crate outside the engine family allowed to depend into `crates/promptforge-internal/`. Inside, the executor is sans-I/O and depends on store, the Lua VM boundary, and shared substrate; store depends on vfs; vfs depends on nothing. promptforge crates never depend on gateway, workshop, or harness crates.
+  - `promptforge` is the only crate outside the Engine family allowed to depend into `crates/promptforge-internal/`. Inside, the executor is sans-I/O and depends on store, the Lua VM boundary, and shared substrate; store depends on vfs; vfs depends on nothing. promptforge crates never depend on gateway, workshop, or Harness crates.
   - `harness-api` is the single public entry into `crates/harness/`. Harness crates may depend on `promptforge`, `gateway-api-types`, `gateway-api-discovery`, and shared-* crates, never on workshop crates or private gateway crates.
-  - The gateway family exposes only `gateway-api-types` and `gateway-api-discovery` and depends only on shared-* crates, never on promptforge, harness, or workshop crates.
+  - The gateway family exposes only `gateway-api-types` and `gateway-api-discovery` and depends only on shared-* crates, never on promptforge, Harness, or workshop crates.
   - Workshop crates may depend on `promptforge`, `harness-api`, the gateway public pair, and shared-* crates. The `workshop` shell depends on `workshop-server-api`, never on `workshop-server`.
   - shared-* crates depend on no product crate. A crate inside a family container may depend only on `crates/` root crates and its own siblings. Tiers flow one way: shell, features, services, vocabulary. These rules bind normal, dev, build, and target-specific dependencies, and `cargo test -p build-xtask` plus `cargo xtask api --check` enforce them.
 - Conventions summary:
@@ -364,13 +364,13 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Consumer piece 1, the harness-capabilities activation suite. `crates/harness/capabilities/tests/it/support.rs`:
   - Add a private synchronous store-only loop over `Run::step` and `Run::resume`. On `Step::Pending` holding `Effect::Store`, it answers with `EffectAnswer::Store` from `vfs::perform_store_op`. On `Step::Done` it returns the `RunResult`. On any other effect it panics, naming the effect. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
   - Replace the `drive_tokio` call on line 78 with that loop, and make `run_activated` synchronous.
-  - Remove the `promptforge::test_support` import on line 15. Rewrite the doc comment on lines 61-65 to describe the store-only loop and its panic instead of the engine's tokio driver.
+  - Remove the `promptforge::test_support` import on line 15. Rewrite the doc comment on lines 61-65 to describe the store-only loop and its panic instead of the Engine's tokio driver.
 - Call sites: drop `.await` at the four `run_activated` calls, in `crates/harness/capabilities/tests/it/activation.rs` around lines 194 and 220 and in `crates/harness/capabilities/tests/it/assembly.rs` around lines 149 and 341. Keep `#[tokio::test]` only where a test still awaits, and make the rest `#[test]`.
 - `crates/harness/capabilities/Cargo.toml`: remove the facade dev-dependency on line 27, which enables `promptforge/test-support`, plus any dev-dependency that becomes unused. The normal `promptforge` dependency on line 19 stays.
-- Consumer piece 2, the engine's `drive_tokio` example. The two consumer pieces touch different crates and can be built in either order.
-- `crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`: the `drive_tokio` doc example (around line 84) imports `Performers` and `drive_tokio` from `promptforge_engine::test_support` instead of the facade. Its other `promptforge::` imports stay; they name the same types because the facade re-exports engine items.
+- Consumer piece 2, the Engine's `drive_tokio` example. The two consumer pieces touch different crates and can be built in either order.
+- `crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`: the `drive_tokio` doc example (around line 84) imports `Performers` and `drive_tokio` from `promptforge_engine::test_support` instead of the facade. Its other `promptforge::` imports stay; they name the same types because the facade re-exports Engine items.
 - `crates/promptforge-internal/engine/Cargo.toml`: the `promptforge` dev-dependency on line 53 drops `features = ["test-support"]`, leaving `promptforge.workspace = true`. The comment on lines 51-52 drops its last sentence ("`test-support` for the `test_support::drive_tokio` example."), so it gives only the doctest reason.
-- Unchanged: the engine's own `test_support` module and its `#[cfg(any(test, feature = "test-support"))]` gate (`crates/promptforge-internal/engine/src/lib.rs` line 13), the engine's `test-support` feature, and the `models_loop` bench's `required-features = ["test-support"]`.
+- Unchanged: the Engine's own `test_support` module and its `#[cfg(any(test, feature = "test-support"))]` gate (`crates/promptforge-internal/engine/src/lib.rs` line 13), the Engine's `test-support` feature, and the `models_loop` bench's `required-features = ["test-support"]`.
 - Removal piece, built after both consumer pieces. `crates/promptforge/`:
   - `Cargo.toml`: remove the `test-support` feature on line 27 (and the `[features]` table if it ends up empty) and `required-features` on line 35, so the facade suite runs with default features.
   - `src/lib.rs`: remove the `test_support` module on lines 210-218.
@@ -400,7 +400,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - Update any expected text that quotes the old attribute rule.
   - `src/test_support_leak.rs` module docs:
     - On lines 9 and 20, the examples that name `promptforge` with `test-support` switch to `promptforge-engine`, which still has the feature.
-    - On lines 24-25, the exemption's parenthetical stops presenting the facade's forwarding as current. It names a container crate forwarding a sibling's, and notes that the guard counts the facade as an engine crate too.
+    - On lines 24-25, the exemption's parenthetical stops presenting the facade's forwarding as current. It names a container crate forwarding a sibling's, and notes that the guard counts the facade as an Engine crate too.
     - The guard and its fixtures stay unchanged. That includes `the_facade_forwarding_the_engine_test_support_feature_passes` (`src/test_support_leak-tests.rs` lines 211-226) and its twin in `src/engine_guards-tests.rs` lines 126-131. Both check a shape the guard still permits, which the reworded docs now describe.
   - Out of scope in `load.rs`: the stale `RUSTDOC_FLAGS` comment on lines 27-29 and the `engine_guards::collect_crates` call.
 - `.github/workflows/ci.yml` line 144: the comment above the Facade docs job says the topic docs "must stand without the test-support module"; fix it so it states only that the facade docs build with default features.
@@ -413,7 +413,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only` passes. The nightly-only fixtures in `load-tests.rs`, `listing-tests.rs`, and `listing-compact-tests.rs` call the new `report` signature.
   - `cargo +nightly-2026-09-05 xtask api --check` passes with one rustdoc build and no listing change.
   - `rg -n "test-support|test_support" crates/promptforge` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose. The workspace still resolves, which proves no manifest enables `promptforge/test-support`, because Cargo rejects a missing feature.
-- Commit: `support.rs`, `activation.rs`, `assembly.rs`, and the harness-capabilities manifest; `tokio_driver.rs` and the engine manifest; the facade files, the build-xtask files, `ci.yml`, and `AGENTS.md`.
+- Commit: `support.rs`, `activation.rs`, `assembly.rs`, and the harness-capabilities manifest; `tokio_driver.rs` and the Engine manifest; the facade files, the build-xtask files, `ci.yml`, and `AGENTS.md`.
 
 </step-2>
 

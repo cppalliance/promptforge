@@ -1,4 +1,4 @@
-//! Cooperative cancellation for the harness's async session paths.
+//! Cooperative cancellation for the Harness's async session paths.
 //!
 //! Dropping the outer future on Ctrl-C would abandon a run mid-step, so
 //! Hosts install a [`CancelHandle`] with [`scope`] and call

@@ -1,5 +1,5 @@
 //! Table-driven tests for the agent socket's framing helpers: the pure
-//! render functions that map harness vocabulary onto Workshop wire
+//! render functions that map Harness vocabulary onto Workshop wire
 //! shapes, and the cursor and wire-index bookkeeping behind every
 //! durable `agent_event` frame.
 

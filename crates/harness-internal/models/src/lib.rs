@@ -1,12 +1,12 @@
-//! harness-models - the harness's model client: the HTTP transport that
-//! performs the engine's `Chat` effects against the bound gateway and
+//! harness-models - the Harness's model client: the HTTP transport that
+//! performs the Engine's `Chat` effects against the bound gateway and
 //! streams deltas back to the session, and the catalog fetch.
 //!
 //! [`GatewayClient`] speaks the always-streaming `/chat/completions` SSE
 //! shape to one gateway URL with, usually, the gateway's shared bearer
 //! key: [`GatewayClient::complete`] sends the wire vocabulary's request
 //! body, reads the stream under the run's byte cap and timeout, hands each
-//! `data:` payload to the engine's shared SSE reassembly, invokes the
+//! `data:` payload to the Engine's shared SSE reassembly, invokes the
 //! caller's delta callback live, and returns the one
 //! [`Completion`](promptforge::model::Completion) the round
 //! produced. [`fetch_model_catalog`] reads the gateway's typed model
@@ -17,12 +17,12 @@
 //!
 //! This is a Gateway model client, not a universal transport: it speaks
 //! the one protocol the gateway serves. Everything it exchanges is the
-//! engine's vocabulary, reached through the `promptforge` crate; the
+//! Engine's vocabulary, reached through the `promptforge` crate; the
 //! metrics it reports are the canonical `promptforge::metrics` ones.
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -30,7 +30,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - A gateway bearer key is never written to logs or `Debug` output.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 

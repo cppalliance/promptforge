@@ -1,6 +1,6 @@
 //! The parsed prompt tree: [`Prompt`], its [`Section`]s, and their
 //! [`Block`]s. Hosts read a prompt's title and frontmatter; the tree below
-//! them is the engine's, reached through [`crate::detail`].
+//! them is the Engine's, reached through [`crate::detail`].
 //!
 //! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.
@@ -149,20 +149,20 @@ impl Prompt {
     }
 
     /// Returns the compiled `lua shared` library, when the prompt declares one;
-    /// the engine reaches it through [`crate::detail::replay`].
+    /// the Engine reaches it through [`crate::detail::replay`].
     #[must_use]
     pub(crate) fn replay(&self) -> Option<&LuaProgram> {
         self.replay.as_ref()
     }
 
-    /// Returns the ordered live Lua and prose blocks from the H1; the engine
+    /// Returns the ordered live Lua and prose blocks from the H1; the Engine
     /// reaches them through [`crate::detail::h1_blocks`].
     #[must_use]
     pub(crate) fn h1_blocks(&self) -> &[Block] {
         &self.h1_blocks
     }
 
-    /// Returns the top-level H2 sections in file order; the engine reaches
+    /// Returns the top-level H2 sections in file order; the Engine reaches
     /// them through [`crate::detail::sections`].
     #[must_use]
     pub(crate) fn sections(&self) -> &[Section] {
@@ -170,7 +170,7 @@ impl Prompt {
     }
 
     /// The entry-point section: the first top-level section in file order;
-    /// the engine reaches it through [`crate::detail::entry`].
+    /// the Engine reaches it through [`crate::detail::entry`].
     #[must_use]
     pub(crate) fn entry(&self) -> Option<&Section> {
         self.sections.first()

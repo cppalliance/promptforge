@@ -1,6 +1,6 @@
 //! The fixed schemas of the model's task built-ins, and the one function
 //! that appends them to a round's advertised scope. The five are the
-//! engine's own: the descriptions name what each call does and what the
+//! Engine's own: the descriptions name what each call does and what the
 //! answer looks like, and the `task` description names the allowlisted
 //! targets so the model copies a heading the arm will accept. The arms
 //! that answer the calls are defined in the parent module.
@@ -15,7 +15,7 @@ use crate::model::ToolSchema;
 use crate::{Error, Result};
 use promptforge_model_client::detail::{tool_schema_name, tool_schema_new};
 
-/// One built-in's fixed schema; the five are the engine's own, so a
+/// One built-in's fixed schema; the five are the Engine's own, so a
 /// refusal by the validated constructor is an internal fault.
 fn builtin_schema(name: &str, description: String, parameters: Value) -> Result<ToolSchema> {
     tool_schema_new(name.to_owned(), description, parameters)

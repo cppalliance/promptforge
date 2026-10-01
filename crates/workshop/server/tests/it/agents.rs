@@ -157,7 +157,7 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     let (state, base) = spawn_router(&config).await;
     // The router is bound without the serving loop that spawns the
     // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the harness is spawned here.
+    // replacements into the Harness is spawned here.
     spawn_bindings_forwarder(&state);
     // The session's model catalog is built from the retained catalog at
     // launch, so the catalog lands before any test launches.

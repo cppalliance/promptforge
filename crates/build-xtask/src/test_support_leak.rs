@@ -1,12 +1,12 @@
 //! `test-support` leak guard: no non-dev dependency table anywhere in the
-//! workspace enables a promptforge or harness crate's `test-support`
+//! workspace enables a promptforge or Harness crate's `test-support`
 //! feature. The promptforge family is the facade plus every
-//! `crates/promptforge-internal/` member; the harness family is the
+//! `crates/promptforge-internal/` member; the Harness family is the
 //! `crates/harness` facade plus every `crates/harness-internal/` member.
 //!
-//! The engine manifest guard (`engine_deps`) lets an engine crate keep an
+//! The Engine manifest guard (`engine_deps`) lets an Engine crate keep an
 //! optional forbidden dependency that only its `test-support` feature
-//! enables (`promptforge-engine`'s tokio test driver), and harness crates
+//! enables (`promptforge-engine`'s tokio test driver), and Harness crates
 //! keep test fixtures behind theirs (`harness-runner`'s). Both are safe
 //! only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
@@ -34,7 +34,7 @@
 //! The check reads declared dependencies, not the resolved graph, so
 //! `workspace-hack` unification is irrelevant to it. Manifests that cannot
 //! be read or parsed are skipped here; the product-boundary check and the
-//! engine manifest guard already report them.
+//! Engine manifest guard already report them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 const GUARDED_FEATURE: &str = crate::engine_deps::EXEMPTING_FEATURE;
 
 /// Scans the workspace for non-dev dependency tables, and `[features]`
-/// values, that enable a promptforge or harness crate's `test-support`
+/// values, that enable a promptforge or Harness crate's `test-support`
 /// feature.
 #[must_use]
 pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
@@ -202,7 +202,7 @@ fn family_of(package: &str, families: &[Vec<String>]) -> Option<usize> {
 }
 
 /// The package names of each guarded family's crates whose manifests
-/// parse: the promptforge crates, then the harness crates.
+/// parse: the promptforge crates, then the Harness crates.
 fn guarded_families(root: &Path) -> [Vec<String>; 2] {
     let crates_dir = root.join("crates");
     [

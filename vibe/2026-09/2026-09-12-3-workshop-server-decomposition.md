@@ -340,7 +340,7 @@ The test suites are the invariant. Every work item passes the full suite before 
   - `crates/workshop-server/ui/src/` - SPA entry: `main.ts`, `base/` (lifecycle primitives), `services/` (DOM-free state), `ui/` (flat 23 TS + 13 CSS), `ui/workshop/` (flat 13 TS + 4 CSS)
   - `crates/workshop/` - Tauri desktop shell (thin, verified healthy)
   - `crates/gateway*/` - inference gateway product crates (gateway, gateway-config, gateway-config-ui, gateway-local, gateway-logging, gateway-protocol, gateway-routing, gateway-stt, gateway-stt-backend-whisper, gateway-stt-engine, gateway-web-search, gateway-whisper-ffi)
-  - `crates/promptforge*/` - runtime engine crates (promptforge, promptforge-core, promptforge-core-support, promptforge-agent, promptforge-lua, promptforge-model-client, promptforge-parser, promptforge-store, promptforge-tool-picker, promptforge-tools, promptforge-vfs, promptforge-webfetch, promptforge-web-search)
+  - `crates/promptforge*/` - runtime Engine crates (promptforge, promptforge-core, promptforge-core-support, promptforge-agent, promptforge-lua, promptforge-model-client, promptforge-parser, promptforge-store, promptforge-tool-picker, promptforge-tools, promptforge-vfs, promptforge-webfetch, promptforge-web-search)
   - `crates/shared-*/` - cross-product crates (shared-loopback, shared-progress, shared-sidecar, shared-vfs, shared-ui)
   - `crates/build-*/` - build output crates (build-llama-cuda, build-ui, build-user-guide, build-workshop)
   - `crates/product-integration-tests/` - cross-product integration tests

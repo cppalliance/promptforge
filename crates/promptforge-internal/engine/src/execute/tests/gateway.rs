@@ -154,7 +154,7 @@ pub(super) fn sse_response(body: &Value) -> axum::response::Response {
 
 /// Validates every replayed `messages[].tool_calls[]` entry against the
 /// OpenAI function-call schema, mirroring `parse_openai_tool_calls` (the
-/// engine's own inbound parser, `pub(crate)` to `model-client` and so
+/// Engine's own inbound parser, `pub(crate)` to `model-client` and so
 /// unreachable from here).
 ///
 /// The mock gateway owes the suites a strict endpoint: without this check a

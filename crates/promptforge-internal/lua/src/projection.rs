@@ -25,7 +25,7 @@
 //! The output is the OpenAI wire shape the gateway speaks: replayed
 //! assistant `tool_calls` render as the function-call
 //! `{id, type, function: {name, arguments}}` object, the exact inverse of the
-//! engine's own inbound parser, so records stay neutral while the wire
+//! Engine's own inbound parser, so records stay neutral while the wire
 //! dogfoods the gateway's ingress contract. The projection is recomputed per
 //! dispatch for whichever model the call targets, so any later
 //! provider-specific mapping changes this one module.

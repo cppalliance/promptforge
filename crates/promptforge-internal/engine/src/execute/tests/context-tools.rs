@@ -18,7 +18,7 @@ pub(in super::super) fn fixture_binding(
 }
 
 /// A run's tool set beside the implementations behind it: the set goes to
-/// the run state (what the engine advertises and journals), the table to
+/// the run state (what the Engine advertises and journals), the table to
 /// this test's Harness (what the driver performs a `ToolCall` with).
 /// A bare [`ToolSet`](crate::lua::ToolSet) converts into a fixture with no
 /// implementations, for the tests whose tools are never called.

@@ -341,7 +341,7 @@ pub(crate) struct ResponseMetadata {
     pub(crate) vllm_metrics: Option<VllmMetrics>,
     /// One line per section that was present but malformed and so
     /// degraded to `None`, and one for a body naming no string `model`:
-    /// the engine reports each as a `model_metadata_degraded` event, since
+    /// the Engine reports each as a `model_metadata_degraded` event, since
     /// this crate reaches no logger.
     pub(crate) diagnostics: Vec<String>,
 }

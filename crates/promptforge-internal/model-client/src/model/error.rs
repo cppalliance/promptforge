@@ -36,8 +36,8 @@ pub enum CompletionErrorKind {
 }
 
 /// The error a model round or a catalog fetch fails with: what the
-/// transport that performed it (the harness's gateway client) reports, and
-/// what comes back into the engine in a `Chat` effect's answer.
+/// transport that performed it (the Harness's gateway client) reports, and
+/// what comes back into the Engine in a `Chat` effect's answer.
 ///
 /// Holds a stable [`kind`](CompletionError::kind) classifier plus the
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying

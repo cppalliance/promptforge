@@ -21,17 +21,17 @@ use super::bindings::{ModelBindings, ToolBindings};
 
 /// One run. Created by the Harness from the
 /// [`Environment`](super::Environment) holding the per-run inputs,
-/// enriched at prepare, owned by the engine for the run. Never shared
+/// enriched at prepare, owned by the Engine for the run. Never shared
 /// between runs.
 ///
-/// The context is the engine's input and nothing else: it holds no
+/// The context is the Engine's input and nothing else: it holds no
 /// observer, client, tool implementation, broker, or capture. Those are
 /// the Harness's; the Engine reports events and issues effects as values
 /// and hands each one to the Harness through `step`.
 ///
 /// The Engine takes its clock and randomness from the Harness: the run's
 /// `seed` and `started_at` are inputs the Harness supplies to
-/// [`new`](RunContext::new) (a harness draws both, records both, and a
+/// [`new`](RunContext::new) (a Harness draws both, records both, and a
 /// replay hands back the recorded values), so given the same inputs and
 /// the same answers a run reproduces its nonces, `sys.when`, effects, and
 /// events. Both are required: for a live run the Harness draws
@@ -55,7 +55,7 @@ pub struct RunContext {
     /// The run's seed: Harness-drawn, the source of the untrusted-envelope
     /// nonce (and of every future in-run random choice).
     pub(crate) seed: u64,
-    /// The behavior flags the run records; empty until an engine change
+    /// The behavior flags the run records; empty until an Engine change
     /// gates itself behind one.
     pub(crate) flags: Flags,
     /// When the run began, as the Harness stamped it: rendered as `sys.when`
@@ -166,7 +166,7 @@ impl RunContext {
     }
 
     /// Sets the run's cancellation flag: the synchronous [`CancelHandle`]
-    /// the engine polls between chain steps and from the Lua instruction
+    /// the Engine polls between chain steps and from the Lua instruction
     /// hook. A Harness that cancels through an awaitable token bridges it to
     /// this flag (set the flag when the token fires), and hands the same
     /// flag to the capabilities it activates so one cancel reaches them
@@ -198,7 +198,7 @@ impl RunContext {
     }
 
     /// Sets the behavior flags the run records. Empty is the only value
-    /// this engine produces; a replay hands back the recorded set.
+    /// this Engine produces; a replay hands back the recorded set.
     #[must_use]
     pub fn flags(mut self, flags: Flags) -> RunContext {
         self.flags = flags;

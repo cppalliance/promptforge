@@ -11,7 +11,7 @@
 //! alias lookup, so no bound or local tool can shadow them. Every answer is
 //! content the model reads: a started task's id, a cancel's confirmation,
 //! a status line, a wait's drained notices, or a refusal naming what was
-//! wrong - the engine's own text, so it resumes trusted and its
+//! wrong - the Engine's own text, so it resumes trusted and its
 //! `ToolResult` fires under the model's call id. The one exception is
 //! `task_events`, whose answer is the task's reported history - model,
 //! tool, and user text among it - and so resumes nonce-wrapped as
@@ -83,7 +83,7 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
 pub(super) struct BuiltinAnswer {
     pub(super) text: String,
     pub(super) ok: bool,
-    /// Whether `text` is the engine's own (every answer but a history
+    /// Whether `text` is the Engine's own (every answer but a history
     /// read's, whose events include model, tool, and user text and arrive
     /// nonce-wrapped as [`OutputTrust::Untrusted`]).
     pub(super) trust: OutputTrust,
@@ -100,7 +100,7 @@ impl BuiltinAnswer {
         }
     }
 
-    /// A served answer whose text came from outside the engine: already
+    /// A served answer whose text came from outside the Engine: already
     /// nonce-wrapped by the caller, reported untrusted.
     pub(super) fn served_untrusted(text: String) -> Self {
         Self {

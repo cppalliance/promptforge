@@ -1,21 +1,21 @@
-//! harness-capabilities - the harness's capability layer: the registry,
+//! harness-capabilities - the Harness's capability layer: the registry,
 //! activation with co-activation conflict checking, the [`Capability`]
 //! and [`Tool`] traits the first-party capability crates implement, and
 //! one core capability of its own, [`UserInput`] (`promptforge/user-input`).
 //!
-//! The engine holds none of this. It binds tool slots against descriptors
+//! The Engine holds none of this. It binds tool slots against descriptors
 //! ([`promptforge::tools::ToolCatalog`]) and issues every tool
 //! call as an effect naming an id; the implementations behind those ids
 //! are defined here, in the Harness. The Harness builds one
 //! [`CapabilityRegistry`] of installed capabilities, calls [`activate`]
 //! per run to turn a prompt's declarations into the run's catalog, its
 //! preludes, and its [`ToolTable`] of implementations, hands the catalog
-//! and the preludes to the engine's `Environment`, and resolves each
+//! and the preludes to the Engine's `Environment`, and resolves each
 //! `ToolCall` effect in the table.
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -26,7 +26,7 @@
 //!   crate's traits and the broker it receives through [`RunServices`].
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 
@@ -46,6 +46,6 @@ pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
 pub use tool::Tool;
 pub use user_input::{USER_INPUT_ASK_TOOL, UserInput};
 
-/// The capability identity vocabulary, re-exported from the engine's types
+/// The capability identity vocabulary, re-exported from the Engine's types
 /// so a provider names one crate for the whole contract.
 pub use promptforge::capabilities::{CapabilityId, CapabilityIdError, CapabilityIdErrorKind};

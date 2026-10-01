@@ -7,7 +7,7 @@
 //! run returns it from `step` for the Harness to perform; the Harness's
 //! [`EffectAnswer`] comes back through `resume` keyed by the effect's
 //! [`EffectId`], and the scheduler applies it on the caller's thread,
-//! emitting the round's events there. The engine thus decides *what* to do
+//! emitting the round's events there. The Engine thus decides *what* to do
 //! and *what it means*; the Harness performs it.
 //!
 //! An [`Effect`] may hold a live handle (the store access capability) and
@@ -81,7 +81,7 @@ pub enum Effect {
     },
     /// One bound tool call: `tool` is the stable identity the performer
     /// resolves to an implementation (the Harness against its activated
-    /// capabilities, the engine's internal table against the run's
+    /// capabilities, the Engine's internal table against the run's
     /// catalog), `alias` the prompt-local name it was called by, and
     /// `origin` who made the call and where, both kept for the record.
     ToolCall {
@@ -96,7 +96,7 @@ pub enum Effect {
         origin: ToolCallOrigin,
     },
     /// One store operation under the chain's store view: an ordinary
-    /// access the engine derived from the chain's capability at dispatch,
+    /// access the Engine derived from the chain's capability at dispatch,
     /// rooted at the handle's declared store. The Harness, performing the
     /// effect, uses it exactly as given and within the scope it carries.
     /// When it drops never affects correctness:
@@ -276,7 +276,7 @@ pub enum EffectAnswer {
     /// holds both request and response bodies, and the box keeps every
     /// other answer's size from being set by this one.
     Chat(std::result::Result<Box<Completion>, CompletionError>),
-    /// The tool's own output or its own failure, before the engine's
+    /// The tool's own output or its own failure, before the Engine's
     /// trust and count rules apply.
     ToolCall(std::result::Result<ToolOutput, ToolError>),
     /// The store operation's outcome or the store's own structured
@@ -383,7 +383,7 @@ impl From<&Completion> for ChatAnswerRecord {
 /// A tool's own output as the log records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolAnswerRecord {
-    /// The output text, before the engine's trust rules apply.
+    /// The output text, before the Engine's trust rules apply.
     pub text: String,
     /// Whether the tool declared its output trusted.
     pub trusted: bool,

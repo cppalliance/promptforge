@@ -75,10 +75,10 @@ The only externally visible changes are import paths and the set of public items
 - Actors and workflows:
   - Dependent crates import the runtime's facade types from the crate root and vocabulary from the `model`, `parser`, `input`, and `types` modules.
   - Test callers are the runtime's unit tests, `crates/promptforge-api-runtime/tests/suite`, `crates/promptforge-api-runtime/benches/models_loop.rs`, and `crates/harness/capabilities/tests/it/support.rs`, which imports `Performers` and `drive_tokio` at line 15.
-- Inputs and outputs: unchanged. `Effect::record` and `EffectAnswer::record` keep returning the public record types the harness runner serializes to its log.
+- Inputs and outputs: unchanged. `Effect::record` and `EffectAnswer::record` keep returning the public record types the Harness runner serializes to its log.
 - States and validation: unchanged.
 - Errors and recovery: unchanged. `RunError`, `RunErrorKind`, and the internal `Error` keep their current classification.
-- Security and privacy behavior: unchanged. Store access handles are still minted only inside the engine, and `perform_store_op` uses the handle it is given without deriving, widening, or retaining scope (`crates/promptforge-api-runtime/src/execute.rs` lines 122-140).
+- Security and privacy behavior: unchanged. Store access handles are still minted only inside the Engine, and `perform_store_op` uses the handle it is given without deriving, widening, or retaining scope (`crates/promptforge-api-runtime/src/execute.rs` lines 122-140).
 - Acceptance criteria:
   - No crate names `promptforge_api_runtime::execute`.
   - No `pub` item is left unreachable once `execute` is private: the crate is clean under `unreachable_pub`, which the workspace enables as a warning and the exit criterion's `-D warnings` turns into an error.
@@ -129,7 +129,7 @@ The crate root becomes the single public facade for the runtime's public types, 
 This is a behavior-neutral refactor, so the existing suites are the main check, backed by the full workspace gates. Moved tests keep their assertions unchanged apart from helper and import swaps, and the total test count must not drop.
 
 - Unit: all in-crate unit tests pass, including every test in the split files.
-- Integration and end-to-end: `tests/suite` passes with the moved tests, and each moved module is declared in `tests/suite/main.rs`. The dependents' suites (harness runner, sessions, capabilities, and models, plus workshop workspace) pass after the import rewrite.
+- Integration and end-to-end: `tests/suite` passes with the moved tests, and each moved module is declared in `tests/suite/main.rs`. The dependents' suites (Harness runner, sessions, capabilities, and models, plus workshop workspace) pass after the import rewrite.
 - Regression, security, and performance: the `models_loop` bench builds under `--all-targets --all-features`. There is no performance target.
 - Exit criteria:
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` passes. This is the gate that catches an unreachable `pub` left behind by the facade change.
@@ -146,7 +146,7 @@ This is a behavior-neutral refactor, so the existing suites are the main check, 
 - Decisions:
   - The crate root is the only public path for facade types. Dependents mix root and `execute::` paths for the same types, so one path halves what a reader has to learn. User's words: "Root-only facade: move all host types to the crate root, make `execute` private; keep `model`, `parser`, `input` as vocabulary modules".
   - No new crate. `test_support` is trimmed in place and the public-API-only tests move into `tests/suite`. User's words: "No new crate: shrink test_support to a minimal feature-gated surface, keep the rest cfg(test), and move the ~2-3k lines of public-API-only tests into tests/suite".
-  - The record types stay public, because `Effect::record` and `EffectAnswer::record` are public and return them, and the harness runner logs their output.
+  - The record types stay public, because `Effect::record` and `EffectAnswer::record` are public and return them, and the Harness runner logs their output.
   - `ToolSchemaError` stays public, because the public `ToolSchema::new` returns it (`crates/promptforge/model-client/src/client/wire.rs` lines 219-265).
   - No `#[non_exhaustive]` on `Effect`, `EffectAnswer`, `Step`, or `RunResult`. The `harness-runner` crate, the Engine's only production caller, matches these values (`crates/harness/runner/src/effect_loop.rs` line 37 imports them). With `#[non_exhaustive]` it would need wildcard arms and would stop getting a compile error when a variant is added.
   - The `lua`, `model`, `fanout`, and `tools` tests stay in this crate. `src/lua/tests.rs` lines 9-12 state that they exercise the executor's `section_vm` path and yield protocol, and the fanout tests cover `resolve_sibling` in `src/fanout.rs`. The private crates never depend on the executor (`crates/promptforge-api-runtime/AGENTS.md`), so these tests cannot move there.
@@ -274,7 +274,7 @@ Each step is one commit holding its code and its tests.
 - Artifacts: `src/lib.rs` - make `pub mod execute` a private `mod execute` and add a root re-export for every item that stays public inside `execute`; the compiler-derived set is authoritative (`unreachable_pub` reports every miss), and the representative set is `ModelBindings`, `ToolBindings`, `CapabilityConflict`, `RequirementCheck`, `Requirements`, `UnmetRequirement`, `AnswerRecord`, `ChatAnswerRecord`, `Effect`, `EffectAnswer`, `EffectId`, `EffectRecord`, `InputAnswerRecord`, `Run`, `Step`, `StoreAnswerRecord`, `ToolAnswerRecord`, `StoreOp`, `StoreOutcome`, `StoreError`, and the `perform_store_op` function (`src/execute.rs` line 135, a function, not a re-export); names already at the crate root need nothing added. Rewrite the `promptforge_api_runtime::execute::` imports in `crates/harness/runner/src/{effect_loop,effect_loop-answering,performers-host,performers,prepare}.rs`, `crates/harness/runner/tests/it/{prepare,support}.rs`, `crates/harness/capabilities/src/activation.rs`, `crates/harness/capabilities/tests/it/{activation,assembly,support}.rs`, `tests/suite/{execution,fanout,prepare,support,vfs}.rs`, and `benches/models_loop.rs`; the doctests in `src/execute/config.rs`, `src/execute/config-limits.rs`, and `src/execute/run.rs`; and the `execute` link and module description in `src/lib.md` line 3.
 - Every `pub` item left inside `execute` is re-exported at the root or demoted, so the crate is clean under `unreachable_pub` and `private_intra_doc_links`. `ModelBindings` is re-exported at the root here, because the public `RunContext::model_bindings` returns it; Step 4 deletes that re-export only together with the accessor.
 - Tests: the crate suite and the dependent suites pass unchanged; this is one commit because a half-converted crate fails clippy and rustdoc.
-- Verify: crate clippy, `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge-api-runtime --no-deps --all-features`, and the harness runner and capabilities suites.
+- Verify: crate clippy, `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge-api-runtime --no-deps --all-features`, and the Harness runner and capabilities suites.
 
 </step-3>
 
@@ -316,7 +316,7 @@ Each step is one commit holding its code and its tests.
 
 - Component: `internals`
 - Artifacts: drop `RunContext.test_host` and the `#[cfg(test)] impl RunContext` builders `observer`, `debug`, `client`, `input_broker`, and `on_delta` (`src/execute/config.rs` lines 121, 155, 351-397) with the `Debug` arm (lines 402-403); drop `RunState.test_host`, `test_host()`, and `set_test_host()` (`src/execute/context.rs` lines 77, 167, 186-203); change `TokioDriver` to `TokioDriver::new(state, host, client)` (`src/test_support/tokio_driver.rs` line 162) taking a `RunHost` assembled from `src/test_support/host.rs`; migrate the fixtures in `src/execute/tests.rs` (lines 433 and 287), `src/execute/run-tests.rs` (lines 270, 316, 344), `src/execute/tests/effects.rs` (lines 71-80, 175-185), `src/execute/tests/input.rs` (lines 164-166, 198-199, 254-256, 270-280, 290-300, 306-316, 333-343), and `src/execute/tests/model_tasks.rs` (lines 63-65); move `RunContext::debug`'s `report_debug = DebugMode::On` side effect to where debug capture is installed; keep the `tap` and `raw_shims` seams.
-- Tests: the crate suite plus the harness runner and capabilities suites, since `TokioDriver` is drawn from the trimmed surface.
+- Tests: the crate suite plus the Harness runner and capabilities suites, since `TokioDriver` is drawn from the trimmed surface.
 
 </step-7>
 
@@ -325,7 +325,7 @@ Each step is one commit holding its code and its tests.
 ### Step 8: Move public-API-only tests into `tests/suite` [completed]
 
 - Component: `suite`
-- Artifacts: move `src/execute/tests/args_surface.rs`, `src/execute/tests/lazy_prose.rs`, and the offline cases of `src/execute/tests/exec_flow.rs` into `tests/suite`, swapping `run_offline` for the `tests/suite/support.rs` helpers and using root paths; this is a port, not a mechanical move - both files reach the private test-support helpers `run`, `fixture`, `TestStore`, `silent`, and `run_offline` through `use super::*`, so each test's fixture setup is rebuilt on the suite helpers while its assertions stay unchanged; declare each new module in `tests/suite/main.rs`. Leave the `engine::` unit tests, the `advance_turn` test, the HTTP-mock-gateway cases, and the two tests that call `synthetic_section` (`list_from_section_ambiguous_error_is_loud` near line 1089 and `duplicate_top_level_section_names_error_loudly` near line 1104) in `src/execute/tests/exec_flow.rs`; those two drive engine walk internals, so an integration target cannot run them, and they take `synthetic_section` from `promptforge_parser::test_support` directly.
+- Artifacts: move `src/execute/tests/args_surface.rs`, `src/execute/tests/lazy_prose.rs`, and the offline cases of `src/execute/tests/exec_flow.rs` into `tests/suite`, swapping `run_offline` for the `tests/suite/support.rs` helpers and using root paths; this is a port, not a mechanical move - both files reach the private test-support helpers `run`, `fixture`, `TestStore`, `silent`, and `run_offline` through `use super::*`, so each test's fixture setup is rebuilt on the suite helpers while its assertions stay unchanged; declare each new module in `tests/suite/main.rs`. Leave the `engine::` unit tests, the `advance_turn` test, the HTTP-mock-gateway cases, and the two tests that call `synthetic_section` (`list_from_section_ambiguous_error_is_loud` near line 1089 and `duplicate_top_level_section_names_error_loudly` near line 1104) in `src/execute/tests/exec_flow.rs`; those two drive Engine walk internals, so an integration target cannot run them, and they take `synthetic_section` from `promptforge_parser::test_support` directly.
 - Tests: `tests/suite` passes with the moved assertions unchanged.
 
 </step-8>

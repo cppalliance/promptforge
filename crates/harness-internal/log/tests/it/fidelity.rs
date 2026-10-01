@@ -22,7 +22,7 @@ const ALL: RecordFilter = RecordFilter {
     last: None,
 };
 
-/// A run's opening row, as the harness would write it.
+/// A run's opening row, as the Harness would write it.
 fn meta() -> RunMeta {
     RunMeta {
         session_id: "session-1".to_owned(),

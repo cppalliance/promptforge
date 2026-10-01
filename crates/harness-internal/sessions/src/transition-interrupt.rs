@@ -17,7 +17,7 @@ use super::RunCompletion;
 pub enum SessionState {
     /// The run is stepping and its effects are being performed.
     Alive,
-    /// Cancel or close was requested: the engine's cancel flag is set,
+    /// Cancel or close was requested: the Engine's cancel flag is set,
     /// outstanding effects are being answered or dropped, and `Run` has
     /// not yet reported `Done`.
     Closing,
@@ -98,7 +98,7 @@ pub enum EffectiveInterrupt {
     /// terminal.
     Superseded,
     /// The interrupt is the run's terminal; render this frame once. The
-    /// `Interrupted` completion the engine reports afterwards adds
+    /// `Interrupted` completion the Engine reports afterwards adds
     /// nothing.
     Terminal(SyntheticTerminal),
 }

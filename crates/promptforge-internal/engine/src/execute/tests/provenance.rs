@@ -1,4 +1,4 @@
-//! Events as values: every report the engine makes is an [`Event`] pushed
+//! Events as values: every report the Engine makes is an [`Event`] pushed
 //! into the run-level buffer, stamped with a [`Provenance`] - the nearest
 //! enclosing task and a per-task sequence number. The main walk is task
 //! `0`; a `call` child reports under its caller's task; a spawned task (a

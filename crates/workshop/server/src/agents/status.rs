@@ -4,7 +4,7 @@
 //!
 //! One reporter task per session, spawned at launch. It holds only the
 //! session's broadcast receivers, never the session handle, so it ends by
-//! itself when the harness lets the session go and the last socket
+//! itself when the Harness lets the session go and the last socket
 //! detaches: the channels close, and the loop returns.
 
 use harness::{Delta, DeltaKind, FailureKind, SessionEvent, SessionFailure};

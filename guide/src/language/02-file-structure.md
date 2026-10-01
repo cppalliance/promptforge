@@ -134,7 +134,7 @@ missing field `description`
 
 ## The promptforge version
 
-The `promptforge:` key declares which major version of the engine the file targets, written `promptforge: 0`. Its value is a non-negative integer, and its presence marks the file as a PromptForge prompt. `0` is the only major this build runs.
+The `promptforge:` key declares which major version of the Engine the file targets, written `promptforge: 0`. Its value is a non-negative integer, and its presence marks the file as a PromptForge prompt. `0` is the only major this build runs.
 
 ````markdown
 ---

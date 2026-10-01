@@ -1,4 +1,4 @@
-//! Hierarchical, deterministic identity for the engine's chains and tasks.
+//! Hierarchical, deterministic identity for the Engine's chains and tasks.
 //!
 //! Every chain (the main walk, a `call` child, a spawned task) is named by
 //! a path: its parent chain's id extended by the parent's local child
@@ -20,7 +20,7 @@
 //! [`AbandonReason`] names how a task's owner ended while the task was
 //! still live, for the `abandoned` terminal state. [`Provenance`] extends a
 //! task's id with a per-task sequence number: the replay key stamped on
-//! every effect and event the engine emits.
+//! every effect and event the Engine emits.
 //!
 //! Ids order as paths: a chain before its descendants, siblings by index.
 //! The tasks one chain owns are its direct children, so sorting their ids
@@ -275,7 +275,7 @@ pub enum AbandonReason {
     /// or its own owner ending first.
     OwnerAborted,
     /// The run itself ended - cancelled by the Host or ended by a fatal
-    /// answer - while the task was live; the engine ended it with the run.
+    /// answer - while the task was live; the Engine ended it with the run.
     RunTerminated,
 }
 

@@ -51,7 +51,7 @@ A **promptforge prompt** is identified by a `promptforge:` version in its YAML f
 - **`promptforge:` present** -> a promptforge prompt. Run it under that major's rules (sections, Lua, transfers, store, budgets); everything below describes major **1**. An unsupported major is **refused, never silently degraded**.
 - **`promptforge:` absent** (no key, or no frontmatter at all) -> **not** a promptforge prompt. Detection reports nothing and promptforge declines to run it; what to do with a plain prompt (hand it to an ordinary harness, etc.) is the **caller's** concern. promptforge does not execute plain prompts.
 
-The engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a promptforge prompt", never an error.
+The Engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a promptforge prompt", never an error.
 
 ## Control flow, blocks, and state (consolidated)
 

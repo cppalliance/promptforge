@@ -30,7 +30,7 @@ use crate::transition::RunId;
 
 use super::SessionCore;
 
-/// Why one run produced no outcome of the engine's.
+/// Why one run produced no outcome of the Engine's.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunFailure {
     /// The client's selected model could not be resolved; the resolution

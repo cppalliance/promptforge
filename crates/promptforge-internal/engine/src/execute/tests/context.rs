@@ -313,7 +313,7 @@ pub(super) async fn run(
         // catalog the run binds its frontmatter slots against, and the
         // implementations go to the Harness's tool table the driver's tool
         // performer resolves a `ToolCall` effect in - the two halves a
-        // harness assembles from its activated capabilities.
+        // Harness assembles from its activated capabilities.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
         host = host.tools(table);

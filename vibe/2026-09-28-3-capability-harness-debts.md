@@ -1,6 +1,6 @@
 ---
-name: Capability harness debts
-overview: "Debt collector result for the capability harness redesign run (15 commits, 35 candidates), plus the small fixes the operator asked for: one shared read-only proxy builder in the Lua crate, a refusal notice that stops naming a registered capability as missing, three doc corrections, and a CI gate for the engine's private-item docs. D1-1 is closed by owner decision with no change."
+name: Capability Harness debts
+overview: "Debt collector result for the capability Harness redesign run (15 commits, 35 candidates), plus the small fixes the operator asked for: one shared read-only proxy builder in the Lua crate, a refusal notice that stops naming a registered capability as missing, three doc corrections, and a CI gate for the Engine's private-item docs. D1-1 is closed by owner decision with no change."
 todos:
   - id: l1-proxy
     content: Move the three read-only proxy builders in promptforge-lua (prelude.rs, argv.rs, sys.rs) onto one crate-private builder in proxy.rs, pinning every refusal text and getmetatable label first (L-1)
@@ -17,13 +17,13 @@ todos:
 isProject: false
 ---
 
-# Capability harness debt removal
+# Capability Harness debt removal
 
 <product-contract>
 
 ## Product Requirements
 
-- Scope and target work: the capability harness redesign run, plan `vibe/2026-09-28-2-capability-harness-redesign.md`, commits `255ffa14` through `9fd8e981` on `master`, baseline `a7e50ec5`. The debt collector analyzed all 15 target commits and challenged its own findings; this plan carries the result, plus the small fixes the operator asked for: the one item the run's ledger deferred, and four small corrections taken from the collector's rejected candidates. The repository is `c:\Users\Vinnie\cursor\promptforge`, and every path below is relative to it.
+- Scope and target work: the capability Harness redesign run, plan `vibe/2026-09-28-2-capability-harness-redesign.md`, commits `255ffa14` through `9fd8e981` on `master`, baseline `a7e50ec5`. The debt collector analyzed all 15 target commits and challenged its own findings; this plan carries the result, plus the small fixes the operator asked for: the one item the run's ledger deferred, and four small corrections taken from the collector's rejected candidates. The repository is `c:\Users\Vinnie\cursor\promptforge`, and every path below is relative to it.
 - Cleanup goals: one read-only proxy builder in the Lua crate instead of three copies; a refusal notice that no longer names a registered capability as missing; three doc corrections the run made necessary; a CI docs step that fails when a private-item doc link in `promptforge-engine` breaks.
 - Non-goals: any run-log compatibility work (owner decision under D1-1); private-item docs gates for crates other than `promptforge-engine`; any behavior change beyond D1-18's notice.
 - Success criteria:
@@ -48,7 +48,7 @@ isProject: false
   - D1-27 (weak or speculative, wording taken): the `environment` doc in `crates/promptforge-internal/lua/src/prelude.rs` (line 119) ends "so no prelude can change what another one sees". Each prelude does get its own environment and lookup table. But the `string`, `table`, `math`, `tools`, and `store` tables in that environment are the VM's shared tables, which any prelude or author code can change.
   - D1-32 (weak or speculative, taken): in "Letting the model ask", `guide/src/language/05-lua-environment.md` near line 782 says "On a host with no input broker it reads the fixed sentence instead". But the example just above declares the capability as a plain, required entry, and a Host with no broker refuses that prompt before the run starts.
 - Exposed pre-existing debt:
-  - D1-2 (exposed, taken at the operator's request): no CI docs build covers `promptforge-engine`'s private-item rustdoc. That gap caused manual repairs in two different plans: `eca41e57` for `workshop-server`, which added a gate for that crate, and `6c818272` for the engine, which added none. At `9fd8e981` the `docs` job in `.github/workflows/ci.yml` runs the public workspace docs build and the two facade builds; the only private-items build is the `workshop-server` step in the `check-workshop` job. The engine's private-items build passes at `6c818272` and later, after Step 14 of the redesign run repaired its links.
+  - D1-2 (exposed, taken at the operator's request): no CI docs build covers `promptforge-engine`'s private-item rustdoc. That gap caused manual repairs in two different plans: `eca41e57` for `workshop-server`, which added a gate for that crate, and `6c818272` for the Engine, which added none. At `9fd8e981` the `docs` job in `.github/workflows/ci.yml` runs the public workspace docs build and the two facade builds; the only private-items build is the `workshop-server` step in the `check-workshop` job. The Engine's private-items build passes at `6c818272` and later, after Step 14 of the redesign run repaired its links.
 - Rejected candidates, 33 of 35:
   - 15 false: the claims do not hold at `9fd8e981`. No reader of earlier builds' logs exists; the full-id fallback reaches only declared capabilities' tools and never model calls; the setup order and the seals hold; relocated tests cover the removed ones; the guide's counts are right; and the session id carried in the origin is already stored in `runs.session_id`.
   - 10 residual-but-acceptable: each is the plan's specified design or an owner deferral, such as `ServiceGap` reserved for the menu and `ToolPerformer::call` receiving no origin.
@@ -69,7 +69,7 @@ isProject: false
   - Not part of this item: the `var` guard in `sys.rs`, whose `__newindex` validates and stores values and so is not read-only.
   - Every refusal text and label stays byte-identical, including how a non-string key renders.
 - D1-18: `Requirements::merge` drops, after folding `other` in, every `missing_required` entry whose capability also appears in `missing_services`. Such an entry can come only from `fill_tool_bindings` seeing an exact tool slot whose capability contributed nothing. Activation records a missing service only for a registered capability whose `create` it skipped, so the service line already names the real cause. The `merge` doc comment says so. No type or signature changes, so `crates/promptforge/public-api.txt` is unaffected.
-- D1-2: a new step in the `docs` job of `.github/workflows/ci.yml`, after "Harness facade docs", named "Engine docs (private items)", running `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. The job already sets `RUSTDOCFLAGS: -D warnings` for every step, so the step needs no `env`. `--all-features` is needed because the engine's `test_support` module sits behind a feature and its doc links are part of what broke. The step goes in the `docs` job rather than beside the `workshop-server` step in `check-workshop`, because the engine is not a workshop crate and the Workshop steps build without `--all-features`. A rustdoc build is a compiler check, not the kind of structural enforcement `AGENTS.md` reserves for owner approval.
+- D1-2: a new step in the `docs` job of `.github/workflows/ci.yml`, after "Harness facade docs", named "Engine docs (private items)", running `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. The job already sets `RUSTDOCFLAGS: -D warnings` for every step, so the step needs no `env`. `--all-features` is needed because the Engine's `test_support` module sits behind a feature and its doc links are part of what broke. The step goes in the `docs` job rather than beside the `workshop-server` step in `check-workshop`, because the Engine is not a workshop crate and the Workshop steps build without `--all-features`. A rustdoc build is a compiler check, not the kind of structural enforcement `AGENTS.md` reserves for owner approval.
 - D1-26, D1-27, D1-32: documentation only.
   - D1-26: the `AGENTS.md` sentence names the user-input wait registry and the session broker, `SessionInputBroker`, which implements `InputBroker` for the `promptforge/user-input` capability.
   - D1-27: the `environment` doc says each prelude gets its own environment and lookup table, so no prelude sees another prelude's globals, and that the library tables, `tools`, and `store` in it are shared with the rest of the VM.
@@ -90,7 +90,7 @@ isProject: false
   - Then run the `harness-runner` and `promptforge-engine` suites.
 - D1-32: regenerate the combined guide, confirm a second regeneration shows no further diff, and build the books with `cargo xtask site --books-only`.
 - D1-26 and D1-27: build `promptforge-lua`'s docs with `RUSTDOCFLAGS=-D warnings`.
-- D1-2: run the new step's command locally with `RUSTDOCFLAGS=-D warnings` and confirm it exits 0; confirm by reading `ci.yml` that the step sits in the `docs` job, whose `env` sets `RUSTDOCFLAGS: -D warnings`. Optional fault injection, reverted before commit: break one private intra-doc link in the engine and confirm the command fails.
+- D1-2: run the new step's command locally with `RUSTDOCFLAGS=-D warnings` and confirm it exits 0; confirm by reading `ci.yml` that the step sits in the `docs` job, whose `env` sets `RUSTDOCFLAGS: -D warnings`. Optional fault injection, reverted before commit: break one private intra-doc link in the Engine and confirm the command fails.
 - Exit: the full repository gates as the Project Survey records them, including both clippy runs, `cargo fmt --all --check`, the docs builds, `cargo +nightly-2026-09-05 xtask api --check` with no `public-api.txt` change, and no guide diff after regeneration.
 
 </verification-contract>
@@ -99,10 +99,10 @@ isProject: false
 ## Decision Record
 
 - D1-1, owner decision on 2026-09-28: "There are no old logs. do not add any backward compatibility or comments or anything." So: no format marker on `runs`, no `#[serde(default)]` on `origin`, no legacy variants, and no doc caveat about reading stored logs across builds. The options put to the owner were docs only, a `record_format` column on `runs`, and a defaulted `origin`.
-- D1-2, operator decision on 2026-09-28: widen the scope to this exposed debt and gate the engine's private-item docs. Rejected: listing the command in the `AGENTS.md` Verification section instead, which relies on each run remembering it, the way Step 14 found the rot only by hand; `AGENTS.md` does not list the `workshop-server` private-items build either, so the gate lives in CI alone. Rejected for now: gating `promptforge-lua` and the `harness-*` crates too, because nobody has shown their private docs are broken, and a gate on a crate that already fails would block CI.
+- D1-2, operator decision on 2026-09-28: widen the scope to this exposed debt and gate the Engine's private-item docs. Rejected: listing the command in the `AGENTS.md` Verification section instead, which relies on each run remembering it, the way Step 14 found the rot only by hand; `AGENTS.md` does not list the `workshop-server` private-items build either, so the gate lives in CI alone. Rejected for now: gating `promptforge-lua` and the `harness-*` crates too, because nobody has shown their private docs are broken, and a gate on a crate that already fails would block CI.
 - Small fixes, operator decision: fix every small deferred item where that can be done reliably. The run ledger deferred one item (L-1). The collector's rejected candidates supplied four small corrections the operator accepted: D1-18, D1-26, D1-27 (wording only), and D1-32. The run's other deferral, `ToolPerformer::call` receiving no tool-call origin (the `Deferred:` trailer on `f1baf7a1`), is an owner decision with its own revisit condition, and is not taken.
 - L-1 passes each caller's refusal text as a closure rather than unifying the three messages. The messages are observable and partly pinned by tests, so unifying them would change behavior for no gain. Rejected: moving `argv` and `sys` onto the prelude message format.
-- D1-18 fixes the report in `Requirements::merge`, where the two lists first meet. Rejected: fixing it in `fill_tool_bindings`, which runs in the engine before activation's report exists; and suppressing the line in `notice` only, which would leave `missing_required` wrong for any other reader.
+- D1-18 fixes the report in `Requirements::merge`, where the two lists first meet. Rejected: fixing it in `fill_tool_bindings`, which runs in the Engine before activation's report exists; and suppressing the line in `notice` only, which would leave `missing_required` wrong for any other reader.
 - Risk: L-1 touches the seals that protect `sys`, `argv`, and prelude globals. The pinned texts, the `getmetatable` results, and the existing seal tests hold that contract.
 
 ### Deferred and Out of Scope
@@ -127,15 +127,15 @@ isProject: false
 - Test placement and naming conventions:
   - Unit tests sit in a sibling file `<module>-tests.rs`, wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;` (about 140 such files, for example `capabilities/src/registry-tests.rs`, `engine/src/execute/run-tests.rs`, `types/src/event-tests.rs`, `sessions/src/input-tests.rs`). Larger suites become a `tests/` module directory beside the module, such as `engine/src/execute/tests/` (with `scheduler/` and `suite/`), `models/src/transport/tests/`, and `workspace/src/workspace/tests/`; the lua crate keeps one `src/tests.rs`. The `build-*` tooling crates use inline `mod tests {}` blocks.
   - Integration tests are one `tests/it/` target per crate (`tests/suite/` in the `promptforge` and `harness` facades). Its `main.rs` declares the modules and opens with `#![expect(clippy::expect_used, clippy::unwrap_used, reason = ...)]`; files split into kebab siblings such as `session-infer.rs` and `session-close.rs`, or into subdirectories such as `workshop/server/tests/it/agents/`, with shared helpers in `support.rs`. A few crates also keep standalone files under `tests/` (`gateway/stt/engine`, `gateway/cloud-providers`, `gateway/stt/backend-whisper`, `build-workshop`).
-  - Shared fixtures live in `test_support` modules (the engine's `src/test_support/` with `host.rs`, `tools.rs`, and recording and tokio driver helpers; `test_support.rs` in the runner, parser, gateway app, and workshop workspace), exported to siblings behind a `test-support` feature (engine, lua, parser, runner, sessions) or a `test-fixtures` feature (gateway, workshop, and `gateway-api-discovery` crates).
+  - Shared fixtures live in `test_support` modules (the Engine's `src/test_support/` with `host.rs`, `tools.rs`, and recording and tokio driver helpers; `test_support.rs` in the runner, parser, gateway app, and workshop workspace), exported to siblings behind a `test-support` feature (engine, lua, parser, runner, sessions) or a `test-fixtures` feature (gateway, workshop, and `gateway-api-discovery` crates).
   - Test functions are snake_case sentences stating the behavior, such as `a_direct_launch_recovers_the_lease_from_a_terminated_owner`.
   - `clippy.toml` allows `unwrap` and `expect` in tests; the workspace lints deny both elsewhere.
   - Criterion benches: `engine/benches/models_loop.rs` and `lua/benches/surface.rs`.
   - UI tests run under `node --test`: `crates/workshop/{ui,look,platform}/test/*.mjs` (the ui package holds 96, with `test/helpers/`) and `crates/gateway/config-ui/ui/src/**/*.test.mjs` (25). Node scripts in `tools/` keep a sibling `<name>.test.mjs`.
 - Directory map:
   - `crates/`: every Rust crate and UI package. Its root is the public layer: the `promptforge` and `harness` facades, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS, not a crate), the `build-*` tooling crates (`build-llama-cuda`, `build-ui`, `build-user-guide`, `build-workshop`, `build-xtask`), and `workspace-hack` (cargo-hakari). `crates/README.md` describes each root crate.
-  - `crates/promptforge-internal/`: the engine's private crates `engine`, `types`, `lua`, `parser`, `vfs`, and `model-client`.
-  - `crates/harness-internal/`: the harness's private crates `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, and `web-search`.
+  - `crates/promptforge-internal/`: the Engine's private crates `engine`, `types`, `lua`, `parser`, `vfs`, and `model-client`.
+  - `crates/harness-internal/`: the Harness's private crates `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, and `web-search`.
   - `crates/workshop/`: `desktop` (the Tauri app, package `workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, and `workspace`, plus the npm workspaces `ui`, `look`, and `platform`.
   - `crates/gateway/`: `app` (package `gateway`), `cloud-providers`, `config`, `config-ui` (with its own `ui/`), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `guide/`: user guide chapter sources (`src/`), mdBook books (`books/`), `landing/`, `chrome/`, the three product guides, and `CONTRIBUTING.md`.
@@ -144,10 +144,10 @@ isProject: false
   - `.github/workflows/`: `ci.yml` (its `ci-green` job is the single required check) and release, nightly, site, and native-library workflows; `.github/fixtures/` holds the installer smoke fixtures. `.githooks/`: pre-commit and pre-push. `.config/`: `nextest.toml` and `hakari.toml`. `.cargo/config.toml`: rust-lld with the static CRT on Windows, and the `cargo workshop` and `cargo xtask` aliases.
   - Root files: `Cargo.toml` (explicit container member list, `default-members` is the gateway app), `rust-toolchain.toml` (stable), `clippy.toml`, `rustfmt.toml`, `deny.toml`, `dist-workspace.toml`, and `gateway.local.example.toml`. `local/`, `target/`, and `target-msrv/` are gitignored; `images/` holds README art.
 - Component boundaries:
-  - Executor: `promptforge` is a facade of single-item re-exports over `promptforge-internal/*`, and the only promptforge crate that code outside the family may name. `promptforge-*` crates depend on no gateway, workshop, or harness crate.
+  - Executor: `promptforge` is a facade of single-item re-exports over `promptforge-internal/*`, and the only promptforge crate that code outside the family may name. `promptforge-*` crates depend on no gateway, workshop, or Harness crate.
   - Harness: `harness` is the facade over `harness-internal/*` and the only door into that container. `harness-*` crates depend only on `promptforge` and their siblings, never on gateway, shared, workshop, or private `promptforge-*` crates.
   - Workshop: its crates may name `harness`, `promptforge`, the gateway public pair, and `shared-*`, never the gateway family's private crates. The desktop app depends on `workshop-server-api`, never `workshop-server`. Inside the family, dependencies flow one way: server, then features, then services, then vocabulary. In the SPA, lazy panels never import a module inside the entry bundle.
-  - Gateway: its private crates depend on the root pair and `shared-*`, never on promptforge, harness, or workshop crates; `gateway-stt` is the only family-visible crate of the nested `stt/` subsystem.
+  - Gateway: its private crates depend on the root pair and `shared-*`, never on promptforge, Harness, or workshop crates; `gateway-stt` is the only family-visible crate of the nested `stt/` subsystem.
   - `shared-*` crates depend on no product crate. A crate in a family container depends only on root crates and its own siblings; `build-*` crates are exempt.
   - Every `workshop-*` and `harness-*` crate's `lib.rs` opens with a `//!` doc holding an `## Invariants` marker listing what it may and may not depend on. `cargo test -p build-xtask` enforces these rules, and `cargo xtask api --check` enforces the `promptforge` surface.
 - Conventions summary:
@@ -170,9 +170,9 @@ isProject: false
 - Scope: four components, one step each, in dependency order. Each step's Todo line names the frontmatter todo it builds. D1-1 has no step, by owner decision.
 - Component order:
   1. **Lua seal proxy** (L-1) - first. It is the only change to the seals that guard `sys`, `argv`, and prelude globals, so it lands while the rest of the tree is unchanged, and Step 3's D1-27 edit to `prelude.rs` must follow it.
-  2. **Refusal notice dedupe** (D1-18) - second. It shares no file with component 1 and could run beside it. It lands before the doc corrections so D1-32's guide sentence about refusal is written against the final refusal behavior, and before the engine docs gate so that gate's local run covers the new `merge` doc comment.
+  2. **Refusal notice dedupe** (D1-18) - second. It shares no file with component 1 and could run beside it. It lands before the doc corrections so D1-32's guide sentence about refusal is written against the final refusal behavior, and before the Engine docs gate so that gate's local run covers the new `merge` doc comment.
   3. **Doc corrections** (D1-26, D1-27, D1-32) - third, after Step 1, because D1-27 edits `prelude.rs` in its final shape.
-  4. **Engine private docs gate** (D1-2) - last. It depends on no other step; landing it last means its local run checks the engine's private docs as the plan leaves them.
+  4. **Engine private docs gate** (D1-2) - last. It depends on no other step; landing it last means its local run checks the Engine's private docs as the plan leaves them.
 - Standing rules for every step:
   - Each step is one commit holding its code, docs, and tests.
   - Line numbers refer to `9fd8e981`. Step 1 moves lines in `prelude.rs`, `argv.rs`, and `sys.rs`; re-locate any reference by content before editing.
@@ -250,21 +250,21 @@ isProject: false
 
 <step-4>
 
-### Step 4: Gate the engine's private-item docs in CI [completed]
+### Step 4: Gate the Engine's private-item docs in CI [completed]
 
 - Component: Engine private docs gate
 - Piece: one CI step, one step.
 - Todo: `d1-2-engine-docs-gate`
-- Depends on: nothing. Placed last so its local run checks the engine docs including Step 2's `merge` doc comment.
+- Depends on: nothing. Placed last so its local run checks the Engine docs including Step 2's `merge` doc comment.
 - Read: Product Requirements, the D1-2 bullet under Debt Inventory; Technical Design, the D1-2 bullet; Testing Plan, the D1-2 bullet and Exit; Decision Record, the D1-2 bullet; Project Survey, Docs command.
 - Build: in `.github/workflows/ci.yml`, the `docs` job (line 115, whose `env` at line 118 sets `RUSTDOCFLAGS: -D warnings` for every step), add a step after "Harness facade docs" (lines 148-149) named "Engine docs (private items)" running `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, with no `env` of its own and no comment. The `workshop-server` private-items step in `check-workshop` (line 215) is untouched.
 - Tests: none new; the check is the CI step itself.
-- Verify: run the step's command locally with `$env:RUSTDOCFLAGS='-D warnings'` and confirm it exits 0; read `ci.yml` to confirm the step sits in the `docs` job under that job's `env`. Optional fault injection, reverted before commit: break one private intra-doc link in the engine and confirm the command fails.
+- Verify: run the step's command locally with `$env:RUSTDOCFLAGS='-D warnings'` and confirm it exits 0; read `ci.yml` to confirm the step sits in the `docs` job under that job's `env`. Optional fault injection, reverted before commit: break one private intra-doc link in the Engine and confirm the command fails.
 - Commit: one commit with the CI step.
 - Done when: the command exits 0 locally, the step is in the `docs` job, and the Exit gates below pass.
 
 </step-4>
 
-- Exit: after Step 4, the full repository gates from the Project Survey: the full-suite test command with its doctests; the Linter command (both clippy runs, the headless check, `cargo deny check`, `cargo audit`); `cargo fmt --all --check`; the docs builds (the workspace build, both facades, the `workshop-server` private-items build, and the new engine private-items build); `cargo +nightly-2026-09-05 xtask api --check` with no `public-api.txt` change; and the combined guide with no diff after regeneration.
+- Exit: after Step 4, the full repository gates from the Project Survey: the full-suite test command with its doctests; the Linter command (both clippy runs, the headless check, `cargo deny check`, `cargo audit`); `cargo fmt --all --check`; the docs builds (the workspace build, both facades, the `workshop-server` private-items build, and the new Engine private-items build); `cargo +nightly-2026-09-05 xtask api --check` with no `public-api.txt` change; and the combined guide with no diff after regeneration.
 
 </execution-plan>

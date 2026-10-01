@@ -23,11 +23,11 @@ const RULE: &str = "doc(hidden) attribute";
 const REQUIRED: &str = "no hidden item in a facade or its container: document it, or make it \
     private or a `detail` function";
 
-/// The harness facade's container, relative to `crates/`.
+/// The Harness facade's container, relative to `crates/`.
 const HARNESS_CONTAINER: &str = "harness-internal";
 
-/// The directories the ban covers: every facade crate, then the engine and
-/// harness containers, whether or not they exist.
+/// The directories the ban covers: every facade crate, then the Engine and
+/// Harness containers, whether or not they exist.
 fn banned_dirs(root: &Path) -> Vec<PathBuf> {
     let facades = crate::facade_shape::FACADE_DIRS.iter().map(|parts| {
         parts

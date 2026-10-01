@@ -1,9 +1,9 @@
-//! harness-log - the harness run log: an append-only Turso record of every
+//! harness-log - the Harness run log: an append-only Turso record of every
 //! run and, per run, every effect, answer, and event in loop order.
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -13,8 +13,8 @@
 //!   record is updated or deleted once written. A `runs` row is written
 //!   at `begin_run` and closed exactly once at `end_run`; a closed run
 //!   accepts no more records.
-//! - Every `u64` the engine hands over (`seed`, `effect_id`) is stored as
-//!   its two's-complement `i64`, losslessly; a `task_id` is the engine's
+//! - Every `u64` the Engine hands over (`seed`, `effect_id`) is stored as
+//!   its two's-complement `i64`, losslessly; a `task_id` is the Engine's
 //!   hierarchical task path stored as text; timestamps are UTC
 //!   milliseconds since the Unix epoch. `started_at` is the caller's;
 //!   `at` and `ended_at` are the log's wall clock.
@@ -26,7 +26,7 @@
 //!   fidelity test in `tests/it/fidelity.rs` pins it.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 

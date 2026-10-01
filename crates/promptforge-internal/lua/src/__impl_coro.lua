@@ -200,7 +200,7 @@ end
 
 -- Drains the chain's pending model-task notices into the author's list
 -- ahead of a round: one yield, answered at once with the notices queued
--- since the last drain (the engine's sentences saying how the model's
+-- since the last drain (the Engine's sentences saying how the model's
 -- tasks ended), each appended as a user record so the model reads them
 -- in its next round. A chain with no model tasks drains an empty list.
 local function drain_task_notices(messages)

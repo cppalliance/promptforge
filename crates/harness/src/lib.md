@@ -58,14 +58,14 @@ assert_eq!(harness.discover(), ["chat", "hello"]);
 Ok::<(), std::io::Error>(())
 ````
 
-1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the harness reads by path.
+1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the Harness reads by path.
 2. Step 2 writes `hello.md`. Its frontmatter holds the three keys every agent needs: `name`, `description`, and `promptforge: 0`. Then come one H1 title and one section whose Lua returns a fixed text. The source is built with `concat!` so that rustdoc keeps its `# Hello` line. The smallest agent needs no model, no tool, and no operator.
-3. Step 3 builds a harness over the folder with [`Harness::new`] and a [`HarnessConfig`]. Building a harness touches no folder, so this step cannot fail.
+3. Step 3 builds a Harness over the folder with [`Harness::new`] and a [`HarnessConfig`]. Building a Harness touches no folder, so this step cannot fail.
 4. Step 4 asserts that [`Harness::discover`] lists `chat` and `hello`, sorted. The file stem is the name a launch asks for, and it sits next to the built-in `chat`.
 
 # Launch an agent
 
-You have an agent and a model server, and you want your program to run the agent and read its answer. Your program tells the harness where the model server is, then launches agents by name. Each launch becomes a session that runs on its own.
+You have an agent and a model server, and you want your program to run the agent and read its answer. Your program tells the Harness where the model server is, then launches agents by name. Each launch becomes a session that runs on its own.
 
 Launching feels like [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html): you get a handle back at once, and the work is already running. Unlike a spawned task, you watch its state and then read its output.
 
@@ -121,10 +121,10 @@ assert!(format!("{:?}", harness.gateway()).contains("<redacted>"));
 # Ok::<(), std::io::Error>(())
 ````
 
-1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the harness puts the `input:` file and looks for the `output:` file.
-2. Step 2 builds one [`Harness`] from a [`HarnessConfig`] and shares it behind an [`Arc`](std::sync::Arc), because one harness serves every session your program launches.
-3. Step 3 pushes the stub model server with [`Harness::set_gateway`], as a [`GatewayBinding`]. Leave `/v1` off its `base_url`, because the harness appends it. Give every new binding a higher `generation` than the last.
-4. Step 4 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array; the harness takes the model's name from its `"id"` string.
+1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the Harness puts the `input:` file and looks for the `output:` file.
+2. Step 2 builds one [`Harness`] from a [`HarnessConfig`] and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches.
+3. Step 3 pushes the stub model server with [`Harness::set_gateway`], as a [`GatewayBinding`]. Leave `/v1` off its `base_url`, because the Harness appends it. Give every new binding a higher `generation` than the last.
+4. Step 4 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array; the Harness takes the model's name from its `"id"` string.
 5. Step 5 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs the live stub, so the example never calls it.
 6. Step 6 asserts that `greet` is launchable, that [`Harness::gateway`] holds the generation 1 binding, and that `{:?}` prints the key as `"<redacted>"`, so a binding is safe to log.
 
@@ -134,7 +134,7 @@ What a gateway push does depends on its generation:
 - A lower one is stored and new launches use it, but running sessions ignore it and keep the old gateway.
 - A higher one reaches every running session, and [The complete program](#the-complete-program) shows what that does.
 
-The harness checks the name before the gateway. A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. No gateway, or one whose URL does not parse or whose key is empty, fails with [`LaunchError::GatewayUnusable`].
+The Harness checks the name before the gateway. A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. No gateway, or one whose URL does not parse or whose key is empty, fails with [`LaunchError::GatewayUnusable`].
 
 You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`.
 
@@ -234,7 +234,7 @@ async fn stream() -> Result<(), Box<dyn Error>> {
 }
 ````
 
-1. Read the hidden `say(&session, "Hello, desk.")` as the operator typing `Hello, desk.`. You do not need its body to follow this tour. Step 1 builds `desk`'s harness through the hidden `desk` function, which pushes the stub gateway, the generation 1 catalog, and the selected model, as [Launch an agent](#launch-an-agent) taught. It launches `chat`, then calls [`Session::subscribe_deltas`] and [`Session::subscribe_events`] before the hidden `say` answers `chat`'s first question. `chat` starts by asking the operator a question and pauses until it gets an answer. The hidden `say` answers it the way the next tour teaches, and that answer starts the first model round. Each receiver gets only what is sent after it subscribes, and the session is already running when `launch` returns. Subscribing right after launch catches every piece of the first reply.
+1. Read the hidden `say(&session, "Hello, desk.")` as the operator typing `Hello, desk.`. You do not need its body to follow this tour. Step 1 builds `desk`'s Harness through the hidden `desk` function, which pushes the stub gateway, the generation 1 catalog, and the selected model, as [Launch an agent](#launch-an-agent) taught. It launches `chat`, then calls [`Session::subscribe_deltas`] and [`Session::subscribe_events`] before the hidden `say` answers `chat`'s first question. `chat` starts by asking the operator a question and pauses until it gets an answer. The hidden `say` answers it the way the next tour teaches, and that answer starts the first model round. Each receiver gets only what is sent after it subscribes, and the session is already running when `launch` returns. Subscribing right after launch catches every piece of the first reply.
 2. Step 2 prints each [`DeltaKind::Text`] piece, the answer, and collects it under its `reply` number. It sends each [`DeltaKind::Reasoning`] piece, the model's reasoning, to stderr, because the operator usually sees these in different places. A wildcard arm ignores kinds added later, because [`DeltaKind`] is `#[non_exhaustive]`. The hidden `first` stands in for [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html) over the two receivers.
 3. Step 3 ignores the error a lagging delta receiver gets for the pieces it lost, and does not retry. A missed piece costs the operator a moment of streaming, never text, because the finished event holds the whole reply.
 4. Step 4 stops at the `assistant_reply` event, and takes its `reply` number and its finished `text`. Only thinking, reply, and tool-call events carry a `reply` number, so a [`SessionEvent`] whose `reply` is `None` is something other than model text. You can route events without parsing every one.
@@ -507,7 +507,7 @@ assert!(harness.session(&SessionId::new("never-issued")).is_none());
 3. Step 3 calls [`Session::subscribe_events`] before it reads [`Session::transcript`] from one past the last shown index. An event recorded between the two reads is caught live rather than lost. The other order, history first, would leave a gap.
 4. Step 4 re-announces the question asked while the client was away through `question`, which calls `subscribe_waits` and then `resend_waits`. It answers the question, and skips live events whose `index` the replay already gave. Open questions survive a disconnect, and the skip removes repeats.
 5. Step 5 asserts that the replayed and live indexes run one by one from one past the last shown index. `index` numbers every event from zero across every run of the session, restarts included, so one saved number is all the client state `desk` needs.
-6. Step 6 asserts that `Harness::session` finds nothing for an id the harness never issued, just as it finds nothing once a session is closed. If you need to watch a close finish, keep a [`Session`] handle, because [`Harness::close`] removes the session at once, while it is still `Closing`. A lookup right after a close already returns `None`.
+6. Step 6 asserts that `Harness::session` finds nothing for an id the Harness never issued, just as it finds nothing once a session is closed. If you need to watch a close finish, keep a [`Session`] handle, because [`Harness::close`] removes the session at once, while it is still `Closing`. A lookup right after a close already returns `None`.
 
 You might expect a disconnect to end the session, the way dropping a receiver ends a channel. Instead, the session keeps running and keeps its open questions, and only a close ends it.
 
@@ -664,16 +664,16 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
 }
 ````
 
-1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). You might expect the harness to find its model server and model in the environment or a config file. Instead, it holds only what your program pushes, and it starts with no gateway at all. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a gateway push, or a catalog push whose model list changed, restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
+1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). You might expect the Harness to find its model server and model in the environment or a config file. Instead, it holds only what your program pushes, and it starts with no gateway at all. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a gateway push, or a catalog push whose model list changed, restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
 2. Step 2 is `stream`, from [Stream a reply](#stream-a-reply). It owns its own delta receiver and a state watch, prints `Text` pieces, and shrugs off a lag error while the session runs. It ends once the state is `Closed`.
 3. Step 3 is `show_replies`, which prints each `assistant_reply` event. That finished text replaces the pieces `stream` printed under the same reply number.
-4. Step 4 is `report_close`, which holds its own clone of the [`Session`]. `report_close` keeps a handle because [`Harness::close`] removes the session from the harness while it is still `Closing`.
+4. Step 4 is `report_close`, which holds its own clone of the [`Session`]. `report_close` keeps a handle because [`Harness::close`] removes the session from the Harness while it is still `Closing`.
 5. Step 5 is `answer`, from [Answer the operator](#answer-the-operator). It subscribes, re-announces, and answers by token. When a restart cancelled the question under it, [`WaitError::UnknownToken`] sends it around again for the new question.
 6. Step 6 launches `chat` by name, shows any refusal through [`display_chain`], and spawns `stream` and `report_close` at once, because the session is already running when `launch` returns.
 7. Step 7 answers `chat`'s first question, cancels the slow turn as [Stop a turn](#stop-a-turn) taught, and answers the new question `chat` asks after its run starts again.
 8. Step 8 pushes a new gateway and a changed model list, each at generation 2, above what the session has seen. A gateway push with a higher generation cancels every running session's current turn at once. Its open questions get [`WaitFrame::Cancelled`], and its run restarts over its transcript on the new gateway.
 9. Step 9 drops the handle and looks the session up by id, as [Reattach after a disconnect](#reattach-after-a-disconnect) taught. It subscribes through `show_replies` before it reads `transcript(0)`, and asserts that the history's indexes run from zero with no gap.
-10. Step 10 lists the open tokens with [`Session::unresolved_waits`], closes the session with `Harness::close`, asserts that it is gone from the harness at once, and waits for `Closed`. An open question keeps its agent waiting until `desk` answers it, cancels the turn, or closes the session, so `desk` decides when to give up.
+10. Step 10 lists the open tokens with [`Session::unresolved_waits`], closes the session with `Harness::close`, asserts that it is gone from the Harness at once, and waits for `Closed`. An open question keeps its agent waiting until `desk` answers it, cancels the turn, or closes the session, so `desk` decides when to give up.
 
 A catalog push with a changed model list, under a higher generation, restarts the run, and with no answer in progress it cancels the current turn at once, as a gateway push does. When the operator's answer has already been accepted, the restart waits for that turn to settle at the first `assistant_reply` event or the first `ModelTurnFailed` or `ToolCallFailed` report, without waiting for the agent to ask again. Every catalog push replaces the stored catalog, but a session acts only on a generation above the last one it saw.
 
@@ -699,7 +699,7 @@ Push settings, launch by name, relay what each session says and asks, and close 
 
 ## CatalogBinding
 
-[`CatalogBinding`] carries one generation of your program's chat-capable model list into the harness. Push it through [`Harness::set_catalog`] whenever that list changes; every push replaces the stored catalog. When no chat-capable model exists, push an empty `models` list under a new, higher generation rather than skipping the push. A running session keeps its current run, but its next restart waits until a later push brings models back under a higher generation. [Launch an agent](#launch-an-agent) shows the first push.
+[`CatalogBinding`] carries one generation of your program's chat-capable model list into the Harness. Push it through [`Harness::set_catalog`] whenever that list changes; every push replaces the stored catalog. When no chat-capable model exists, push an empty `models` list under a new, higher generation rather than skipping the push. A running session keeps its current run, but its next restart waits until a later push brings models back under a higher generation. [Launch an agent](#launch-an-agent) shows the first push.
 
 - `generation`: nothing rejects a repeat, but sessions ignore a catalog not above the last one they saw, so start at 1 and raise it.
 - `models`: raw JSON model entries; with no selected model, a launch binds the `"id"` string of the first entry.
@@ -729,7 +729,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## GatewayBinding
 
-[`GatewayBinding`] tells the harness which model server to use and the key that goes with it. Push it through [`Harness::set_gateway`] at startup and whenever the server or key changes. A binding whose URL does not parse or whose key is empty still installs, and launches under it fail with [`LaunchError::GatewayUnusable`]; pushed under a higher generation, it also ends every running session, which reports [`FailureKind::RunFailed`] and closes. Push a corrected binding under a higher generation. [Launch an agent](#launch-an-agent) teaches this.
+[`GatewayBinding`] tells the Harness which model server to use and the key that goes with it. Push it through [`Harness::set_gateway`] at startup and whenever the server or key changes. A binding whose URL does not parse or whose key is empty still installs, and launches under it fail with [`LaunchError::GatewayUnusable`]; pushed under a higher generation, it also ends every running session, which reports [`FailureKind::RunFailed`] and closes. Push a corrected binding under a higher generation. [Launch an agent](#launch-an-agent) teaches this.
 
 - `generation`: a push with the current one is ignored. A different one replaces the stored binding, but running sessions switch only to a higher one.
 - [`GatewayBinding::api_root`]: `base_url` with trailing slashes trimmed and `/v1` always appended, so leave `/v1` off `base_url`.
@@ -747,14 +747,14 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## HarnessConfig
 
-[`HarnessConfig`] tells the harness where the agents live and where to keep its state. Write it as a struct literal and pass it to [`Harness::new`]. Neither path is checked then, so a bad path shows up at launch, not at construction. A missing `state_dir` is created on the first launch. [Launch an agent](#launch-an-agent) teaches this.
+[`HarnessConfig`] tells the Harness where the agents live and where to keep its state. Write it as a struct literal and pass it to [`Harness::new`]. Neither path is checked then, so a bad path shows up at launch, not at construction. A missing `state_dir` is created on the first launch. [Launch an agent](#launch-an-agent) teaches this.
 
 - `agents_path`: the folder whose `.md` files are the launchable agents; launching `name` reads `<agents_path>/<name>.md`.
-- `state_dir`: the folder the harness keeps its run log under.
+- `state_dir`: the folder the Harness keeps its run log under.
 
 ## HostSnapshot
 
-[`HostSnapshot`] carries your program's selected model and workspace roots into the harness. Push it through [`Harness::set_host`] when the operator changes either one. Each run reads it as it starts, so a new selection reaches a running session at its next restart, never a turn in progress; with no selection, a launch binds the first model of the latest [`CatalogBinding`]. The harness starts with [`HostSnapshot::default()`](HostSnapshot::default): no selection and no roots. [Launch an agent](#launch-an-agent) teaches this.
+[`HostSnapshot`] carries your program's selected model and workspace roots into the Harness. Push it through [`Harness::set_host`] when the operator changes either one. Each run reads it as it starts, so a new selection reaches a running session at its next restart, never a turn in progress; with no selection, a launch binds the first model of the latest [`CatalogBinding`]. The Harness starts with [`HostSnapshot::default()`](HostSnapshot::default): no selection and no roots. [Launch an agent](#launch-an-agent) teaches this.
 
 - `selected_model`: never swapped for another; a model the gateway lacks, or an unfetchable list, fails the run with [`FailureKind::RunFailed`], closing the session; `launch` succeeds.
 
@@ -826,7 +826,7 @@ A [`SessionFailure`] is one failure report for the operator, from [`Session::sub
 
 A [`SessionId`] names a session so that you can find it again through [`Harness::session`] after your client disconnects. It serializes as a bare string, and `Display` writes the raw id, so you can store it and send it to a client as plain text. [Reattach after a disconnect](#reattach-after-a-disconnect) teaches this.
 
-- [`SessionId::new`]: wraps any string without checking it, an empty one included; an id the harness never minted finds no session.
+- [`SessionId::new`]: wraps any string without checking it, an empty one included; an id the Harness never minted finds no session.
 - [`SessionId::fresh`]: mints 128 random bits from the OS-seeded cryptographic RNG, hex-encoded.
 
 ## SessionState
@@ -853,7 +853,7 @@ A [`WaitFrame`] tells you that a session opened a question for the operator, or 
 
 ## display_chain
 
-[`display_chain`] renders an error and every cause in its `source()` chain as one line, joined with `: `. Use it to show a harness error to a person or a model, because an error's `Display` holds only its own message. A cause whose text already appears in the line is left out, but its own causes are still visited, so the root cause survives. An empty cause is left out with no `: `. [Launch an agent](#launch-an-agent) shows it in use.
+[`display_chain`] renders an error and every cause in its `source()` chain as one line, joined with `: `. Use it to show a Harness error to a person or a model, because an error's `Display` holds only its own message. A cause whose text already appears in the line is left out, but its own causes are still visited, so the root cause survives. An empty cause is left out with no `: `. [Launch an agent](#launch-an-agent) shows it in use.
 
 # Where to go next
 
