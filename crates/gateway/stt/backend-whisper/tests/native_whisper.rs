@@ -161,9 +161,13 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
     assert_eq!(glossary_clip, GLOSSARY_CLIP_TRANSCRIPT);
     assert_ne!(glossary_clip, unprompted_clip);
 
-    drop(glossary_prompted);
-    drop(unprompted);
-    std::fs::remove_file(model).expect("dropping the engine releases the model");
+    glossary_prompted
+        .shutdown()
+        .expect("the glossary-prompted engine shuts down");
+    unprompted
+        .shutdown()
+        .expect("the unprompted engine shuts down");
+    std::fs::remove_file(model).expect("shutting down the engines releases the model");
 }
 
 #[tokio::test]
@@ -188,6 +192,7 @@ async fn independent_final_jobs_do_not_require_a_reset() {
         .await
         .expect("second job succeeds");
     assert_eq!(second, first, "equal stateless jobs remain independent");
+    engine.shutdown().expect("the engine shuts down");
 }
 
 #[tokio::test]
@@ -241,6 +246,7 @@ async fn one_final_job_cannot_change_another_jobs_history() {
         standalone, control,
         "prior job history cannot leak into a stateless decode"
     );
+    engine.shutdown().expect("the engine shuts down");
 }
 
 #[tokio::test]
@@ -264,6 +270,7 @@ async fn final_decode_is_absent_without_a_final_model() {
             .contains("final decoder is not configured"),
         "the missing final worker is classified explicitly: {error}"
     );
+    engine.shutdown().expect("the engine shuts down");
 }
 
 #[tokio::test]
@@ -296,5 +303,5 @@ async fn configured_model_branches_write_their_load_text_then_release_the_activi
     // the hub busy, and dropping it leaves the factory nothing to write to.
     drop(activity);
     assert!(!hub.current().busy, "the load's guard ended the activity");
-    drop(engine);
+    engine.shutdown().expect("the engine shuts down");
 }

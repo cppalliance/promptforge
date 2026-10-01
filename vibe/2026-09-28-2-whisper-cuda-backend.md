@@ -616,7 +616,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - A `small.en` transcription of `jfk.wav`, on 4 threads with the median of 5 runs, took 1.997 s and 1.928 s over two rounds with OpenMP, and 1.940 s and 1.944 s without. There is no material difference.
   - A reload on the thread that loaded the library before aborts with `0xC0000409` in ggml's own load-time check, at the second cycle in two runs and the fourth in a third. The Decision Record notes this upstream limitation.
 
-### Step 11: Shut down the native whisper suite's engines before each test ends
+### Step 11: Shut down the native whisper suite's engines before each test ends [completed]
 
 - In `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`, each of the five tests that builds an `SttEngine` now ends it with `SttEngine::shutdown()` and expects `Ok`. Today each one drops its engine, either explicitly or at the end of its scope:
   - `packaged_runtime_preserves_native_transcription_contract` shuts down `glossary_prompted` and `unprompted` before it removes its copied model;
@@ -635,6 +635,12 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - The step stops and reports, and Step 12 waits, if either of these happens:
   - the suite still prints a `CUDA error` at exit on the Linux CUDA package;
   - the suite ends the process on the pinned Windows CUDA build.
+- Runs, 2026-10-01:
+  - Linux CUDA package, before the change: four tests passed. The process then aborted with SIGABRT during the last test, after four `CUDA error` lines (`ggml-cuda.cu:106`) from `whisper_free_state` on the detached workers, and cargo exited 101.
+  - Linux CUDA package, after the change: 5 passed, exit 0, and no `CUDA error`, in 4 of 4 runs.
+  - Pinned Linux CPU build: 5 passed.
+  - Windows CPU build without OpenMP: 5 passed, in 3 of 3 runs. Step 2's OpenMP control crashed with `STATUS_ACCESS_VIOLATION` in `independent_final_jobs_do_not_require_a_reset`, the first test that unloads the library after CPU transcriptions.
+  - Pinned Windows CUDA build: 5 passed, in 3 of 3 runs.
 
 ### Step 12: Retire speech before the gateway exits
 
