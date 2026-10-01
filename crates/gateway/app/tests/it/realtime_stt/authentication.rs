@@ -80,7 +80,9 @@ async fn gateway_auth_origin_query_and_final_speech_surfaces_precede_upgrade() {
     assert_final_speech_route_surface(&http, strict.addr).await;
     strict.shutdown().await;
 
-    let trusted = server(false, &service).await;
+    // The strict server's stop retired its speech service.
+    let trusted_service = speech(&ScriptedDecoder::new(), Some(&ScriptedDecoder::new()));
+    let trusted = server(false, &trusted_service).await;
     let mut socket = connect(trusted.addr, None, None, None).await;
     expect_type(&mut socket, "session.created").await;
     socket.close(None).await.expect("socket closes");

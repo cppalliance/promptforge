@@ -642,7 +642,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Windows CPU build without OpenMP: 5 passed, in 3 of 3 runs. Step 2's OpenMP control crashed with `STATUS_ACCESS_VIOLATION` in `independent_final_jobs_do_not_require_a_reset`, the first test that unloads the library after CPU transcriptions.
   - Pinned Windows CUDA build: 5 passed, in 3 of 3 runs.
 
-### Step 12: Retire speech before the gateway exits
+### Step 12: Retire speech before the gateway exits [completed]
 
 - In `crates/gateway/app/src/runner.rs`, `Gateway::serve` clones `state.speech`, the process's `SpeechService`, under the `stt` feature, before `build_router` takes the state.
 - After the command worker's bounded join, `serve` runs `SpeechService::shutdown` on `tokio::task::spawn_blocking`:
@@ -668,3 +668,8 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
     - On `cuda`, the pinned Windows CUDA build, served from loopback with its real pin from Step 11's download, keeps OpenMP, and the gateway also exits 0 when stopped after a transcription.
   - The scratch work binds loopback ports clear of 8000, 8002, 8008, 8009, and 8011. It leaves `~/pf-target` untouched, only reads `~/.promptforge`, and pulls or publishes nothing beyond Step 11's one download.
 - As the final step, it runs the full suite.
+- Runs, 2026-10-01:
+  - Linux CUDA package, without this step's change: both stops printed `CUDA error: driver shutting down` from `cudaFree`. One exited 0, the other 134, from an abort.
+  - Linux CUDA package, with the change: 10 of 10 stops exited 0 with no `CUDA error`. Five were `POST /shutdown` and five SIGINT, and six came after transcriptions on both models. Both stops on the pinned Linux CPU build, each after a transcription, exited 0.
+  - Windows CPU build without OpenMP: the gateway exited 0 after a transcription. The `gateway-stt` native suites passed: 1 test from `--lib` and 2 from `--test it`.
+  - Pinned Windows CUDA build: both runs reported `gpu: true` and exited 0 after transcriptions.
