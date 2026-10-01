@@ -103,7 +103,7 @@ Give every role under `models:` a distinct label, written in the [name grammar](
 
 ### Declaration errors
 
-A mistake inside `models:` fails the parse with a [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
+A mistake inside `models:` fails the parse with a [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
 
 - A label used twice fails with ``duplicate model role label `{key}`: contract map keys must be unique``, which names the label.
 - A label outside the name grammar fails with ``invalid model role label `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}``, which names the label and the grammar.
@@ -148,7 +148,7 @@ return models.infer(prose)
 
 ## Requirements at prepare
 
-Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
+Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
 
 - `thinking` needs a model that can think. It is unmet only when the bound model never thinks, and its line is `role '{role}': requires 'thinking'; the current model's thinking capability is Never`.
 - `no-thinking` needs a model that can reply without thinking. It is unmet only when the bound model always thinks, and its line is `role '{role}': requires 'no-thinking'; the current model's thinking capability is Always`.
@@ -190,7 +190,7 @@ Give a section a selection or a prompt-wide default before it runs a round. A ro
 model binding required for section Only
 ````
 
-Left uncaught, the missing-model error fails the run with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
+Left uncaught, the missing-model error fails the run with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -223,7 +223,7 @@ Roles come only from the frontmatter, and Lua never creates one. `models.use` an
 
 When the Host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
 
-These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
+These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
 
 ## Model handles
 
@@ -436,9 +436,9 @@ Bad arguments fail the call with an error value of kind `lua`:
 
 If the model replies with tool calls anyway, the call fails with an error value of kind `lua` whose message is `model inference received tool calls but no tools were advertised`. The text is the same for both forms and does not name `models.infer`.
 
-A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](17-limits-and-errors.md#how-a-failed-run-is-classified).
+A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
-A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point. The run records every round as round events under the current section, marking a failed round as failed and a cut-off round as truncated, and [Task Events](16-task-events.md#model-round-events) describes those events.
+A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point.
 
 ## The bound model in sys.model
 
@@ -477,7 +477,7 @@ The first block makes the section's first tool call, here to a small tool writte
 
 The field appears at the section's first tool call, made either from a Lua block or at the model's request during a conversation; whichever tool the first call runs, it counts. At that moment `sys.model` takes the section's model, its selection or else the prompt-wide default, and it stays fixed for the rest of the section. A round by itself never sets it, and a section that makes no tool call, or has no model when its first tool call runs, never gets the field.
 
-Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
+Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
 
 ````lua
 local ok, id = pcall(function() return sys.model end)

@@ -62,7 +62,7 @@ When `## Child` runs `return 'child-done'`, `first` is the handle of that task, 
 
 Only the owner may wait on, inspect, or cancel a task. A chain ends cleanly when every task it spawned has been waited on or cancelled, and a chain that ends normally while a task it spawned is still live fails with an error value of kind `tasks_live`. In the prompt above, the owner is the run's main walk, and its wait leaves nothing live.
 
-The `tasks` global holds ten functions, where `?` marks an optional argument:
+The `tasks` global holds nine functions, where `?` marks an optional argument:
 
 | Function | What it does |
 |---|---|
@@ -72,14 +72,13 @@ The `tasks` global holds ten functions, where `?` marks an optional argument:
 | `tasks.concurrency(n?)` | Lowers the chain's admission limit for the tasks it spawns, or reads it back |
 | `tasks.ready(task)` | Says whether a task has ended |
 | `tasks.status(task)` | Returns a task's status table |
-| `tasks.events(task, opts?)` | Returns what a task has reported so far |
 | `tasks.pending(filter?)` | Lists the live tasks the chain owns |
 | `tasks.note(text)` | Publishes a progress note for the task the code runs in |
 | `tasks.cancel(task)` | Ends a task |
 
 The `tasks` global is there in the Lua of every section, including the H1 body, the sections that tasks run, and fanout arms. Tasks need nothing in the frontmatter and have no command-line flags: every task feature is a Lua call, an options table, a returned value, or text the model reads.
 
-The model can start and manage tasks of its own. Once a section calls `tools.allow_tasks(targets?)`, every model round in that section has five task built-ins in [scope](12-tools.md#advertising-tools-to-the-model), beside the section's bound and local tools: `task`, `task_cancel`, `task_status`, `await_tasks`, and `task_events`. The model calls them as [model tool calls](12-tools.md#model-tool-calls) inside [`models.loop`](11-conversations.md#a-first-conversation), and no bound or local tool can shadow them. The model sees only the tasks it started itself, and naming a task the prompt started is refused as unknown, while the prompt can take over the model's tasks through `tasks.pending({ origin = "model" })`. A `task_events` result is one JSON object per line, inside the [untrusted envelope](09-the-store.md#wrapping-untrusted-text).
+The model can start and manage tasks of its own. Once a section calls `tools.allow_tasks(targets?)`, every model round in that section has four task built-ins in [scope](12-tools.md#advertising-tools-to-the-model), beside the section's bound and local tools: `task`, `task_cancel`, `task_status`, and `await_tasks`. The model calls them as [model tool calls](12-tools.md#model-tool-calls) inside [`models.loop`](11-conversations.md#a-first-conversation), and no bound or local tool can shadow them. The model sees only the tasks it started itself, and naming a task the prompt started is refused as unknown, while the prompt can take over the model's tasks through `tasks.pending({ origin = "model" })`.
 
 Tasks are the general form of background work, and [`fanout`](14-fanout.md#the-fanout-call) is built on them: each fanout arm is a task. `tasks.spawn` takes the same heading references as [`call`](08-jump-and-call.md#jump-and-call-at-a-glance), and a task gets its own copy of the owner's `var`, the way a called chain or an arm does. Reach for tasks when the work is not one collection run through one worker section.
 
@@ -495,7 +494,7 @@ tasks.join({ s })
 
 ## Checking on tasks
 
-Besides the waits, the `tasks` namespace checks on tasks and controls them without waiting for them to end. `tasks.ready(task)` says whether a task has ended, `tasks.status(task)` returns its status table, `tasks.pending(filter)` lists the live tasks the chain owns, `tasks.note(text)` publishes a progress note, and `tasks.cancel(task)` ends a task. `tasks.events(task, { last = seq })` returns what a task the chain owns, or the chain's own task named by `sys.taskid`, has reported so far, and with `last` set to the last sequence number already read it returns only newer entries, so a polling loop reads each entry once; [Task Events](16-task-events.md#reading-a-tasks-history) covers it in full.
+Besides the waits, the `tasks` namespace checks on tasks and controls them without waiting for them to end. `tasks.ready(task)` says whether a task has ended, `tasks.status(task)` returns its status table, `tasks.pending(filter)` lists the live tasks the chain owns, `tasks.note(text)` publishes a progress note, and `tasks.cancel(task)` ends a task.
 
 `tasks.ready`, `tasks.status`, `tasks.pending`, `tasks.note`, and `tasks.cancel` are answered at once, like `tasks.spawn`: the owner keeps running, and no other chain runs in between. So a status read right after a spawn shows the task not yet started, and a loop that does nothing but call `tasks.ready` never lets the task run. Check between calls that wait, such as a store call or a model round, or use a wait. This prompt reads a task's status while the task is in a model round:
 
@@ -569,7 +568,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - `chat`: a model round
 - `tool_call`: a tool call, a wait for the operator in `input.ask()` included
 - `store`: a store call
-- `tasks`: a wait on tasks, timed or not, or a history read
+- `tasks`: a wait on tasks, timed or not
 - `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
 - `call`: a called chain
 
@@ -588,11 +587,11 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - A value that is not a string fails with `pending filter origin must be a string, got {type}`.
 - Text that is not valid UTF-8 fails with `pending filter origin must be a valid UTF-8 string`.
 
-The timeout behind a timed wait is never a task you can see: `tasks.pending` and a status table's `tasks` never list it, it never counts as a task left live when its owner ends, and it has no history to read.
+The timeout behind a timed wait is never a task you can see: `tasks.pending` and a status table's `tasks` never list it, and it never counts as a task left live when its owner ends.
 
 ### Progress notes
 
-`tasks.note(text)` publishes the latest progress note for the task your code runs inside, and returns nothing. The owner reads it as the `note` field of `tasks.status`. The note is kept on the task itself, so a note set from a called chain inside the task lands on the task, and a later note replaces the earlier one. Setting a note adds nothing to the task's history. Inside a task, `tasks.note('hello from ' .. sys.taskid)` followed by `tasks.status(sys.taskid).note` reads the note back.
+`tasks.note(text)` publishes the latest progress note for the task your code runs inside, and returns nothing. The owner reads it as the `note` field of `tasks.status`. The note is kept on the task itself, so a note set from a called chain inside the task lands on the task, and a later note replaces the earlier one. Inside a task, `tasks.note('hello from ' .. sys.taskid)` followed by `tasks.status(sys.taskid).note` reads the note back.
 
 `tasks.note` on the main walk succeeds, but the note lands where nothing reads it. `tasks.note` takes a string: another type fails with `tasks.note text must be a string, got {type}`, and text that is not valid UTF-8 fails with `text must be a valid UTF-8 string`, both error values of kind `lua`.
 
@@ -614,7 +613,7 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 
 ## The concurrency limit
 
-The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it first runs when it is admitted. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
 
 `tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the Harness's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. With the Harness's ceiling at 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable wherever it runs, under any ceiling. The new limit gates admissions from then on only, and never preempts a task that is already running.
 
@@ -669,7 +668,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 
 `tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on Harness work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
-A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
+A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe.
 
 A wait on a cancelled task returns `ok = false` and an error value of kind `cancelled`, whose `task` field names the task, with the message `` task `{task}` was cancelled ``. The wait itself does not raise:
 
@@ -682,7 +681,7 @@ Here `ok` is `false`, `err.kind` is `cancelled`, `err.task` equals `t.task`, and
 
 ### Cancelled and abandoned
 
-A task ends with its owner. When the owning chain ends, every task it owns that is still running is abandoned and its chain stopped, along with every task that chain owns in turn. Cancelled and abandoned are different endings: cancelled means the owner stopped the task on purpose, and abandoned means the owner ended while the task was still live. The status `state` and the task's history keep them apart, and so does what the model is told about the tasks it started.
+A task ends with its owner. When the owning chain ends, every task it owns that is still running is abandoned and its chain stopped, along with every task that chain owns in turn. Cancelled and abandoned are different endings: cancelled means the owner stopped the task on purpose, and abandoned means the owner ended while the task was still live. The status `state` keeps them apart, and so does what the model is told about the tasks it started.
 
 An abandoned task ends with state `abandoned` and `ok` false. It is recorded as abandoned exactly once, with its reason, and never also as succeeded or failed. It never reaches a wait, because only its owner may wait on it and its owner has already ended.
 
@@ -784,7 +783,7 @@ A live task is abandoned for one of five reasons, and each reason has a fixed ph
 | `owner_aborted` | The owner was stopped from outside, by a failing sibling arm's fail-fast or by its own owner ending first | `the owner was aborted` |
 | `run_terminated` | The run itself ended while the task was live, for example because the Host cancelled it | `the run ended` |
 
-`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
+`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](16-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
 
 ### When a chain stops
 
@@ -810,7 +809,7 @@ task_consumed|0.0|task `0.0` was already delivered: a task's result is taken by 
 | Kind | Raised when | Fields | Message |
 |---|---|---|---|
 | `lua` | an argument is wrong, a target does not resolve, the depth cap is crossed, or the target is a list section | `message` | one of the messages listed below |
-| `task_not_owned` | a wait, status read, history read, or cancel names a task the chain does not own, or an id that names no task | `task` | `` task `{task}` is not a task this chain owns `` |
+| `task_not_owned` | a wait, status read, or cancel names a task the chain does not own, or an id that names no task | `task` | `` task `{task}` is not a task this chain owns `` |
 | `task_consumed` | a wait names a task that was already delivered | `task` | `` task `{task}` was already delivered: a task's result is taken by one wait `` |
 | `tasks_live` | a chain ended normally with tasks it spawned still live | `tasks`, the ids joined with `, ` | `chain ended with author tasks still live: {ids}; wait on or cancel every task a chain spawns before it ends` |
 | `cancelled` | returned, not raised, by a wait on a cancelled task | `task` | `` task `{task}` was cancelled `` |
@@ -819,7 +818,7 @@ task_consumed|0.0|task `0.0` was already delivered: a task's result is taken by 
 
 `task_consumed` marks a wait on a result already taken, with the task in `err.task`. `tasks_live` marks a chain that ended normally while tasks it spawned were still running, with their ids, comma-separated, in `err.tasks`. `cancelled` is the error value a wait returns, unraised, for a cancelled task, with the task in `err.task`. A wait never raises a cancelled task's error value; only re-raising it, for example with `error(err)`, makes it a failure.
 
-When one of these errors ends the run uncaught, the run error kind is [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass too. That covers a leaked task, a task reached by a chain that does not own it, a result waited on twice, and a `cancelled` error value that the owner re-raises right after the wait with nothing to catch it: each is the prompt's own program failing, as any Lua fault is. A `cancelled` error value re-raised later, after another suspending call, ends the run with the cancelled outcome instead, not as a failed run. Raised inside a task, such an error first becomes that task's failure, which reaches the owner through its wait.
+When one of these errors ends the run uncaught, the run error kind is [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass too. That covers a leaked task, a task reached by a chain that does not own it, a result waited on twice, and a `cancelled` error value that the owner re-raises right after the wait with nothing to catch it: each is the prompt's own program failing, as any Lua fault is. A `cancelled` error value re-raised later, after another suspending call, ends the run with the cancelled outcome instead, not as a failed run. Raised inside a task, such an error first becomes that task's failure, which reaches the owner through its wait.
 
 ### Argument messages
 
@@ -887,7 +886,7 @@ return models.infer('List the key facts about: ' .. args)
 ```
 ````
 
-The H1 body makes `writer` the default [model role](10-models.md#choosing-a-sections-model) for every section, and `models.loop` runs the conversation until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.allow_tasks({ '## Research' })` puts the five task built-ins in scope for every model round in `## Plan` and limits the model's `task` calls to `## Research`. The model can start the task by calling `task` with `{"target": "## Research"}`, and `## Research` then runs as a task under the run's own argument string, because the call passes no `input`. `## Plan` returns, so the walk never reaches `## Research` as a walked section.
+The H1 body makes `writer` the default [model role](10-models.md#choosing-a-sections-model) for every section, and `models.loop` runs the conversation until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.allow_tasks({ '## Research' })` puts the four task built-ins in scope for every model round in `## Plan` and limits the model's `task` calls to `## Research`. The model can start the task by calling `task` with `{"target": "## Research"}`, and `## Research` then runs as a task under the run's own argument string, because the call passes no `input`. `## Plan` returns, so the walk never reaches `## Research` as a walked section.
 
 Until `tools.allow_tasks` has run in a section, the task built-ins are not in scope there at all, and a model round in a section without it offers none of them. The allowlist belongs to the section where `tools.allow_tasks` ran, and each section opts in for itself.
 
@@ -896,7 +895,7 @@ Until `tools.allow_tasks` has run in a section, the task built-ins are not in sc
 
 With a list, a `task` call naming any other target is refused with `` task: target `{target}` is not allowed; allowed targets: {headings} ``, the allowed headings joined by `, `. No task starts, and the run continues normally.
 
-While the allowlist is set, every model round in the section has the five task built-ins in scope, listed after the section's bound and local tools, in the fixed order `task`, `task_cancel`, `task_status`, `await_tasks`, `task_events`.
+While the allowlist is set, every model round in the section has the four task built-ins in scope, listed after the section's bound and local tools, in the fixed order `task`, `task_cancel`, `task_status`, `await_tasks`.
 
 ### The task built-in
 
@@ -934,7 +933,7 @@ Allowed targets are compared as written, such as `## Research`: leading and trai
 
 ### The built-in names
 
-A model call to one of the five names always reaches the built-in, before any alias is looked up, so no bound or local tool can shadow it, and local tools need other names. A script reaches tasks only through the `tasks` namespace: [`tools.call`](12-tools.md#calling-tools-from-lua) with one of the five names raises an error value of kind `unbound_tool` whose `name` field is that name, even when a local tool of that name exists, and no tool result is recorded.
+A model call to one of the four names always reaches the built-in, before any alias is looked up, so no bound or local tool can shadow it, and local tools need other names. A script reaches tasks only through the `tasks` namespace: [`tools.call`](12-tools.md#calling-tools-from-lua) with one of the four names raises an error value of kind `unbound_tool` whose `name` field is that name, even when a local tool of that name exists, and no tool result is recorded.
 
 When the model calls `task` in a section that has not run `tools.allow_tasks`, `models.loop` raises an error value of kind [`out_of_scope_tool`](12-tools.md#advertising-tools-to-the-model) whose `name` is `task`, at the `models.loop` call, before any task starts. Nothing is appended to the message list, and no further round runs.
 
@@ -949,7 +948,7 @@ Task id={task} (## {target}) was canceled: the author cancelled it
 Task id={task} (## {target}) was abandoned: {why}
 ````
 
-The spellings `was canceled` and `cancelled it` are exactly as shown. The head, `Task id={task} (## {target})`, gives the task id and the name of the section the task ran, written after `## `. The Engine also keeps each notice in the owner section's history, together with the owner's round count at the moment it queued the notice.
+The spellings `was canceled` and `cancelled it` are exactly as shown. The head, `Task id={task} (## {target})`, gives the task id and the name of the section the task ran, written after `## `.
 
 Before every `models.loop` round, the notices waiting for the section are appended to its message list as user records whose `content` is the notice, so the model reads them in that round, beside the records the loop appends itself ([Conversations](11-conversations.md#what-the-loop-appends)). The owner can find them in its list afterward like any other record:
 
@@ -976,8 +975,6 @@ The prompt cancels a model task through the handles `tasks.pending` gives it:
 local mine = tasks.pending({ origin = 'model' })
 tasks.cancel(mine[1])
 ````
-
-The abandoned notice is kept in the owner section's history even though the model never reads it, because its owner has already ended.
 
 A notice is the Engine's own sentence. Only a completed task's result is wrapped, in the [untrusted envelope](09-the-store.md#wrapping-untrusted-text) under the run's nonce; the head, the verb, a failure message, and the cancel and abandon wording are plain Engine text. A completed notice spans several lines, because the wrapped result follows `completed: ` directly:
 
@@ -1016,9 +1013,9 @@ return tostring(results[1].ok) .. '|' .. results[1].result
 
 For a model task whose section returns `'child result'`, this returns `true|child result`: each entry has `ok` and `result`, and `result` is the task's own returned text, not the notice sentence. Once the prompt's wait has collected a model task, the task counts as delivered, so the section's end neither abandons it nor fails.
 
-## The model's status, cancel, and history tools
+## The model's status and cancel tools
 
-`task_cancel`, `task_status`, and `task_events` each take a required `id` string, exactly as `task` returned it, such as `{"id":"0.0"}`. They see only tasks the model started from the calling section. Any other id, including the id of a task the prompt spawned, is refused with `{name}: no model task with id {id}`, such as `task_status: no model task with id 0.0` or `task_events: no model task with id 0.7`, so the model can neither end nor inspect the prompt's own tasks. A bad `id` gets its own refusal, where `{name}` is the built-in called:
+`task_cancel` and `task_status` each take a required `id` string, exactly as `task` returned it, such as `{"id":"0.0"}`. They see only tasks the model started from the calling section. Any other id, including the id of a task the prompt spawned, is refused with `{name}: no model task with id {id}`, such as `task_status: no model task with id 0.0`, so the model can neither end nor inspect the prompt's own tasks. A bad `id` gets its own refusal, where `{name}` is the built-in called:
 
 - A missing or non-string `id` is refused with `` {name}: `id` must be a task id string, exactly as `task` returned it ``.
 - A string that is not a task id is refused with `` {name}: `{id}` is not a task id; use the id `task` returned ``, such as `` task_status: `nope` is not a task id; use the id `task` returned ``.
@@ -1043,21 +1040,9 @@ In the last line, `tasks 0.0.0` lists the live tasks the task started itself, ea
 
 `task_cancel` is answered right away. It cancels one of the model's own tasks, does nothing more for a task that already ended, like `tasks.cancel`, and returns `Task id={task} cancelled`; a failure comes back as `task_cancel: {error}`. The model's own `task_cancel` queues no task notice, because its confirmation is the model's whole word on it, while a cancel from the prompt does queue one. After the model cancels its only task, `tasks.pending()` is empty, and the section ends without abandoning anything or failing.
 
-### History reads
-
-`task_events` returns what one of the model's tasks has reported so far, its sections, model rounds, tool calls, and their content, as one JSON object per line, in order; it reads the same history as `tasks.events`, and [Task Events](16-task-events.md#reading-a-tasks-history) describes each kind of entry and its fields. An optional `last` integer, the `provenance.seq` of the last entry the model already read, limits the result to later entries:
-
-- `last` left out or `null` reads the whole history.
-- A non-negative whole number that fits in 32 bits reads what came after it.
-- Anything else is refused with `` task_events: `last` must be a non-negative integer sequence number when given ``.
-
-When nothing was reported after `last`, the result is the text `no new events`. While the model's `task_events` read is being answered, the calling chain's status `blocked` reads `tasks`.
-
-The `task_events` result is wrapped in the untrusted envelope under the run's nonce. It is the only task built-in result that is not trusted, because a task's history holds model, tool, and user text. Lines a task writes with [`log`](05-lua-environment.md#checkpoints-with-log) appear in its history under the same encoding, so a logged forged close tag or `[INST]` arrives escaped and spaced inside the reader's envelope. The read itself is recorded in the history as a tool result for the model's call id, with the alias `task_events`, marked untrusted.
-
 ### Trust and failed calls
 
-A bad task built-in call never fails the run: every fault the model can cause comes back as the tool result text, so the model can read it and try again. Each `task_events` argument fault comes back this way and is recorded as a failed tool call, not a run error. Every other task built-in result, whether a start, a cancel confirmation, a status line, a wait's notices, a refusal, or `no new events`, is the Engine's own text and reaches the model as [trusted](12-tools.md#trusted-and-untrusted-output).
+A bad task built-in call never fails the run: every fault the model can cause comes back as the tool result text, so the model can read it and try again. Every task built-in result, whether a start, a cancel confirmation, a status line, a wait's notices, or a refusal, is the Engine's own text and reaches the model as [trusted](12-tools.md#trusted-and-untrusted-output).
 
 Each call to `task`, `task_status`, or `await_tasks` is an ordinary tool call: it gets a tool record in the message list and is recorded as one succeeded tool call under the owner's section, while refused calls are recorded as failed tool calls.
 

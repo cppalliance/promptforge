@@ -154,8 +154,6 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 |---|---|---|---|
 | Task handle | `{ task = id }` | A plain methodless table; the bare id string also works | [Tasks](15-tasks.md#task-handles-and-ids) |
 | `tasks.cancel` | `tasks.cancel(task)` | Nothing; cancelling an ended task does nothing | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
-| `tasks.events` | `tasks.events(task, opts?)` | A 1-based sequence of event tables, each with a `kind` | [Task Events](16-task-events.md#reading-a-tasks-history) |
-| `tasks.events` option `last` | `tasks.events(t, { last = seq })` | Only events after `seq`, a whole number from 0 to 4294967295 | [Task Events](16-task-events.md#reading-a-tasks-history) |
 | `tasks.note` | `tasks.note(text)` | Nothing; sets the `note` field of `tasks.status` | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.pending` | `tasks.pending(filter?)` | The chain's live Task handles in spawn order, empty when none | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.pending` filter `origin` | `tasks.pending({ origin = 'model' })` | Only live tasks of that origin, `author` or `model` | [Tasks](15-tasks.md#checking-on-tasks) |
@@ -198,14 +196,11 @@ For each tool and argument, Form is what the model sends and Returns is the text
 | `task` | `{"target": "## Research"}` | `Task id={id} started`, at once | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 | `task.input` | `"input": "text"`, optional | Replaces the task's argument string | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 | `task.target` | `"target": "## Research"`, required | Names the section the task runs | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
-| `task_cancel` | `{"id": "0.0"}` | `Task id={task} cancelled` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_cancel.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events` | `{"id": "0.0"}` | One JSON event per line in the untrusted envelope, or `no new events` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events.last` | `"last": 12`, optional | Only events after that `provenance.seq` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_status` | `{"id": "0.0"}` | One line starting `Task id={task} (## {target}): {state}` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_status.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `tools.allow_tasks` | `tools.allow_tasks(targets?)` in Lua | `task`, `task_cancel`, `task_status`, `await_tasks`, and `task_events` in scope for every round in the section | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
+| `task_cancel` | `{"id": "0.0"}` | `Task id={task} cancelled` | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_cancel.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_status` | `{"id": "0.0"}` | One line starting `Task id={task} (## {target}): {state}` | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_status.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `tools.allow_tasks` | `tools.allow_tasks(targets?)` in Lua | `task`, `task_cancel`, `task_status`, and `await_tasks` in scope for every round in the section | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 
 ### Web tools
 
@@ -336,20 +331,20 @@ Set by names the frontmatter key that sets a value, or says whether the Harness 
 | Name | Default | Range or rule | Set by | Taught in |
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
-| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](16-limits-and-errors.md#cancelling-a-run) |
 | Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | Harness | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
-| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
-| Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](16-limits-and-errors.md#limits-at-a-glance) |
+| Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
 | Log message length | 256 characters | Counted as Unicode characters | fixed | [The Lua Environment](05-lua-environment.md#checkpoints-with-log) |
-| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](16-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](16-limits-and-errors.md#model-reply-size-and-wait-time) |
 | Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | Harness | [Conversations](11-conversations.md#the-round-cap) |
 | Round cap from frontmatter | The Harness default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
-| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](16-limits-and-errors.md#limits-at-a-glance) |
 | `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the Host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 
 ## Error kinds
@@ -360,44 +355,44 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `Fence` | A second `lua shared` fence, a `lua shared` fence outside the H1, or an unclosed fence | The unclosed fence's label or section name, else nothing | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Frontmatter` | The frontmatter block is missing, unclosed, or not valid YAML, or a frontmatter key or value is rejected | The YAML diagnostic, in `invalid frontmatter: {message}`, or the rejected key's own message, with the line and column beside it | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `List` | A list section holds non-list content, an empty item, or no items | The section name, and the offending line for non-list content | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Lua` | A Lua region (the shared library, an H1 block, or a section block) does not compile | The section and block, plus the compiler diagnostic | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Structure` | The H1 title is missing, repeated, or empty, a heading is empty or has no parent one level up, two siblings share a name, or the file has no `promptforge:` key when run | The section name, the heading level, and both lines of a duplicate sibling | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
+| `Fence` | A second `lua shared` fence, a `lua shared` fence outside the H1, or an unclosed fence | The unclosed fence's label or section name, else nothing | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Frontmatter` | The frontmatter block is missing, unclosed, or not valid YAML, or a frontmatter key or value is rejected | The YAML diagnostic, in `invalid frontmatter: {message}`, or the rejected key's own message, with the line and column beside it | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `List` | A list section holds non-list content, an empty item, or no items | The section name, and the offending line for non-list content | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Lua` | A Lua region (the shared library, an H1 block, or a section block) does not compile | The section and block, plus the compiler diagnostic | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Structure` | The H1 title is missing, repeated, or empty, a heading is empty or has no parent one level up, two siblings share a name, or the file has no `promptforge:` key when run | The section name, the heading level, and both lines of a duplicate sibling | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
 
 ### Run error kinds
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Internal` | An Engine invariant breaks, a fault in the Engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](16-limits-and-errors.md#cancelling-a-run) |
+| `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Internal` | An Engine invariant breaks, a fault in the Engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](16-limits-and-errors.md#model-call-and-environment-failures) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 
 ### Error kinds on error values
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The reply's detail phrase, or plain `empty model reply`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
-| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
+| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |
 | `task_consumed` | A wait names a task already delivered | The task, in `` task `{task}` was already delivered: a task's result is taken by one wait ``; field `task` | [Tasks](15-tasks.md#waiting-for-results) |
-| `task_not_owned` | A wait, status read, history read, or cancel names a task the chain does not own, or an id that names no task | The task, in `` task `{task}` is not a task this chain owns ``; field `task` | [Tasks](15-tasks.md#task-errors) |
+| `task_not_owned` | A wait, status read, or cancel names a task the chain does not own, or an id that names no task | The task, in `` task `{task}` is not a task this chain owns ``; field `task` | [Tasks](15-tasks.md#task-errors) |
 | `tasks_live` | A chain ends normally with tasks it spawned still live | The leaked ids in spawn order; field `tasks`, joined with `, ` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `tool` | A bound tool fails in a script `tools.call` | The tool's model-safe failure text, in `tool call failure: {message}` | [Tools](12-tools.md#tool-failures) |
 | `tool_loop_exhausted` | `models.loop` makes its round cap of rounds without a final reply | Nothing, as in `tool-call loop did not converge` | [Conversations](11-conversations.md#the-round-cap) |

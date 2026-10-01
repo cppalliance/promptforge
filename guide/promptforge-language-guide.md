@@ -34,7 +34,7 @@ Say hello.
 
 Its frontmatter is the three lines between the `---` delimiters, its H1 title is `Greeter`, and it has one section, `## Say hi`, holding one line of prose. The delimiters and keys are covered in [the frontmatter header](02-file-structure.md#the-frontmatter-header), and the two required strings in [name and description](02-file-structure.md#name-and-description).
 
-A file with no `---` delimiters at the top, or with YAML between them that does not parse, fails with the parse error kind `Frontmatter` ([parse error kinds](17-limits-and-errors.md#parse-error-kinds)).
+A file with no `---` delimiters at the top, or with YAML between them that does not parse, fails with the parse error kind `Frontmatter` ([parse error kinds](16-limits-and-errors.md#parse-error-kinds)).
 
 The title is exactly one H1 with non-empty text: a file with no H1 fails with the parse error kind `Structure` and `prompt requires an H1 title`, a file with several gives `prompt must contain exactly one H1 title`, and a blank title gives `prompt H1 title must not be empty` ([the one-H1 rule](02-file-structure.md#what-a-prompt-file-looks-like)).
 
@@ -45,7 +45,7 @@ The `promptforge: 0` line is what marks a Markdown file as a PromptForge prompt.
 - Any other version number fails the run with the run error kind `Version` and `unsupported promptforge version: {n} (this build supports major 0)`, where `{n}` is the declared number.
 - A file with no `promptforge:` key still parses, but the run declines it with the parse error kind `Structure` and `not a promptforge prompt: no promptforge version`, an error that names the prompt's `name`.
 
-So a file with the right layout but no `promptforge: 0` parses and never runs, and every prompt that runs declares `promptforge: 0`. [The promptforge version](02-file-structure.md#the-promptforge-version) covers the key in full, [parse error kinds](17-limits-and-errors.md#parse-error-kinds) lists `Structure`, and [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists `Version` with the other run error kinds.
+So a file with the right layout but no `promptforge: 0` parses and never runs, and every prompt that runs declares `promptforge: 0`. [The promptforge version](02-file-structure.md#the-promptforge-version) covers the key in full, [parse error kinds](16-limits-and-errors.md#parse-error-kinds) lists `Structure`, and [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists `Version` with the other run error kinds.
 
 The part between the H1 title and the first section is the H1 body, and it can hold prose and `lua` fences too ([the H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). Because the H1 body can do all the work, a prompt needs no minimum number of sections. This prompt has none, and its run ends with the result `hello`:
 
@@ -254,7 +254,7 @@ return models.infer(prose)
 ```
 ````
 
-It fails with the run error kind `Binding` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and the message `model binding required for section {name}`, where `{name}` is the section's heading text:
+It fails with the run error kind `Binding` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and the message `model binding required for section {name}`, where `{name}` is the section's heading text:
 
 ````text
 model binding required for section Only
@@ -496,7 +496,7 @@ Four optional frontmatter keys are the contract keys, the prompt's contract with
 - `models:` declares model roles ([declaring roles](10-models.md#declaring-roles)).
 - `args:` types the prompt's arguments ([arg declarations](06-arguments.md#arg-declarations)).
 
-The parser checks only the shape of these keys. The Harness satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the Harness cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
+The parser checks only the shape of these keys. The Harness satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the Harness cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
 
 A prompt that declares no capabilities, tools, or model roles has no requirements for the Harness to meet before the run. It runs on its Lua sections alone, with no model, no tools, and no real files behind it:
 
@@ -529,13 +529,12 @@ Lua only ever selects labels that are already bound:
 
 The model calls a bound tool by its alias from `tools:`, such as `search`, never by its tool path, such as `promptforge/web/search`.
 
-The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through Harness work: requests the Harness performs for the run and answers. There are exactly five kinds of Harness work:
+The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through Harness work: requests the Harness performs for the run and answers. There are exactly four kinds of Harness work:
 
 - A model round: `models.infer` sends one round with its prompt text and no tools, and `models.loop` runs rounds ([running a round with models.infer](10-models.md#running-a-round-with-modelsinfer)).
 - A tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)), a wait for operator input included, because `input.ask()` calls a tool ([asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)).
 - A store operation, one for each store call ([what the store is](09-the-store.md#what-the-store-is)).
 - The timer behind a timed wait on tasks ([time limits on waits](15-tasks.md#time-limits-on-waits)).
-- A read of a task's event history ([reading a task's history](16-task-events.md#reading-a-tasks-history)).
 
 Everything else a block does, such as computing and returning a value, is plain Lua that needs no Harness work, which is why a literal `return` asks the Harness for nothing. While the Harness performs Harness work, only the chain that asked for it waits ([waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
 
@@ -664,7 +663,7 @@ prompt must contain exactly one H1 title
 prompt H1 title must not be empty
 ````
 
-The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](17-limits-and-errors.md#parse-error-kinds).
+The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](16-limits-and-errors.md#parse-error-kinds).
 
 H2 headings placed after the H1 divide the body into named sections. Only headings after the H1 at level 2 or deeper become sections, and the top-level sections are the H2s, kept in file order. Each section has a name taken from its heading text, a level, and its own prose and Lua. No particular name is required; `## Main` is a common choice. The headings `## First` and `## Second` give two sections named `First` and `Second`, both at level 2. A deeper heading such as `### Author note` under `## Prepare` belongs to `Prepare` and is not another top-level section.
 
@@ -760,7 +759,7 @@ Parsing accepts a file with or without the key, but the version is checked when 
 unsupported promptforge version: {N} (this build supports major 0)
 ````
 
-That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified).
+That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
 Every prompt needs the `promptforge:` key. A file whose frontmatter holds only `name` and `description` still parses, even with a plain prose section, but its run fails on the first step, before anything executes, with parse error kind `Structure` and this message:
 
@@ -917,7 +916,7 @@ An alias is a plain name from the grammar, and a tool path such as `promptforge/
 invalid alias "{alias}": expected [A-Za-z][A-Za-z0-9_-]{0,63}
 ````
 
-Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.
 
 ### Reserved names for aliases and role labels
 
@@ -1185,7 +1184,7 @@ section heading must have whitespace after the {markers} markers: {text}
 section heading has no name: {text}
 ````
 
-Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.
 
 ---
 
@@ -1325,7 +1324,7 @@ An empty `lua` block, an opening line followed at once by its closing line, is v
 
 ### Fence and syntax errors
 
-Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
+Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
 
 ````text
 prompt `lua shared` fence is not closed
@@ -1811,7 +1810,7 @@ The fence can sit anywhere after the title and before the first `##` section, wi
 
 The opening line is exactly three backticks followed by `lua shared`: lowercase, one space, at the start of the line, and nothing after it. Any other opening line is an ordinary Markdown code block in the prose, wherever it sits in the H1 body. The fence closes like a `lua` fence, at the first line that is exactly three backticks.
 
-A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
+A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
 
 ````text
 prompt allows at most one `lua shared` fence
@@ -1919,7 +1918,7 @@ In a fanout arm, `item` is installed before the replay, so the library's top-lev
 
 ### When the library fails to load
 
-Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
+Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
 
 ## List sections
 
@@ -1972,7 +1971,7 @@ A `---` break keeps commentary out of a list: only the marker lines below the la
 
 This list has the single item `beta`. A list that opens with a break, such as `---` followed by `- alpha` and `- beta`, has the items `alpha` and `beta`.
 
-Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
+Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
 
 ````text
 empty bullet item in list section `{section}`
@@ -2049,7 +2048,7 @@ Naming a section that has no list items, such as a prose section, fails with an 
 section `{name}` has no pre-parsed items
 ````
 
-`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 ---
 
@@ -2160,7 +2159,7 @@ Every run ends in exactly one of three outcomes:
 - Cancelled, reported as its own outcome and not as a failure.
 - Failed, with a run error kind that names the cause, such as an uncaught Lua error, and a message for people to read.
 
-This chapter's features can fail a run with two run error kinds: `Lua` for an uncaught Lua error in a section, and `RequirementsUnmet` when the Harness cannot satisfy the prompt or the H1 pass fails. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind, and [Failure and cancellation](#failure-and-cancellation) shows how a run fails or is cancelled.
+This chapter's features can fail a run with two run error kinds: `Lua` for an uncaught Lua error in a section, and `RequirementsUnmet` when the Harness cannot satisfy the prompt or the H1 pass fails. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind, and [Failure and cancellation](#failure-and-cancellation) shows how a run fails or is cancelled.
 
 A run can also be refused before it starts. When the Harness cannot provide what the prompt requires, for example a model with a large enough context for one of the prompt's roles, no section runs and no Lua runs, so nothing in the prompt can catch the refusal. The run fails with run error kind `RequirementsUnmet`, and the error's message is the requirements notice, which lists what is missing:
 
@@ -2338,7 +2337,7 @@ error('expected failure')
 
 Its outcome is failed, with run error kind `Lua` and an error message that contains `expected failure`. `## First` finishes normally. `## Second` is never reported as finished; its section VM is still torn down, exactly once, and then the run is reported as failed. Any other uncaught Lua error in a walked section, such as `assert(false, 'message')` or a call to a function that does not exist, ends the run the same way. The same failure in a block in the H1 body ends the run as `RequirementsUnmet` instead, as [The H1 pass](#the-h1-pass) explains.
 
-A failed run always comes with a run error kind that classifies the cause by condition, together with a message for people to read. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists them all.
+A failed run always comes with a run error kind that classifies the cause by condition, together with a message for people to read. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists them all.
 
 When the Host cancels a run, the run ends as cancelled. A cancel is its own outcome and never a failure. It stops the run even while its Lua is busy in a loop or while a block waits on a model's reply, and a model request cut short by a cancel is not reported as a failed model call. A cancel that lands while every chain is waiting takes effect at the next step.
 
@@ -2516,7 +2515,7 @@ return 'unreachable'
 
 Its outcome is failed, with run error kind `RequirementsUnmet` and a message that contains `the gate cannot hold`. `## Result` never runs. A call to a function that does not exist, an `error(...)` call, or any other ordinary Lua error in a block in the H1 body fails the run the same way. The same error anywhere else ends the run as `Lua` ([Failure and cancellation](#failure-and-cancellation)).
 
-Only ordinary Lua errors from the H1 body's own blocks make up the gate. Failures around those blocks keep run error kind `Lua`: the shared library failing as it loads, a reassigned `var` found when the pass's `var` is read back, and a jump from the H1 pass whose heading matches no top-level section or more than one. Every other failure keeps its own run error kind, and a cancel keeps its cancelled outcome. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) gives the full mapping.
+Only ordinary Lua errors from the H1 body's own blocks make up the gate. Failures around those blocks keep run error kind `Lua`: the shared library failing as it loads, a reassigned `var` found when the pass's `var` is read back, and a jump from the H1 pass whose heading matches no top-level section or more than one. Every other failure keeps its own run error kind, and a cancel keeps its cancelled outcome. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) gives the full mapping.
 
 ### Names and order in the H1 pass
 
@@ -2692,7 +2691,7 @@ One refusal names every gap at once. The gaps found during capability activation
 
 A prompt runs normally when every required capability is present, no two declared capabilities conflict, and every model role's requirements are met. The refusal happens only when at least one of those fails. The `analyst` prompt above runs to `done` on a 200000-token model whose thinking capability is `Always`.
 
-The run error kind `RequirementsUnmet` covers both ways a prompt's preconditions can fail: a requirement the Harness cannot satisfy, found at prepare, and an uncaught Lua error in the H1 pass, the [hard gate](#the-h1-pass). The message tells them apart: a refusal at prepare is the requirements notice, and a failed gate is the Lua error text. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists the other run error kinds.
+The run error kind `RequirementsUnmet` covers both ways a prompt's preconditions can fail: a requirement the Harness cannot satisfy, found at prepare, and an uncaught Lua error in the H1 pass, the [hard gate](#the-h1-pass). The message tells them apart: a refusal at prepare is the requirements notice, and a failed gate is the Lua error text. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists the other run error kinds.
 
 A prompt can also fail to start for reasons outside the notice: its `promptforge` version is missing or unsupported ([The promptforge version](02-file-structure.md#the-promptforge-version)), or its store cannot be set up ([Store errors](09-the-store.md#store-errors)). Such a prompt runs none of its sections and reports nothing; that failure is the run's whole outcome. A file without the `promptforge:` key parses but never runs.
 
@@ -2700,9 +2699,9 @@ A prompt can also fail to start for reasons outside the notice: its `promptforge
 
 Harness work, the work the Harness does for a run ([The prompt, the Host, and the Harness](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness)), is done by the Harness while only the calling chain waits. Model requests, tool calls, `input.ask()` requests, and store operations are all Harness work. While one chain waits for its answer, other chains keep running. For example, `store.write('notes.md', 'kept')` issues one piece of Harness work, and its chain waits for the answer before its next line runs. `input.ask()` asks the operator for text ([Asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)), `store.write` saves a file in the run's store ([What the store is](09-the-store.md#what-the-store-is)), and a script calls tools by alias ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)). Tasks, sections started to run beside the section that started them, are chains that keep running this way ([Starting a task](15-tasks.md#starting-a-task)).
 
-Runs are reproducible. Each run has a seed and a start instant, both supplied by the Harness; a prompt cannot set either one. Lua in a prompt has no clock or random source of its own, so the same prompt with the same seed, the same start instant, and the same model answers, as a replay has, produces byte-identical result text. It also produces the same `sys.when`, the run's start time as Lua sees it, and the same Harness work in the same order. The same holds for the run's events ([Reading a task's history](16-task-events.md#reading-a-tasks-history)) and for the random nonce inside each untrusted envelope ([Wrapping untrusted text](09-the-store.md#wrapping-untrusted-text)); a different seed gives a different nonce.
+Runs are reproducible. Each run has a seed and a start instant, both supplied by the Harness; a prompt cannot set either one. Lua in a prompt has no clock or random source of its own, so the same prompt with the same seed, the same start instant, and the same model answers, as a replay has, produces byte-identical result text. It also produces the same `sys.when`, the run's start time as Lua sees it, and the same Harness work in the same order. The same holds for the random nonce inside each untrusted envelope ([Wrapping untrusted text](09-the-store.md#wrapping-untrusted-text)); a different seed gives a different nonce.
 
-A task's record does not depend on how fast, or in what order, model answers arrive. Answering the model requests one at a time, all at once in the order they were issued, or all at once in reverse gives the same result text, the same events for each task, and the same Harness work for each task. Only the interleaving across tasks differs.
+A task's record does not depend on how fast, or in what order, model answers arrive. Answering the model requests one at a time, all at once in the order they were issued, or all at once in reverse gives the same result text and the same Harness work for each task. Only the interleaving across tasks differs.
 
 ---
 
@@ -2852,7 +2851,7 @@ return answer
 ```
 ````
 
-The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
+The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
 
 ### Failed Engine calls raise
 
@@ -3397,7 +3396,7 @@ lua log event budget exceeded
 lua log cumulative byte budget exceeded
 ````
 
-`pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](17-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
+`pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](16-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
 
 ## Asking the operator with input.ask
 
@@ -3491,7 +3490,7 @@ That is a normal return, not an error: the section keeps running. `available` is
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
 - A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text. The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
 ### Letting the model ask
 
@@ -3525,13 +3524,13 @@ end
 return text
 ````
 
-Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
-When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
+When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](16-limits-and-errors.md#calls-waiting-during-a-cancel)).
 
 ## Error locations in the prompt file
 
-Every Lua block is compiled when the prompt file is parsed. A block that does not compile fails the parse with parse error kind `Lua` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), so the prompt never runs. At run time, a Lua error names the failing line of the prompt file itself, so you can go straight to it.
+Every Lua block is compiled when the prompt file is parsed. A block that does not compile fails the parse with parse error kind `Lua` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), so the prompt never runs. At run time, a Lua error names the failing line of the prompt file itself, so you can go straight to it.
 
 Both kinds of message name a Lua region by its location label, such as ``section `Check` epilog`` or ``section `Only` prologue`` ([Writing a Lua fence](03-blocks-and-prose.md#writing-a-lua-fence)). The label is the name Lua gives the block, and Lua prints it as `[string "{location}"]:N:`.
 
@@ -3645,10 +3644,10 @@ not an arm: runtime error: unknown sys field 'index'
 | `task_not_owned` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `task_consumed` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `tasks_live` | `tasks` | [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) |
-| `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel) |
+| `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](16-limits-and-errors.md#calls-waiting-during-a-cancel) |
 | `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | [Store errors](09-the-store.md#store-errors) |
 | `lua` | none | This chapter |
-| `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | none | [Errors caught in Lua](16-limits-and-errors.md#errors-caught-in-lua) |
 
 `err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. An Engine function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed error from Harness work, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
@@ -3726,7 +3725,7 @@ When a failed Engine call's error goes uncaught, the run reports the original fa
 
 ### Uncaught failures
 
-An uncaught Lua failure, a runtime error in your code or an error you raise yourself, ends the run with run error kind `Lua`, holding the failure's message. That holds in a walked section, a `call` chain, a task, a fanout arm, and the shared library load. In the H1 pass the same failure ends the run as `RequirementsUnmet`, whose notice is the Lua error text. Only failures that would end as `Lua` become `RequirementsUnmet` there: other kinds keep their own run error kind in the H1 pass, and a failed shared library load, a failed `var` read-back, and a bad `jump` target in the H1 pass stay `Lua`. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+An uncaught Lua failure, a runtime error in your code or an error you raise yourself, ends the run with run error kind `Lua`, holding the failure's message. That holds in a walked section, a `call` chain, a task, a fanout arm, and the shared library load. In the H1 pass the same failure ends the run as `RequirementsUnmet`, whose notice is the Lua error text. Only failures that would end as `Lua` become `RequirementsUnmet` there: other kinds keep their own run error kind in the H1 pass, and a failed shared library load, a failed `var` read-back, and a bad `jump` target in the H1 pass stay `Lua`. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 ## Section VM lifecycle and reports
 
@@ -3759,7 +3758,7 @@ A section's Lua lifecycle shows in the run's reports, which carry the section na
 
 A block's `log` checkpoints fall between its started and succeeded reports. When the shared library raises, for example with `error(...)`, the load reports started and then failed, and teardown still runs and reports started and succeeded. A failing block reports a block failure. A section whose VM fails to build is torn down the same way before the error is reported.
 
-At parse time, each Lua block's compilation reports a started report followed by exactly one succeeded or failed report, with no source text and no location label. [Run and section boundaries](16-task-events.md#run-and-section-boundaries) shows how these reports appear when you read a task's events.
+At parse time, each Lua block's compilation reports a started report followed by exactly one succeeded or failed report, with no source text and no location label.
 
 ---
 
@@ -3952,7 +3951,7 @@ Three placeholder failures involve `args` and `argv`:
 - A dotted path into a field `argv` does not have, or into a scalar, such as `{{ argv.query.x }}` when `query` is a string, fails with `missing {{ {path} }}`, as in `missing {{ argv.query.x }}`.
 - `args` is a string, so a dotted placeholder into it, such as `{{ args.x }}`, fails with `args is a string, not a table`.
 
-Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 ## Arg declarations
 
@@ -4027,7 +4026,7 @@ This is an explicit declaration, so the argument string is parsed as JSON like u
 
 ### Declaration errors
 
-Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](17-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
+Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](16-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
 
 | Mistake | Message after `invalid frontmatter: ` |
 |---|---|
@@ -4126,7 +4125,7 @@ return argv.query
 ```
 ````
 
-Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
+Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
 
 ## The H1 repair pattern
 
@@ -4180,7 +4179,7 @@ if argv.limit == nil then
 end
 ````
 
-Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
+Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
 
 ## Frozen argv
 
@@ -4259,7 +4258,7 @@ if wrote then return 'written' end
 return 'refused'
 ````
 
-This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) covers.
+This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) covers.
 
 A nil `argv` is frozen too. Under an explicit `args:` declaration, a run with no arguments gets a nil `argv`, because the empty string is not JSON; a prompt with no `args:` key gets `argv.prose == ''` instead. Assigning the nil `argv` outside the H1 body, as in `argv = {}`, fails with `argv is frozen outside H1: assign it in H1 only`.
 
@@ -4966,7 +4965,7 @@ caught
 
 Here `ok` is `false`, `err.kind` is `lua`, and `tostring(err)` is `missing {{ var.missing }} [MissingKey at byte 9]`, so a block can also inspect the text before deciding what to do. The bracketed part is explained under Reading the error text below.
 
-Left uncaught, the failure ends the run with the run error kind `Lua`, and the run's message names the failing placeholder, such as `missing {{ var.missing }}`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), the run ends as `RequirementsUnmet` instead, with that message as its notice. Substitution has no run error kind of its own; [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+Left uncaught, the failure ends the run with the run error kind `Lua`, and the run's message names the failing placeholder, such as `missing {{ var.missing }}`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), the run ends as `RequirementsUnmet` instead, with that message as its notice. Substitution has no run error kind of its own; [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 `prose` is not a substitution source. A `{{ prose }}` placeholder inside the prose makes the read fail, catchable with `pcall`, with substitution kind `Serialize` and the message `global 'prose' in {{ prose }} is not JSON data`.
 
@@ -5135,7 +5134,7 @@ local ok, err = pcall(call, '## Missing')
 return 'caught: ' .. tostring(err)
 ````
 
-The run succeeds, and its result starts with `caught: ` and contains `not found`. Left uncaught in a walked section, the error ends the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). A `jump` reference is looked up only after its block has ended, so `pcall` in the jumping block never sees a lookup error from `jump`. The next section shows what happens instead.
+The run succeeds, and its result starts with `caught: ` and contains `not found`. Left uncaught in a walked section, the error ends the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). A `jump` reference is looked up only after its block has ended, so `pcall` in the jumping block never sees a lookup error from `jump`. The next section shows what happens instead.
 
 ## Sibling jumps
 
@@ -5236,7 +5235,7 @@ When this block ends, the walk moves to `## C`, and `'never the result'` is disc
 
 ### When a jump target is wrong
 
-A jump's heading reference is looked up after the jumping block has ended. If it is malformed or matches no section in the visible set, as in `jump('## Missing')`, the run fails with one of the [heading errors](#heading-addresses), such as a not-found message, and run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). By then the jumping section has already closed as completed, so the error is never raised inside the jumping block, and `pcall` there cannot catch it. Only the string check runs at the `jump` call itself.
+A jump's heading reference is looked up after the jumping block has ended. If it is malformed or matches no section in the visible set, as in `jump('## Missing')`, the run fails with one of the [heading errors](#heading-addresses), such as a not-found message, and run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). By then the jumping section has already closed as completed, so the error is never raised inside the jumping block, and `pcall` there cannot catch it. Only the string check runs at the `jump` call itself.
 
 ### Where jump works
 
@@ -5636,7 +5635,7 @@ return call('## Alpha')
 ```
 ````
 
-Left uncaught, the depth cap error passes up through every calling section unchanged and fails the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified).
+Left uncaught, the depth cap error passes up through every calling section unchanged and fails the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
 A jump never adds a level, so `jump` can descend into child sections without spending depth. If `## Main` does `jump('### X')`, and then `### X` and `### Y` ping-pong with `return call('### Y')` and `return call('### X')`, nine sections run before the cap trips: the one reached by the jump and eight reached by calls.
 
@@ -5747,7 +5746,7 @@ return tostring(ok) .. ':' .. tostring(err)
 
 The run result starts with `false:` and contains `## Nope`.
 
-Left uncaught, a heading error from `call`, `fanout`, or `list_from_section` is an error in the H1 block. The H1 pass is a hard gate, so the run ends with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), whose notice is the Lua error text. A `jump` from the H1 is different: its heading is looked up after the H1 block has ended, so a bad `jump` target ends the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). In every case the message names the heading.
+Left uncaught, a heading error from `call`, `fanout`, or `list_from_section` is an error in the H1 block. The H1 pass is a hard gate, so the run ends with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified), whose notice is the Lua error text. A `jump` from the H1 is different: its heading is looked up after the H1 block has ended, so a bad `jump` target ends the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). In every case the message names the heading.
 
 ## Chain ids under call
 
@@ -6317,36 +6316,6 @@ In shared library code while it loads, store calls run directly instead of suspe
 
 A local tool handler, a Lua function a prompt registers with `tools.add_local` for a model to call, can use the store as well, and a store call made there is an ordinary store operation ([Local tools](12-tools.md#local-tools)).
 
-### Store reports
-
-Each store operation leaves one success or failure report inside the block and section that made it, in call order, alongside the other reports a section VM produces ([Section VM lifecycle and reports](05-lua-environment.md#section-vm-lifecycle-and-reports)):
-
-| Call | Reports |
-|---|---|
-| `store.write` | `store_write_succeeded`, `store_write_failed` |
-| `store.append` | `store_append_succeeded`, `store_append_failed` |
-| `store.read` | `store_read_succeeded`, `store_read_failed` |
-| `store.read_numbered` | `store_read_numbered_succeeded`, `store_read_numbered_failed` |
-| `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
-| `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
-| `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
-| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
-
-Reports hold no paths, contents, anchors, or [argument string](06-arguments.md#input-basics). An operation that fails in the ordinary way records its failure report and also raises a Lua error in the calling block. For a section whose first block writes a file and whose second block reads it, the section VM reports in this order, starting with the shared library load that every section VM runs:
-
-````text
-lua_shared_load_started
-lua_shared_load_succeeded
-lua_chunk_started
-store_write_succeeded
-lua_chunk_succeeded
-lua_chunk_started
-store_read_succeeded
-lua_chunk_succeeded
-lua_teardown_started
-lua_teardown_succeeded
-````
-
 ## Sharing the store across calls and tasks
 
 A run has one store, and every chain in the run uses it. A [called chain](08-jump-and-call.md#called-chains) can write a store file that the caller reads as soon as `call` returns:
@@ -6422,7 +6391,7 @@ With two arms that wrote `alpha` and `beta`, `research.md` holds `alpha` and `be
 
 ### When claims conflict
 
-When a claims conflict arises, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
+When a claims conflict arises, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
 
 ````text
 store determinism violation: {claim} on {path} by {identity} conflicts with a {other_claim} claim by {other_identity}
@@ -6469,7 +6438,7 @@ local count = tonumber(ok and v or '0')
 if not ok then assert(v.reason == 'not_found', 'unexpected store failure') end
 ````
 
-Left uncaught, a store failure aborts the block, and the run fails with [run error kind](17-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
+Left uncaught, a store failure aborts the block, and the run fails with [run error kind](16-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
 
 ### Store messages
 
@@ -6508,7 +6477,7 @@ Four failures that once shared one fixed message now carry their own reasons, ea
 
 ### Run error kinds
 
-A store problem that ends a run is classified by one of two run error kinds ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)):
+A store problem that ends a run is classified by one of two run error kinds ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)):
 
 | Run error kind | When |
 |---|---|
@@ -6603,7 +6572,7 @@ Every `untrusted` call in a run shares one nonce, so identical content wraps to 
 
 ### Text that arrives already wrapped
 
-Some text reaches the model already inside the same envelope, with no `untrusted` call needed. Results from untrusted tools arrive this way ([Trusted and untrusted output](12-tools.md#trusted-and-untrusted-output)). So do child task results in task notices, and the task history rendered for the model ([Task notices to the model](15-tasks.md#task-notices-to-the-model)). Store text is not among them, so wrapping it is always up to your Lua code.
+Some text reaches the model already inside the same envelope, with no `untrusted` call needed. Results from untrusted tools arrive this way ([Trusted and untrusted output](12-tools.md#trusted-and-untrusted-output)). So do child task results in task notices ([Task notices to the model](15-tasks.md#task-notices-to-the-model)). Store text is not among them, so wrapping it is always up to your Lua code.
 
 ## How the envelope encodes content
 
@@ -6777,7 +6746,7 @@ Give every role under `models:` a distinct label, written in the [name grammar](
 
 ### Declaration errors
 
-A mistake inside `models:` fails the parse with a [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
+A mistake inside `models:` fails the parse with a [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
 
 - A label used twice fails with ``duplicate model role label `{key}`: contract map keys must be unique``, which names the label.
 - A label outside the name grammar fails with ``invalid model role label `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}``, which names the label and the grammar.
@@ -6822,7 +6791,7 @@ return models.infer(prose)
 
 ## Requirements at prepare
 
-Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
+Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
 
 - `thinking` needs a model that can think. It is unmet only when the bound model never thinks, and its line is `role '{role}': requires 'thinking'; the current model's thinking capability is Never`.
 - `no-thinking` needs a model that can reply without thinking. It is unmet only when the bound model always thinks, and its line is `role '{role}': requires 'no-thinking'; the current model's thinking capability is Always`.
@@ -6864,7 +6833,7 @@ Give a section a selection or a prompt-wide default before it runs a round. A ro
 model binding required for section Only
 ````
 
-Left uncaught, the missing-model error fails the run with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
+Left uncaught, the missing-model error fails the run with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -6897,7 +6866,7 @@ Roles come only from the frontmatter, and Lua never creates one. `models.use` an
 
 When the Host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
 
-These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
+These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
 
 ## Model handles
 
@@ -7110,9 +7079,9 @@ Bad arguments fail the call with an error value of kind `lua`:
 
 If the model replies with tool calls anyway, the call fails with an error value of kind `lua` whose message is `model inference received tool calls but no tools were advertised`. The text is the same for both forms and does not name `models.infer`.
 
-A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](17-limits-and-errors.md#how-a-failed-run-is-classified).
+A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
-A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point. The run records every round as round events under the current section, marking a failed round as failed and a cut-off round as truncated, and [Task Events](16-task-events.md#model-round-events) describes those events.
+A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point.
 
 ## The bound model in sys.model
 
@@ -7151,7 +7120,7 @@ The first block makes the section's first tool call, here to a small tool writte
 
 The field appears at the section's first tool call, made either from a Lua block or at the model's request during a conversation; whichever tool the first call runs, it counts. At that moment `sys.model` takes the section's model, its selection or else the prompt-wide default, and it stays fixed for the rest of the section. A round by itself never sets it, and a section that makes no tool call, or has no model when its first tool call runs, never gets the field.
 
-Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
+Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
 
 ````lua
 local ok, id = pcall(function() return sys.model end)
@@ -7201,7 +7170,7 @@ A message list is what `models.loop` takes: a Lua array of records, each with th
 
 When the model gives a text reply, the loop appends `{ role = "assistant", content = reply }` as the terminal record and returns. `models.loop` itself returns `nil`: everything the conversation adds lands in your list, in place, so once the loop returns, the reply is `msgs[#msgs].content`.
 
-Each round runs on the section's current model: the role selected with `models.use`, or else the prompt-wide default set with `models.default`, as [Models](10-models.md#choosing-a-sections-model) explains. The loop looks that model up again each time it sends a round. With neither set, the call fails with the missing-model error, which is kind `internal` when caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) and ends the run with run error kind `Binding` when uncaught (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Each round runs on the section's current model: the role selected with `models.use`, or else the prompt-wide default set with `models.default`, as [Models](10-models.md#choosing-a-sections-model) explains. The loop looks that model up again each time it sends a round. With neither set, the call fails with the missing-model error, which is kind `internal` when caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) and ends the run with run error kind `Binding` when uncaught (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 Builder methods are called with a colon and chain, each call appending one record at the end of the list, in call order. This block puts a system record ahead of the user record; `:system(content)` appends `{ role = "system", content = content }`:
 
@@ -7426,14 +7395,6 @@ The model's [sampling options](10-models.md#sampling-options) apply to every rou
 
 The round count advances once for every round that returns a reply, whether a text reply or a batch of tool calls, and an empty reply advances it too; a round that overflows the model's context window, and a round that fails, do not. A [task](15-tasks.md#starting-a-task) counts its rounds against its own round count, which its status table shows as the `turns` field. The round count is separate from the round cap, the most rounds a single `models.loop` call may make, which each call counts for itself.
 
-The run reports each loop round and each tool call as an event filed under the section that ran the loop, and [round events](16-task-events.md#model-round-events) carry the round count as their `turn` field; a round that calls one tool, followed by a text reply, reports these in order:
-
-````text
-model_turn_completed
-tool_call_succeeded
-model_turn_completed
-````
-
 When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
 
 ## How the list reaches the model
@@ -7549,7 +7510,7 @@ Ids are unique across the whole list, not only within one assistant record: reus
 
 The rules across records run in this order: first the plain-text check on a leading block of two or more system records; then each record in list order, with the `tool_calls` placement rule, then the `tool_call_id` placement rule, then the rules for its own `role`; and last the check for a batch still open at the end of the list. The checks on each record's own fields run before all of them.
 
-All of these are `lua`-kind error values raised at the `models.loop` call and catchable with `pcall`. Each message is exactly the text shown, with no prefix, and only the first broken rule is reported. A failed check across records is also reported as a `model_turn_failed` [round event](16-task-events.md#model-round-events) before the error reaches the call.
+All of these are `lua`-kind error values raised at the `models.loop` call and catchable with `pcall`. Each message is exactly the text shown, with no prefix, and only the first broken rule is reported.
 
 ## Empty and truncated replies
 
@@ -7577,11 +7538,9 @@ When the model's first reply is empty, with finish reason `"stop"` and no detail
 empty_model_reply|stop|empty model reply
 ````
 
-Reasoning text from the model is never used as the reply; the detail may say it was ignored, as in `empty model reply: reasoning content was present but ignored`. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Reasoning text from the model is never used as the reply; the detail may say it was ignored, as in `empty model reply: reasoning content was present but ignored`. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 An empty reply still completes its round: it advances the round count, and the loop then either takes the clean exit or raises `empty_model_reply` with the reply's detail as the message and, when the provider sent one, the finish reason in `finish_reason`. A text reply that the provider cut short for length, with finish reason `"length"`, is accepted as the terminal record.
-
-Both show up as [round events](16-task-events.md#model-round-events): an empty reply is reported as `model_turn_completed`, carrying the empty-reply detail and finish reason, and a truncated text reply reports `model_turn_truncated` right after its `model_turn_completed`, as a truncated `models.infer` round does too.
 
 ## Compactors and context exhaustion
 
@@ -7619,7 +7578,7 @@ context exhausted: the request precheck overflowed the model's context window
 context exhausted: the provider rejected the request as exceeding the model's context window
 ````
 
-Left uncaught, context exhaustion ends the run with run error kind `ContextExhausted` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, context exhaustion ends the run with run error kind `ContextExhausted` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 A compactor can also be your own function. When a round overflows, the loop calls it instead of raising, with the reason `"precheck"` or `"provider"` as its single string argument. A custom compactor ends by raising an error, which propagates out of `models.loop` unchanged, a bare string staying a bare string, so `pcall` around the loop catches it:
 
@@ -7637,7 +7596,7 @@ return msgs[#msgs].content
 the notes are too long to send (precheck)
 ````
 
-A compactor that returns at all, with or without a value, makes `models.loop` raise a `lua`-kind error whose message names `compactors.fail`. Left uncaught in a walked section, a compactor's own error ends the run with run error kind `Lua` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), with the compactor's error text in the message.
+A compactor that returns at all, with or without a value, makes `models.loop` raise a `lua`-kind error whose message names `compactors.fail`. Left uncaught in a walked section, a compactor's own error ends the run with run error kind `Lua` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), with the compactor's error text in the message.
 
 `compactors.fail(tag)` takes one reason string and raises a `context_exhausted` error value whose `reason` is that string; it never returns. The tag is exactly `"precheck"` or `"provider"`; any other string raises a `lua`-kind error, `unknown overflow reason "{tag}"; expected "precheck" or "provider"`, which is an authoring error rather than context exhaustion.
 
@@ -7672,7 +7631,7 @@ max_tool_iterations: 5
 
 The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the Harness running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
 
-Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 A model that keeps calling a failing bound tool reaches the cap the same way, because each failure is answered with failure text and the model never gives a text reply. After exhaustion the list holds only complete rounds: every round appended its assistant tool-call record and a tool record for each call, with no half-answered batch.
 
@@ -7692,7 +7651,7 @@ With `max_tool_iterations: 2` and a model that calls one tool in every round, th
 tool-call loop did not converge after 5 records
 ````
 
-A value out of range fails at parse, before the run starts, with parse error kind `Frontmatter` (see [parse error kinds](17-limits-and-errors.md#parse-error-kinds)). Zero or less gives `max_tool_iterations must be a positive integer (>= 1), got {raw}`, and more than 1000 gives `max_tool_iterations must be <= 1000, got {raw}`. `{raw}` echoes the value as written, and very large values are range-checked, never wrapped.
+A value out of range fails at parse, before the run starts, with parse error kind `Frontmatter` (see [parse error kinds](16-limits-and-errors.md#parse-error-kinds)). Zero or less gives `max_tool_iterations must be a positive integer (>= 1), got {raw}`, and more than 1000 gives `max_tool_iterations must be <= 1000, got {raw}`. `{raw}` echoes the value as written, and very large values are range-checked, never wrapped.
 
 ## Catching loop failures
 
@@ -7727,9 +7686,9 @@ An `out_of_scope_tool` message begins `tool "{name}" is not in this section's sc
 
 `models.loop` takes at most three arguments with a handle and at most two without one; more raise a `lua`-kind error, `models.loop takes (handle?, messages, compactor?)`.
 
-Any failure while preparing a round, whether in choosing the model, reading the section's tools, checking the list, or reaching the provider, is raised at the `models.loop` call like any other call error, so `pcall` catches it. Any other failed round, such as a backend error that is not a context-window rejection, is reported as a `model_turn_failed` [round event](16-task-events.md#model-round-events) and raised as the call's error, with kind `internal` for backend and transport failures.
+Any failure while preparing a round, whether in choosing the model, reading the section's tools, checking the list, or reaching the provider, is raised at the `models.loop` call like any other call error, so `pcall` catches it. Any other failed round, such as a backend error that is not a context-window rejection, is raised as the call's error, with kind `internal` for backend and transport failures.
 
-The last column of the table is the run error kind when a loop failure in a walked section is left uncaught (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). An error value you catch and raise again before the block makes another [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), as the `error(err)` line above does, ends the run the same way. Raised again after another suspending call, it keeps its run error kind for `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, and `tool`, a `cancelled` value ends the run with the cancelled outcome rather than as a failure, and any other kind ends the run as `Lua`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), an ordinary Lua error that would end the run as `Lua` ends it as `RequirementsUnmet` instead, whose notice is the Lua error text, and the other kinds keep their run error kind.
+The last column of the table is the run error kind when a loop failure in a walked section is left uncaught (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). An error value you catch and raise again before the block makes another [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), as the `error(err)` line above does, ends the run the same way. Raised again after another suspending call, it keeps its run error kind for `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, and `tool`, a `cancelled` value ends the run with the cancelled outcome rather than as a failure, and any other kind ends the run as `Lua`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), an ordinary Lua error that would end the run as `Lua` ends it as `RequirementsUnmet` instead, whose notice is the Lua error text, and the other kinds keep their run error kind.
 
 ---
 
@@ -7828,7 +7787,7 @@ capabilities:
     optional: true
 ````
 
-A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
+A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -7847,7 +7806,7 @@ With `optional: true`, a capability the Harness lacks, or one that fails to acti
 
 `config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
 
-Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
+Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
 
 ````text
 invalid frontmatter: capability {id} is declared more than once under capabilities
@@ -7869,7 +7828,7 @@ A capability can name another capability as a conflict, for example when each pr
 
 ### Entry errors
 
-A malformed entry fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
+A malformed entry fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
 
 - A map without `ref` fails with `` missing field `ref` ``.
 - A key written twice fails with `` duplicate field `{key}` ``, where `{key}` is `ref`, `optional`, or `config`.
@@ -8172,7 +8131,7 @@ Uncaught, these fail the run wherever the call is made. A slot can stay unbound 
 - `tools.add expects strings, Tool objects, or arrays of either, got {type}` for an alias or array element that is neither a string nor a Tool object.
 - `tools.add array form takes no override` for a description passed with the array form.
 
-Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
+Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
 
 ````text
 model-facing schema build failure for tool alias "{alias}"
@@ -8193,7 +8152,7 @@ Both lines call the same tool. A call your Lua code makes this way is a script c
 
 A script call can reach any tool bound in the run, even one outside the section's scope. The scope only limits what the model is offered.
 
-A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model. Each call is also recorded in the run's events with a succeeded or failed event, which [Task Events](16-task-events.md#tool-call-events) shows how to read.
+A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model.
 
 ### Arguments
 
@@ -8222,7 +8181,7 @@ A `tools.call` that names neither a local tool nor a bound alias raises an error
 tool "{name}" is not bound in this run; bound aliases: [...]
 ````
 
-Five names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, `task_events`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
+Four names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
 
 These argument errors raise at the call, where `pcall` catches them:
 
@@ -8314,12 +8273,12 @@ A caught tool error is read through `err.kind`, through `err.name` on `unbound_t
 | Kind | Raised when | `name` field | Message |
 |---|---|---|---|
 | `tool` | a called tool fails on its own in a script call | none | `tool call failure: {message}` |
-| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the five Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
+| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the four Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
 | `out_of_scope_tool` | the model calls a name outside the round's scope | the name | `tool "{name}" is not in this section's scope; in-scope aliases: [...]` |
 
-`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the five Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
+`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the four Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
 
-Uncaught, these failures end the run with run error kind [`Tool`](17-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
+Uncaught, these failures end the run with run error kind [`Tool`](16-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
 
 ## Counting calls
 
@@ -8447,7 +8406,7 @@ A local tool call involves no Harness work of its own: the Engine hands it to th
 
 `jump` refuses while a handler runs, so a handler never [jumps](08-jump-and-call.md#sibling-jumps). Calling it there, even through a reference to `jump` saved before the handler ran, raises an ordinary error that `pcall` can catch, with the message `jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns`. The refusal lasts until the outermost handler returns or raises, including across nested local calls, and then `jump` works again in the block.
 
-A handler that never returns still stops when the run is cancelled, as [Limits and Errors](17-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
+A handler that never returns still stops when the run is cancelled, as [Limits and Errors](16-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
 
 ### Handler errors
 
@@ -8587,7 +8546,7 @@ The search tool takes a search query and returns a list of search results. `tool
 
 Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the Host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The Host provides the gateway address and token, the Harness passes them to the capability when it registers it, and the prompt only declares the capability id. The Harness provides `promptforge/web` as a built-in capability when the Host configures it with a PromptForge gateway connection.
 
-When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
+When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -8647,7 +8606,7 @@ if not ok and err.kind == 'tool' and string.find(tostring(err), 'userinfo', 1, t
 end
 ````
 
-The error value carries the fetch tool's own message, here `url must not contain userinfo`. As with every tool failure raised in a script, its `message` field, and so `tostring(err)`, reads `tool call failure: {message}`, with the tool's message in place of `{message}` ([tool failures](12-tools.md#tool-failures)). A script never sees the tool error kind as a field, because every web tool failure reaches a script with error kind `tool`. Left uncaught, a hard failure ends the run with run error kind `Tool` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this text:
+The error value carries the fetch tool's own message, here `url must not contain userinfo`. As with every tool failure raised in a script, its `message` field, and so `tostring(err)`, reads `tool call failure: {message}`, with the tool's message in place of `{message}` ([tool failures](12-tools.md#tool-failures)). A script never sees the tool error kind as a field, because every web tool failure reaches a script with error kind `tool`. Left uncaught, a hard failure ends the run with run error kind `Tool` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and this text:
 
 ````text
 tool call failure: url must not contain userinfo
@@ -9033,7 +8992,7 @@ if not ok and err.kind == 'tool' then
 end
 ````
 
-Uncaught, a failure ends the run with run error kind `Tool` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and the text `tool call failure: {message}`, as here when the gateway cannot be reached:
+Uncaught, a failure ends the run with run error kind `Tool` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and the text `tool call failure: {message}`, as here when the gateway cannot be reached:
 
 ````text
 tool call failure: web_search: request failed
@@ -9364,7 +9323,7 @@ return item
 lua: fanout over an empty collection: no work is likely a bug
 ````
 
-`pcall(fanout, '### Worker', 5)` likewise returns `false` and an error value whose text contains `collection`. Left uncaught, any of these errors fails the run with the same message text, as run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), or as `RequirementsUnmet` when the call is in the H1 pass ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
+`pcall(fanout, '### Worker', 5)` likewise returns `false` and an error value whose text contains `collection`. Left uncaught, any of these errors fails the run with the same message text, as run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), or as `RequirementsUnmet` when the call is in the H1 pass ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
 
 ## The worker section
 
@@ -9598,7 +9557,7 @@ An arm that ends without a result, such as the one arm of a fanout over `{'alpha
 
 ### Read-only results
 
-Results are read-only. Assigning any field raises the Lua error `fanout results are read-only`, reported at the assigning line. `pcall` receives that message, and an uncaught one fails the run with run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). `setmetatable` on a result raises an error containing `protected metatable`, and `getmetatable(result)` returns a stand-in table that holds `__tostring` and no `__index` or `__newindex`:
+Results are read-only. Assigning any field raises the Lua error `fanout results are read-only`, reported at the assigning line. `pcall` receives that message, and an uncaught one fails the run with run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). `setmetatable` on a result raises an error containing `protected metatable`, and `getmetatable(result)` returns a stand-in table that holds `__tostring` and no `__index` or `__newindex`:
 
 ````lua
 local r = fanout('### Worker', {'alpha', 'beta'})
@@ -9784,7 +9743,7 @@ return item
 ```
 ````
 
-The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
+The run fails with run error kind `Determinism` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
 
 `store.append` counts as a write. Two arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
 
@@ -9837,7 +9796,7 @@ Work.
 - beta
 ````
 
-Left uncaught, as here, the failure ends the run with run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the run's message contains `arm deliberately failed`. The error `fanout` raises is the failing arm's own error value, with its original kind and message, not a wrapper around it. For an arm that called `error('message')`, that kind is `lua`. The same uncaught failure in the H1 pass ends the run as `RequirementsUnmet` instead ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
+Left uncaught, as here, the failure ends the run with run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the run's message contains `arm deliberately failed`. The error `fanout` raises is the failing arm's own error value, with its original kind and message, not a wrapper around it. For an arm that called `error('message')`, that kind is `lua`. The same uncaught failure in the H1 pass ends the run as `RequirementsUnmet` instead ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
 
 `pcall(fanout, worker, collection)` catches a fanout failure ([catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)): it returns `false` plus the error value, and the block keeps going, further `models.infer` calls included. A late reply meant for a cancelled sibling is discarded instead of failing the run. Here the worker section calls the model and then raises an error for the member `boom`:
 
@@ -9875,7 +9834,7 @@ UNKNOWN
 
 When an arm is cancelled because a sibling failed, everything under it stops too: a chain it started with `call` stops, a nested fanout's arms stop with it, and so on down, and anything that had not yet run its block never runs it. What a cancelled arm had started is abandoned with the reason `owner_aborted`, which [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) explains.
 
-If the Host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
+If the Host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](16-limits-and-errors.md#cancelling-a-run)).
 
 ## Addressing from an arm
 
@@ -10177,7 +10136,7 @@ When `## Child` runs `return 'child-done'`, `first` is the handle of that task, 
 
 Only the owner may wait on, inspect, or cancel a task. A chain ends cleanly when every task it spawned has been waited on or cancelled, and a chain that ends normally while a task it spawned is still live fails with an error value of kind `tasks_live`. In the prompt above, the owner is the run's main walk, and its wait leaves nothing live.
 
-The `tasks` global holds ten functions, where `?` marks an optional argument:
+The `tasks` global holds nine functions, where `?` marks an optional argument:
 
 | Function | What it does |
 |---|---|
@@ -10187,14 +10146,13 @@ The `tasks` global holds ten functions, where `?` marks an optional argument:
 | `tasks.concurrency(n?)` | Lowers the chain's admission limit for the tasks it spawns, or reads it back |
 | `tasks.ready(task)` | Says whether a task has ended |
 | `tasks.status(task)` | Returns a task's status table |
-| `tasks.events(task, opts?)` | Returns what a task has reported so far |
 | `tasks.pending(filter?)` | Lists the live tasks the chain owns |
 | `tasks.note(text)` | Publishes a progress note for the task the code runs in |
 | `tasks.cancel(task)` | Ends a task |
 
 The `tasks` global is there in the Lua of every section, including the H1 body, the sections that tasks run, and fanout arms. Tasks need nothing in the frontmatter and have no command-line flags: every task feature is a Lua call, an options table, a returned value, or text the model reads.
 
-The model can start and manage tasks of its own. Once a section calls `tools.allow_tasks(targets?)`, every model round in that section has five task built-ins in [scope](12-tools.md#advertising-tools-to-the-model), beside the section's bound and local tools: `task`, `task_cancel`, `task_status`, `await_tasks`, and `task_events`. The model calls them as [model tool calls](12-tools.md#model-tool-calls) inside [`models.loop`](11-conversations.md#a-first-conversation), and no bound or local tool can shadow them. The model sees only the tasks it started itself, and naming a task the prompt started is refused as unknown, while the prompt can take over the model's tasks through `tasks.pending({ origin = "model" })`. A `task_events` result is one JSON object per line, inside the [untrusted envelope](09-the-store.md#wrapping-untrusted-text).
+The model can start and manage tasks of its own. Once a section calls `tools.allow_tasks(targets?)`, every model round in that section has four task built-ins in [scope](12-tools.md#advertising-tools-to-the-model), beside the section's bound and local tools: `task`, `task_cancel`, `task_status`, and `await_tasks`. The model calls them as [model tool calls](12-tools.md#model-tool-calls) inside [`models.loop`](11-conversations.md#a-first-conversation), and no bound or local tool can shadow them. The model sees only the tasks it started itself, and naming a task the prompt started is refused as unknown, while the prompt can take over the model's tasks through `tasks.pending({ origin = "model" })`.
 
 Tasks are the general form of background work, and [`fanout`](14-fanout.md#the-fanout-call) is built on them: each fanout arm is a task. `tasks.spawn` takes the same heading references as [`call`](08-jump-and-call.md#jump-and-call-at-a-glance), and a task gets its own copy of the owner's `var`, the way a called chain or an arm does. Reach for tasks when the work is not one collection run through one worker section.
 
@@ -10610,7 +10568,7 @@ tasks.join({ s })
 
 ## Checking on tasks
 
-Besides the waits, the `tasks` namespace checks on tasks and controls them without waiting for them to end. `tasks.ready(task)` says whether a task has ended, `tasks.status(task)` returns its status table, `tasks.pending(filter)` lists the live tasks the chain owns, `tasks.note(text)` publishes a progress note, and `tasks.cancel(task)` ends a task. `tasks.events(task, { last = seq })` returns what a task the chain owns, or the chain's own task named by `sys.taskid`, has reported so far, and with `last` set to the last sequence number already read it returns only newer entries, so a polling loop reads each entry once; [Task Events](16-task-events.md#reading-a-tasks-history) covers it in full.
+Besides the waits, the `tasks` namespace checks on tasks and controls them without waiting for them to end. `tasks.ready(task)` says whether a task has ended, `tasks.status(task)` returns its status table, `tasks.pending(filter)` lists the live tasks the chain owns, `tasks.note(text)` publishes a progress note, and `tasks.cancel(task)` ends a task.
 
 `tasks.ready`, `tasks.status`, `tasks.pending`, `tasks.note`, and `tasks.cancel` are answered at once, like `tasks.spawn`: the owner keeps running, and no other chain runs in between. So a status read right after a spawn shows the task not yet started, and a loop that does nothing but call `tasks.ready` never lets the task run. Check between calls that wait, such as a store call or a model round, or use a wait. This prompt reads a task's status while the task is in a model round:
 
@@ -10684,7 +10642,7 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - `chat`: a model round
 - `tool_call`: a tool call, a wait for the operator in `input.ask()` included
 - `store`: a store call
-- `tasks`: a wait on tasks, timed or not, or a history read
+- `tasks`: a wait on tasks, timed or not
 - `queued`: waiting for a slot under the concurrency limit, with `state` still `running`
 - `call`: a called chain
 
@@ -10703,11 +10661,11 @@ At that moment the whole table holds `target` `Child`, `origin` `author`, `state
 - A value that is not a string fails with `pending filter origin must be a string, got {type}`.
 - Text that is not valid UTF-8 fails with `pending filter origin must be a valid UTF-8 string`.
 
-The timeout behind a timed wait is never a task you can see: `tasks.pending` and a status table's `tasks` never list it, it never counts as a task left live when its owner ends, and it has no history to read.
+The timeout behind a timed wait is never a task you can see: `tasks.pending` and a status table's `tasks` never list it, and it never counts as a task left live when its owner ends.
 
 ### Progress notes
 
-`tasks.note(text)` publishes the latest progress note for the task your code runs inside, and returns nothing. The owner reads it as the `note` field of `tasks.status`. The note is kept on the task itself, so a note set from a called chain inside the task lands on the task, and a later note replaces the earlier one. Setting a note adds nothing to the task's history. Inside a task, `tasks.note('hello from ' .. sys.taskid)` followed by `tasks.status(sys.taskid).note` reads the note back.
+`tasks.note(text)` publishes the latest progress note for the task your code runs inside, and returns nothing. The owner reads it as the `note` field of `tasks.status`. The note is kept on the task itself, so a note set from a called chain inside the task lands on the task, and a later note replaces the earlier one. Inside a task, `tasks.note('hello from ' .. sys.taskid)` followed by `tasks.status(sys.taskid).note` reads the note back.
 
 `tasks.note` on the main walk succeeds, but the note lands where nothing reads it. `tasks.note` takes a string: another type fails with `tasks.note text must be a string, got {type}`, and text that is not valid UTF-8 fails with `text must be a valid UTF-8 string`, both error values of kind `lua`.
 
@@ -10729,7 +10687,7 @@ The timeout behind a timed wait is never a task you can see: `tasks.pending` and
 
 ## The concurrency limit
 
-The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it reports [`task_started`](16-task-events.md#task-lifecycle-events) when it is admitted and first runs. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
+The Harness running the prompt sets one concurrency limit for the whole run: the most tasks running at once, 8 by default, and every task counts against it, fanout arms, spawned tasks, and their own spawned tasks included. A spawned task that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` with `state` still `running`, and it first runs when it is admitted. The scheduler admits the waiting tasks in spawn order as slots free up, and a task parked on a wait gives its slot back while it waits, so a fanout whose arms each fan out again cannot deadlock. The main walk never waits for a slot.
 
 `tasks.concurrency(n)` lowers the limit for the tasks the calling chain spawns from then on, clamped to the parent chain's limit, which for the main walk is the Harness's ceiling. It returns the effective limit, and `tasks.concurrency()` with no argument reads it back. With the Harness's ceiling at 4, `tasks.concurrency(16)` returns 4, `tasks.concurrency(2)` returns 2, and a later `tasks.concurrency(4)` climbs back to 4: the setter is `min(n, parent)`, never an error, so a prompt stays portable wherever it runs, under any ceiling. The new limit gates admissions from then on only, and never preempts a task that is already running.
 
@@ -10784,7 +10742,7 @@ return models.infer('Answer carefully, checking each step: ' .. args)
 
 `tasks.join_any` delivers the first task to end, and the loop cancels whatever is still live, so the section ends with nothing left running whichever task wins. If the other task is still in its model round when it is cancelled, that is safe: a task stopped while it waits on Harness work, such as a store call, a model round, or a timeout, does not fail the run, and the late answer is discarded when it arrives.
 
-A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe. The first cancel is recorded in the task's history once, and repeated cancels add nothing.
+A cancel marks the task `cancelled`, with `ok` false, and stops its chain, together with every task that chain owns. Cancelling a task that has already ended does nothing, so calling `tasks.cancel` more than once is safe.
 
 A wait on a cancelled task returns `ok = false` and an error value of kind `cancelled`, whose `task` field names the task, with the message `` task `{task}` was cancelled ``. The wait itself does not raise:
 
@@ -10797,7 +10755,7 @@ Here `ok` is `false`, `err.kind` is `cancelled`, `err.task` equals `t.task`, and
 
 ### Cancelled and abandoned
 
-A task ends with its owner. When the owning chain ends, every task it owns that is still running is abandoned and its chain stopped, along with every task that chain owns in turn. Cancelled and abandoned are different endings: cancelled means the owner stopped the task on purpose, and abandoned means the owner ended while the task was still live. The status `state` and the task's history keep them apart, and so does what the model is told about the tasks it started.
+A task ends with its owner. When the owning chain ends, every task it owns that is still running is abandoned and its chain stopped, along with every task that chain owns in turn. Cancelled and abandoned are different endings: cancelled means the owner stopped the task on purpose, and abandoned means the owner ended while the task was still live. The status `state` keeps them apart, and so does what the model is told about the tasks it started.
 
 An abandoned task ends with state `abandoned` and `ok` false. It is recorded as abandoned exactly once, with its reason, and never also as succeeded or failed. It never reaches a wait, because only its owner may wait on it and its owner has already ended.
 
@@ -10899,7 +10857,7 @@ A live task is abandoned for one of five reasons, and each reason has a fixed ph
 | `owner_aborted` | The owner was stopped from outside, by a failing sibling arm's fail-fast or by its own owner ending first | `the owner was aborted` |
 | `run_terminated` | The run itself ended while the task was live, for example because the Host cancelled it | `the run ended` |
 
-`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](17-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
+`tool_loop_exhausted` is kept apart from `owner_failed` so that the model is told its task outlived the loop that started it. When the run itself ends while tasks are live, every such task is abandoned exactly once before the run ends: with `run_terminated` for a task the run's end stranded directly, and with `owner_aborted` for a task nested under one, so no task is recorded twice. A [Host cancel](16-limits-and-errors.md#cancelling-a-run) ends the run as cancelled, not failed. A run that ends normally has no live tasks left, because each chain settled its own.
 
 ### When a chain stops
 
@@ -10925,7 +10883,7 @@ task_consumed|0.0|task `0.0` was already delivered: a task's result is taken by 
 | Kind | Raised when | Fields | Message |
 |---|---|---|---|
 | `lua` | an argument is wrong, a target does not resolve, the depth cap is crossed, or the target is a list section | `message` | one of the messages listed below |
-| `task_not_owned` | a wait, status read, history read, or cancel names a task the chain does not own, or an id that names no task | `task` | `` task `{task}` is not a task this chain owns `` |
+| `task_not_owned` | a wait, status read, or cancel names a task the chain does not own, or an id that names no task | `task` | `` task `{task}` is not a task this chain owns `` |
 | `task_consumed` | a wait names a task that was already delivered | `task` | `` task `{task}` was already delivered: a task's result is taken by one wait `` |
 | `tasks_live` | a chain ended normally with tasks it spawned still live | `tasks`, the ids joined with `, ` | `chain ended with author tasks still live: {ids}; wait on or cancel every task a chain spawns before it ends` |
 | `cancelled` | returned, not raised, by a wait on a cancelled task | `task` | `` task `{task}` was cancelled `` |
@@ -10934,7 +10892,7 @@ task_consumed|0.0|task `0.0` was already delivered: a task's result is taken by 
 
 `task_consumed` marks a wait on a result already taken, with the task in `err.task`. `tasks_live` marks a chain that ended normally while tasks it spawned were still running, with their ids, comma-separated, in `err.tasks`. `cancelled` is the error value a wait returns, unraised, for a cancelled task, with the task in `err.task`. A wait never raises a cancelled task's error value; only re-raising it, for example with `error(err)`, makes it a failure.
 
-When one of these errors ends the run uncaught, the run error kind is [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass too. That covers a leaked task, a task reached by a chain that does not own it, a result waited on twice, and a `cancelled` error value that the owner re-raises right after the wait with nothing to catch it: each is the prompt's own program failing, as any Lua fault is. A `cancelled` error value re-raised later, after another suspending call, ends the run with the cancelled outcome instead, not as a failed run. Raised inside a task, such an error first becomes that task's failure, which reaches the owner through its wait.
+When one of these errors ends the run uncaught, the run error kind is [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass too. That covers a leaked task, a task reached by a chain that does not own it, a result waited on twice, and a `cancelled` error value that the owner re-raises right after the wait with nothing to catch it: each is the prompt's own program failing, as any Lua fault is. A `cancelled` error value re-raised later, after another suspending call, ends the run with the cancelled outcome instead, not as a failed run. Raised inside a task, such an error first becomes that task's failure, which reaches the owner through its wait.
 
 ### Argument messages
 
@@ -11002,7 +10960,7 @@ return models.infer('List the key facts about: ' .. args)
 ```
 ````
 
-The H1 body makes `writer` the default [model role](10-models.md#choosing-a-sections-model) for every section, and `models.loop` runs the conversation until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.allow_tasks({ '## Research' })` puts the five task built-ins in scope for every model round in `## Plan` and limits the model's `task` calls to `## Research`. The model can start the task by calling `task` with `{"target": "## Research"}`, and `## Research` then runs as a task under the run's own argument string, because the call passes no `input`. `## Plan` returns, so the walk never reaches `## Research` as a walked section.
+The H1 body makes `writer` the default [model role](10-models.md#choosing-a-sections-model) for every section, and `models.loop` runs the conversation until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.allow_tasks({ '## Research' })` puts the four task built-ins in scope for every model round in `## Plan` and limits the model's `task` calls to `## Research`. The model can start the task by calling `task` with `{"target": "## Research"}`, and `## Research` then runs as a task under the run's own argument string, because the call passes no `input`. `## Plan` returns, so the walk never reaches `## Research` as a walked section.
 
 Until `tools.allow_tasks` has run in a section, the task built-ins are not in scope there at all, and a model round in a section without it offers none of them. The allowlist belongs to the section where `tools.allow_tasks` ran, and each section opts in for itself.
 
@@ -11011,7 +10969,7 @@ Until `tools.allow_tasks` has run in a section, the task built-ins are not in sc
 
 With a list, a `task` call naming any other target is refused with `` task: target `{target}` is not allowed; allowed targets: {headings} ``, the allowed headings joined by `, `. No task starts, and the run continues normally.
 
-While the allowlist is set, every model round in the section has the five task built-ins in scope, listed after the section's bound and local tools, in the fixed order `task`, `task_cancel`, `task_status`, `await_tasks`, `task_events`.
+While the allowlist is set, every model round in the section has the four task built-ins in scope, listed after the section's bound and local tools, in the fixed order `task`, `task_cancel`, `task_status`, `await_tasks`.
 
 ### The task built-in
 
@@ -11049,7 +11007,7 @@ Allowed targets are compared as written, such as `## Research`: leading and trai
 
 ### The built-in names
 
-A model call to one of the five names always reaches the built-in, before any alias is looked up, so no bound or local tool can shadow it, and local tools need other names. A script reaches tasks only through the `tasks` namespace: [`tools.call`](12-tools.md#calling-tools-from-lua) with one of the five names raises an error value of kind `unbound_tool` whose `name` field is that name, even when a local tool of that name exists, and no tool result is recorded.
+A model call to one of the four names always reaches the built-in, before any alias is looked up, so no bound or local tool can shadow it, and local tools need other names. A script reaches tasks only through the `tasks` namespace: [`tools.call`](12-tools.md#calling-tools-from-lua) with one of the four names raises an error value of kind `unbound_tool` whose `name` field is that name, even when a local tool of that name exists, and no tool result is recorded.
 
 When the model calls `task` in a section that has not run `tools.allow_tasks`, `models.loop` raises an error value of kind [`out_of_scope_tool`](12-tools.md#advertising-tools-to-the-model) whose `name` is `task`, at the `models.loop` call, before any task starts. Nothing is appended to the message list, and no further round runs.
 
@@ -11064,7 +11022,7 @@ Task id={task} (## {target}) was canceled: the author cancelled it
 Task id={task} (## {target}) was abandoned: {why}
 ````
 
-The spellings `was canceled` and `cancelled it` are exactly as shown. The head, `Task id={task} (## {target})`, gives the task id and the name of the section the task ran, written after `## `. The Engine also keeps each notice in the owner section's history, together with the owner's round count at the moment it queued the notice.
+The spellings `was canceled` and `cancelled it` are exactly as shown. The head, `Task id={task} (## {target})`, gives the task id and the name of the section the task ran, written after `## `.
 
 Before every `models.loop` round, the notices waiting for the section are appended to its message list as user records whose `content` is the notice, so the model reads them in that round, beside the records the loop appends itself ([Conversations](11-conversations.md#what-the-loop-appends)). The owner can find them in its list afterward like any other record:
 
@@ -11091,8 +11049,6 @@ The prompt cancels a model task through the handles `tasks.pending` gives it:
 local mine = tasks.pending({ origin = 'model' })
 tasks.cancel(mine[1])
 ````
-
-The abandoned notice is kept in the owner section's history even though the model never reads it, because its owner has already ended.
 
 A notice is the Engine's own sentence. Only a completed task's result is wrapped, in the [untrusted envelope](09-the-store.md#wrapping-untrusted-text) under the run's nonce; the head, the verb, a failure message, and the cancel and abandon wording are plain Engine text. A completed notice spans several lines, because the wrapped result follows `completed: ` directly:
 
@@ -11131,9 +11087,9 @@ return tostring(results[1].ok) .. '|' .. results[1].result
 
 For a model task whose section returns `'child result'`, this returns `true|child result`: each entry has `ok` and `result`, and `result` is the task's own returned text, not the notice sentence. Once the prompt's wait has collected a model task, the task counts as delivered, so the section's end neither abandons it nor fails.
 
-## The model's status, cancel, and history tools
+## The model's status and cancel tools
 
-`task_cancel`, `task_status`, and `task_events` each take a required `id` string, exactly as `task` returned it, such as `{"id":"0.0"}`. They see only tasks the model started from the calling section. Any other id, including the id of a task the prompt spawned, is refused with `{name}: no model task with id {id}`, such as `task_status: no model task with id 0.0` or `task_events: no model task with id 0.7`, so the model can neither end nor inspect the prompt's own tasks. A bad `id` gets its own refusal, where `{name}` is the built-in called:
+`task_cancel` and `task_status` each take a required `id` string, exactly as `task` returned it, such as `{"id":"0.0"}`. They see only tasks the model started from the calling section. Any other id, including the id of a task the prompt spawned, is refused with `{name}: no model task with id {id}`, such as `task_status: no model task with id 0.0`, so the model can neither end nor inspect the prompt's own tasks. A bad `id` gets its own refusal, where `{name}` is the built-in called:
 
 - A missing or non-string `id` is refused with `` {name}: `id` must be a task id string, exactly as `task` returned it ``.
 - A string that is not a task id is refused with `` {name}: `{id}` is not a task id; use the id `task` returned ``, such as `` task_status: `nope` is not a task id; use the id `task` returned ``.
@@ -11158,21 +11114,9 @@ In the last line, `tasks 0.0.0` lists the live tasks the task started itself, ea
 
 `task_cancel` is answered right away. It cancels one of the model's own tasks, does nothing more for a task that already ended, like `tasks.cancel`, and returns `Task id={task} cancelled`; a failure comes back as `task_cancel: {error}`. The model's own `task_cancel` queues no task notice, because its confirmation is the model's whole word on it, while a cancel from the prompt does queue one. After the model cancels its only task, `tasks.pending()` is empty, and the section ends without abandoning anything or failing.
 
-### History reads
-
-`task_events` returns what one of the model's tasks has reported so far, its sections, model rounds, tool calls, and their content, as one JSON object per line, in order; it reads the same history as `tasks.events`, and [Task Events](16-task-events.md#reading-a-tasks-history) describes each kind of entry and its fields. An optional `last` integer, the `provenance.seq` of the last entry the model already read, limits the result to later entries:
-
-- `last` left out or `null` reads the whole history.
-- A non-negative whole number that fits in 32 bits reads what came after it.
-- Anything else is refused with `` task_events: `last` must be a non-negative integer sequence number when given ``.
-
-When nothing was reported after `last`, the result is the text `no new events`. While the model's `task_events` read is being answered, the calling chain's status `blocked` reads `tasks`.
-
-The `task_events` result is wrapped in the untrusted envelope under the run's nonce. It is the only task built-in result that is not trusted, because a task's history holds model, tool, and user text. Lines a task writes with [`log`](05-lua-environment.md#checkpoints-with-log) appear in its history under the same encoding, so a logged forged close tag or `[INST]` arrives escaped and spaced inside the reader's envelope. The read itself is recorded in the history as a tool result for the model's call id, with the alias `task_events`, marked untrusted.
-
 ### Trust and failed calls
 
-A bad task built-in call never fails the run: every fault the model can cause comes back as the tool result text, so the model can read it and try again. Each `task_events` argument fault comes back this way and is recorded as a failed tool call, not a run error. Every other task built-in result, whether a start, a cancel confirmation, a status line, a wait's notices, a refusal, or `no new events`, is the Engine's own text and reaches the model as [trusted](12-tools.md#trusted-and-untrusted-output).
+A bad task built-in call never fails the run: every fault the model can cause comes back as the tool result text, so the model can read it and try again. Every task built-in result, whether a start, a cancel confirmation, a status line, a wait's notices, or a refusal, is the Engine's own text and reaches the model as [trusted](12-tools.md#trusted-and-untrusted-output).
 
 Each call to `task`, `task_status`, or `await_tasks` is an ordinary tool call: it gets a tool record in the message list and is recorded as one succeeded tool call under the owner's section, while refused calls are recorded as failed tool calls.
 
@@ -11214,964 +11158,6 @@ A task that ends at the same moment the timeout expires wins. When a task ends f
 | No waiting notice, no running task, and no timeout | `nothing to wait for`, at once |
 | No waiting notice and no running task, with a timeout | `slept {seconds} seconds` after the whole timeout, such as `slept 0.05 seconds` |
 | A `timeout` that is not a non-negative number | the refusal text |
-
----
-
-# Task Events
-
-A run reports everything it does as it goes: each section that starts and finishes, each Lua block, each model round with its token counts, each tool call and store operation, and each task that starts and ends. `tasks.events` hands those reports back to your Lua code as plain tables, so a prompt can check what a task actually did, add up what its model calls cost, or follow a long task while it is still running. This chapter shows you how to read a task's history, what every kind of event means and holds, and which events a prompt never gets back.
-
-## Reading a task's history
-
-An event is one report the run makes as it works, such as a section starting, a store write finishing, or a model round ending. The run reports events at every boundary of the parse and the run: the parse itself, the run, each section, each Lua block, each model round, each tool call, each store operation, and each task. The Harness keeps every event in its run log, and `tasks.events(task)` reads one task's history, the events that task has reported so far:
-
-````markdown
----
-name: child-history
-description: Starts a task and lists the events it reported
-promptforge: 0
----
-
-# Child history
-
-## Start
-
-```lua
-local t = tasks.spawn('### Child')
-tasks.join_any({ t })
-local kinds = {}
-for _, e in ipairs(tasks.events(t)) do
-  kinds[#kinds + 1] = e.kind
-end
-return table.concat(kinds, '\n')
-```
-
-### Child
-
-```lua
-return 'done'
-```
-````
-
-`tasks.spawn('### Child')` starts the child section as a [task](15-tasks.md#starting-a-task) and returns its Task handle, and [`tasks.join_any({ t })`](15-tasks.md#waiting-for-results) waits until that task ends. `tasks.events(t)` then returns the task's history as a 1-based Lua sequence of plain tables, one per event, in the order the task reported them. The Harness serves the read from its run log.
-
-Each table's `kind` field names its event, so the block returns one line per event. The first line is `section_started`, reported when `### Child` began, and the last is `task_succeeded`, reported when the task ended with a result. The lines between report the child's section VM starting up, its Lua block running, and its section finishing.
-
-### What an event holds
-
-Every event table holds the same four keys, followed by the fields of its own kind, if it has any. A successful store write reads like this in Lua:
-
-````lua
-{
-  kind = 'store_write_succeeded',
-  execution = 'run-1',
-  section = 'Gather',
-  provenance = { task = '0.2', seq = 9 },
-}
-````
-
-- `kind` names the event.
-- `execution` identifies the run.
-- `section` is the heading text of the section that reported the event.
-- `provenance` says which task reported the event, in `provenance.task`, and where the event falls in that task's count, in `provenance.seq`.
-
-`execution`, `section`, and `provenance` are the event's three coordinates. An event that holds only `kind` and the three coordinates, such as `run_started`, `section_finished`, or `store_write_succeeded`, is a boundary event: it marks the moment something began, ended, or failed, and says nothing more. Of the 59 kinds, 44 are boundary events, and the other 15 add fields of their own, which this chapter gives with each kind. Read every field with ordinary indexing, as in `e.kind`, `e.section`, `e.provenance.task`, and `e.provenance.seq`.
-
-### Event kinds
-
-A kind is the event's name written in snake_case, such as `run_started`, `section_finished`, or `store_read_numbered_succeeded`. Here are all 57, by area:
-
-| Area | Kinds | Covered in |
-|---|---|---|
-| Parse | `parse_started`, `parse_succeeded`, `parse_failed` | [Lua block and parse events](#lua-block-and-parse-events) |
-| Run | `run_started`, `run_succeeded`, `run_failed` | [Run and section boundaries](#run-and-section-boundaries) |
-| Section | `section_started`, `section_finished` | [Run and section boundaries](#run-and-section-boundaries) |
-| Section VM | `lua_shared_load_started`, `lua_shared_load_succeeded`, `lua_shared_load_failed`, `lua_chunk_started`, `lua_chunk_succeeded`, `lua_chunk_failed`, `lua_teardown_started`, `lua_teardown_succeeded` | [Lua block and parse events](#lua-block-and-parse-events) |
-| Compiling at parse time | `lua_compilation_started`, `lua_compilation_succeeded`, `lua_compilation_failed` | [Lua block and parse events](#lua-block-and-parse-events) |
-| Author checkpoint | `lua` | [Lua block and parse events](#lua-block-and-parse-events) |
-| Model | `model_turn_completed`, `model_turn_failed`, `model_turn_truncated`, `model_metadata_degraded`, `thinking`, `assistant_reply`, `assistant_tool_calls` | [Model round events](#model-round-events) |
-| Tools | `tool_scope_validation_started`, `tool_scope_validation_succeeded`, `tool_scope_validation_failed`, `tool_call_succeeded`, `tool_call_failed`, `tool_result` | [Tool call events](#tool-call-events) |
-| Store | `store_write_succeeded`, `store_write_failed`, `store_append_succeeded`, `store_append_failed`, `store_read_succeeded`, `store_read_failed`, `store_read_numbered_succeeded`, `store_read_numbered_failed`, `store_replace_succeeded`, `store_replace_failed`, `store_delete_succeeded`, `store_delete_failed`, `store_glob_succeeded`, `store_glob_failed`, `store_exists_succeeded`, `store_exists_failed` | [Store and operator input events](#store-and-operator-input-events) |
-| Tasks | `task_started`, `task_succeeded`, `task_failed`, `task_cancelled`, `task_abandoned`, `task_notice` | [Task lifecycle events](#task-lifecycle-events) |
-| Debug capture, only when the Harness switches it on | `request`, `response` | [Model round events](#model-round-events) |
-
-### The section label
-
-`section` is heading text without the `#` markers, so `## Inner` reports as `Inner`. Every event a section's code causes has that section's heading, and a section reached through [`call`](08-jump-and-call.md#called-chains) reports under its own heading, not its caller's. The [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) and the run's opening and closing events report under the H1 title, and parse events report under `Prompt`. Whatever heading you write becomes the label on every event its section reports, so headings you can recognize make a history easy to read.
-
-### Which tasks a chain can read
-
-A chain can read exactly two kinds of task: a task it [owns](15-tasks.md#starting-a-task), such as one it started with `tasks.spawn`, and the task it runs inside, whose id is [`sys.taskid`](05-lua-environment.md#run-metadata-in-sys). This is the same owner-or-self rule that [`tasks.status`](15-tasks.md#checking-on-tasks) follows. Pass `sys.taskid` to read the current task's own history, inside a spawned task or on the main walk, which reads itself as task `0`:
-
-````lua
-local mine = tasks.events(sys.taskid)
-````
-
-On the main walk `#mine` is always above 0, because `run_started` opens the run's events. The timers that timed waits use behind the scenes are never readable tasks.
-
-### Reading only new events
-
-A read returns what the task has reported so far, and anything reported later needs another read. Pass `{ last = seq }` as the second argument to get only the events reported after `seq`, the highest `provenance.seq` you have already seen. `last` is exclusive, so a polling loop that passes back the highest `seq` it has seen reads each event exactly once:
-
-````markdown
----
-name: progress
-description: Follows a task's events while it runs
-promptforge: 0
----
-
-# Progress
-
-## Watch
-
-```lua
-local t = tasks.spawn('### Work')
-local seen
-local kinds = {}
-repeat
-  local ended = tasks.join_any({ t }, { timeout = 2 })
-  for _, e in ipairs(tasks.events(t, { last = seen })) do
-    seen = e.provenance.seq
-    kinds[#kinds + 1] = e.kind
-  end
-until ended
-return table.concat(kinds, '\n')
-```
-
-### Work
-
-```lua
-store.write('draft.md', 'outline')
-store.append('draft.md', '\nbody')
-return 'done'
-```
-````
-
-With a `timeout`, `tasks.join_any` returns `nil` if the task is still running after 2 seconds, and the task's handle once it has ended, as [Time limits on waits](15-tasks.md#time-limits-on-waits) describes. Each iteration reads only what the task reported since the previous one and keeps the newest `seq` in `seen`. On the first iteration `seen` is nil, and a `last` of nil reads from the task's first event. The result lists every event of `### Work` once, however many iterations the loop takes.
-
-## Read options, results, and errors
-
-Name the task with a Task handle, as in `tasks.events(t)`, or with a bare [task id](15-tasks.md#task-handles-and-ids) string such as `'0'` or `'0.2'`. The second argument is optional. When you pass it, it is a table whose only option is `last`, a whole number from 0 to 4294967295, which is the full range of `provenance.seq`. A float with no fractional part counts as that whole number, so `last = 3.0` reads as `3`. With no second argument, or no `last` in it, the read starts at the task's first event.
-
-The result is always a sequence table. When nothing new has been reported it is empty, with `#events == 0`, so `#` and `ipairs` work on any result without a nil check.
-
-An optional field that an event leaves out reads as `nil`, never as a placeholder value, so a plain truth test checks for it. That covers an `assistant_reply` event's `finish_reason` when the provider sent no stop label, its `metrics` when nothing was measured, and any seed a task started without:
-
-````lua
-local reason = e.finish_reason or 'no stop label'
-````
-
-Reading a history has no side effects: a `tasks.events` call adds no events of its own. A task that reads its own history sees every event reported before the read.
-
-The model reads the same Harness-kept history with its `task_events` built-in, as [The model's status, cancel, and history tools](15-tasks.md#the-models-status-cancel-and-history-tools) describes. Your Lua code gets the events back as a sequence of tables, while the same read made by the model comes back to the model as untrusted text.
-
-### Read errors
-
-`tasks.events` checks its arguments at the call, and a broken rule raises an [error value](05-lua-environment.md#catching-and-inspecting-errors) there, where `pcall` catches it. `err.kind` and `err.message` read as for any error value, and `tostring(err)` returns the message:
-
-| Kind | Raised when | Message |
-|---|---|---|
-| `lua` | the second argument is not a table | `tasks.events opts must be a table, got {type}` |
-| `lua` | `last` is not a number | `tasks.events last must be a number, got {type}` |
-| `lua` | the task argument is neither a Task handle nor a string | `tasks.events expects a Task handle or task id, got {type}` |
-| `lua` | the task string is not a dot-separated task id | `` `{text}` is not a task id: required a dot-separated path such as `0.1` `` |
-| `lua` | `last` is negative, fractional, or above 4294967295 | `last must be a non-negative integer sequence number, got {value}` |
-| `task_not_owned` | the chain neither owns the task nor runs inside it, including an id that names no task | `` task `{task}` is not a task this chain owns ``, with the id in the error's `task` field |
-
-When one call breaks several rules, the first broken rule in this order is reported: the types of the options table and `last`, then the task argument and the range of `last`, and ownership last. An id that names no task at all gets the same `task_not_owned` refusal as a task another chain owns, so a chain learns nothing about tasks it never started. When a task id reaches your code from somewhere other than your own `tasks.spawn`, such as the argument string, guard the read:
-
-````lua
-local ok, history = pcall(tasks.events, args)
-if not ok then
-  if history.kind == 'task_not_owned' then
-    return 'not my task: ' .. history.task
-  end
-  error(history)
-end
-return #history .. ' events so far'
-````
-
-If the run is cancelled while a read is still waiting for the Harness, the read fails with an error value of kind `cancelled`, and the model's `task_events` read fails the same way. [Cancelling a run](17-limits-and-errors.md#cancelling-a-run) covers what a cancel does to the rest of the run.
-
-## Event coordinates and task ids
-
-Every event has three coordinates that trace it back to its run and its reporter:
-
-- `execution` is a string that identifies the run. One value runs through every event of a run, from the parse to the end.
-- `section` is the heading text of the section that reported the event. A [`models.loop`](11-conversations.md#a-first-conversation) conversation's events report under the section that ran the loop.
-- `provenance` names the task that reported the event, in `task`, and the event's place in that task's count, in `seq`.
-
-### Task ids and called sections
-
-`provenance.task` is the id of the nearest task the event belongs to. Task ids are dot-separated paths: the main walk is task `0`, and the tasks it starts, such as the arms of a [`fanout`](14-fanout.md#the-fanout-call), are `0.0`, `0.1`, `0.2`, and so on. Each task stamps its own id on its events and keeps its own `seq` count.
-
-A section reached through `call` is not a task of its own. It reports under its caller's task and continues the caller's `seq` numbers, because the caller waits for the `call` to finish and the two never interleave. This prompt shows where a called section's events land:
-
-````markdown
----
-name: call-report
-description: Shows where a called section's events are filed
-promptforge: 0
----
-
-# Call report
-
-## Outer
-
-```lua
-local reply = call('## Inner')
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'lua' then
-    return reply .. ' from ' .. e.section .. ' on task ' .. e.provenance.task
-  end
-end
-```
-
-## Inner
-
-```lua
-log('inner ran')
-return 'hello'
-```
-````
-
-[`log`](05-lua-environment.md#checkpoints-with-log) reports an event of kind `lua` whose `message` field holds the logged text. `## Outer` calls `## Inner`, then searches its own history for that event and returns:
-
-````text
-hello from Inner on task 0
-````
-
-The event has the called section's own heading, `Inner`, as its `section`, and the caller's task, `0`, as its `provenance.task`. A spawned task, by contrast, reports under its own id.
-
-### Sequence numbers
-
-`provenance.seq` strictly increases within a task, independently of every other task, so sorting a task's events by `seq` puts them in order without a clock. A spawned task counts from 0. The main walk's count starts after any parse events the Harness logged ahead of the run.
-
-Event numbers can skip. One counter per task numbers both the [Harness work](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness) the task asks for, such as model calls and store writes, and the events the task reports, so the two stay in order against each other. Each piece of Harness work takes the next number, so the numbers on events skip wherever the task asked the Harness for something. With no Harness work in between, event numbers run without gaps from the task's starting number. The counter itself never skips; only the events leave holes where Harness work took a number.
-
-The pair of task id and `seq` is unique across a run's log. `seq` is a 32-bit unsigned count, from 0 to 4294967295, the same range `last` accepts.
-
-### Reproducible ids
-
-Two runs of the same prompt, given the same argument string and the same answers to their Harness work, get the same task ids and stamp the same `{ task, seq }` on the same events, however their chains interleave. Provenance sorts by task path first and by `seq` second.
-
-### How the run log writes an event
-
-Outside Lua, the Harness writes each event to its run log as one line of JSON: `kind` first, then `execution`, `section`, and `provenance`, then the kind's own fields. The store write shown earlier in this chapter becomes:
-
-````text
-{"kind":"store_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}
-````
-
-An event table in Lua has the same keys and nesting.
-
-## Run and section boundaries
-
-A run's events open with `run_started` and close with `run_succeeded` or `run_failed`, both reported under the prompt's H1 title, with each walked section's events between them in document order. This prompt has two sections and a shared library:
-
-````markdown
----
-name: lifecycle
-description: Two sections that share a helper
-promptforge: 0
----
-
-# Lifecycle
-
-```lua shared
-function shout(text)
-  return string.upper(text)
-end
-```
-
-## First
-
-```lua
-var.word = shout('hello')
-```
-
-## Second
-
-```lua
-return var.word
-```
-````
-
-Leaving out any parse events the Harness logged first, the run log for this prompt reads as follows, one event per line with its `section` and then its `kind`:
-
-````text
-Lifecycle  run_started
-First      section_started
-First      lua_shared_load_started
-First      lua_shared_load_succeeded
-First      lua_chunk_started
-First      lua_chunk_succeeded
-First      lua_teardown_started
-First      lua_teardown_succeeded
-First      section_finished
-Second     section_started
-Second     lua_shared_load_started
-Second     lua_shared_load_succeeded
-Second     lua_chunk_started
-Second     lua_chunk_succeeded
-Second     lua_teardown_started
-Second     lua_teardown_succeeded
-Second     section_finished
-Lifecycle  run_succeeded
-````
-
-Each section starts, its [section VM](03-blocks-and-prose.md#how-the-shared-library-loads) replays the shared library, runs the section's Lua block, and shuts down, and then the section finishes. `First` falls through, `Second` returns `HELLO` as the run result, and the run succeeds.
-
-### What each boundary means
-
-| Kind | Meaning |
-|---|---|
-| `parse_started` | Parsing of the prompt file began |
-| `parse_succeeded` | Parsing, including compiling the prompt's Lua, completed |
-| `parse_failed` | Parsing failed |
-| `run_started` | The run passed its [version gate](02-file-structure.md#the-promptforge-version) and began |
-| `run_succeeded` | The run returned a value |
-| `run_failed` | The run returned an error |
-| `section_started` | A walked section began |
-| `section_finished` | A walked section completed successfully |
-
-`run_started` is reported on the main walk, task `0`, under the H1 title and ahead of any section event, so the main walk can find it in `tasks.events(sys.taskid)`. A run ends with exactly one closing event, `run_succeeded` or `run_failed`, under the H1 title and after every task's terminal event. There is no run-cancelled kind: a [cancelled](04-how-a-prompt-runs.md#failure-and-cancellation) run also closes with `run_failed`, even though its outcome is cancelled rather than failed. A prompt never reads either closing event, because both are reported after every chain has stopped, so they appear only in the Harness's run log.
-
-Each walked section reports `section_started` when it begins and `section_finished` only when it completes successfully, both with its heading text as `section`. A section completes by falling through, by [`jump`](08-jump-and-call.md#sibling-jumps), or by `return`, and it reports `section_finished` after its Lua teardown and before the next section reports `section_started`. The events of a task's chain have that task's id.
-
-The H1 pass never reports `section_started` or `section_finished`, even when it ends with a return or an error, but it still reports its Lua teardown pair under the H1 title. A section still suspended when the run ends, waiting on a model, a tool, or a task, reports no `section_finished`.
-
-### Spotting a failed section
-
-There is no section-failed kind. A section whose chain ends in an error reports `section_started` but never `section_finished`, and that gap is how you find the failing section in a history. This block reports where a failed task stopped:
-
-````lua
-local t = tasks.spawn('### Risky')
-local _, ok = tasks.join_any({ t })
-if ok then
-  return 'the task succeeded'
-end
-local open = {}
-for _, e in ipairs(tasks.events(t)) do
-  if e.kind == 'section_started' then open[e.section] = true end
-  if e.kind == 'section_finished' then open[e.section] = nil end
-end
-for name in pairs(open) do
-  return 'the task failed in ' .. name
-end
-return 'the task failed'
-````
-
-`tasks.join_any` returns `ok` as `false` when the task failed, and every section the task started but never finished is left in `open`.
-
-## Lua block and parse events
-
-### Section VM events
-
-Every section VM reports its phases, with the section's heading as `section`:
-
-- Replaying the shared library reports `lua_shared_load_started`, then `lua_shared_load_succeeded` or `lua_shared_load_failed`.
-- Running each Lua block reports `lua_chunk_started`, then `lua_chunk_succeeded` or `lua_chunk_failed`.
-- Teardown reports `lua_teardown_started` and `lua_teardown_succeeded`, back to back. Teardown has no failed kind.
-
-When a block pauses at a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), such as a model call, a tool call, or a store operation, no event marks the pause. The block's `lua_chunk_started` and its closing event still bracket it, and the events of the Harness work it waited on come between them.
-
-`lua_shared_load_failed` covers any error while the shared library loads or runs, including a call to `jump`, which is not available while the library loads. Every section reports exactly one teardown pair, even when its section VM fails before any block runs: a failing shared library reports `lua_shared_load_failed`, then `lua_teardown_started` and `lua_teardown_succeeded`.
-
-The H1 pass reports its Lua block events under the H1 title. When its own Lua fails with an uncaught error, such as a failed `assert`, it reports `lua_chunk_failed` under the H1 title, and the run ends as [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified) with the error's text as its notice, the hard gate that [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) describes.
-
-A failed block's detail is the error it raised, never the event: `lua_chunk_failed` is a boundary event and holds only the coordinates.
-
-### Checkpoints from log
-
-Every `log(message)` call that passes its checks reports a `lua` event, your own checkpoint in the history. Its `message` field holds the text exactly as logged. Its `section` is the heading of the section whose Lua called `log`, which for a section reached through `call` is that section's own heading, and its `provenance` is the calling task. This section writes two checkpoints and reads them back:
-
-````markdown
----
-name: checkpoints
-description: Reads back its own log checkpoints
-promptforge: 0
----
-
-# Checkpoints
-
-## Work
-
-```lua
-log('loaded input')
-store.write('notes.md', args)
-log('saved notes')
-local lines = {}
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'lua' then
-    lines[#lines + 1] = e.section .. ': ' .. e.message
-  end
-end
-return table.concat(lines, '\n')
-```
-````
-
-````text
-Work: loaded input
-Work: saved notes
-````
-
-A `log` call that breaks one of its rules raises at the call and reports nothing. The rules, from [Checkpoints with log](05-lua-environment.md#checkpoints-with-log), are exactly one argument, a UTF-8 string of at most 256 characters with no newline or control character, and a run that has not yet used up its log events or log bytes.
-
-### Parse and compile events
-
-`parse_started` and `parse_succeeded` bracket the parse of the prompt file, reported on task `0` with `Prompt` as their `section`. Between them, each Lua block compiled while the file is parsed reports `lua_compilation_started`, then `lua_compilation_succeeded` or `lua_compilation_failed`. Each block is compiled once, when the file is parsed, so these events belong to the parse, not to a section VM. A compilation event's `section` says where the Lua sits: the H1 title for Lua in the H1 body, and the section's heading for a section's Lua. No parse or compilation event includes Lua source or its location. In order, a parse reports:
-
-1. `parse_started`
-2. one compilation pair for each Lua block: `lua_compilation_started`, then `lua_compilation_succeeded` or `lua_compilation_failed`
-3. `parse_succeeded` or `parse_failed`
-
-The main walk sees these events in its own history only when the Harness logs parse events in the same log it serves reads from, as the standard runner does, and the main walk's own numbering then continues after them. A file whose parse fails never runs, so a prompt never reads `parse_failed`, or a `lua_compilation_failed`, which fails the parse. Both appear only in the Harness's run log.
-
-## Store and operator input events
-
-### Store events
-
-Every [store](09-the-store.md#what-the-store-is) operation reports a succeeded or failed boundary event under the section that asked for it:
-
-| Call | Kinds |
-|---|---|
-| `store.write` | `store_write_succeeded`, `store_write_failed` |
-| `store.append` | `store_append_succeeded`, `store_append_failed` |
-| `store.read` | `store_read_succeeded`, `store_read_failed` |
-| `store.read_numbered` | `store_read_numbered_succeeded`, `store_read_numbered_failed` |
-| `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
-| `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
-| `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
-| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
-
-Note that `store.str_replace` reports as `store_replace`, and that `store.exists` reports its own pair. The store events hold no path, no content, and no error detail. A failed store call raises an error value of kind `store` at the call, as [Store errors](09-the-store.md#store-errors) describes, and that error is where the detail lives. A store call made inside a [local tool](12-tools.md#local-tools) handler is an ordinary store operation and reports the same events.
-
-A store operation's event is reported before the Lua call returns, so its outcome always comes before the block's closing event. Store and model work appear in the order the section did them: a write, then a read, then a model round report `store_write_succeeded`, then `store_read_succeeded`, then `model_turn_completed`, the event that ends a completed round. This prompt counts what a task did with the store:
-
-````markdown
----
-name: store-audit
-description: Counts a task's store writes and failed reads
-promptforge: 0
----
-
-# Store audit
-
-## Audit
-
-```lua
-local t = tasks.spawn('### Writer')
-tasks.join_any({ t })
-local writes, failed = 0, 0
-for _, e in ipairs(tasks.events(t)) do
-  if e.kind == 'store_write_succeeded' then writes = writes + 1 end
-  if e.kind == 'store_read_failed' then failed = failed + 1 end
-end
-return 'writes=' .. writes .. ' failed=' .. failed
-```
-
-### Writer
-
-```lua
-store.write('a.md', 'alpha')
-store.write('b.md', 'beta')
-pcall(store.read, 'missing.md')
-return 'done'
-```
-````
-
-````text
-writes=2 failed=1
-````
-
-The read of a file that does not exist raised an error value, which `pcall` caught inside the task, and the history still shows it as `store_read_failed`, with neither the path nor the error text.
-
-### Operator input
-
-Operator input has no event kinds of its own. A section that calls [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) makes a script call to the ask tool, so each ask reports as a [tool call](#tool-call-events). While an ask waits for the operator, the asking task's [`tasks.status`](15-tasks.md#status-fields) reads `blocked` `tool_call`, as it does during any tool call. When the operator's text arrives, the call reports `tool_call_succeeded` and then a `tool_result` under the same section, whose `alias` is the tool path `promptforge/user-input/ask`, whose `tool_call_id` is empty, whose `trusted` is `true`, and whose `content` is the operator's text exactly as typed, byte for byte. On a Host with nobody to ask, the same pair is reported with the fixed fallback sentence as `content`. A failed ask reports `tool_call_failed` and no `tool_result`. Counting the ask tool's results tells you how many asks came back, fallback answers included, and `input.connected()` tells you whether a person gave them:
-
-````lua
-local asks = 0
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'tool_result' and e.alias == 'promptforge/user-input/ask' then
-    asks = asks + 1
-  end
-end
-````
-
-A model that asks through an alias of its own, as [Letting the model ask](05-lua-environment.md#letting-the-model-ask) shows, reports under that alias and the model's call id, like any model tool call.
-
-## Model round events
-
-Every [round](10-models.md#running-a-round-with-modelsinfer), from `models.infer` or from a `models.loop` conversation, reports its events under the section that ran it. This prompt makes one round and reads back the event that reports its reply:
-
-````markdown
----
-name: reply-audit
-description: Reads back the reply event of its own round
-promptforge: 0
-models:
-  writer: {}
----
-
-# Reply audit
-
-```lua
-models.default('writer')
-```
-
-## Ask
-
-```lua
-local reply = models.infer('Name one prime number between 10 and 20.')
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'assistant_reply' then
-    return reply .. ' (' .. e.origin .. ', round ' .. e.turn .. ', ' .. e.model .. ')'
-  end
-end
-```
-````
-
-The block returns a line such as `13 (infer, round 1, claude-sonnet-4-6)`. The `assistant_reply` event holds the same text that `models.infer` returned, along with `origin` `infer`, which marks a `models.infer` round, the round's number in `turn`, and the name of the model that served it.
-
-### Round boundaries
-
-Each round ends with `model_turn_completed` or `model_turn_failed`. A round whose text reply arrived but hit the model's length limit, with finish reason `length`, also reports `model_turn_truncated`, after `model_turn_completed`. An [empty reply](11-conversations.md#empty-and-truncated-replies) is a completed round, not a failed one. A provider's refusal for context length is a failed round, the case that [Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion) covers. A round's events are reported once the model's answer to that round arrives.
-
-### Reply events
-
-Each text reply reports an `assistant_reply` event. Beside the coordinates, it holds:
-
-| Field | Value |
-|---|---|
-| `turn` | The round's number |
-| `text` | The reply text |
-| `finish_reason` | The provider's stop label, such as `"stop"` or `"length"`, or nil when the provider sent none |
-| `model` | The name of the model that served the round, as the provider returned it |
-| `origin` | `"infer"` for a `models.infer` round, `"chat"` for a `models.loop` round |
-| `metrics` | What was measured about the call, or nil when nothing was |
-
-The `model` name can differ from the bound model's id, since it is whatever the provider says served the round, and it is an empty string when the provider named no model. To tell whether the round you just made was cut off, check the latest reply's `finish_reason`:
-
-````lua
-models.use('writer', { max_tokens = 50 })
-local text = models.infer('Describe the water cycle in detail.')
-local latest
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'assistant_reply' then latest = e end
-end
-if latest and latest.finish_reason == 'length' then
-  return text .. ' [cut off]'
-end
-return text
-````
-
-`max_tokens`, a [sampling option](10-models.md#sampling-options), keeps this reply short, and a reply cut off at the model's length limit has finish reason `length`.
-
-### Reasoning events
-
-Each completed block of model reasoning reports a `thinking` event with `turn`, `model`, and `text`. It is reported only when the reasoning is present and non-empty, and it comes after `model_turn_completed` and before the round's reply event, in `models.loop` and `models.infer` rounds alike.
-
-### Tool call batches
-
-When the model answers with tool calls, the round reports an `assistant_tool_calls` event in place of `assistant_reply`, before any of the calls runs. Its fields are `turn`, `model`, and `calls`. Each call in `calls` has `id`, the provider-issued call id, `name`, and `arguments`, a table, exactly as the model produced them. That is the same `{ id, name, arguments }` shape that `models.loop` appends as the assistant record's `tool_calls`, as [What the loop appends](11-conversations.md#what-the-loop-appends) shows. The model calls a bound tool by its prompt-local alias, never by its tool path, so each `name` is an alias. The event is reported even when the batch names tools outside the round's scope.
-
-A round that ends in tool calls reports no `assistant_reply`, but it still counts as a round, and its `model_turn_completed`, and its debug events when capture is on, still fire. Each `models.loop` round reports its round events and, for a tool round, the outcome of each tool call.
-
-### Round numbers
-
-`turn` numbers the rounds. Each round advances a 1-based [round count](11-conversations.md#turns-and-live-output), and a round's `thinking`, reply, degraded-metadata, and debug events all hold that round's number in `turn`. A spawned task keeps its own round count, so a task's first round is `turn` 1 whatever its owner has done, and a task's rounds report under that task, labeled with the section its chain is running. The round count stops at 4294967295 instead of wrapping, so a `turn` value is never reused.
-
-The round count is separate from the round cap, which limits each `models.loop` call on its own, as [The round cap](11-conversations.md#the-round-cap) describes. The run's default limits are gathered in [Limits at a glance](17-limits-and-errors.md#limits-at-a-glance).
-
-### Event order within a round
-
-A round's events come in a fixed order:
-
-1. `request` and `response`, only when the Harness has debug capture switched on
-2. `model_turn_completed`, or `model_turn_failed` in its place
-3. one `model_metadata_degraded` for each metadata problem
-4. `thinking`, when the answer has non-empty reasoning
-5. `model_turn_truncated`, when a text reply's finish reason is `length`
-6. `assistant_reply` for a text reply, or `assistant_tool_calls` for a batch of tool calls
-
-For example, a `models.infer` round whose answer includes reasoning reports:
-
-````text
-model_turn_completed
-thinking
-assistant_reply
-````
-
-### models.infer rounds
-
-A `models.infer` round is a full round. It advances the round count and reports the same round events as a `models.loop` round, including the debug pair, `model_turn_completed`, `thinking`, and `model_turn_truncated` when the reply is cut off at `length`. Each `models.infer` call is exactly one completed round followed by one `assistant_reply` with `origin` `infer`, with no `thinking` between them when the answer holds no reasoning. It never reports tool call events, because a `models.infer` round has no tools in scope.
-
-### Degraded metadata
-
-Malformed or unusual metadata from the backend does not fail the round. Instead, the run reports one `model_metadata_degraded` event per problem, with `turn`, the number of the round that served the answer, and a `message` that names the malformed part and why it did not parse. The round still succeeds, and its reply still arrives. The backend's `usage`, `timings`, and `metrics` parts are checked independently, so each malformed one is dropped and reported once while the others are kept. The messages are:
-
-- ``malformed `{key}` in completion response ignored: {reason}``, where `{key}` is `usage`, `timings`, or `metrics`, and `{reason}` is the decoder's own reason, as in ``malformed `usage` in completion response ignored: invalid type: string "lots", expected u64``
-- ``completion response named no string `model`; recorded as empty``, when the answer names no model. It comes ahead of any messages about the other parts, and the round's `model` is then an empty string.
-
-A healthy backend leaves a clean history: well-formed metadata, and parts the backend simply leaves out, report no `model_metadata_degraded`. `models.infer` rounds get these reports exactly as `models.loop` rounds do.
-
-### Debug capture
-
-When the Harness switches debug capture on, each round also reports its raw bodies, as sent to and received from the backend, under the section. `request` holds `turn` and the full, unredacted `body`, and `response` holds `turn`, `body`, and, when the backend supplied them, `finish_reason` and `reasoning_content`. The bodies are raw and include the full prompt. Capture is a Harness setting that a prompt cannot change: by default neither event is reported, and the standard runner leaves capture off.
-
-## Model call metrics
-
-The `metrics` field of an `assistant_reply` event holds everything measured about one model call. It is nil when nothing was measured, so test it with a plain truth test before reading inside it. Events are the only place a prompt can read these numbers, since `models.infer` returns only the reply text and `models.loop` returns nil. This prompt reports the tokens its two rounds used:
-
-````markdown
----
-name: token-report
-description: Writes a short talk and reports the tokens it used
-promptforge: 0
-models:
-  writer: {}
----
-
-# Token report
-
-```lua
-models.default('writer')
-```
-
-## Talk
-
-```lua
-local outline = models.infer('Outline a two-minute talk about honeybees.')
-local talk = models.infer('Write the talk from this outline: ' .. outline)
-local prompt_tokens, completion_tokens = 0, 0
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  local usage = e.kind == 'assistant_reply' and e.metrics and e.metrics.usage
-  if usage then
-    prompt_tokens = prompt_tokens + usage.prompt_tokens
-    completion_tokens = completion_tokens + usage.completion_tokens
-  end
-end
-return talk .. '\n\n' .. prompt_tokens .. ' prompt tokens, ' .. completion_tokens .. ' completion tokens'
-```
-````
-
-The run result is the talk followed by the token totals of both rounds. The `usage` line guards each lookup, because `metrics` and each of its parts can be nil.
-
-### Where the numbers come from
-
-`metrics` has four optional parts. `usage`, `llama`, and `vllm` come from the serving backend, and `client` comes from the calling client's own clock. A part whose source did not report is nil. `llama` is present only when a llama.cpp server served the call and `vllm` only when vLLM did, so a present part tells you which backend served it:
-
-````lua
-local m = e.metrics
-local backend = (m and m.llama and 'llama.cpp') or (m and m.vllm and 'vLLM') or 'unknown'
-````
-
-Counts are integers: the `*_tokens` fields, `prompt_n`, `predicted_n`, `draft_n`, and `draft_n_accepted`. Times and rates are floating-point numbers. `metrics` itself, each of its four parts, and each optional field can be nil, so guard every level of a read.
-
-### Token usage
-
-`metrics.usage` holds the call's token counts:
-
-| Field | Value |
-|---|---|
-| `prompt_tokens` | Tokens in the prompt, always present when `usage` is |
-| `completion_tokens` | Tokens the model generated, always present when `usage` is |
-| `total_tokens` | `prompt_tokens` plus `completion_tokens`, always present when `usage` is |
-| `cached_tokens` | Prompt tokens served from the backend's prefix cache, or nil when the backend does not report it |
-| `reasoning_tokens` | Tokens spent on reasoning, or nil when the backend does not report it |
-
-### llama.cpp timings
-
-`metrics.llama` is present only when a llama.cpp server served the call, and then all eight of its fields are numbers:
-
-| Field | Value |
-|---|---|
-| `prompt_n` | Prompt tokens processed |
-| `prompt_ms` | Wall-clock milliseconds spent processing the prompt |
-| `prompt_per_second` | Prompt tokens processed per second |
-| `predicted_n` | Tokens predicted |
-| `predicted_ms` | Wall-clock milliseconds spent predicting |
-| `predicted_per_second` | Tokens predicted per second |
-| `draft_n` | Draft tokens proposed by speculative decoding |
-| `draft_n_accepted` | Draft tokens the target model accepted |
-
-Compare the last two to measure speculative decoding. The acceptance ratio is `draft_n_accepted / draft_n` when `draft_n > 0`:
-
-````lua
-local llama = e.metrics and e.metrics.llama
-local acceptance
-if llama and llama.draft_n > 0 then
-  acceptance = llama.draft_n_accepted / llama.draft_n
-end
-````
-
-### vLLM metrics
-
-`metrics.vllm` is present only when vLLM served the call. Each of its fields is nil when vLLM did not measure it:
-
-| Field | Value |
-|---|---|
-| `time_to_first_token_ms` | Milliseconds until the first token |
-| `generation_time_ms` | Milliseconds spent generating |
-| `queue_time_ms` | Milliseconds spent waiting in the scheduler queue |
-| `mean_itl_ms` | Mean inter-token latency, in milliseconds |
-| `tokens_per_second` | Tokens per second |
-
-### Client timing
-
-`metrics.client` is measured on the calling client's own clock:
-
-| Field | Value |
-|---|---|
-| `e2e_ms` | End-to-end milliseconds, from sending the request until the whole answer arrived, always present when `client` is |
-| `ttft_ms` | Milliseconds from sending the request to the first streamed token, or nil when the stream produced none |
-| `mean_itl_ms` | Mean inter-token latency, in milliseconds, or nil unless at least two tokens streamed |
-
-The client's `mean_itl_ms` comes from the client's own clock, so it is a separate measurement from `vllm.mean_itl_ms`.
-
-## Tool call events
-
-Every tool call reports `tool_call_succeeded` or `tool_call_failed`, whether it is a [script call](12-tools.md#calling-tools-from-lua) made with `tools.call`, a [model tool call](12-tools.md#model-tool-calls) made inside `models.loop`, or a call to one of the model's [task built-ins](15-tasks.md#letting-the-model-start-tasks). The outcome is filed under the section and task that made the call, for script and model calls alike, and a failed model tool call is reported before it becomes the failure text the model reads. A call's output is then reported as a `tool_result` event. This prompt gives the model a local tool and lists the calls the model made:
-
-````markdown
----
-name: tool-trace
-description: Lists the tool calls the model made
-promptforge: 0
-models:
-  writer: {}
----
-
-# Tool trace
-
-## Add
-
-```lua
-models.use('writer')
-tools.add_local('add', 'Add two integers', { a = 'integer', b = 'integer' }, function(p)
-  return p.a + p.b
-end)
-local msgs = messages.new():user('Use the add tool to add 17 and 25, then state the sum.')
-models.loop(msgs)
-local trace = {}
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'assistant_tool_calls' then
-    for _, c in ipairs(e.calls) do
-      trace[#trace + 1] = 'round ' .. e.turn .. ' asked for ' .. c.name .. ' as ' .. c.id
-    end
-  elseif e.kind == 'tool_result' then
-    trace[#trace + 1] = 'round ' .. e.turn .. ' got ' .. e.content .. ' from ' .. e.alias .. ' as ' .. e.tool_call_id
-  end
-end
-return table.concat(trace, '\n')
-```
-````
-
-The block returns lines such as:
-
-````text
-round 1 asked for add as call_1
-round 1 got 42 from add as call_1
-````
-
-The model's first round asks for `add`, and that batch is reported as `assistant_tool_calls` before the handler runs. The handler's return value then comes back as a `tool_result` with the same round number and call id. The model's final text reply adds nothing to the trace.
-
-### Tool results
-
-A `tool_result` event holds these fields beside the coordinates:
-
-| Field | Value |
-|---|---|
-| `turn` | For a model tool call, the turn of the round that requested it; for a script call, the round count when the call was made |
-| `tool_call_id` | The provider-issued call id for a model tool call, or the empty string for a script call |
-| `alias` | The alias the call named |
-| `content` | The tool's output, already wrapped in the [untrusted envelope](09-the-store.md#wrapping-untrusted-text) when the tool is untrusted |
-| `trusted` | `true` only when the output was not wrapped |
-
-Whether a call reports a `tool_result` depends on who made it and how it ended:
-
-| Call | `tool_result` |
-|---|---|
-| A script call that succeeds | Yes, after `tool_call_succeeded` |
-| A script call that fails | No |
-| A script call refused with kind [`unbound_tool`](12-tools.md#calling-tools-from-lua) because its alias names no bound tool, a task built-in's name included | No |
-| A model tool call to a bound tool that succeeds | Yes, after `tool_call_succeeded` |
-| A model tool call to a bound tool that fails | Yes, after `tool_call_failed`, with the wrapped failure message as `content` |
-| A local tool call whose handler returns | Yes, with `trusted` set to `true` |
-| A local tool call whose handler raises or returns a table | No |
-| A task built-in call by the model, served or refused | Yes, with the built-in's name as `alias` |
-
-`tool_call_id` tells the two kinds of call apart: a model tool call has the model's id, and a script call's id is empty. A script call's `turn` is the number of rounds already completed when the call was made, and its `content` is exactly what the script received, wrapped when the tool is [untrusted](12-tools.md#trusted-and-untrusted-output).
-
-### Matching results to requests
-
-A model tool call's `tool_result` fires exactly once, with the round's `turn`, the model's call id, the alias, the final content, and the trust flag, so you can match it to the call in `assistant_tool_calls` that asked for it. Match on `turn` together with the id, because providers reuse ids such as `call_1` across rounds. Within one message list the ids are unique, as [Checking the list](11-conversations.md#checking-the-list) requires, and pairing `turn` with the id tells calls apart across a task's whole history.
-
-In a history, a tool round reads in order: the batch of requested calls, with the model's name and the call names, comes before any call runs, and then each result is reported under the model's call id and the tool's alias. The model calls tools by alias, so `name` in `assistant_tool_calls` and `alias` in `tool_result` are both prompt-local names.
-
-### Scope checks
-
-Before each model round, the round's [scope](12-tools.md#advertising-tools-to-the-model) is checked. `tool_scope_validation_started` is reported before the scope is built from the round's bound tools, local tools, and task built-ins, and then `tool_scope_validation_succeeded` or `tool_scope_validation_failed` follows, all under the section. A failed check's error goes back to the code that asked for the round. A model tool call that names a tool outside the round's scope is refused and reports `tool_call_failed`.
-
-### Local tool calls
-
-Each call to a [local tool](12-tools.md#local-tools) reports `tool_call_succeeded` or `tool_call_failed` for the section that ran it. A handler that returns reports a trusted `tool_result` whose `turn` is the round count recorded when the call was made, even when the handler runs rounds of its own. A handler that raises, or that returns a table, reports `tool_call_failed` before the error reaches the caller, and no `tool_result`.
-
-The handler runs inside the calling chain, so everything it does is ordinary work whose events land in the calling task's history: its store operations, its model rounds, and its own tool calls, which are script calls. All of those events come before the outer call's `tool_call_succeeded`. When a handler calls a second local tool, the inner call finishes first, so nested local calls report their `tool_result` events innermost first.
-
-### Task built-in calls
-
-Each task built-in call the model makes reports `tool_call_succeeded` when it is served, or `tool_call_failed` when it is refused, under the section that ran the loop. It also reports a `tool_result` whose `alias` is the built-in's name and whose `content` is the text the built-in sent back, with its `turn`, the model's call id, and its trust flag.
-
-The model's history read shows up as a `tool_result` with `alias` `task_events` under the model's call id. When the read found events, that result is untrusted, with `trusted` set to `false`. An empty read answers with the trusted sentence `no new events`.
-
-## Task lifecycle events
-
-Every task reports a `task_started` event when it is admitted and first runs, under the section that started the task, whether the task came from `tasks.spawn`, a `fanout` arm, or the model's `task` built-in. A task that must wait for a concurrency slot reports nothing until it is admitted, so its `task_started` may come after the spawn and after other tasks' events ([The concurrency limit](14-fanout.md#concurrency)). This prompt lists the tasks a fanout started:
-
-````markdown
----
-name: arm-starts
-description: Lists the tasks a fanout started
-promptforge: 0
----
-
-# Arm starts
-
-## Gather
-
-```lua
-fanout('### Worker', { 'a', 'b', 'c' })
-local starts = {}
-for _, e in ipairs(tasks.events(sys.taskid)) do
-  if e.kind == 'task_started' then
-    starts[#starts + 1] = e.task .. ' ' .. e.origin .. ' ' .. e.target
-  end
-end
-return table.concat(starts, '\n')
-```
-
-### Worker
-
-```lua
-return item
-```
-````
-
-````text
-0.0 author Worker
-0.1 author Worker
-0.2 author Worker
-````
-
-Each [arm](14-fanout.md#inside-an-arm) of the fanout is a task, so the fanout reports one `task_started` per arm into the caller's own history, under the calling section, `Gather`. Everything that happens inside an arm, from its section events and store results to its `models.infer` rounds, lands in that arm's own history under the arm's id, and each arm ends with `task_succeeded` under the worker section, `Worker`.
-
-### Task starts
-
-`task_started` holds these fields beside the coordinates:
-
-| Field | Value |
-|---|---|
-| `task` | The new task's dotted id |
-| `target` | The heading text of the section where the task's chain starts, without the `#` markers |
-| `origin` | `"author"` or `"model"` |
-| `input`, `item`, `index` | The seeds the task started with, each nil when unset, as [Starting a task](15-tasks.md#starting-a-task) describes |
-| `var` | The snapshot of the owner's `var` that the task started with |
-
-`task_started` is stamped on the owner's `seq` count, not the new task's. The new task's own events hold its id in `provenance.task`, so `task_started` events and provenance together are enough to rebuild the tree of tasks. It is reported at admission, when the task first runs, under the section that spawned it, which the run records at spawn time. `origin` says who started the task: `author` for a task from `tasks.spawn` or a `fanout` arm, and `model` for a task the model started with its `task` built-in. A model-started task's `task_started` sits under the owner's section, with `origin` `model` and a `target` naming the section without the `##`.
-
-### How a task ends
-
-Every started task gets exactly one terminal event:
-
-| Kind | Reported when the task |
-|---|---|
-| `task_succeeded` | ended with a result |
-| `task_failed` | ended with an error |
-| `task_cancelled` | was cancelled |
-| `task_abandoned` | was ended along with its owner, with the reason in `reason` |
-
-The terminal event is reported under the task's target section, stamped with the task's own provenance, and holds the task's id in `task`. A task is never reported as both abandoned and cancelled. `tasks.events(t)` on a finished task returns its events in order, ending with its terminal event.
-
-A model-started task's `task_failed` is reported under its target section, not the owner's, and the owner reads it with `tasks.events` on the model task's id. An arm whose `models.loop` ran into its round cap reports `task_failed`, even though `fanout` still gives that arm an exhausted result and cancels no sibling, as [Arm failures](14-fanout.md#arm-failures) describes. The arms' `task_started` events sit in the caller's own history, and each arm's terminal event is in that arm's history, which the caller owns and may read.
-
-A [`tasks.cancel`](15-tasks.md#cancellation-and-task-lifetimes) reports one `task_cancelled` for the task, under its target section and stamped with the task's own provenance, after the events of everything the cancelled task owned. Cancelling it again reports nothing.
-
-### Abandoned tasks
-
-`task_abandoned` says why a live task was ended along with its owner, in its `reason` field:
-
-| `reason` | When | Notice phrase |
-|---|---|---|
-| `owner_returned` | The owner returned while the task was live | `the section ended` |
-| `owner_failed` | The owner failed while the task was live | `the owner failed` |
-| `tool_loop_exhausted` | The owner's `models.loop` ran past its round cap | `the tool loop was exhausted` |
-| `owner_aborted` | The owner was itself aborted, as happens to the tasks nested under an abandoned task | `the owner was aborted` |
-| `run_terminated` | The run was cancelled by the Host or ended by the Harness | `the run ended` |
-
-An abandonment is distinct from a purposeful cancel. For an author task, `owner_returned` goes with the [`tasks_live`](15-tasks.md#cancellation-and-task-lifetimes) error on the owner, while for a model task it is a quiet abandon. In a nested abandonment, everything the abandoned task owned reports its end first, and the task's own `task_abandoned` comes last. Before `run_succeeded` or `run_failed`, the run settles every task still live by abandoning it exactly once: `run_terminated` for a task still live at the end, and `owner_aborted` for the tasks nested under it.
-
-A prompt never reads `task_abandoned` through `tasks.events`. It is stamped on the abandoned task after the task's owner has already ended, so it appears only in the Harness's run log.
-
-### Task notices
-
-A [task notice](15-tasks.md#task-notices-to-the-model) is the sentence queued for the model when a task it started ends. Every notice reports a `task_notice` event under the owner's section the moment it is queued, even if no round ever reads it. Its fields are `turn`, the owner's round count when the notice was queued, `task`, the ended task's id, and `text`, the exact sentence the model reads, byte for byte. Notices exist only for tasks the model started, and the text takes one of four forms:
-
-````text
-Task id={id} (## {target}) completed: {result}
-Task id={id} (## {target}) failed: {error}
-Task id={id} (## {target}) was canceled: the author cancelled it
-Task id={id} (## {target}) was abandoned: {phrase}
-````
-
-In a completed notice, `{result}` arrives in the untrusted envelope. The cancel sentence spells `canceled` with one l and `cancelled` with two, so match it exactly as shown. In an abandoned notice, `{phrase}` is the notice phrase for the `reason`, from the table above, and those phrases appear only in notice text, never in `task_abandoned`. The model's own `task_cancel` queues no notice, because the model already read the built-in's confirmation. [`tasks.note`](15-tasks.md#checking-on-tasks) reports no event at all, so a note never shows up in any history.
-
-## Trust and what events leave out
-
-Events say that something happened, not everything about it. No `_failed` event holds a message: each says only that something failed, and the detail is the failing call's own error. A failed store call, for example, raises an error value of kind `store` that `pcall` catches, while its `store_*_failed` event holds none of that detail. In the same way, a run's outcome and its error detail come from the run's result and from the errors raised to Lua, never from events.
-
-### Untrusted text in events
-
-Treat the text inside events as untrusted:
-
-- `thinking.text` and `assistant_reply.text`
-- `assistant_tool_calls.calls`, names and arguments alike
-- `tool_result.content`, unless `trusted` is `true`
-- the seeds in `task_started`
-- the `request` and `response` bodies
-- `model_metadata_degraded.message`
-
-The coordinates come from the Harness, for `execution`, and from your own headings, for `section`. Before you hand event text to a model, wrap it with [`untrusted()`](09-the-store.md#wrapping-untrusted-text) as you would any other untrusted text:
-
-````lua
-local t = tasks.spawn('### Research')
-tasks.join_any({ t })
-local found = {}
-for _, e in ipairs(tasks.events(t)) do
-  if e.kind == 'assistant_reply' then
-    found[#found + 1] = untrusted(e.text)
-  end
-end
-return models.infer('Summarize what the research found:\n' .. table.concat(found, '\n'))
-````
-
-A `tool_result` whose `trusted` is `false` already arrives in the untrusted envelope.
-
-### Events a prompt never reads
-
-A prompt reads the events of its own task and of the tasks it owns, as reported so far. No prompt ever reads these, which appear only in the Harness's run log:
-
-- `run_succeeded` and `run_failed`, which are reported after every chain has stopped
-- every `task_abandoned`, which is stamped on the abandoned task after its owner has already ended
-- `parse_failed` and `lua_compilation_failed`, because a file whose parse fails never runs
-
-Two more limits depend on who is reading. A task never reads its own terminal event, because it has ended by then, so only its owner reads it. A reader never sees the events of a task it neither owns nor runs inside, such as a task started by one of its own tasks, although that task's start still shows up as `task_started` in the history of the task that started it.
-
-### Events never steer the run
-
-The Engine acts on no event. The only way an event comes back is an explicit history read, a prompt's `tasks.events` or the model's `task_events`, which the Harness serves from its log, so a Harness that drops events changes what those reads return. Each model reply and each batch of tool calls appears whole, once its round completes: the partial fragments a Harness may stream live never become events.
 
 ---
 
@@ -12766,7 +11752,6 @@ A cancel also reaches every call that is waiting on the Harness. Each one resume
 - `models.infer`, and each `models.loop` round
 - `tools.call`, `input.ask()` included, and tool calls the model makes
 - every `store` call
-- a `tasks.events` read ([Read options, results, and errors](16-task-events.md#read-options-results-and-errors)), with the model's `task_events` built-in failing the same way
 
 Calls made inside a local tool handler are ordinary suspending calls and resume the same way ([Local tools](12-tools.md#local-tools)).
 
@@ -12790,7 +11775,7 @@ Catching a cancel does not keep the run going. Once the Host cancels, running Lu
 ### Work in flight
 
 - A tool call in flight is interrupted rather than waited out, and the run ends promptly with the cancelled outcome, even when the tool itself would never finish.
-- A `models.infer` round in flight is aborted before its reply lands, and no `model_turn_failed` event is reported for it; a round that really fails does report one ([Model round events](16-task-events.md#model-round-events)).
+- A `models.infer` round in flight is aborted before its reply lands.
 - A cancel that lands while a block waits on a `store.write` ends the run with the cancelled outcome the same way.
 - A run cancelled before a [`fanout`](14-fanout.md#the-fanout-call) begins ends with the cancelled outcome without running any arms.
 
@@ -12952,8 +11937,6 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 |---|---|---|---|
 | Task handle | `{ task = id }` | A plain methodless table; the bare id string also works | [Tasks](15-tasks.md#task-handles-and-ids) |
 | `tasks.cancel` | `tasks.cancel(task)` | Nothing; cancelling an ended task does nothing | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
-| `tasks.events` | `tasks.events(task, opts?)` | A 1-based sequence of event tables, each with a `kind` | [Task Events](16-task-events.md#reading-a-tasks-history) |
-| `tasks.events` option `last` | `tasks.events(t, { last = seq })` | Only events after `seq`, a whole number from 0 to 4294967295 | [Task Events](16-task-events.md#reading-a-tasks-history) |
 | `tasks.note` | `tasks.note(text)` | Nothing; sets the `note` field of `tasks.status` | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.pending` | `tasks.pending(filter?)` | The chain's live Task handles in spawn order, empty when none | [Tasks](15-tasks.md#checking-on-tasks) |
 | `tasks.pending` filter `origin` | `tasks.pending({ origin = 'model' })` | Only live tasks of that origin, `author` or `model` | [Tasks](15-tasks.md#checking-on-tasks) |
@@ -12996,14 +11979,11 @@ For each tool and argument, Form is what the model sends and Returns is the text
 | `task` | `{"target": "## Research"}` | `Task id={id} started`, at once | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 | `task.input` | `"input": "text"`, optional | Replaces the task's argument string | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 | `task.target` | `"target": "## Research"`, required | Names the section the task runs | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
-| `task_cancel` | `{"id": "0.0"}` | `Task id={task} cancelled` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_cancel.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events` | `{"id": "0.0"}` | One JSON event per line in the untrusted envelope, or `no new events` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_events.last` | `"last": 12`, optional | Only events after that `provenance.seq` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_status` | `{"id": "0.0"}` | One line starting `Task id={task} (## {target}): {state}` | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `task_status.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-cancel-and-history-tools) |
-| `tools.allow_tasks` | `tools.allow_tasks(targets?)` in Lua | `task`, `task_cancel`, `task_status`, `await_tasks`, and `task_events` in scope for every round in the section | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
+| `task_cancel` | `{"id": "0.0"}` | `Task id={task} cancelled` | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_cancel.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_status` | `{"id": "0.0"}` | One line starting `Task id={task} (## {target}): {state}` | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `task_status.id` | `"id": "0.0"`, required | Names a task the model started, exactly as `task` returned it | [Tasks](15-tasks.md#the-models-status-and-cancel-tools) |
+| `tools.allow_tasks` | `tools.allow_tasks(targets?)` in Lua | `task`, `task_cancel`, `task_status`, and `await_tasks` in scope for every round in the section | [Tasks](15-tasks.md#letting-the-model-start-tasks) |
 
 ### Web tools
 
@@ -13134,20 +12114,20 @@ Set by names the frontmatter key that sets a value, or says whether the Harness 
 | Name | Default | Range or rule | Set by | Taught in |
 |---|---|---|---|---|
 | Call depth cap | 8 levels | Nested `call`, fanout arms, and tasks share it, first call included | fixed | [Jump and Call](08-jump-and-call.md#call-failures-and-the-depth-cap) |
-| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
+| Cancel poll interval | 10,000 instructions | A Host cancel stops a running block within this many instructions | fixed | [Limits and Errors](16-limits-and-errors.md#cancelling-a-run) |
 | Concurrency limit | 8 tasks at once | Every task the run admits, fanout arms included; `tasks.concurrency` lowers it for a chain's own spawns | Harness | [Fanout](14-fanout.md#concurrency) |
 | Generic completion text | `done` | The run result when no block returns a scalar | fixed | [How a Prompt Runs](04-how-a-prompt-runs.md#what-a-run-does) |
-| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
-| Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
+| Harness-set limits | Listed in the chapter | A prompt changes only the round cap | Harness | [Limits and Errors](16-limits-and-errors.md#limits-at-a-glance) |
+| Instruction count | No cap | Only the cancel poll counts instructions | fixed | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Log byte quota | 262,144 bytes per section VM | 256 UTF-8 bytes per allowed log event, so it follows the log event quota | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Log event quota | 1024 `log` calls per section VM | Every one-argument `log` call spends one | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
 | Log message length | 256 characters | Counted as Unicode characters | fixed | [The Lua Environment](05-lua-environment.md#checkpoints-with-log) |
-| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](17-limits-and-errors.md#lua-block-budgets) |
-| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
-| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](17-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Lua memory | 64 MiB per section VM | Running out is an ordinary `lua` error | Harness | [Limits and Errors](16-limits-and-errors.md#lua-block-budgets) |
+| Model receive timeout | 120 seconds | Applies to the headers and to each next body chunk | Harness | [Limits and Errors](16-limits-and-errors.md#model-reply-size-and-wait-time) |
+| Model response cap | 16 MiB | A larger reply fails the call | Harness | [Limits and Errors](16-limits-and-errors.md#model-reply-size-and-wait-time) |
 | Round cap default | 24 rounds | Per `models.loop` call, when `max_tool_iterations` is absent | Harness | [Conversations](11-conversations.md#the-round-cap) |
 | Round cap from frontmatter | The Harness default | Whole number 1 to 1000, per `models.loop` call | `max_tool_iterations` | [Conversations](11-conversations.md#the-round-cap) |
-| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](17-limits-and-errors.md#limits-at-a-glance) |
+| Run limit defaults | Listed in the chapter | One set applies to the whole run | Harness | [Limits and Errors](16-limits-and-errors.md#limits-at-a-glance) |
 | `input.ask` fallback sentence | `User input is unavailable in this host; continue without it.` | Returned with `available` set to `false` when the Host has nobody to ask | fixed | [The Lua Environment](05-lua-environment.md#checking-for-an-operator) |
 
 ## Error kinds
@@ -13158,44 +12138,44 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `Fence` | A second `lua shared` fence, a `lua shared` fence outside the H1, or an unclosed fence | The unclosed fence's label or section name, else nothing | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Frontmatter` | The frontmatter block is missing, unclosed, or not valid YAML, or a frontmatter key or value is rejected | The YAML diagnostic, in `invalid frontmatter: {message}`, or the rejected key's own message, with the line and column beside it | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `List` | A list section holds non-list content, an empty item, or no items | The section name, and the offending line for non-list content | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Lua` | A Lua region (the shared library, an H1 block, or a section block) does not compile | The section and block, plus the compiler diagnostic | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
-| `Structure` | The H1 title is missing, repeated, or empty, a heading is empty or has no parent one level up, two siblings share a name, or the file has no `promptforge:` key when run | The section name, the heading level, and both lines of a duplicate sibling | [Limits and Errors](17-limits-and-errors.md#parse-error-kinds) |
+| `Fence` | A second `lua shared` fence, a `lua shared` fence outside the H1, or an unclosed fence | The unclosed fence's label or section name, else nothing | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Frontmatter` | The frontmatter block is missing, unclosed, or not valid YAML, or a frontmatter key or value is rejected | The YAML diagnostic, in `invalid frontmatter: {message}`, or the rejected key's own message, with the line and column beside it | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `List` | A list section holds non-list content, an empty item, or no items | The section name, and the offending line for non-list content | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Lua` | A Lua region (the shared library, an H1 block, or a section block) does not compile | The section and block, plus the compiler diagnostic | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
+| `Structure` | The H1 title is missing, repeated, or empty, a heading is empty or has no parent one level up, two siblings share a name, or the file has no `promptforge:` key when run | The section name, the heading level, and both lines of a duplicate sibling | [Limits and Errors](16-limits-and-errors.md#parse-error-kinds) |
 
 ### Run error kinds
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](17-limits-and-errors.md#cancelling-a-run) |
-| `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Internal` | An Engine invariant breaks, a fault in the Engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](17-limits-and-errors.md#model-call-and-environment-failures) |
-| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
-| `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](17-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](16-limits-and-errors.md#cancelling-a-run) |
+| `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Internal` | An Engine invariant breaks, a fault in the Engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Lua` | An uncaught Lua failure in a walked section, `call` chain, task, fanout arm, or the shared library load, including a failed substitution, running out of memory, and a block that returns a table; a task error in any chain; a caught `lua`, `internal`, `out_of_scope_tool`, `unbound_tool`, or task error value raised again after another suspending call | The Lua error's own text | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](16-limits-and-errors.md#model-call-and-environment-failures) |
+| `Store` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 
 ### Error kinds on error values
 
 | Kind | Raised when | Message names | Taught in |
 |---|---|---|---|
-| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The reply's detail phrase, or plain `empty model reply`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
-| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
+| `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |
 | `task_consumed` | A wait names a task already delivered | The task, in `` task `{task}` was already delivered: a task's result is taken by one wait ``; field `task` | [Tasks](15-tasks.md#waiting-for-results) |
-| `task_not_owned` | A wait, status read, history read, or cancel names a task the chain does not own, or an id that names no task | The task, in `` task `{task}` is not a task this chain owns ``; field `task` | [Tasks](15-tasks.md#task-errors) |
+| `task_not_owned` | A wait, status read, or cancel names a task the chain does not own, or an id that names no task | The task, in `` task `{task}` is not a task this chain owns ``; field `task` | [Tasks](15-tasks.md#task-errors) |
 | `tasks_live` | A chain ends normally with tasks it spawned still live | The leaked ids in spawn order; field `tasks`, joined with `, ` | [Tasks](15-tasks.md#cancellation-and-task-lifetimes) |
 | `tool` | A bound tool fails in a script `tools.call` | The tool's model-safe failure text, in `tool call failure: {message}` | [Tools](12-tools.md#tool-failures) |
 | `tool_loop_exhausted` | `models.loop` makes its round cap of rounds without a final reply | Nothing, as in `tool-call loop did not converge` | [Conversations](11-conversations.md#the-round-cap) |

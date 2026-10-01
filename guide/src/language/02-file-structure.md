@@ -68,7 +68,7 @@ prompt must contain exactly one H1 title
 prompt H1 title must not be empty
 ````
 
-The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](17-limits-and-errors.md#parse-error-kinds).
+The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](16-limits-and-errors.md#parse-error-kinds).
 
 H2 headings placed after the H1 divide the body into named sections. Only headings after the H1 at level 2 or deeper become sections, and the top-level sections are the H2s, kept in file order. Each section has a name taken from its heading text, a level, and its own prose and Lua. No particular name is required; `## Main` is a common choice. The headings `## First` and `## Second` give two sections named `First` and `Second`, both at level 2. A deeper heading such as `### Author note` under `## Prepare` belongs to `Prepare` and is not another top-level section.
 
@@ -164,7 +164,7 @@ Parsing accepts a file with or without the key, but the version is checked when 
 unsupported promptforge version: {N} (this build supports major 0)
 ````
 
-That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified).
+That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
 Every prompt needs the `promptforge:` key. A file whose frontmatter holds only `name` and `description` still parses, even with a plain prose section, but its run fails on the first step, before anything executes, with parse error kind `Structure` and this message:
 
@@ -321,7 +321,7 @@ An alias is a plain name from the grammar, and a tool path such as `promptforge/
 invalid alias "{alias}": expected [A-Za-z][A-Za-z0-9_-]{0,63}
 ````
 
-Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.
 
 ### Reserved names for aliases and role labels
 
@@ -589,4 +589,4 @@ section heading must have whitespace after the {markers} markers: {text}
 section heading has no name: {text}
 ````
 
-Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.

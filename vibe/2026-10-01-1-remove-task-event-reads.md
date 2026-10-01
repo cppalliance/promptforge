@@ -330,7 +330,7 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 </step-2>
 <step-3>
 
-### Step 3: Remove the Task Events chapter
+### Step 3: Remove the Task Events chapter [completed]
 
 - Component: guide-chapter
 - Artifacts: `guide/src/language/16-task-events.md` (deleted), `17-limits-and-errors.md` and `18-quick-reference.md` (renamed to `16-limits-and-errors.md` and `17-quick-reference.md`), the chapters `01`, `04`, `05`, `10`, `11`, `12` and `15-tasks.md`, `guide/src/introduction.md`, `crates/harness/src/vfs.md`, and the regenerated `guide/promptforge-language-guide.md`. All edits are listed under Technical Design, "File and public API changes" (Guide).

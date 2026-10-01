@@ -134,7 +134,7 @@ An empty `lua` block, an opening line followed at once by its closing line, is v
 
 ### Fence and syntax errors
 
-Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
+Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
 
 ````text
 prompt `lua shared` fence is not closed
@@ -620,7 +620,7 @@ The fence can sit anywhere after the title and before the first `##` section, wi
 
 The opening line is exactly three backticks followed by `lua shared`: lowercase, one space, at the start of the line, and nothing after it. Any other opening line is an ordinary Markdown code block in the prose, wherever it sits in the H1 body. The fence closes like a `lua` fence, at the first line that is exactly three backticks.
 
-A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
+A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
 
 ````text
 prompt allows at most one `lua shared` fence
@@ -728,7 +728,7 @@ In a fanout arm, `item` is installed before the replay, so the library's top-lev
 
 ### When the library fails to load
 
-Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
+Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
 
 ## List sections
 
@@ -781,7 +781,7 @@ A `---` break keeps commentary out of a list: only the marker lines below the la
 
 This list has the single item `beta`. A list that opens with a break, such as `---` followed by `- alpha` and `- beta`, has the items `alpha` and `beta`.
 
-Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
+Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
 
 ````text
 empty bullet item in list section `{section}`
@@ -858,4 +858,4 @@ Naming a section that has no list items, such as a prose section, fails with an 
 section `{name}` has no pre-parsed items
 ````
 
-`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).

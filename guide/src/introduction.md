@@ -28,5 +28,5 @@ Each audience has one documentation set.
 
 If you operate the gateway, read [the Gateway set](gateway/index.md). It teaches installation, the configuration file, remote and local models, speech-to-text, profiles, and the operational surface.
 
-If you write prompts, read [the Prompt Language set](language/index.md). It teaches the .md prompt language in full: file structure, blocks and prose, how a prompt runs, the Lua environment, arguments and substitution, jump and call, the store, models and conversations, tools and web access, fanout, tasks and task events, and limits and errors, with a quick reference at the end.
+If you write prompts, read [the Prompt Language set](language/index.md). It teaches the .md prompt language in full: file structure, blocks and prose, how a prompt runs, the Lua environment, arguments and substitution, jump and call, the store, models and conversations, tools and web access, fanout, tasks, and limits and errors, with a quick reference at the end.
 

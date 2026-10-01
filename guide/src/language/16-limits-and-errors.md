@@ -589,7 +589,6 @@ A cancel also reaches every call that is waiting on the Harness. Each one resume
 - `models.infer`, and each `models.loop` round
 - `tools.call`, `input.ask()` included, and tool calls the model makes
 - every `store` call
-- a `tasks.events` read ([Read options, results, and errors](16-task-events.md#read-options-results-and-errors)), with the model's `task_events` built-in failing the same way
 
 Calls made inside a local tool handler are ordinary suspending calls and resume the same way ([Local tools](12-tools.md#local-tools)).
 
@@ -613,6 +612,6 @@ Catching a cancel does not keep the run going. Once the Host cancels, running Lu
 ### Work in flight
 
 - A tool call in flight is interrupted rather than waited out, and the run ends promptly with the cancelled outcome, even when the tool itself would never finish.
-- A `models.infer` round in flight is aborted before its reply lands, and no `model_turn_failed` event is reported for it; a round that really fails does report one ([Model round events](16-task-events.md#model-round-events)).
+- A `models.infer` round in flight is aborted before its reply lands.
 - A cancel that lands while a block waits on a `store.write` ends the run with the cancelled outcome the same way.
 - A run cancelled before a [`fanout`](14-fanout.md#the-fanout-call) begins ends with the cancelled outcome without running any arms.

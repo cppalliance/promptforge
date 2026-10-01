@@ -39,7 +39,7 @@ A message list is what `models.loop` takes: a Lua array of records, each with th
 
 When the model gives a text reply, the loop appends `{ role = "assistant", content = reply }` as the terminal record and returns. `models.loop` itself returns `nil`: everything the conversation adds lands in your list, in place, so once the loop returns, the reply is `msgs[#msgs].content`.
 
-Each round runs on the section's current model: the role selected with `models.use`, or else the prompt-wide default set with `models.default`, as [Models](10-models.md#choosing-a-sections-model) explains. The loop looks that model up again each time it sends a round. With neither set, the call fails with the missing-model error, which is kind `internal` when caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) and ends the run with run error kind `Binding` when uncaught (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Each round runs on the section's current model: the role selected with `models.use`, or else the prompt-wide default set with `models.default`, as [Models](10-models.md#choosing-a-sections-model) explains. The loop looks that model up again each time it sends a round. With neither set, the call fails with the missing-model error, which is kind `internal` when caught with [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) and ends the run with run error kind `Binding` when uncaught (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 Builder methods are called with a colon and chain, each call appending one record at the end of the list, in call order. This block puts a system record ahead of the user record; `:system(content)` appends `{ role = "system", content = content }`:
 
@@ -264,14 +264,6 @@ The model's [sampling options](10-models.md#sampling-options) apply to every rou
 
 The round count advances once for every round that returns a reply, whether a text reply or a batch of tool calls, and an empty reply advances it too; a round that overflows the model's context window, and a round that fails, do not. A [task](15-tasks.md#starting-a-task) counts its rounds against its own round count, which its status table shows as the `turns` field. The round count is separate from the round cap, the most rounds a single `models.loop` call may make, which each call counts for itself.
 
-The run reports each loop round and each tool call as an event filed under the section that ran the loop, and [round events](16-task-events.md#model-round-events) carry the round count as their `turn` field; a round that calls one tool, followed by a text reply, reports these in order:
-
-````text
-model_turn_completed
-tool_call_succeeded
-model_turn_completed
-````
-
 When the Host shows live output, the Harness streams each text fragment of a loop round to the Host as it arrives, in the order the model streamed it, and the reply in the terminal record is those fragments joined. A [`models.infer`](10-models.md#running-a-round-with-modelsinfer) round does not stream. A Host that stops listening does not fail the round.
 
 ## How the list reaches the model
@@ -387,7 +379,7 @@ Ids are unique across the whole list, not only within one assistant record: reus
 
 The rules across records run in this order: first the plain-text check on a leading block of two or more system records; then each record in list order, with the `tool_calls` placement rule, then the `tool_call_id` placement rule, then the rules for its own `role`; and last the check for a batch still open at the end of the list. The checks on each record's own fields run before all of them.
 
-All of these are `lua`-kind error values raised at the `models.loop` call and catchable with `pcall`. Each message is exactly the text shown, with no prefix, and only the first broken rule is reported. A failed check across records is also reported as a `model_turn_failed` [round event](16-task-events.md#model-round-events) before the error reaches the call.
+All of these are `lua`-kind error values raised at the `models.loop` call and catchable with `pcall`. Each message is exactly the text shown, with no prefix, and only the first broken rule is reported.
 
 ## Empty and truncated replies
 
@@ -415,11 +407,9 @@ When the model's first reply is empty, with finish reason `"stop"` and no detail
 empty_model_reply|stop|empty model reply
 ````
 
-Reasoning text from the model is never used as the reply; the detail may say it was ignored, as in `empty model reply: reasoning content was present but ignored`. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Reasoning text from the model is never used as the reply; the detail may say it was ignored, as in `empty model reply: reasoning content was present but ignored`. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 An empty reply still completes its round: it advances the round count, and the loop then either takes the clean exit or raises `empty_model_reply` with the reply's detail as the message and, when the provider sent one, the finish reason in `finish_reason`. A text reply that the provider cut short for length, with finish reason `"length"`, is accepted as the terminal record.
-
-Both show up as [round events](16-task-events.md#model-round-events): an empty reply is reported as `model_turn_completed`, carrying the empty-reply detail and finish reason, and a truncated text reply reports `model_turn_truncated` right after its `model_turn_completed`, as a truncated `models.infer` round does too.
 
 ## Compactors and context exhaustion
 
@@ -457,7 +447,7 @@ context exhausted: the request precheck overflowed the model's context window
 context exhausted: the provider rejected the request as exceeding the model's context window
 ````
 
-Left uncaught, context exhaustion ends the run with run error kind `ContextExhausted` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, context exhaustion ends the run with run error kind `ContextExhausted` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 A compactor can also be your own function. When a round overflows, the loop calls it instead of raising, with the reason `"precheck"` or `"provider"` as its single string argument. A custom compactor ends by raising an error, which propagates out of `models.loop` unchanged, a bare string staying a bare string, so `pcall` around the loop catches it:
 
@@ -475,7 +465,7 @@ return msgs[#msgs].content
 the notes are too long to send (precheck)
 ````
 
-A compactor that returns at all, with or without a value, makes `models.loop` raise a `lua`-kind error whose message names `compactors.fail`. Left uncaught in a walked section, a compactor's own error ends the run with run error kind `Lua` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), with the compactor's error text in the message.
+A compactor that returns at all, with or without a value, makes `models.loop` raise a `lua`-kind error whose message names `compactors.fail`. Left uncaught in a walked section, a compactor's own error ends the run with run error kind `Lua` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), with the compactor's error text in the message.
 
 `compactors.fail(tag)` takes one reason string and raises a `context_exhausted` error value whose `reason` is that string; it never returns. The tag is exactly `"precheck"` or `"provider"`; any other string raises a `lua`-kind error, `unknown overflow reason "{tag}"; expected "precheck" or "provider"`, which is an authoring error rather than context exhaustion.
 
@@ -510,7 +500,7 @@ max_tool_iterations: 5
 
 The value is a whole number from 1 through 1000, and it overrides the run's default for this prompt. Without `max_tool_iterations:`, the run's default applies: 24 rounds per `models.loop` call, unless the Harness running the prompt sets a different default, which a prompt's own value also overrides. Each `models.loop` call gets the full cap on its own, so two loops in one section can each make that many rounds.
 
-Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Against a model that keeps calling tools, `models.loop` with a round cap of N makes exactly N rounds and then fails with `tool_loop_exhausted`. `pcall` catches it as an error value whose `kind` is `tool_loop_exhausted` and whose `tostring(err)` is `tool-call loop did not converge`, with no extra fields. Left uncaught, it ends the run with run error kind `Tool` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
 A model that keeps calling a failing bound tool reaches the cap the same way, because each failure is answered with failure text and the model never gives a text reply. After exhaustion the list holds only complete rounds: every round appended its assistant tool-call record and a tool record for each call, with no half-answered batch.
 
@@ -530,7 +520,7 @@ With `max_tool_iterations: 2` and a model that calls one tool in every round, th
 tool-call loop did not converge after 5 records
 ````
 
-A value out of range fails at parse, before the run starts, with parse error kind `Frontmatter` (see [parse error kinds](17-limits-and-errors.md#parse-error-kinds)). Zero or less gives `max_tool_iterations must be a positive integer (>= 1), got {raw}`, and more than 1000 gives `max_tool_iterations must be <= 1000, got {raw}`. `{raw}` echoes the value as written, and very large values are range-checked, never wrapped.
+A value out of range fails at parse, before the run starts, with parse error kind `Frontmatter` (see [parse error kinds](16-limits-and-errors.md#parse-error-kinds)). Zero or less gives `max_tool_iterations must be a positive integer (>= 1), got {raw}`, and more than 1000 gives `max_tool_iterations must be <= 1000, got {raw}`. `{raw}` echoes the value as written, and very large values are range-checked, never wrapped.
 
 ## Catching loop failures
 
@@ -565,6 +555,6 @@ An `out_of_scope_tool` message begins `tool "{name}" is not in this section's sc
 
 `models.loop` takes at most three arguments with a handle and at most two without one; more raise a `lua`-kind error, `models.loop takes (handle?, messages, compactor?)`.
 
-Any failure while preparing a round, whether in choosing the model, reading the section's tools, checking the list, or reaching the provider, is raised at the `models.loop` call like any other call error, so `pcall` catches it. Any other failed round, such as a backend error that is not a context-window rejection, is reported as a `model_turn_failed` [round event](16-task-events.md#model-round-events) and raised as the call's error, with kind `internal` for backend and transport failures.
+Any failure while preparing a round, whether in choosing the model, reading the section's tools, checking the list, or reaching the provider, is raised at the `models.loop` call like any other call error, so `pcall` catches it. Any other failed round, such as a backend error that is not a context-window rejection, is raised as the call's error, with kind `internal` for backend and transport failures.
 
-The last column of the table is the run error kind when a loop failure in a walked section is left uncaught (see [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). An error value you catch and raise again before the block makes another [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), as the `error(err)` line above does, ends the run the same way. Raised again after another suspending call, it keeps its run error kind for `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, and `tool`, a `cancelled` value ends the run with the cancelled outcome rather than as a failure, and any other kind ends the run as `Lua`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), an ordinary Lua error that would end the run as `Lua` ends it as `RequirementsUnmet` instead, whose notice is the Lua error text, and the other kinds keep their run error kind.
+The last column of the table is the run error kind when a loop failure in a walked section is left uncaught (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). An error value you catch and raise again before the block makes another [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), as the `error(err)` line above does, ends the run the same way. Raised again after another suspending call, it keeps its run error kind for `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, and `tool`, a `cancelled` value ends the run with the cancelled outcome rather than as a failure, and any other kind ends the run as `Lua`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), an ordinary Lua error that would end the run as `Lua` ends it as `RequirementsUnmet` instead, whose notice is the Lua error text, and the other kinds keep their run error kind.

@@ -187,7 +187,7 @@ Three placeholder failures involve `args` and `argv`:
 - A dotted path into a field `argv` does not have, or into a scalar, such as `{{ argv.query.x }}` when `query` is a string, fails with `missing {{ {path} }}`, as in `missing {{ argv.query.x }}`.
 - `args` is a string, so a dotted placeholder into it, such as `{{ args.x }}`, fails with `args is a string, not a table`.
 
-Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 ## Arg declarations
 
@@ -262,7 +262,7 @@ This is an explicit declaration, so the argument string is parsed as JSON like u
 
 ### Declaration errors
 
-Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](17-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
+Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](16-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
 
 | Mistake | Message after `invalid frontmatter: ` |
 |---|---|
@@ -361,7 +361,7 @@ return argv.query
 ```
 ````
 
-Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
+Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
 
 ## The H1 repair pattern
 
@@ -415,7 +415,7 @@ if argv.limit == nil then
 end
 ````
 
-Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
+Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
 
 ## Frozen argv
 
@@ -494,7 +494,7 @@ if wrote then return 'written' end
 return 'refused'
 ````
 
-This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) covers.
+This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) covers.
 
 A nil `argv` is frozen too. Under an explicit `args:` declaration, a run with no arguments gets a nil `argv`, because the empty string is not JSON; a prompt with no `args:` key gets `argv.prose == ''` instead. Assigning the nil `argv` outside the H1 body, as in `argv = {}`, fails with `argv is frozen outside H1: assign it in H1 only`.
 

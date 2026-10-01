@@ -502,36 +502,6 @@ In shared library code while it loads, store calls run directly instead of suspe
 
 A local tool handler, a Lua function a prompt registers with `tools.add_local` for a model to call, can use the store as well, and a store call made there is an ordinary store operation ([Local tools](12-tools.md#local-tools)).
 
-### Store reports
-
-Each store operation leaves one success or failure report inside the block and section that made it, in call order, alongside the other reports a section VM produces ([Section VM lifecycle and reports](05-lua-environment.md#section-vm-lifecycle-and-reports)):
-
-| Call | Reports |
-|---|---|
-| `store.write` | `store_write_succeeded`, `store_write_failed` |
-| `store.append` | `store_append_succeeded`, `store_append_failed` |
-| `store.read` | `store_read_succeeded`, `store_read_failed` |
-| `store.read_numbered` | `store_read_numbered_succeeded`, `store_read_numbered_failed` |
-| `store.str_replace` | `store_replace_succeeded`, `store_replace_failed` |
-| `store.delete` | `store_delete_succeeded`, `store_delete_failed` |
-| `store.glob` | `store_glob_succeeded`, `store_glob_failed` |
-| `store.exists` | `store_exists_succeeded`, `store_exists_failed` |
-
-Reports hold no paths, contents, anchors, or [argument string](06-arguments.md#input-basics). An operation that fails in the ordinary way records its failure report and also raises a Lua error in the calling block. For a section whose first block writes a file and whose second block reads it, the section VM reports in this order, starting with the shared library load that every section VM runs:
-
-````text
-lua_shared_load_started
-lua_shared_load_succeeded
-lua_chunk_started
-store_write_succeeded
-lua_chunk_succeeded
-lua_chunk_started
-store_read_succeeded
-lua_chunk_succeeded
-lua_teardown_started
-lua_teardown_succeeded
-````
-
 ## Sharing the store across calls and tasks
 
 A run has one store, and every chain in the run uses it. A [called chain](08-jump-and-call.md#called-chains) can write a store file that the caller reads as soon as `call` returns:
@@ -607,7 +577,7 @@ With two arms that wrote `alpha` and `beta`, `research.md` holds `alpha` and `be
 
 ### When claims conflict
 
-When a claims conflict arises, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
+When a claims conflict arises, the run ends on the spot with run error kind `Determinism` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and this message:
 
 ````text
 store determinism violation: {claim} on {path} by {identity} conflicts with a {other_claim} claim by {other_identity}
@@ -654,7 +624,7 @@ local count = tonumber(ok and v or '0')
 if not ok then assert(v.reason == 'not_found', 'unexpected store failure') end
 ````
 
-Left uncaught, a store failure aborts the block, and the run fails with [run error kind](17-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
+Left uncaught, a store failure aborts the block, and the run fails with [run error kind](16-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
 
 ### Store messages
 
@@ -693,7 +663,7 @@ Four failures that once shared one fixed message now carry their own reasons, ea
 
 ### Run error kinds
 
-A store problem that ends a run is classified by one of two run error kinds ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)):
+A store problem that ends a run is classified by one of two run error kinds ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)):
 
 | Run error kind | When |
 |---|---|
@@ -788,7 +758,7 @@ Every `untrusted` call in a run shares one nonce, so identical content wraps to 
 
 ### Text that arrives already wrapped
 
-Some text reaches the model already inside the same envelope, with no `untrusted` call needed. Results from untrusted tools arrive this way ([Trusted and untrusted output](12-tools.md#trusted-and-untrusted-output)). So do child task results in task notices, and the task history rendered for the model ([Task notices to the model](15-tasks.md#task-notices-to-the-model)). Store text is not among them, so wrapping it is always up to your Lua code.
+Some text reaches the model already inside the same envelope, with no `untrusted` call needed. Results from untrusted tools arrive this way ([Trusted and untrusted output](12-tools.md#trusted-and-untrusted-output)). So do child task results in task notices ([Task notices to the model](15-tasks.md#task-notices-to-the-model)). Store text is not among them, so wrapping it is always up to your Lua code.
 
 ## How the envelope encodes content
 

@@ -93,7 +93,7 @@ capabilities:
     optional: true
 ````
 
-A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
+A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -112,7 +112,7 @@ With `optional: true`, a capability the Harness lacks, or one that fails to acti
 
 `config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
 
-Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
+Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
 
 ````text
 invalid frontmatter: capability {id} is declared more than once under capabilities
@@ -134,7 +134,7 @@ A capability can name another capability as a conflict, for example when each pr
 
 ### Entry errors
 
-A malformed entry fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
+A malformed entry fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
 
 - A map without `ref` fails with `` missing field `ref` ``.
 - A key written twice fails with `` duplicate field `{key}` ``, where `{key}` is `ref`, `optional`, or `config`.
@@ -437,7 +437,7 @@ Uncaught, these fail the run wherever the call is made. A slot can stay unbound 
 - `tools.add expects strings, Tool objects, or arrays of either, got {type}` for an alias or array element that is neither a string nor a Tool object.
 - `tools.add array form takes no override` for a description passed with the array form.
 
-Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
+Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
 
 ````text
 model-facing schema build failure for tool alias "{alias}"
@@ -458,7 +458,7 @@ Both lines call the same tool. A call your Lua code makes this way is a script c
 
 A script call can reach any tool bound in the run, even one outside the section's scope. The scope only limits what the model is offered.
 
-A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model. Each call is also recorded in the run's events with a succeeded or failed event, which [Task Events](16-task-events.md#tool-call-events) shows how to read.
+A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model.
 
 ### Arguments
 
@@ -487,7 +487,7 @@ A `tools.call` that names neither a local tool nor a bound alias raises an error
 tool "{name}" is not bound in this run; bound aliases: [...]
 ````
 
-Five names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, `task_events`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
+Four names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
 
 These argument errors raise at the call, where `pcall` catches them:
 
@@ -579,12 +579,12 @@ A caught tool error is read through `err.kind`, through `err.name` on `unbound_t
 | Kind | Raised when | `name` field | Message |
 |---|---|---|---|
 | `tool` | a called tool fails on its own in a script call | none | `tool call failure: {message}` |
-| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the five Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
+| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the four Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
 | `out_of_scope_tool` | the model calls a name outside the round's scope | the name | `tool "{name}" is not in this section's scope; in-scope aliases: [...]` |
 
-`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the five Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
+`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the four Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
 
-Uncaught, these failures end the run with run error kind [`Tool`](17-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
+Uncaught, these failures end the run with run error kind [`Tool`](16-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
 
 ## Counting calls
 
@@ -712,7 +712,7 @@ A local tool call involves no Harness work of its own: the Engine hands it to th
 
 `jump` refuses while a handler runs, so a handler never [jumps](08-jump-and-call.md#sibling-jumps). Calling it there, even through a reference to `jump` saved before the handler ran, raises an ordinary error that `pcall` can catch, with the message `jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns`. The refusal lasts until the outermost handler returns or raises, including across nested local calls, and then `jump` works again in the block.
 
-A handler that never returns still stops when the run is cancelled, as [Limits and Errors](17-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
+A handler that never returns still stops when the run is cancelled, as [Limits and Errors](16-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
 
 ### Handler errors
 

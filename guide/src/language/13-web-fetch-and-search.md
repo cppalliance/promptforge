@@ -78,7 +78,7 @@ The search tool takes a search query and returns a list of search results. `tool
 
 Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the Host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The Host provides the gateway address and token, the Harness passes them to the capability when it registers it, and the prompt only declares the capability id. The Harness provides `promptforge/web` as a built-in capability when the Host configures it with a PromptForge gateway connection.
 
-When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
+When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -138,7 +138,7 @@ if not ok and err.kind == 'tool' and string.find(tostring(err), 'userinfo', 1, t
 end
 ````
 
-The error value carries the fetch tool's own message, here `url must not contain userinfo`. As with every tool failure raised in a script, its `message` field, and so `tostring(err)`, reads `tool call failure: {message}`, with the tool's message in place of `{message}` ([tool failures](12-tools.md#tool-failures)). A script never sees the tool error kind as a field, because every web tool failure reaches a script with error kind `tool`. Left uncaught, a hard failure ends the run with run error kind `Tool` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and this text:
+The error value carries the fetch tool's own message, here `url must not contain userinfo`. As with every tool failure raised in a script, its `message` field, and so `tostring(err)`, reads `tool call failure: {message}`, with the tool's message in place of `{message}` ([tool failures](12-tools.md#tool-failures)). A script never sees the tool error kind as a field, because every web tool failure reaches a script with error kind `tool`. Left uncaught, a hard failure ends the run with run error kind `Tool` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and this text:
 
 ````text
 tool call failure: url must not contain userinfo
@@ -524,7 +524,7 @@ if not ok and err.kind == 'tool' then
 end
 ````
 
-Uncaught, a failure ends the run with run error kind `Tool` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and the text `tool call failure: {message}`, as here when the gateway cannot be reached:
+Uncaught, a failure ends the run with run error kind `Tool` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and the text `tool call failure: {message}`, as here when the gateway cannot be reached:
 
 ````text
 tool call failure: web_search: request failed

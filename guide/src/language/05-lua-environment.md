@@ -144,7 +144,7 @@ return answer
 ```
 ````
 
-The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
+The failure is a Lua runtime error whose text includes your message, here `the answer must be yes`. Left uncaught, it ends the run with run error kind `Lua`, or with `RequirementsUnmet` when it happens in the H1 pass ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). [Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation) covers what that does to the run as a whole.
 
 ### Failed Engine calls raise
 
@@ -689,7 +689,7 @@ lua log event budget exceeded
 lua log cumulative byte budget exceeded
 ````
 
-`pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](17-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
+`pcall` catches either as a `lua`-kind error value. Left uncaught, either ends the run with run error kind `Quota` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). [Lua block budgets](16-limits-and-errors.md#lua-block-budgets) sets these quotas beside the run's other limits.
 
 ## Asking the operator with input.ask
 
@@ -783,7 +783,7 @@ That is a normal return, not an error: the section keeps running. `available` is
 - The section VM's state survives the wait. A local set before the call, such as `local before = 41`, still holds `41` after it, however long the operator takes.
 - The wait pauses only the calling chain. The rest of the run keeps going while it waits.
 - A task started with `tasks.spawn` that waits in `input.ask()` stays live while other chains keep running, and its status reads `blocked` `tool_call` until its answer arrives ([Checking on tasks](15-tasks.md#checking-on-tasks)). It ends only after its own answer arrives or the chain that started it ends or cancels it.
-- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text ([Tool call events](16-task-events.md#tool-call-events)). The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
+- Each `input.ask()` is one call to the capability's ask tool, whose tool path is `promptforge/user-input/ask`. It reports like any script tool call, with a trusted `tool_result` whose `alias` is that tool path and whose `content` is the operator's text. The Host decides where the question goes: a terminal, a chat window, a web form, or nowhere.
 
 ### Letting the model ask
 
@@ -817,13 +817,13 @@ end
 return text
 ````
 
-Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+Left uncaught, a failed ask ends the run with run error kind `Tool` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
-When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel)).
+When the run is cancelled while a section waits in `input.ask()`, the run stops promptly with the cancelled outcome, and the code after the call never runs ([Calls waiting during a cancel](16-limits-and-errors.md#calls-waiting-during-a-cancel)).
 
 ## Error locations in the prompt file
 
-Every Lua block is compiled when the prompt file is parsed. A block that does not compile fails the parse with parse error kind `Lua` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), so the prompt never runs. At run time, a Lua error names the failing line of the prompt file itself, so you can go straight to it.
+Every Lua block is compiled when the prompt file is parsed. A block that does not compile fails the parse with parse error kind `Lua` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), so the prompt never runs. At run time, a Lua error names the failing line of the prompt file itself, so you can go straight to it.
 
 Both kinds of message name a Lua region by its location label, such as ``section `Check` epilog`` or ``section `Only` prologue`` ([Writing a Lua fence](03-blocks-and-prose.md#writing-a-lua-fence)). The label is the name Lua gives the block, and Lua prints it as `[string "{location}"]:N:`.
 
@@ -937,10 +937,10 @@ not an arm: runtime error: unknown sys field 'index'
 | `task_not_owned` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `task_consumed` | `task` | [Task errors](15-tasks.md#task-errors) |
 | `tasks_live` | `tasks` | [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) |
-| `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](17-limits-and-errors.md#calls-waiting-during-a-cancel) |
+| `cancelled` | `task`, for a cancelled task | [Calls waiting during a cancel](16-limits-and-errors.md#calls-waiting-during-a-cancel) |
 | `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | [Store errors](09-the-store.md#store-errors) |
 | `lua` | none | This chapter |
-| `internal` | none | [Errors caught in Lua](17-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | none | [Errors caught in Lua](16-limits-and-errors.md#errors-caught-in-lua) |
 
 `err.kind == 'lua'` marks an authoring or runtime failure: a compile error, a runtime error in your own code, an argument or misuse error from a PromptForge function, or an exhausted log quota. A placeholder in prose that fails to render and running out of Lua memory are `lua` too. An Engine function failure caught by `pcall` is kind `lua` when it is an authoring or argument problem and `internal` when the Lua runtime's own machinery failed. A typed error from Harness work, such as a model round that ran out of context or a failed `store` operation, keeps its own kind and fields.
 
@@ -1018,7 +1018,7 @@ When a failed Engine call's error goes uncaught, the run reports the original fa
 
 ### Uncaught failures
 
-An uncaught Lua failure, a runtime error in your code or an error you raise yourself, ends the run with run error kind `Lua`, holding the failure's message. That holds in a walked section, a `call` chain, a task, a fanout arm, and the shared library load. In the H1 pass the same failure ends the run as `RequirementsUnmet`, whose notice is the Lua error text. Only failures that would end as `Lua` become `RequirementsUnmet` there: other kinds keep their own run error kind in the H1 pass, and a failed shared library load, a failed `var` read-back, and a bad `jump` target in the H1 pass stay `Lua`. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+An uncaught Lua failure, a runtime error in your code or an error you raise yourself, ends the run with run error kind `Lua`, holding the failure's message. That holds in a walked section, a `call` chain, a task, a fanout arm, and the shared library load. In the H1 pass the same failure ends the run as `RequirementsUnmet`, whose notice is the Lua error text. Only failures that would end as `Lua` become `RequirementsUnmet` there: other kinds keep their own run error kind in the H1 pass, and a failed shared library load, a failed `var` read-back, and a bad `jump` target in the H1 pass stay `Lua`. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 ## Section VM lifecycle and reports
 
@@ -1051,4 +1051,4 @@ A section's Lua lifecycle shows in the run's reports, which carry the section na
 
 A block's `log` checkpoints fall between its started and succeeded reports. When the shared library raises, for example with `error(...)`, the load reports started and then failed, and teardown still runs and reports started and succeeded. A failing block reports a block failure. A section whose VM fails to build is torn down the same way before the error is reported.
 
-At parse time, each Lua block's compilation reports a started report followed by exactly one succeeded or failed report, with no source text and no location label. [Run and section boundaries](16-task-events.md#run-and-section-boundaries) shows how these reports appear when you read a task's events.
+At parse time, each Lua block's compilation reports a started report followed by exactly one succeeded or failed report, with no source text and no location label.
