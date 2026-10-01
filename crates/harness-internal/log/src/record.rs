@@ -124,17 +124,12 @@ pub struct Record {
 
 /// Which of a run's records to read. The default reads them all.
 ///
-/// Without `task`, records come back in `seq` order, the loop's order.
-/// With `task`, they come back in that task's own `task_seq` order, which
-/// can differ from `seq` when tasks interleave. `last` keeps only the
-/// final `n` in whichever order applies.
+/// Records come back in `seq` order, the loop's order. `last` keeps only
+/// the final `n`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecordFilter {
     /// Only records of this kind.
     pub kind: Option<RecordKind>,
-    /// Only records from this task (its rendered path), ordered by
-    /// `task_seq`.
-    pub task: Option<String>,
     /// Only the final `n` records.
     pub last: Option<u32>,
 }

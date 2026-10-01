@@ -18,7 +18,6 @@ const AWKWARD: f64 = 3.907_800_000_000_000_4;
 /// Every record of a run, in loop order.
 const ALL: RecordFilter = RecordFilter {
     kind: None,
-    task: None,
     last: None,
 };
 

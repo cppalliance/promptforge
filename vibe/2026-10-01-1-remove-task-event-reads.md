@@ -320,7 +320,7 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 </step-1>
 <step-2>
 
-### Step 2: Remove the log's per-task read path
+### Step 2: Remove the log's per-task read path [completed]
 
 - Component: run-log-read-path
 - Artifacts: `crates/harness-internal/log` (package `harness-log`): `src/read.rs`, `src/record.rs`, `src/schema.rs`, `README.md`, and the tests `tests/it/read.rs`, `tests/it/append.rs`, `tests/it/fidelity.rs`; plus every `task: None` literal in a `RecordFilter { ... }` in the runner and models tests, found with `rg -n "task:" crates/harness-internal`. All edits are listed under Technical Design, "File and public API changes" (Harness log).

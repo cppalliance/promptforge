@@ -1,5 +1,4 @@
-//! The read side: one run's row and its records, whole or sliced by kind
-//! and task.
+//! The read side: one run's row and its records, whole or sliced by kind.
 
 use crate::append::{RunLog, unsigned};
 use crate::error::LogError;
@@ -63,19 +62,11 @@ impl RunLog {
         self.run(run).await?;
         let kind = filter.kind.map(RecordKind::as_str);
         let limit = filter.last.map_or(-1, i64::from);
-        let mut rows = match filter.task {
-            None => {
-                self.conn()
-                    .query(schema::SELECT_RECORDS, (run.get(), kind, limit))
-                    .await?
-            }
-            Some(task) => {
-                self.conn()
-                    .query(schema::SELECT_TASK_RECORDS, (run.get(), task, kind, limit))
-                    .await?
-            }
-        };
-        // The queries read newest first so `LIMIT` keeps the final
+        let mut rows = self
+            .conn()
+            .query(schema::SELECT_RECORDS, (run.get(), kind, limit))
+            .await?;
+        // The query reads newest first so `LIMIT` keeps the final
         // records; oldest first is the order callers expect.
         let mut records = Vec::new();
         while let Some(row) = rows.next().await? {
@@ -102,34 +93,6 @@ impl RunLog {
         Ok(records)
     }
 
-    /// The `Event` payloads of one task (named by its rendered path), in
-    /// `task_seq` order: what the `TaskEvents` performer hands back to the
-    /// Engine. `last` keeps only the final `n`. A task that never logged
-    /// reads as empty.
-    ///
-    /// # Errors
-    /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
-    /// [`LogError::Corrupt`] when a row does not fit the schema,
-    /// [`LogError::Payload`] when a payload does not parse, and
-    /// [`LogError::Database`] when the database cannot read.
-    pub async fn events_for_task(
-        &self,
-        run: RunId,
-        task: &str,
-        last: Option<u32>,
-    ) -> Result<Vec<serde_json::Value>, LogError> {
-        let filter = RecordFilter {
-            kind: Some(RecordKind::Event),
-            task: Some(task.to_owned()),
-            last,
-        };
-        let records = self.records(run, filter).await?;
-        Ok(records
-            .into_iter()
-            .map(|stored| stored.record.payload)
-            .collect())
-    }
-
     /// Every `event` record of `run` in `seq` order, the loop's order:
     /// what a session view renders and what a reconnecting client replays.
     ///
@@ -141,7 +104,6 @@ impl RunLog {
     pub async fn transcript(&self, run: RunId) -> Result<Vec<StoredRecord>, LogError> {
         let filter = RecordFilter {
             kind: Some(RecordKind::Event),
-            task: None,
             last: None,
         };
         self.records(run, filter).await
