@@ -62,11 +62,11 @@ function isTextInput(element: Element | null): element is HTMLElement {
  * rather than the spec's "inherit" - a deliberate simplification.
  */
 function isContentEditable(element: HTMLElement): boolean {
-  const host = element.closest("[contenteditable]");
-  if (host === null) {
+  const editable = element.closest("[contenteditable]");
+  if (editable === null) {
     return false;
   }
-  return host.getAttribute("contenteditable")?.toLowerCase() !== "false";
+  return editable.getAttribute("contenteditable")?.toLowerCase() !== "false";
 }
 
 /** Anything the execCommand fallback can act on natively. */

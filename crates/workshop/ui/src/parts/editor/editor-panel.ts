@@ -289,7 +289,7 @@ export class EditorPanel extends WorkshopPart {
     }
     this._register(
       showPanelDialog({
-        host: this.element,
+        container: this.element,
         classPrefix: "ws-editor-revert",
         titleId: "editor-revert-title",
         title: "Revert file",
@@ -414,7 +414,7 @@ export class EditorPanel extends WorkshopPart {
     message = `${this.title} was modified outside the editor. Reload the on-disk text, or overwrite the file with your changes.`,
   ): void {
     this._register(showPanelDialog({
-      host: this.element,
+      container: this.element,
       classPrefix: "ws-editor-conflict",
       titleId: "editor-conflict-title",
       title: "File changed on disk",
@@ -484,7 +484,7 @@ export class EditorPanel extends WorkshopPart {
       }
     };
     const dialog = showPanelDialog({
-      host: this.element,
+      container: this.element,
       classPrefix: "ws-editor-close",
       titleId: "editor-close-title",
       title: "Unsaved changes",

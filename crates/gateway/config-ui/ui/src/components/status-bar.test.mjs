@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, settle } from "../harness.mjs";
+import { bootApp, gatewayStub, modelsFixture, settle } from "../test-support.mjs";
 
 const ENDPOINTS = [
   { path: "/v1/chat/completions", name: "Chat completions", ready: true, provisioning: false },

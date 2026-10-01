@@ -19,7 +19,7 @@ import {
   navigate,
   settle,
   systemFixture,
-} from "./harness.mjs";
+} from "./test-support.mjs";
 
 const WORKSHOP_ORIGIN = "http://127.0.0.1:7910";
 const PANEL_URL = `http://127.0.0.1:8081/config/?mode=panel&bridge=${encodeURIComponent(

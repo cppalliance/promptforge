@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: s7-ui
     content: "Step 7: rename the DOM container names, LazyPanelHost, the harness() test helpers and config-ui harness.mjs in the TypeScript UIs, with exact wording for every check text"
-    status: pending
+    status: completed
   - id: s8-finish
     content: "Step 8: rename HOSTED_OFFER and SyntheticHost, qualify the database-engine and speech-engine names, add the retired seeds, update the AGENTS.md Using-the-terms bullets"
     status: pending

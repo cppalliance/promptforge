@@ -31,7 +31,7 @@ export interface PanelDialogField {
 
 export interface PanelDialogOptions {
   /** The panel element the overlay mounts into. */
-  readonly host: HTMLElement;
+  readonly container: HTMLElement;
   /** BEM-style class prefix, e.g. "ws-editor-conflict" or "ws-editor-close". */
   readonly classPrefix: string;
   /** The title element's id, unique per dialog kind for aria-labelledby. */

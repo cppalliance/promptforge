@@ -165,7 +165,7 @@ check(
 
 dispatch({ type: "pf-action", action: "apply" });
 dispatch({ type: "pf-action", action: "download-started" });
-dispatch({ type: "pf-action", action: "reboot-the-host" });
+dispatch({ type: "pf-action", action: "reboot-the-machine" });
 await flush();
 check(
   "apply and download-started reach the status bar as local info lines",
@@ -190,7 +190,7 @@ check("a disposed bridge answers nothing", replies.length === repliesBefore);
   });
   panel.init({ params: {} });
   const iframe = panel.element.querySelector("iframe");
-  check("the panel hosts an iframe immediately (no async origin probe)", iframe !== null);
+  check("the panel embeds an iframe immediately (no async origin probe)", iframe !== null);
   check(
     "the iframe loads the config SPA same-origin via the workshop proxy",
     iframe?.getAttribute("src") ===

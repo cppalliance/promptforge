@@ -15,7 +15,7 @@ import {
   modelsFixture,
   navigate,
   settle,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 function fixtureStub(extra = {}) {
   return gatewayStub({ key: "k", config: modelsFixture(), models: ["qwen-common"], ...extra });

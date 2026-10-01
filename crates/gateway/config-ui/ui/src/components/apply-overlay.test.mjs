@@ -17,7 +17,7 @@ import {
   modelsFixture,
   settle,
   sseChannel,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 const CANCELLED_TOAST = "Apply cancelled - your pending changes are still staged";
 

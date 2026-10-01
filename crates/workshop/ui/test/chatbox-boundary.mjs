@@ -35,7 +35,7 @@ const FORBIDDEN = [
     name: "an import from @workshop/platform other than lifecycle",
     pattern: new RegExp('"' + "@workshop/platform/" + "(?!" + "lifecycle" + '")'),
   },
-  { name: "the host's access-control vocabulary", pattern: ["gr", "ant"].join("") },
+  { name: "the owning part's access-control vocabulary", pattern: ["gr", "ant"].join("") },
 ];
 
 const files = (await readdir(chatboxDir, { recursive: true, withFileTypes: true }))
@@ -47,7 +47,7 @@ test("the chatbox directory holds the component's files", () => {
   assert.ok(files.length > 0, "src/parts/chatbox/ holds no files; the walk is broken");
 });
 
-test("no file under src/parts/chatbox/ reaches into the host layers", async () => {
+test("no file under src/parts/chatbox/ reaches into the embedding layers", async () => {
   const offenders = [];
   for (const file of files) {
     const lines = (await readFile(file, "utf8")).split("\n");

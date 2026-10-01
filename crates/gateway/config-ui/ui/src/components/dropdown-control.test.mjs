@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadApp, makeDom } from "../harness.mjs";
+import { loadApp, makeDom } from "../test-support.mjs";
 
 const app = await loadApp();
 

@@ -75,7 +75,7 @@ export const DOCK: ServiceToken<DockviewApi> = createServiceToken<DockviewApi>("
  * against a feature's panel class) must unwrap through
  * resolvePanelContent, never read view.content directly.
  */
-export interface LazyPanelHost {
+export interface LazyPanelContainer {
   readonly resolvedPanel: IContentRenderer | null;
 }
 
@@ -86,8 +86,8 @@ export interface LazyPanelHost {
  * any other renderer answers itself.
  */
 export function resolvePanelContent(content: IContentRenderer): IContentRenderer {
-  const host = content as IContentRenderer & Partial<LazyPanelHost>;
-  return host.resolvedPanel ?? content;
+  const container = content as IContentRenderer & Partial<LazyPanelContainer>;
+  return container.resolvedPanel ?? content;
 }
 
 const entries = new Map<string, PanelTypeEntry>();

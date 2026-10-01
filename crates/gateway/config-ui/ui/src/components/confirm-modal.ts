@@ -18,10 +18,10 @@ export interface ConfirmOptions {
 }
 
 /**
- * Opens the confirm dialog in `host` and resolves with the choice:
+ * Opens the confirm dialog in `container` and resolves with the choice:
  * true for the confirming action, false for Cancel/Escape/backdrop.
  */
-export function confirmDialog(host: HTMLElement, options: ConfirmOptions): Promise<boolean> {
+export function confirmDialog(container: HTMLElement, options: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
     const settle = (choice: boolean): void => {
@@ -31,7 +31,7 @@ export function confirmDialog(host: HTMLElement, options: ConfirmOptions): Promi
       }
     };
     const handle = openModal({
-      host,
+      container,
       classPrefix: "confirm",
       titleId: "confirm-title",
       title: options.title,

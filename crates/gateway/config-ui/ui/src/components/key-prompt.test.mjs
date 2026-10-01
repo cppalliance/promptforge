@@ -13,7 +13,7 @@ import {
   makeDom,
   modelsFixture,
   settle,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 /** Fills the key input and fires the form's submit handler. */
 function submitKey(dom, root, value) {

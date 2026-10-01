@@ -60,9 +60,9 @@ function check(name, condition) {
 
 // Renders text into a container element and returns the .ws-markdown-content root.
 function render(text, options) {
-  const host = document.createElement("div");
-  host.append(renderMarkdown(text, options));
-  return host.firstElementChild;
+  const container = document.createElement("div");
+  container.append(renderMarkdown(text, options));
+  return container.firstElementChild;
 }
 
 // --- Structure -----------------------------------------------------------

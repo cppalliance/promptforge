@@ -13,7 +13,7 @@ import {
   modelsFixture,
   navigate,
   settle,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

@@ -51,9 +51,9 @@ export interface ApplyOverlayOptions {
   onCancel?: () => void | Promise<void>;
 }
 
-/** Creates an overlay controller that mounts into `host` when opened. */
+/** Creates an overlay controller that mounts into `container` when opened. */
 export function createApplyOverlay(
-  host: HTMLElement,
+  container: HTMLElement,
   options: ApplyOverlayOptions = {},
 ): ApplyOverlay {
   let element: HTMLElement | null = null;
@@ -150,7 +150,7 @@ export function createApplyOverlay(
         card.append(actions);
       }
       element.append(card);
-      host.append(element);
+      container.append(element);
       // Duck-typed: the HTMLElement global is absent under node --test.
       const focused = document.activeElement as HTMLElement | null;
       restoreFocus = focused && typeof focused.focus === "function" ? focused : null;

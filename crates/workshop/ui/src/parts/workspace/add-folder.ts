@@ -23,14 +23,14 @@ export interface AddFolderStatusSink {
 }
 
 /**
- * Starts the flow over `host`, the dialog's overlay parent in browser
+ * Starts the flow over `container`, the dialog's overlay parent in browser
  * mode. Returns the dialog's disposable in browser mode - the caller
  * owns dismissal when its own lifetime ends - and null in the desktop
  * app, where the native picker needs no parent. Outcomes paint `statusBar`
  * when given, else the status-bar service when one is registered.
  */
 export function addFolderToWorkspace(
-  host: HTMLElement,
+  container: HTMLElement,
   statusBar?: AddFolderStatusSink | null,
 ): IDisposable | null {
   if (window.__TAURI_INTERNALS__ !== undefined) {
@@ -38,7 +38,7 @@ export function addFolderToWorkspace(
     return null;
   }
   return showPanelDialog({
-    host,
+    container,
     classPrefix: "ws-workspace-add",
     titleId: "workspace-add-title",
     title: "Add Folder to Workspace",

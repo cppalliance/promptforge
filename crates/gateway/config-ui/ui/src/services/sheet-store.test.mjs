@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudSheetFixture, jsonResponse, loadApp } from "../harness.mjs";
+import { cloudSheetFixture, jsonResponse, loadApp } from "../test-support.mjs";
 
 const app = await loadApp();
 
