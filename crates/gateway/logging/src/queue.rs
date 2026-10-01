@@ -434,14 +434,14 @@ impl LogQueue {
     fn subtract_undelivered(&self, amount: u64) {
         let _ = self
             .admission_gate
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 let records = current & UNDELIVERED_RECORDS;
                 Some(current.saturating_sub(records.min(amount)))
             });
     }
 
     fn saturating_sub(counter: &AtomicU64, amount: u64) {
-        let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        let _ = counter.try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             Some(current.saturating_sub(amount))
         });
     }

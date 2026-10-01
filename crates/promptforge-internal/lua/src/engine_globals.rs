@@ -27,7 +27,7 @@ fn log_checkpoint(
     // Spend one unit of the per-VM log budget before doing any work; an
     // exhausted budget refuses further checkpoints (lua 002).
     if log_budget
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
         .is_err()
     {
         return Err(mlua::Error::external(crate::error::lua_quota::LOG_EVENT));
@@ -52,7 +52,7 @@ fn log_checkpoint(
     // so many small events cannot emit unbounded total log volume
     // (lua 002).
     if log_byte_budget
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
             remaining.checked_sub(message.len())
         })
         .is_err()

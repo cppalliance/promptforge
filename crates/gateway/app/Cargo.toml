@@ -190,6 +190,7 @@ unwrap_used = "deny"
 expect_used = "deny"
 dbg_macro = "warn"
 doc_markdown = "allow"
+assert_is_empty = "allow"
 
 # Release packaging through cargo-dist (see dist-workspace.toml): the
 # sample systemd unit is included in the archive.

@@ -278,6 +278,10 @@ dbg_macro = "warn"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"
+# Cherry-picked out of pedantic: its suggested rewrite for a collection is
+# `assert_eq!(x, [] as [T; 0])`, which has to spell out the element type and
+# needs `T: PartialEq + Debug`, so it cannot be applied to most call sites.
+assert_is_empty = "allow"
 
 # The profile that 'dist' will build with
 [profile.dist]

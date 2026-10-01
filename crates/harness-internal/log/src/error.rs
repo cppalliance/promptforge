@@ -76,7 +76,7 @@ pub enum LogError {
     #[error("run log file")]
     Io {
         /// The I/O error.
-        #[from]
+        #[source]
         source: io::Error,
     },
     /// A payload could not be serialized on the way in or parsed on the
@@ -97,6 +97,12 @@ pub enum LogError {
     /// found the described value.
     #[error("run log: corrupt row: {0}")]
     Corrupt(String),
+}
+
+impl From<io::Error> for LogError {
+    fn from(source: io::Error) -> Self {
+        LogError::Io { source }
+    }
 }
 
 impl From<turso::Error> for LogError {

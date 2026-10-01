@@ -120,7 +120,7 @@ impl InterruptController {
         let _ =
             self.state
                 .generation
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |generation| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |generation| {
                     Some(generation.saturating_add(1))
                 });
         let mut active_child = self.lock_active_child();

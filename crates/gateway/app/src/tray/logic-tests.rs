@@ -25,7 +25,6 @@ fn selected_config() -> Config {
 
 /// With no local child running, only the boot STT selection counts.
 #[test]
-#[expect(clippy::float_cmp, reason = "1.0 is exact in binary floating point")]
 fn the_tray_status_counts_routed_models_and_the_boot_stt_selection() {
     let state = app_state(selected_config(), None);
     let (models, vram_gb) = state
@@ -42,10 +41,6 @@ fn the_tray_status_counts_routed_models_and_the_boot_stt_selection() {
 /// after an apply swaps the live config for one with no selection.
 #[cfg(feature = "test-fixtures")]
 #[tokio::test]
-#[expect(
-    clippy::float_cmp,
-    reason = "3.5 + 1.0 is exact in binary floating point"
-)]
 async fn the_status_sums_running_children_after_an_apply_swaps_the_config() {
     let state = app_state(selected_config(), None);
     let child = Config::from_toml_str(

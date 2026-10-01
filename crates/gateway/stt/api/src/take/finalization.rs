@@ -149,7 +149,7 @@ pub(super) struct FinalSegmentOwner {
 impl FinalSegmentOwner {
     pub(super) fn reserve(pending_segments: &Arc<AtomicUsize>) -> Option<Self> {
         pending_segments
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |pending| {
                 (pending < FINAL_SEGMENT_CAPACITY).then_some(pending + 1)
             })
             .ok()?;
