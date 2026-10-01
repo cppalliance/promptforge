@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: s3-cicerone
     content: "Step 3: run tools/cicerone.md in update mode for promptforge scoped to vfs.md with baseline 75d616f6; commit its page changes if any"
-    status: pending
+    status: completed
   - id: s4-lua
     content: "Step 4: rename the Lua Engine-globals names (inject_values, install_engine_globals, EngineGlobal, engine_globals module, engine_type helper, registry key), messages, Lua-sense test names, strings and fixture names, and the guide quote"
     status: pending
