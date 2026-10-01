@@ -28,12 +28,17 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - The pinned linux-x86_64 whisper.cpp runtime is the CPU build. On a 32-thread CPU, the final `small.en` pass over a 9.4 s answer takes 2.14 s, and the same sources built with CUDA take 0.13 s.
   - The only Windows x86-64 build is the CUDA build, and its CUDA backend links the NVIDIA driver library. A Windows host without an NVIDIA driver cannot load it, so it has no speech.
   - Every platform has exactly one pinned whisper build, chosen by OS and architecture alone. Nothing looks at the host's GPU.
+  - Local testing of the new builds on the operator's hosts found two process-level defects:
+    - the Windows CPU build ends the process when `whisper.dll` is unloaded after a CPU transcription;
+    - a gateway on the Linux CUDA build prints CUDA-error aborts at every graceful stop, because speech frees GPU memory after the CUDA runtime has shut down.
 - Goals:
   - A CUDA build for linux-x86_64 and a CPU build for windows-x86_64, from the same whisper.cpp tag, `b4938`, built and published by the existing whisper build workflow and pinned by digest like every other runtime. The pins land in one commit after this work merges.
   - One setting, `[stt] whisper_backend`, chooses the build on Windows x86-64 and Linux x86-64 the way `[local] llama_backend` chooses llama-server: `auto` detects an NVIDIA GPU, and an explicit value forces a build.
   - The C ABI, the FFI crate, the model files, and decoding stay as they are.
   - Under the default `auto`, a host the selection cannot serve gets the CPU build or a failed speech load, never an ended gateway process.
   - The native speech fixtures name their build, so no test depends on the host's GPU.
+  - A graceful stop retires speech before the process exits, so no speech thread frees native state after the CUDA runtime's teardown.
+  - The Windows CPU build survives being unloaded, as the other builds do.
 - Non-goals:
   - Replacing or rebuilding the five archives already in `whisper-lib-b4938`.
   - A CUDA build for linux-aarch64, a Vulkan whisper build, or runtime backend loading inside ggml.
@@ -50,6 +55,8 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A host whose CPU lacks a baseline extension fails the speech load with an error naming the required and missing extensions, and the gateway keeps serving.
   - `cpu` and `cuda` force their build on both platforms.
   - The native fixtures pass on a Linux host with an NVIDIA GPU without extra setup, and CI's native job still exercises the CUDA build.
+  - A gateway on the Linux CUDA build stops through `POST /shutdown` or SIGINT with no CUDA error and exit status 0, within the existing shutdown bounds.
+  - On the Windows CPU build, the Windows native suites pass, including unloading the library after a CPU transcription.
   - A push-triggered run of the whisper build workflow does not compile the Linux CUDA build. A release dispatch compiles it and adds both new archives to `whisper-lib-b4938`, leaving every existing asset untouched.
   - Every exit gate in the Testing Plan passes.
 - Constraints:
@@ -100,6 +107,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - An explicit `cuda` below the floor is honored, and on a GPU the build has no native code for it can end the gateway at the first transcription. The docs name the floor, with `auto` or `cpu` as the recovery.
   - A CPU missing a baseline extension fails the speech load with an error naming the required and missing extensions. Speech stays unavailable and the gateway keeps serving; no setting recovers it, because every x86 build shares the baseline.
   - As today, a failed speech load never stops the gateway and is never retried in-process. A restart is the recovery.
+  - A graceful stop retires speech after the command worker stops: admission closes, Realtime sessions end, and the speech workers join, within the command worker's `WORKER_JOIN_TIMEOUT` deadline. Past that deadline the retirement is abandoned with a warning, as a stuck command already is.
 - Security and privacy behavior:
   - The new rows are fail-closed with all-zero digests until the post-merge commit pins them from the release's `SHA256SUMS`.
   - Publishing is add-only: an archive the release already holds is never uploaded again.
@@ -115,9 +123,11 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - `gateway-local` owns the GPU probe, reused from llama-server, and row selection with its host-capability checks (the driver floor and the CPU baseline), and provisioning.
   - `gateway-whisper-ffi` and `gateway-stt-backend-whisper` do not change.
   - The native speech fixtures and CI's native job name their backend explicitly.
+  - `gateway`'s `Gateway::serve` retires speech at a graceful stop, through the existing `SpeechService::shutdown`.
 - Modules and interfaces:
   - The Windows CPU build is a `windows-x86_64` matrix row on a hosted Windows runner, and it builds on push like the other rows.
-    - It configures like the Windows CUDA row without `-DGGML_CUDA=ON`, packages like it without the CUDA runtime DLLs, and smoke-loads the same way.
+    - It configures like the Windows CUDA row without `-DGGML_CUDA=ON` and with `-DGGML_OPENMP=OFF`, packages like it without the CUDA runtime DLLs, and smoke-loads the same way.
+    - With OpenMP off, ggml runs its own thread pool, and the build no longer imports the MSVC OpenMP runtime, `VCOMP140.DLL`, whose unload under a live thread team ended the process. Master's Windows llama-server build sets the same flag in `crates/build-llama-cuda/src/cmake.rs`.
     - The shared `Package Windows runtime` step fails the CUDA row when its bundle lacks a `cudart64_*.dll`, `cublas64_*.dll`, or `cublasLt64_*.dll`, the Windows counterpart of the Linux CUDA job's `ldd` check. Master's step copied them with `-ErrorAction SilentlyContinue` and never checked, so a toolkit missing one produced a bundle without it.
   - The Linux CUDA build is a job of its own in the same workflow, and it runs only on `workflow_dispatch`, so push-triggered runs skip it.
     - Runner and toolchain: hosted `ubuntu-22.04` with no GPU and no driver, and NVIDIA's CUDA 12.8 apt build components: the compiler, cudart, cuBLAS, and the driver stubs. Its timeout is sized like the hosted Blackwell CUDA build's.
@@ -144,8 +154,12 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - `ArtifactStore::provision_whisper_library(backend, activity)`, in `crates/gateway/local/src/artifacts.rs`, still returns the library path, and goes through the existing verified install path once a row is selected.
   - `prepare()`, in `crates/gateway/stt/api/src/artifacts.rs`, reads the setting from `[stt]`, passes it to provisioning through `prepare_impl`, which takes the provisioning as an argument, and logs `provisioned whisper library` with the path, as `crates/gateway/local/src/runtime.rs` logs `provisioned llama-server`.
   - The native fixture configs in `crates/gateway/stt/api/tests/common/mod.rs`, `crates/gateway/stt/api/src/batch-native-tests.rs`, and `crates/gateway/app/tests/it/realtime_stt.rs` set `whisper_backend` from a test-only `PROMPTFORGE_WHISPER_BACKEND`, defaulting to `cpu`. It sits beside the existing `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO`, and the `native-whisper` job in `.github/workflows/stt-miri.yml` sets it to `cuda`.
+  - `Gateway::serve`, in `crates/gateway/app/src/runner.rs`, keeps a clone of the process's `SpeechService` under the `stt` feature.
+    - After the bounded command-worker join, it runs `SpeechService::shutdown` on `spawn_blocking` under a deadline shared with that join.
+    - On expiry it logs a warning and abandons the call, as the join abandons a stuck command.
+    - The engine, its signal-and-detach `Drop`, and the FFI do not change.
 - File and public API changes:
-  - Changed: `.github/workflows/whisper-lib.yml`, and `.github/workflows/stt-miri.yml`'s native job with the three native fixture files.
+  - Changed: `.github/workflows/whisper-lib.yml`, and `.github/workflows/stt-miri.yml`'s native job with the three native fixture files; `Gateway::serve` in `crates/gateway/app/src/runner.rs`, `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`, and `crates/gateway/app/tests/it/realtime_stt/authentication.rs`.
   - New public API: `gateway_config::WhisperBackend`, `SttPipelineConfig::whisper_backend`, and the `LocalError` variant for an unsupported CPU.
   - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`.
   - Docs:
@@ -178,6 +192,10 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - under `auto` on Linux x86-64, driver 569 or an unreadable version selects the CPU row, and 570 or later selects the CUDA row, while Windows x86-64 is unchanged at any driver version;
     - the probe parser reads `compute_cap, driver_version` lines, and llama-server's existing selection tests still pass;
     - a host missing any baseline extension fails selection on every x86 row under every setting, with an error naming it; a complete set selects as before, and other architectures skip the check.
+  - Speech retirement at a graceful stop, in `crates/gateway/app/src/runner.rs` beside `serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound`, with a scripted speech service and no GPU:
+    - when `serve` returns, both scripted decoders report their workers dropped and speech reports not ready;
+    - with a worker job held across the stop, `serve` returns within one to two join bounds, and releasing the job then lets the workers drop;
+    - the realtime authentication test that served one speech service from two servers gives each server its own.
 - Integration and end-to-end:
   - Tests that go through provisioning, the native fixtures included, pass an explicit backend, so no test depends on the host's GPUs. The existing warm-cache reuse and no-older-ABI tests keep passing under the new signature.
   - On a Linux x86-64 host with `nvidia-smi` on PATH (WSL here), the ignored native suites pass without `PROMPTFORGE_WHISPER_BACKEND` and use the pinned CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and the gateway's realtime native test.
@@ -187,6 +205,14 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - Record the host, the build time, and the architecture list ggml chose.
   - The Windows CPU row's configure, package, and smoke-load steps run on a Windows host the same way.
   - The Windows CUDA row's package step, replayed against a stub toolkit, bundles its three CUDA runtime DLLs, and with any one removed from the stub it fails naming it.
+  - The Windows CPU row, built on a Windows host with `-DGGML_OPENMP=OFF`:
+    - its smoke-load reports no OpenMP, and `dumpbin /dependents` lists no `VCOMP140.DLL`;
+    - a probe that transcribes on the CPU and then unloads the library exits cleanly;
+    - the Windows native suites pass on it;
+    - a `small.en` transcription is timed against the OpenMP build.
+  - On a Linux x86-64 host with an NVIDIA GPU, a gateway on the Linux CUDA package stops repeatedly, by `POST /shutdown` and by SIGINT, with no CUDA error and exit status 0. The `native_whisper` suite on that package also exits without one.
+  - With engines that shut down before each test ends, the `native_whisper` suite passes on the Linux CUDA package, the Windows CPU build without OpenMP, and the pinned Windows CUDA build.
+  - A gateway stopped after a transcription exits 0 on the Linux CPU build and on the pinned Windows CUDA build.
   - Optionally, a dispatch of the branch's workflow on a fork exercises both hosted jobs. The self-hosted Windows CUDA row stays queued there, so the publish never runs, and the run is cancelled. On 2026-09-30 both new builds compiled on GitHub-hosted runners this way.
   - Before landing, the add-only publish runs against a throwaway release on a fork, which needs the operator's go-ahead because it creates and deletes a public release. An archive the release already holds stays byte-identical, a new one is uploaded, `SHA256SUMS` keeps its old lines verbatim and gains the new one, and a re-run uploads nothing.
   - After merge, the release dispatch leaves the five existing archives and their lines unchanged, and the pin commit's pins equal the new lines in `SHA256SUMS`.
@@ -232,6 +258,12 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - CUDA 12.8 for the Linux build. It is the first toolkit with Blackwell's sm_120, and it needs driver 570 or later.
   - The provisioning log names the library path, as llama-server's does. The install directory in the path names the build, so no build-label type is needed.
   - The Windows CUDA package requires its three CUDA runtime DLLs, as the Linux CUDA job's `ldd` check requires its libraries. The user asked to include this working-tree edit "if those changes are positive and doesn't introduce any defects".
+  - The Windows CPU row builds without OpenMP, as master's Windows llama-server build does, so unloading the library cannot end the process. The user chose to fix this in this pull request.
+    - Its unload check loads once per thread, as the gateway and the test harness do. A reload on the same thread trips ggml's load-time check, so the user chose "option a": keep the flag, probe one load per thread, and record that check as an upstream limitation.
+  - A graceful stop retires speech in `Gateway::serve`, which every host runs, through the existing `SpeechService::shutdown`, so whisper frees its GPU memory while the CUDA runtime is alive. The user chose to fix this in this pull request.
+    - It shares the command worker's join deadline, so the documented shutdown bounds stay as they are.
+    - It runs after the command worker stops, so a speech load that worker was still running has either published its runtime or been cancelled.
+    - A service injected through `Gateway::with_speech_service` is retired when that `serve` stops, so one service serves one `serve` call. Only the gateway's own tests inject one, and one realtime test that reused a service across two servers changes with it.
   - The upload itself enforces add-only, so the guarantee does not rest on the job's filtering alone.
     - New archives go up with `gh release upload` without `--clobber`, which refuses a name the release already holds. A filtering mistake then fails the publish instead of replacing an archive that shipped gateways and `.github/workflows/stt-miri.yml` pin.
     - `SHA256SUMS` is the one asset replaced, and its existing lines stay verbatim.
@@ -261,11 +293,23 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A separate cleanup plan run after this one closes: the user chose to fold the fixes in. No revisit condition.
   - Dispatching from the pull request's head before merge and pinning inside the pull request: replaced at the user's request. No revisit condition.
   - `auto` skipping an unpinned row, to close the window before the pin commit: master has no such rule, and one commit closes the window. Revisit if the window outlasts the first release dispatch after merge.
+  - Never unloading the whisper runtime, by holding the library in `ManuallyDrop`: it changes the FFI's ownership on every build to work around one runtime, and its workaround comment would need an upstream issue URL. Revisit if a build without OpenMP still crashes on unload.
+  - Keeping an extra reference to `vcomp140.dll`: it is process-global state in a serve path, which `AGENTS.md` forbids, and the Windows CPU build would still import the OpenMP runtime. No revisit condition.
+  - Skipping the native free at process exit: it cannot stop an in-flight decode's CUDA calls, it breaks the engine's tested detach contract, and it needs process-global state to detect exit. No revisit condition.
+  - Making the engine's `Drop` join its workers again: it undoes `6aa3409c`, which made `Drop` signal and detach so that no drop site blocks. No revisit condition.
+  - Allowing reloads on the same thread, by setting `GGML_NO_BACKTRACE` or by patching ggml's terminate-handler check in the workflow: the variable is process-global state in a serve path, which `AGENTS.md` forbids, and the patch diverges from the pinned upstream source. Revisit if a product path ever reloads speech on the thread that loaded it.
 - Assumptions, risks, and notes:
   - The hosted Linux CUDA compile is slow. The hosted Windows CUDA compile took 95 minutes before that row moved to the self-hosted runner.
   - At the post-merge release dispatch, a failed build publishes nothing, because publishing waits for every build, and the dispatch is re-run after a fix.
   - A release dispatch rebuilds the five existing rows too, and the add-only publish discards them.
   - The post-merge dispatch rebuilds the Windows CUDA row under Step 9's check. The published Windows CUDA archive is 523 MB, which only a bundled cuBLAS explains, so the self-hosted runner's toolkit likely holds all three DLLs. If it lacks one, the dispatch fails at that check and publishes nothing.
+  - A Windows CPU build without OpenMP may transcribe at a different speed, and Step 10 measures it.
+  - ggml's load-time check, `GGML_ASSERT(prev != ggml_uncaught_exception)` in `ggml/src/ggml.cpp` at whisper.cpp `371b5a75`, aborts a reload of `ggml-base.dll` on a thread that loaded it before.
+    - The cause: on Windows the C++ terminate handler is per thread, so the reload finds the handler the previous load left behind.
+    - It affects every Windows build, the published CUDA archive included.
+    - No product path reaches it. The gateway loads speech once per process, and the test harness gives each test its own thread.
+  - A stop while a CUDA speech load outlasts the shared deadline still abandons the retirement, so that rare stop can still race the CUDA runtime's teardown.
+  - The published Windows CUDA archive keeps OpenMP. Its decodes run on the GPU, and CI's native job, which loads and frees it test after test, passes.
   - `auto` depends on `nvidia-smi` being on the gateway's PATH. WSL2 keeps it in `/usr/lib/wsl/lib`, which systemd's default service PATH lacks, so a WSL2 service needs `cuda` set, or that directory on its PATH.
   - A card without native code compiles the PTX once, at first load. That start is slow, and it was not measured.
   - The CUDA 12.8 floor is driver 570, and CUDA's minor-version compatibility from driver 525 cannot compile newer PTX, per NVIDIA's compatibility documentation as read on 2026-09-29. Neither crash was reproduced on a host.
@@ -373,7 +417,8 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   1. The whisper release pipeline in `.github/workflows/whisper-lib.yml`, Steps 1 to 3. It goes first because it has the longest lead and needs no code: the release dispatch after merge needs it on `master`, someone with write access, and the self-hosted Windows CUDA runner online, and the pins wait on that dispatch's `SHA256SUMS`.
   2. The `[stt] whisper_backend` setting in `gateway-config`, Step 4. It comes before selection because the whisper rows and `provision_whisper_library` take its `WhisperBackend` type.
   3. Backend-aware whisper provisioning in `gateway-local` and `gateway-stt`, with its docs, the explicit fixture backend, the host-capability gate, and the markers on the two unpinned rows, Steps 5 to 8. It comes after the setting because it uses the setting's type, and its new rows install only once the post-merge commit pins their archives.
-  4. The Windows CUDA package's runtime check in `.github/workflows/whisper-lib.yml`, Step 9. It returns to the release pipeline after the other components, because the user added it once Steps 1 to 8 were planned, and nothing depends on it.
+  4. Release pipeline follow-ups in `.github/workflows/whisper-lib.yml`, Steps 9 and 10: the Windows CUDA package's runtime check, and the Windows CPU build without OpenMP. They return to the pipeline after the other components, because the user added them once Steps 1 to 8 were planned.
+  5. Speech retirement before exit, Steps 11 and 12: the native whisper suite ends its engines with a joined shutdown, and `gateway`'s `Gateway::serve` retires speech at a graceful stop. It comes after Step 10, because both move the library's unload before the process exits, and the Windows CPU build survives that only without OpenMP.
 - Pieces:
   - The pipeline's three pieces, Steps 1 to 3, are built one after another, add-only publish first. Each has its own check, and with the publish first no commit pairs the new builds with a publish that replaces archives.
   - The setting, Step 4, is one piece, covered by the config tests.
@@ -383,9 +428,13 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
     - The host-capability gate with its docs, Step 7, is one piece. The driver floor and the baseline check change the same `whisper_asset` signature and the same selection tests, which building them apart would rewrite twice.
   - The markers, Step 8, follow alone. They leave the two rows for the post-merge pin commit, which makes the paths Steps 6 and 7 fix reachable.
   - The runtime check, Step 9, is one piece. Its edit already sits uncommitted in the working tree, so the step verifies and commits it.
+  - The Windows CPU build without OpenMP, Step 10, is one piece: one configure flag and its checks. It follows Step 9 rather than joining it, because the two change different rows and neither uses the other.
+  - Speech retirement is two pieces, built one after another, because neither uses the other's code and each has its own tests:
+    - The native whisper suite's engine shutdown, Step 11, goes first. Its native runs cover it. On the Linux CUDA package they confirm at the engine level that joining the workers before exit removes the CUDA error, which is the mechanism Step 12 reaches through `SpeechService::shutdown`. On the pinned Windows CUDA build, which keeps OpenMP, they test that an in-process unload is safe before Step 12 relies on it.
+    - The retirement in `Gateway::serve`, Step 12, is one piece: the change to `serve`, its doc comments, its unit tests, and the one realtime test that serves a single speech service from two servers, which the change would otherwise break.
 - Landing:
   - The work happens on branch `whisper-cuda-backend`, fast-forwarded to `master` at `a7e50ec5` before Step 1. `/export-vibe-plan` runs before Step 1.
-  - `/export-vibe-plan` runs again before Step 6, and again before Step 8. Each time it rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`.
+  - `/export-vibe-plan` runs again before Step 6, before Step 8, and before Step 10. Each time it rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`, and the rewrite rides in that step's commit. The export before Step 10 carries Steps 10 to 12.
   - Every step reaches `master` in one pull request, #91 on `cppalliance/promptforge`, which merges after review with the two new rows fail-closed.
   - No step depends on the release, because the new rows' zero digests keep them fail-closed.
   - After merge, anyone with write access runs the release and pins both rows in one commit, as the Deferred list sets out. Until then `master` selects an unpinned row where the Functional Specification says, and never a build that can end the gateway.
@@ -399,7 +448,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Updating the wg21-website guide. That belongs to the website work.
   - A linux-aarch64 CUDA build, a Vulkan whisper build, runtime backend loading, llama-server selection, an operator library override, and a config UI control.
   - A future whisper.cpp tag bump. It publishes a new release whole, and the add-only publish does not block it. It also re-reads Step 7's x86 baseline list from the new tag's ggml.
-  - The older debt listed under the Decision Record's notes, running whisper out of process, and further changes to `whisper-lib.yml`'s build steps or its CUDA architecture list beyond Steps 2, 3, and 9.
+  - The older debt listed under the Decision Record's notes, running whisper out of process, and further changes to `whisper-lib.yml`'s build steps or its CUDA architecture list beyond Steps 2, 3, 9, and 10.
 
 ### Step 1: Make the whisper release publish add-only [completed]
 
@@ -545,3 +594,71 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - the CPU row's package step bundles exactly what it did before;
   - the CUDA branch's copy and check also pass against this host's own CUDA toolkit at `CUDA_PATH`.
 - It changes no published archive, because the add-only publish never replaces one.
+
+### Step 10: Build the Windows CPU runtime without OpenMP [completed]
+
+- In `.github/workflows/whisper-lib.yml`, `Configure Windows CPU` gains `-DGGML_OPENMP=OFF`, the option whisper.cpp `371b5a75` declares in `ggml/CMakeLists.txt`. Master's Windows llama-server build sets the same flag in `configure_options`, in `crates/build-llama-cuda/src/cmake.rs`. Nothing else in the workflow changes, and the Windows CUDA row keeps OpenMP.
+- With OpenMP on, `ggml-cpu.dll` imports the MSVC OpenMP runtime, `VCOMP140.DLL`. Freeing `whisper.dll` after a CPU transcription unloads that runtime while its thread team is still alive, and the next time one of those threads runs, the process ends with an access violation. Without OpenMP, ggml runs its own thread pool.
+- The commit also carries the plan's re-export, as the Landing sets out.
+- Checks, in scratch on this Windows host, with Step 2's dry-run harness (`vibe/scratch/whisper-cpu-dryrun/`) building the row with Visual Studio 18's CMake and MSVC:
+  - the package holds what Step 2's record lists, and `dumpbin /dependents` over every DLL in it lists no `VCOMP140.DLL`;
+  - the smoke-load's `whisper_print_system_info()` output has no `OPENMP` entry, where Step 2's build reported `OPENMP = 1`;
+  - a probe that, on a fresh thread for each cycle, loads the library, transcribes `jfk.wav` on the CPU, and frees it, several times over, exits cleanly, where the OpenMP build ends with `0xC0000005` at the first free. One thread per load matches how the gateway and the test harness load the library;
+  - the ignored native suites of `gateway-whisper-ffi` and `gateway-stt-backend-whisper` pass with `PROMPTFORGE_WHISPER_LIBRARY` at the new `whisper.dll`;
+  - a `small.en` transcription of `jfk.wav`, timed on the OpenMP and OpenMP-off builds, is recorded under this step.
+- If the probe still ends the process without OpenMP, the step stops and reports, and Steps 11 and 12 wait.
+- Dry run, 2026-10-01, on this host with Visual Studio 18's CMake and MSVC 19.51, against Step 2's OpenMP build as the control:
+  - With OpenMP, `ggml-base.dll` and `ggml-cpu.dll` import `VCOMP140.DLL`, the smoke-load reports `OPENMP = 1`, the probe ends with `0xC0000005` at the first free, and the `native_whisper` suite crashes with `STATUS_ACCESS_VIOLATION`.
+  - With `-DGGML_OPENMP=OFF`, no DLL imports `VCOMP140.DLL` and the system info has no `OPENMP` entry.
+    - The probe, one thread per cycle, exits cleanly: 6 of 6 cycles in its first run, and 5 of 5 in the harness's `noomp` phase.
+    - The native suites pass: 1 test in `gateway-whisper-ffi`, then 5 and 2 in `gateway-stt-backend-whisper`.
+    - Step 9's `runtime` checks pass 6 of 6.
+  - A `small.en` transcription of `jfk.wav`, on 4 threads with the median of 5 runs, took 1.997 s and 1.928 s over two rounds with OpenMP, and 1.940 s and 1.944 s without. There is no material difference.
+  - A reload on the thread that loaded the library before aborts with `0xC0000409` in ggml's own load-time check, at the second cycle in two runs and the fourth in a third. The Decision Record notes this upstream limitation.
+
+### Step 11: Shut down the native whisper suite's engines before each test ends
+
+- In `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`, each of the five tests that builds an `SttEngine` now ends it with `SttEngine::shutdown()` and expects `Ok`. Today each one drops its engine, either explicitly or at the end of its scope:
+  - `packaged_runtime_preserves_native_transcription_contract` shuts down `glossary_prompted` and `unprompted` before it removes its copied model;
+  - `independent_final_jobs_do_not_require_a_reset`, `one_final_job_cannot_change_another_jobs_history`, and `final_decode_is_absent_without_a_final_model` each shut down their one engine after their assertions;
+  - `configured_model_branches_write_their_load_text_then_release_the_activity` shuts down its engine after the activity check.
+- `shutdown()` joins both workers, so each test releases its decoders and its library reference before it returns. The test process then exits with no worker still freeing whisper state.
+  - On the Windows CPU build, each test unloads the library inside the process after CPU transcriptions, which is the path Step 10 makes safe.
+  - The `gateway-stt` native suites already end their services with `SpeechService::shutdown`, and this suite now does the same at the engine level.
+- The engine, its signal-and-detach `Drop`, the FFI, and the suite's assertions do not change.
+- The pinned Windows CUDA archive, `whisper-b4938-windows-x86_64-cuda.zip` (523,565,776 bytes) from the `whisper-lib-b4938` release, is downloaded once into the ignored `vibe/scratch/` for this step's and Step 12's checks; approving this plan authorizes that download. No local copy exists on this host.
+- Checks run `cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1`, with `PROMPTFORGE_WHISPER_MODEL` and `PROMPTFORGE_WHISPER_AUDIO` at the fixtures in `vibe/scratch/stt-native/`:
+  - In WSL, with `PROMPTFORGE_WHISPER_LIBRARY` at `libwhisper.so` in the extracted Linux CUDA package from Step 3's dry run (`~/whisper-cuda-dryrun/work/dist/`). One run before the change is recorded under this step, whether or not it prints a `CUDA error` at exit. After the change, the suite passes and exits 0 with no `CUDA error` in its output.
+  - In WSL, on the pinned `linux-x86_64` CPU build, the suite passes.
+  - On this Windows host, with the Windows toolchain and Step 10's OpenMP-off `whisper.dll`, the suite passes. A run on Step 2's OpenMP build is recorded beside it as the control.
+  - On this Windows host, on the `whisper.dll` of the pinned `windows-x86_64-cuda` build, which keeps OpenMP, the suite passes. CI's `native-whisper` job runs this suite on that build, but only after merge.
+- The step stops and reports, and Step 12 waits, if either of these happens:
+  - the suite still prints a `CUDA error` at exit on the Linux CUDA package;
+  - the suite ends the process on the pinned Windows CUDA build.
+
+### Step 12: Retire speech before the gateway exits
+
+- In `crates/gateway/app/src/runner.rs`, `Gateway::serve` clones `state.speech`, the process's `SpeechService`, under the `stt` feature, before `build_router` takes the state.
+- After the command worker's bounded join, `serve` runs `SpeechService::shutdown` on `tokio::task::spawn_blocking`:
+  - It uses a deadline shared with that join. The deadline is `WORKER_JOIN_TIMEOUT` past one `tokio::time::Instant` read before the join, and `tokio::time::timeout_at` takes it for both waits.
+  - On expiry, it logs a warning that names the bound and abandons the call, as the join does for a stuck command. An example message: `speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it`.
+- `SpeechService::shutdown` already closes admission, which ends Realtime sessions. It waits for the runtime to drain and then joins the engine's workers, so whisper frees its context while the CUDA runtime is still alive. The engine, its signal-and-detach `Drop`, and the FFI do not change.
+- Doc comments:
+  - the shutdown paragraph of `Gateway::serve` adds the retirement after the worker join, within the same deadline;
+  - `WORKER_JOIN_TIMEOUT` and `RUNTIME_SHUTDOWN_TIMEOUT` say that the join deadline now also bounds the speech retirement;
+  - `Gateway::with_speech_service` says that a graceful stop of `serve` retires the service it was given, so one service serves one `serve` call.
+- In `crates/gateway/app/tests/it/realtime_stt/authentication.rs`, `gateway_auth_origin_query_and_final_speech_surfaces_precede_upgrade` gives its `trusted` server a scripted speech service of its own. Today it reuses the `strict` server's service. After this change the `strict` server's stop retires that service, so the `trusted` upgrade would get 503. No other test serves one speech service twice.
+- Tests sit in `drain_tests`, beside `serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound`, each under `#[cfg(feature = "stt")]`. They use `Gateway::with_speech_service` and the `gateway-stt` test fixtures' `scripted_service` over an interim and a final `ScriptedDecoder`, and they need no GPU:
+  - `serve_retires_speech_before_it_returns`: after a graceful stop, when `serve` returns `Ok`, both scripted decoders report their workers dropped and `SpeechService::status` reports not ready. Today's code fails this test.
+  - `serve_abandons_a_speech_retirement_that_outlasts_the_join_bound`: a worker job is held through `generation_ownership(..).own_worker_job()` across the stop. `serve` returns `Ok` within one to two join bounds, and dropping the job afterward lets `wait_until_worker_dropped` succeed. Today's code fails this test.
+- Checks, in scratch:
+  - In WSL, a scratch clone at Step 11's commit pins its `linux-x86_64-cuda` row to the Linux CUDA package from Step 3's dry run (`~/whisper-cuda-dryrun/work/dist/`), served from loopback, and runs a gateway with `whisper_backend = "cuda"`.
+    - Without this step's change, a stop with speech loaded prints the `CUDA error` that local testing found.
+    - With the change, ten stops print no `CUDA error` and exit 0. They mix `POST /shutdown` and SIGINT, and some come after a transcription.
+    - On `cpu`, which is the pinned Linux CPU build, the same clone also exits 0 when stopped after a transcription.
+  - On Windows, with the Windows toolchain, a scratch clone pins its `windows-x86_64` row to Step 10's build, served from loopback. It builds the gateway without the `config-ui` feature, so it needs no Windows `node_modules`.
+    - On `cpu`, the gateway exits 0 when stopped after a transcription.
+    - On `cpu`, the `gateway-stt` native suites (`--lib` and `--test it`, ignored, one thread) pass on that build.
+    - On `cuda`, the pinned Windows CUDA build, served from loopback with its real pin from Step 11's download, keeps OpenMP, and the gateway also exits 0 when stopped after a transcription.
+  - The scratch work binds loopback ports clear of 8000, 8002, 8008, 8009, and 8011. It leaves `~/pf-target` untouched, only reads `~/.promptforge`, and pulls or publishes nothing beyond Step 11's one download.
+- As the final step, it runs the full suite.

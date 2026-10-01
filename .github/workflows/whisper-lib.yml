@@ -76,6 +76,7 @@ jobs:
           cmake -S whisper.cpp -B build -A x64
           -DBUILD_SHARED_LIBS=ON
           -DGGML_NATIVE=OFF
+          -DGGML_OPENMP=OFF
           -DWHISPER_BUILD_EXAMPLES=OFF
           -DWHISPER_BUILD_TESTS=OFF
 
