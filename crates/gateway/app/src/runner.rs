@@ -36,9 +36,12 @@ const GRACEFUL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// serving ends. Dropping a tokio runtime waits indefinitely for its
 /// blocking pool, and a request the drain abandoned may still sit in a
 /// blocking call, so the runtime is abandoned after this bound and the
-/// leftover work dies with the process. The command worker is joined by
-/// `serve` under [`WORKER_JOIN_TIMEOUT`] before this teardown runs, so a
-/// command body that ignored its token is already abandoned by then.
+/// leftover work dies with the process. The command worker is joined and
+/// the speech service retired by `serve` under the one
+/// [`WORKER_JOIN_TIMEOUT`] deadline before this teardown runs, so a command
+/// body that ignored its token, or a speech retirement still draining, is
+/// already abandoned by then; an abandoned retirement is blocking-pool work
+/// this bound reaps.
 const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long `serve` waits for the command worker after the queue closes.
@@ -46,7 +49,9 @@ const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// or spawn) would otherwise pin the join forever; after this bound the
 /// worker is abandoned and [`RUNTIME_SHUTDOWN_TIMEOUT`] reaps what is
 /// left. No command writes a state file, so the bound can never abandon a
-/// half-written one; only a download or a spawn can outlive it.
+/// half-written one; only a download or a spawn can outlive it. The join's
+/// deadline also bounds the speech retirement that follows it, so the two
+/// waits together take at most this long.
 const WORKER_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Options for running the gateway. Built by the binary from parsed args.

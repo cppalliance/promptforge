@@ -207,6 +207,9 @@ impl Gateway {
     /// This composition seam lets embedders provide an already prepared
     /// speech generation while preserving the Gateway's authentication,
     /// host-authority, and route-layer policies.
+    ///
+    /// A graceful stop of [`serve`](Self::serve) retires the service it was
+    /// given, clones included, so one service serves one `serve` call.
     #[cfg(feature = "stt")]
     #[must_use]
     pub fn with_speech_service(mut self, service: gateway_stt::SpeechService) -> Self {
@@ -251,7 +254,12 @@ impl Gateway {
     /// dropped with the runtime rather than pinning the exit. The command
     /// worker is then joined for at most `WORKER_JOIN_TIMEOUT`: a command
     /// body that ignored its cancellation token is abandoned to the runtime
-    /// teardown instead of pinning the exit.
+    /// teardown instead of pinning the exit. Last, within the same
+    /// deadline, the speech service retires: admission closes, which ends
+    /// Realtime sessions, admitted speech work drains, and the engine's
+    /// workers are joined, so a native decoder frees its context before
+    /// the process exits. A retirement still draining at the deadline is
+    /// abandoned the same way.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
@@ -269,6 +277,8 @@ impl Gateway {
         let drain_shutdown = state.shutdown.clone();
         let commands = state.commands.clone();
         let commands_after = state.commands.clone();
+        #[cfg(feature = "stt")]
+        let speech = state.speech.clone();
         let worker = state.commands.spawn_worker(&state);
         // Connect info exposes each request's peer address, so
         // loopback-only routes (`POST /admin/reveal`) can tell loopback
@@ -308,12 +318,12 @@ impl Gateway {
         // Close the queue and reap the worker, so a gateway served on a
         // caller-owned runtime (tests, embedders) leaves no task behind.
         // The join is bounded: a command body that ignored its token is
-        // abandoned here and left to the runtime teardown bound.
+        // abandoned here and left to the runtime teardown bound. One
+        // deadline bounds the join and the speech retirement after it.
         commands_after.shutdown();
+        let deadline = tokio::time::Instant::now() + WORKER_JOIN_TIMEOUT;
         if let Some(worker) = worker
-            && tokio::time::timeout(WORKER_JOIN_TIMEOUT, worker)
-                .await
-                .is_err()
+            && tokio::time::timeout_at(deadline, worker).await.is_err()
         {
             let command = commands_after
                 .active_command()
@@ -322,6 +332,23 @@ impl Gateway {
                 command = %command,
                 "the command worker did not stop within {WORKER_JOIN_TIMEOUT:?}; abandoning it"
             );
+        }
+        // Speech retires before `serve` returns, so the engine's workers
+        // free their native contexts while the process is still whole:
+        // CUDA memory freed during process exit fails with "driver
+        // shutting down". The retirement blocks until admitted speech work
+        // drains, so it runs on the blocking pool, and a drain still
+        // waiting at the deadline is abandoned to the runtime teardown
+        // bound like a stuck command.
+        #[cfg(feature = "stt")]
+        if tokio::time::timeout_at(
+            deadline,
+            tokio::task::spawn_blocking(move || speech.shutdown()),
+        )
+        .await
+        .is_err()
+        {
+            tracing::warn!("speech did not retire within {WORKER_JOIN_TIMEOUT:?}; abandoning it");
         }
         result
     }
