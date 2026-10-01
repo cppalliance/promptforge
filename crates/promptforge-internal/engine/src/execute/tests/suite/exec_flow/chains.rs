@@ -371,7 +371,7 @@ return sys.taskid\n\
 }
 
 /// Nested `call()` is capped at [`MAX_CALL_DEPTH`]. Locks the
-/// `call_depth` divergence threaded through the unified engine (the
+/// `call_depth` divergence threaded through the one shared walk (the
 /// top-level walk always enters at depth 0; the subroutine keeps its depth).
 /// The caller is not in its own visible set, so the recursion is mutual.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

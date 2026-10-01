@@ -154,7 +154,7 @@ impl Frontmatter {
         &self.description
     }
 
-    /// Returns the declared promptforge Engine major, when present.
+    /// Returns the Engine major the `promptforge:` key declares, when present.
     #[must_use]
     pub fn promptforge(&self) -> Option<u32> {
         self.promptforge

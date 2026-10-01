@@ -198,7 +198,7 @@ impl RunContext {
     }
 
     /// Sets the behavior flags the run records. Empty is the only value
-    /// this Engine produces; a replay hands back the recorded set.
+    /// this Engine version produces; a replay hands back the recorded set.
     #[must_use]
     pub fn flags(mut self, flags: Flags) -> RunContext {
         self.flags = flags;

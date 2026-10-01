@@ -24,7 +24,7 @@ pub(crate) mod untrusted;
 
 pub(crate) use crate::error::{Error, Result};
 
-// The crate root is the one path to the execution engine's items; the
+// The crate root is the one path to this crate's items; the
 // `execute` module stays private and every item that remains public inside it
 // is re-exported here, so the `promptforge` facade names
 // `promptforge_engine::X`, not a module path.
