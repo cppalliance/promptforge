@@ -177,7 +177,7 @@ fn every_seed_is_caught_and_a_seed_confined_to_test_code_passes() {
             RETIRED_SEEDS
                 .iter()
                 .copied()
-                .find(|seed| v.contains(seed))
+                .find(|seed| v.contains(&format!("retired symbol {seed} ")))
                 .expect("a violation names a seed")
         })
         .collect();

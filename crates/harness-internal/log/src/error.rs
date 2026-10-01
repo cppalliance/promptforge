@@ -122,16 +122,16 @@ mod tests {
     use crate::{DatabaseSource, JsonSource, LogError};
 
     #[test]
-    fn the_database_variant_reaches_the_engine_error_through_the_log_wrapper() {
-        let engine = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
-        let rendered = engine.to_string();
-        let error = LogError::from(engine);
+    fn the_database_variant_reaches_the_database_error_through_the_log_wrapper() {
+        let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
+        let rendered = database.to_string();
+        let error = LogError::from(database);
         let Some(cause) = error.source() else {
-            panic!("the database variant reports its engine cause as source()");
+            panic!("the database variant reports its database cause as source()");
         };
         assert_eq!(cause.to_string(), rendered);
         let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
-            panic!("the engine cause is harness-log's DatabaseSource");
+            panic!("the database cause is harness-log's DatabaseSource");
         };
         assert!(matches!(wrapper.as_inner(), turso::Error::Corrupt(_)));
     }
@@ -154,10 +154,10 @@ mod tests {
     }
 
     #[test]
-    fn the_database_wrapper_hands_back_the_engine_error_it_wraps() {
-        let engine = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
-        let rendered = engine.to_string();
-        let inner = DatabaseSource::from(engine).into_inner();
+    fn the_database_wrapper_hands_back_the_database_error_it_wraps() {
+        let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
+        let rendered = database.to_string();
+        let inner = DatabaseSource::from(database).into_inner();
         assert_eq!(inner.to_string(), rendered);
         assert!(matches!(inner, turso::Error::Corrupt(_)));
     }

@@ -18,10 +18,11 @@ const ENGINE_ROOT_CRATES: [&str; 1] = ["promptforge"];
 /// The private container whose every member is an Engine crate.
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 
-/// The identifiers the sans-I/O Engine plan retired. Live Engine source
-/// (outside `#[cfg(test)]`, `tests/`, and test-support modules) may not
-/// name any of them again.
-pub(crate) const RETIRED_SEEDS: [&str; 8] = [
+/// The identifiers the sans-I/O Engine plan retired, and the names the
+/// terminology rename replaced. Live Engine source (outside
+/// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
+/// of them again.
+pub(crate) const RETIRED_SEEDS: [&str; 17] = [
     "install_agent_chat_shim",
     "EventsSnapshot",
     "install_runtime_events",
@@ -30,6 +31,15 @@ pub(crate) const RETIRED_SEEDS: [&str; 8] = [
     "LuaFanoutResult",
     "Observer",
     "DebugCapture",
+    "HostBackend",
+    "HostAccess",
+    "HostRoot",
+    "identity_to_host",
+    "inject_host",
+    "inject_host_with_var",
+    "install_host_apis",
+    "host_injected",
+    "HostGlobal",
 ];
 
 /// Every Engine crate directory: the named root crates first, whether or

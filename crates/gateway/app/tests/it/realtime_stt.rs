@@ -248,7 +248,7 @@ fn native_speech_service() -> SpeechService {
         let service = SpeechService::new();
         service
             .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
-            .expect("native engine loads");
+            .expect("the native speech engine loads");
         service
     })
     .join()

@@ -25,7 +25,7 @@ todos:
     status: completed
   - id: s8-finish
     content: "Step 8: rename HOSTED_OFFER and SyntheticHost, qualify the database-engine and speech-engine names, add the retired seeds, update the AGENTS.md Using-the-terms bullets"
-    status: pending
+    status: completed
   - id: s9-final
     content: "Step 9: full gates plus the headless gateway check, identifier residual and sense checks, push, update the PR #104 description"
     status: pending

@@ -19,8 +19,8 @@ Three words have exactly one meaning each, everywhere in this repository: code c
   - the part's own name for a program or UI part that embeds another, such as "the desktop app" or "the container element"
   - "run", "serve", "embed", or "hold" for the verb
 - "Engine" and "Harness" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
-- Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host triple and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
-- Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Identifiers that use "host" in another sense, such as `HostBackend`, `RunHost`, and `inject_host`, keep their old names until a rename lands.
+- Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host and target vocabulary and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
+- Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Code names follow the same terms.
 - Quotations of people stay verbatim.
 - `crates/workshop/ui/test/docs-claims.mjs` enforces these rules in every `AGENTS.md`, every `## Invariants` crate doc, and every `.cursor/rules` file.
 
