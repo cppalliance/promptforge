@@ -1,7 +1,9 @@
 //! Safe full-decoding parameters.
 
-use std::ffi::{CString, c_int};
+use std::ffi::{CString, c_int, c_void};
 use std::ptr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::WhisperError;
 use crate::raw;
@@ -48,6 +50,7 @@ pub struct FullParams {
     print_timestamps: Option<bool>,
     suppress_blank: Option<bool>,
     suppress_nst: Option<bool>,
+    abort_flag: Option<Arc<AtomicBool>>,
 }
 
 impl FullParams {
@@ -68,6 +71,7 @@ impl FullParams {
             print_timestamps: None,
             suppress_blank: None,
             suppress_nst: None,
+            abort_flag: None,
         }
     }
 
@@ -153,6 +157,16 @@ impl FullParams {
         Ok(())
     }
 
+    /// Ends the pass early once `flag` reads true.
+    ///
+    /// whisper reads the flag after each encoder pass and decoder step, never
+    /// inside one, and a set flag ends the pass with
+    /// [`WhisperError::Inference`]. A flag already set when the pass begins is
+    /// first read after its first encoder pass.
+    pub fn set_abort_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.abort_flag = Some(flag);
+    }
+
     pub(crate) fn apply(&self, native: &mut raw::FullParams) {
         let SamplingStrategy::Greedy { best_of } = self.strategy;
         native.greedy.best_of = best_of;
@@ -181,11 +195,95 @@ impl FullParams {
         apply_bool(&mut native.print_timestamps, self.print_timestamps);
         apply_bool(&mut native.suppress_blank, self.suppress_blank);
         apply_bool(&mut native.suppress_nst, self.suppress_nst);
+        if let Some(flag) = &self.abort_flag {
+            native.abort_callback = Some(abort_requested);
+            native.abort_callback_user_data = Arc::as_ptr(flag).cast_mut().cast();
+        }
     }
+}
+
+/// The pinned b4938 `ggml_abort_callback` that [`FullParams::apply`] installs
+/// for an abort flag: `data` is that flag's address, and a true answer ends
+/// the pass.
+///
+/// Never panics: unwinding across the C boundary would abort the process, so
+/// the body holds no locks and has no unwrap paths.
+extern "C" fn abort_requested(data: *mut c_void) -> bool {
+    if data.is_null() {
+        return false;
+    }
+    // SAFETY: `FullParams::apply` passes `Arc::as_ptr` of the flag its
+    // `FullParams` owns, and `WhisperState::full` borrows those params for the
+    // whole whisper call that invokes this callback, so `data` points to a
+    // live `AtomicBool`; the null case returned above.
+    let flag = unsafe { &*data.cast::<AtomicBool>() };
+    flag.load(Ordering::Acquire)
 }
 
 fn apply_bool(target: &mut bool, value: Option<bool>) {
     if let Some(value) = value {
         *target = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flag_data(flag: &Arc<AtomicBool>) -> *mut c_void {
+        Arc::as_ptr(flag).cast_mut().cast()
+    }
+
+    /// Native parameters with the abort members at whisper's null defaults.
+    fn null_native() -> raw::FullParams {
+        // SAFETY: every raw::FullParams member is an integer, float, bool, raw
+        // pointer, nullable function pointer, or a struct of those, and
+        // all-zero bytes are a valid value of each.
+        unsafe { std::mem::zeroed() }
+    }
+
+    #[test]
+    fn abort_requested_reads_the_flag_at_its_data_pointer() {
+        assert!(!abort_requested(ptr::null_mut()), "null data never aborts");
+        let flag = Arc::new(AtomicBool::new(false));
+        assert!(
+            !abort_requested(flag_data(&flag)),
+            "an unset flag does not abort"
+        );
+        flag.store(true, Ordering::Release);
+        assert!(abort_requested(flag_data(&flag)), "a set flag aborts");
+    }
+
+    #[test]
+    fn apply_installs_the_abort_callback_and_flag_only_when_a_flag_is_set() {
+        let mut native = null_native();
+        FullParams::new(SamplingStrategy::Greedy { best_of: 1 }).apply(&mut native);
+        assert!(
+            native.abort_callback.is_none(),
+            "no flag leaves the callback null"
+        );
+        assert!(
+            native.abort_callback_user_data.is_null(),
+            "no flag leaves the user data null"
+        );
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_abort_flag(Arc::clone(&flag));
+        let mut native = null_native();
+        params.apply(&mut native);
+        assert!(
+            ptr::eq(native.abort_callback_user_data, flag_data(&flag)),
+            "the user data is the flag's address"
+        );
+        let callback = native
+            .abort_callback
+            .expect("a set flag installs the callback");
+        assert!(!callback(native.abort_callback_user_data));
+        flag.store(true, Ordering::Release);
+        assert!(
+            callback(native.abort_callback_user_data),
+            "the installed callback reads the flag"
+        );
     }
 }

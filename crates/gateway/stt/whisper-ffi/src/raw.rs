@@ -116,8 +116,8 @@ pub(crate) struct FullParams {
     progress_callback_user_data: *mut c_void,
     encoder_begin_callback: *mut c_void,
     encoder_begin_callback_user_data: *mut c_void,
-    abort_callback: *mut c_void,
-    abort_callback_user_data: *mut c_void,
+    pub(crate) abort_callback: AbortCallback,
+    pub(crate) abort_callback_user_data: *mut c_void,
     logits_filter_callback: *mut c_void,
     logits_filter_callback_user_data: *mut c_void,
     grammar_rules: *const *const c_void,
@@ -144,6 +144,10 @@ pub(crate) type FullGetSegmentTextFromState =
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;
 pub(crate) type Free = unsafe extern "C" fn(*mut Context);
 pub(crate) type FreeState = unsafe extern "C" fn(*mut State);
+
+/// `ggml_abort_callback` from the pinned b4938 ggml.h. whisper calls it after
+/// each encoder pass and decoder step, and a true return ends the pass.
+pub(crate) type AbortCallback = Option<extern "C" fn(*mut c_void) -> bool>;
 
 /// `ggml_log_callback` from the pinned b4938 ggml.h. The level is a C
 /// `enum ggml_log_level`, which the ABI passes as `c_int`.

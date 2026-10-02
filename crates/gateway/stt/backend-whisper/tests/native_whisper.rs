@@ -6,13 +6,17 @@
     reason = "native fixture setup fails by panicking with the missing invariant named"
 )]
 
+use std::error::Error as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 
 use gateway_progress::{Activity, ProgressHub};
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 use gateway_stt_engine::test_fixtures::native::require_fixture;
-use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine, TranscribeError};
+use gateway_whisper_ffi::WhisperError;
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
 const UNPROMPTED_CLIP_TRANSCRIPT: &str = "country can do for you.";
@@ -20,6 +24,14 @@ const GLOSSARY_CLIP_TRANSCRIPT: &str = "One tree can do for you.";
 const CONDITIONING_TRANSCRIPT: &str = "And so my fellow Americans asked";
 const CONDITIONED_CLIP_TRANSCRIPT: &str = "what I can do for you.";
 const SAMPLES_PER_TENTH: usize = 1_600;
+/// Repeats of the 11 s clip in the long decode: about ten minutes, which the
+/// fastest build still takes seconds to transcribe.
+const LONG_CLIP_REPEATS: usize = 55;
+/// How far into the long decode its flag is set.
+const MID_PASS: Duration = Duration::from_millis(300);
+/// The longest an aborted decode may run on after its flag is set: one
+/// encoder pass or decoder step, which tiny.en finishes well within it.
+const ABORT_BOUND: Duration = Duration::from_secs(1);
 static NATIVE_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn fixture_dir() -> PathBuf {
@@ -303,5 +315,95 @@ async fn configured_model_branches_write_their_load_text_then_release_the_activi
     // the hub busy, and dropping it leaves the factory nothing to write to.
     drop(activity);
     assert!(!hub.current().busy, "the load's guard ended the activity");
+    engine.shutdown().expect("the engine shuts down");
+}
+
+fn whisper_source(error: &TranscribeError) -> Option<&WhisperError> {
+    error.source()?.downcast_ref::<WhisperError>()
+}
+
+#[tokio::test]
+#[ignore = "requires packaged whisper, model, and audio fixtures"]
+async fn a_decode_ends_when_its_cancellation_flag_is_set() {
+    let _guard = NATIVE_TEST.lock().await;
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
+    let engine = engine(library, model.clone(), Some(model));
+    let samples = jfk_samples();
+
+    let preset = Arc::new(AtomicBool::new(true));
+    let error = engine
+        .decode(
+            request(DecodeMode::Final, samples.clone(), Vec::new(), "").with_cancellation(preset),
+        )
+        .await
+        .expect_err("a decode whose flag is already set fails");
+    assert!(
+        matches!(error, TranscribeError::Inference { .. }),
+        "a preset flag fails as inference: {error}"
+    );
+    assert!(
+        whisper_source(&error).is_none(),
+        "a preset flag fails before whisper runs a pass: {:?}",
+        error.source()
+    );
+
+    let unset = Arc::new(AtomicBool::new(false));
+    let text = engine
+        .decode(
+            request(DecodeMode::Final, samples.clone(), Vec::new(), "")
+                .with_cancellation(Arc::clone(&unset)),
+        )
+        .await
+        .expect("a decode whose flag stays unset transcribes");
+    assert_eq!(
+        text, JFK_TRANSCRIPT,
+        "an unset flag leaves the decode whole"
+    );
+
+    let long: Vec<f32> = samples
+        .iter()
+        .copied()
+        .cycle()
+        .take(samples.len() * LONG_CLIP_REPEATS)
+        .collect();
+    let flag = Arc::new(AtomicBool::new(false));
+    let decode = async {
+        let result = engine
+            .decode(
+                request(DecodeMode::Final, long, Vec::new(), "")
+                    .with_cancellation(Arc::clone(&flag)),
+            )
+            .await;
+        (result, Instant::now())
+    };
+    let cancel = async {
+        tokio::time::sleep(MID_PASS).await;
+        flag.store(true, Ordering::Release);
+        Instant::now()
+    };
+    let ((result, finished_at), cancelled_at) = tokio::join!(decode, cancel);
+    let Some(ran_on) = finished_at.checked_duration_since(cancelled_at) else {
+        let early = cancelled_at.duration_since(finished_at);
+        panic!(
+            "the long decode ended {early:?} before its flag was set {MID_PASS:?} in: {result:?}"
+        );
+    };
+    let Err(error) = result else {
+        panic!("the long decode transcribed after its flag was set {MID_PASS:?} in");
+    };
+    assert!(
+        matches!(whisper_source(&error), Some(WhisperError::Inference { .. })),
+        "whisper's abort ends the pass as an inference failure: {error}: {:?}",
+        error.source()
+    );
+    assert!(
+        ran_on < ABORT_BOUND,
+        "the decode ended {ran_on:?} after its flag was set, past {ABORT_BOUND:?}"
+    );
     engine.shutdown().expect("the engine shuts down");
 }
