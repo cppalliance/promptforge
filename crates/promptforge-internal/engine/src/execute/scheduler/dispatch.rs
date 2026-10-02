@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use crate::execute::protocol::{Answer, Request, StoreOp};
+use crate::execute::protocol::{Answer, Request, VfsOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
@@ -25,7 +25,7 @@ use promptforge_types::event::lifecycle;
 use promptforge_types::event::lifecycle::Lifecycle;
 use promptforge_vfs::VfsError;
 
-use super::{ChainIndex, Continuation, Counters, Scheduler, StoreContinuation};
+use super::{ChainIndex, Continuation, Counters, Scheduler, VfsContinuation};
 
 /// The error for an alias that names no binding in the run's tool catalog:
 /// the name and every bound alias, so the message reads required versus
@@ -44,42 +44,33 @@ pub(super) fn unbound_tool_call(tool_set: &ToolSet, name: &str) -> Error {
 
 /// The succeeded/failed observation pair one store operation reports;
 /// nothing for an op this crate does not name.
-fn store_observations(op: &StoreOp) -> Option<(Lifecycle, Lifecycle)> {
+fn vfs_observations(op: &VfsOp) -> Option<(Lifecycle, Lifecycle)> {
     let pair = match op {
-        StoreOp::Write { .. } => (
-            lifecycle::STORE_WRITE_SUCCEEDED,
-            lifecycle::STORE_WRITE_FAILED,
+        VfsOp::Write { .. } => (lifecycle::VFS_WRITE_SUCCEEDED, lifecycle::VFS_WRITE_FAILED),
+        VfsOp::Append { .. } => (
+            lifecycle::VFS_APPEND_SUCCEEDED,
+            lifecycle::VFS_APPEND_FAILED,
         ),
-        StoreOp::Append { .. } => (
-            lifecycle::STORE_APPEND_SUCCEEDED,
-            lifecycle::STORE_APPEND_FAILED,
+        VfsOp::Read { .. } => (lifecycle::VFS_READ_SUCCEEDED, lifecycle::VFS_READ_FAILED),
+        VfsOp::ReadNumbered { .. } => (
+            lifecycle::VFS_READ_NUMBERED_SUCCEEDED,
+            lifecycle::VFS_READ_NUMBERED_FAILED,
         ),
-        StoreOp::Read { .. } => (
-            lifecycle::STORE_READ_SUCCEEDED,
-            lifecycle::STORE_READ_FAILED,
+        VfsOp::StrReplace { .. } => (
+            lifecycle::VFS_REPLACE_SUCCEEDED,
+            lifecycle::VFS_REPLACE_FAILED,
         ),
-        StoreOp::ReadNumbered { .. } => (
-            lifecycle::STORE_READ_NUMBERED_SUCCEEDED,
-            lifecycle::STORE_READ_NUMBERED_FAILED,
+        VfsOp::Delete { .. } => (
+            lifecycle::VFS_DELETE_SUCCEEDED,
+            lifecycle::VFS_DELETE_FAILED,
         ),
-        StoreOp::StrReplace { .. } => (
-            lifecycle::STORE_REPLACE_SUCCEEDED,
-            lifecycle::STORE_REPLACE_FAILED,
-        ),
-        StoreOp::Delete { .. } => (
-            lifecycle::STORE_DELETE_SUCCEEDED,
-            lifecycle::STORE_DELETE_FAILED,
-        ),
-        StoreOp::Glob { .. } => (
-            lifecycle::STORE_GLOB_SUCCEEDED,
-            lifecycle::STORE_GLOB_FAILED,
-        ),
-        StoreOp::Exists { .. } => (
-            lifecycle::STORE_EXISTS_SUCCEEDED,
-            lifecycle::STORE_EXISTS_FAILED,
+        VfsOp::Glob { .. } => (lifecycle::VFS_GLOB_SUCCEEDED, lifecycle::VFS_GLOB_FAILED),
+        VfsOp::Exists { .. } => (
+            lifecycle::VFS_EXISTS_SUCCEEDED,
+            lifecycle::VFS_EXISTS_FAILED,
         ),
         // Any op `promptforge-lua` adds behind its `#[non_exhaustive]`
-        // `StoreOp` before this crate names it reports nothing.
+        // `VfsOp` before this crate names it reports nothing.
         _ => return None,
     };
     Some(pair)
@@ -115,9 +106,9 @@ fn blocked_on(request: &Request) -> Option<&'static str> {
 /// spot rather than resuming it into Lua, so no author `pcall` can catch
 /// it. Every other failure returns as the call's answer as an
 /// [`Error::Store`] holding the model-facing message rendered for the
-/// operation and the structured cause, classified `Store` if it aborts
-/// the chunk uncaught.
-pub(super) fn classify_store_failure(op: &StoreOp, error: &VfsError) -> Error {
+/// operation and the structured cause, which ends the run as a
+/// `RunErrorKind::Vfs` error if it aborts the chunk uncaught.
+pub(super) fn classify_vfs_failure(op: &VfsOp, error: &VfsError) -> Error {
     if let VfsError::Conflict { detail, .. } = error {
         return Error::Determinism(detail.clone());
     }
@@ -209,7 +200,7 @@ impl Scheduler {
                 Ok(())
             }
             Request::LocalToolDone { outcome } => self.dispatch_local_tool_done(id, outcome),
-            Request::Store { op } => self.dispatch_store(id, op),
+            Request::Store { op } => self.dispatch_vfs(id, op),
             Request::Chat { messages, binding } => {
                 self.dispatch_chat(id, &messages, binding);
                 Ok(())
@@ -267,7 +258,7 @@ impl Scheduler {
 
     /// Dispatches a `store` request: derives the store view from the
     /// chain's access capability and issues the operation through it as a
-    /// `Store` effect for the Harness to perform, parking the chain in the
+    /// `Vfs` effect for the Harness to perform, parking the chain in the
     /// pending table exactly as a leaf I/O round does. Every store
     /// operation takes this yield path uniformly (memory mounts and real
     /// files alike, with no inline fast path) so interleaving behavior never
@@ -279,16 +270,16 @@ impl Scheduler {
     /// is gone, which only the chain-end paths take, or [`Error::Store`]
     /// when the handle the chain's access came from declares no store,
     /// which the run's start probe already ruled out.
-    fn dispatch_store(&mut self, id: ChainIndex, op: StoreOp) -> Result<()> {
+    fn dispatch_vfs(&mut self, id: ChainIndex, op: VfsOp) -> Result<()> {
         let access = Arc::clone(self.chains[id.index()].access()?);
         let view = Arc::new(promptforge_vfs::detail::store_view(&access).map_err(Error::store)?);
-        let observations = store_observations(&op);
-        let continuation = StoreContinuation {
+        let observations = vfs_observations(&op);
+        let continuation = VfsContinuation {
             op: op.clone(),
             observations,
         };
-        let effect = Effect::Store { access: view, op };
-        self.issue(id, effect, Continuation::Store(continuation));
+        let effect = Effect::Vfs { access: view, op };
+        self.issue(id, effect, Continuation::Vfs(continuation));
         Ok(())
     }
 

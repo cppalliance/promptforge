@@ -168,7 +168,7 @@ Answering a round feels like proxying an HTTP call: forward the request, wrap th
 use std::sync::Arc;
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::model::{Completion, CompletionError, CompletionResult};
-use promptforge::{transport::ClientError, vfs::perform_store_op};
+use promptforge::{transport::ClientError, vfs::perform_vfs_op};
 use promptforge::{Run, RunErrorKind, RunResult, Step};
 
 // 1. Each run prepares the greeter from the last tour with `model`, and its section asks `writer` once.
@@ -188,7 +188,7 @@ fn run_greeter(
         };
         for (id, _provenance, effect) in effects {
             let answer = match effect {
-                Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+                Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
                 Effect::Chat { binding, .. } => EffectAnswer::Chat(chat(binding.id().name())),
                 _ => EffectAnswer::Dropped,
             };
@@ -214,7 +214,7 @@ assert_eq!(error.kind(), RunErrorKind::Completion);
 ````
 
 1. Step 1 defines `run_greeter`. It gives the context the model, prepares the two-role greeter from the previous section, and creates a fresh run each time you call it. The `""` passed to [`Run::new`](crate::Run::new) is the run's arguments string, empty because the greeter takes none. One prompt serves both answers below, because your program chooses each answer per round.
-2. Step 2 answers each store effect with [`perform_store_op`](crate::vfs::perform_store_op), as on the [crate page](crate#run-a-prompt). It answers each chat effect with [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat), holding whatever `chat` returns. [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) answers any other effect without performing it, and a chain waiting on it resumes with a cancelled error; that arm never runs for the greeter. A live Harness sends the effect's `messages`, `tools`, and `options` to its backend, but not its `stream` flag. The options name the model by its id's [`name()`](ModelId::name), not the role name or the server part, so the `writer` role bound to `gateway/fast` reaches your backend as model `fast`.
+2. Step 2 answers each store effect with [`perform_vfs_op`](crate::vfs::perform_vfs_op), as on the [crate page](crate#run-a-prompt). It answers each chat effect with [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat), holding whatever `chat` returns. [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) answers any other effect without performing it, and a chain waiting on it resumes with a cancelled error; that arm never runs for the greeter. A live Harness sends the effect's `messages`, `tools`, and `options` to its backend, but not its `stream` flag. The options name the model by its id's [`name()`](ModelId::name), not the role name or the server part, so the `writer` role bound to `gateway/fast` reaches your backend as model `fast`.
 3. Step 3 builds the reply with [`Completion::from_result`] and [`CompletionResult::Text`], then boxes it, and the run ends with [`RunResult::Ok`](crate::RunResult::Ok) holding `hello world`. `from_result` is the only way to build a completion without a transport; a live Harness gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). Pass the model name your backend reported as the second argument, because [`Completion::model`] records the model that served the round, which can differ from the one requested. This canned Harness has no backend to report one, so step 2 passes the requested name, `binding.id().name()`; a live Harness passes the name from its backend's response. The `?` turns the constructor's error into a `CompletionError` through `From`.
 4. Step 4 converts [`ClientError::Backend`](crate::transport::ClientError::Backend) with status 503 into a `CompletionError` with `into()`, and answers the round with `Err`. The run ends with [`RunResult::Failure`](crate::RunResult::Failure) of kind [`RunErrorKind::Completion`](crate::RunErrorKind::Completion). The run needs the failure itself, not a missing answer, so answer a failed round with `EffectAnswer::Chat(Err(error))`.
 

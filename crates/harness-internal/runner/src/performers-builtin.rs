@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreOp, StoreOutcome, VfsError, perform_store_op};
+use promptforge::vfs::{VfsError, VfsOp, VfsOutcome, perform_vfs_op};
 
 use super::{BoxFuture, StorePerformer, TimerPerformer};
 
@@ -41,7 +41,7 @@ impl TimerPerformer for TokioTimer {
 pub struct VfsStore;
 
 impl StorePerformer for VfsStore {
-    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        perform_store_op(access, op)
+    fn perform(&self, access: &Access, op: VfsOp) -> Result<VfsOutcome, VfsError> {
+        perform_vfs_op(access, op)
     }
 }

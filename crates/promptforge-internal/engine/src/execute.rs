@@ -65,16 +65,16 @@ pub use run::{
     AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, Step,
     ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
-// The store vocabulary a `Store` effect holds and its answer returns, for
+// The store vocabulary a `Vfs` effect holds and its answer returns, for
 // the Engine's own store handling; other crates name it from `promptforge_lua`.
-pub(crate) use promptforge_lua::{StoreOp, StoreOutcome};
+pub(crate) use promptforge_lua::{VfsOp, VfsOutcome};
 
-/// Performs one store operation through `access`: the work behind an
-/// [`Effect::Store`], for the Harness's store performer. `access` is the
-/// store view the effect carries - derived from the chain's capability
-/// at dispatch - and each [`StoreOp`] maps onto one `Access` call over
-/// it, so the Harness answers a store effect exactly as the Engine's test
-/// drivers do. The `i64` line bounds convert to `usize` here, and an
+/// Performs one operation on the run's store view through `access`: the
+/// work behind an [`Effect::Vfs`], for the Harness's store performer.
+/// `access` is the store view the effect carries - derived from the
+/// chain's capability at dispatch - and each [`VfsOp`] maps onto one
+/// `Access` call over it, so the Harness answers a `Vfs` effect exactly as
+/// the Engine's test drivers do. The `i64` line bounds convert to `usize` here, and an
 /// `end` without a `start` is refused as an invalid range.
 ///
 /// Synchronous, because the VFS is synchronous by design; the Harness runs it
@@ -85,10 +85,10 @@ pub(crate) use promptforge_lua::{StoreOp, StoreOutcome};
 /// validation, not-found, anchor, range, conflict, or backend failure),
 /// which the Engine raises at the author's call site when the answer is
 /// resumed.
-pub fn perform_store_op(
+pub fn perform_vfs_op(
     access: &promptforge_vfs::Access,
-    op: StoreOp,
-) -> std::result::Result<StoreOutcome, promptforge_vfs::VfsError> {
+    op: VfsOp,
+) -> std::result::Result<VfsOutcome, promptforge_vfs::VfsError> {
     crate::lua::run_store_op(access, op)
 }
 
@@ -119,7 +119,8 @@ pub fn perform_store_op(
 /// - [`RunErrorKind::ContextExhausted`] - the selected compactor exhausted the
 ///   model's context window.
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
-/// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
+/// - [`RunErrorKind::Vfs`] - a run-scoped store operation failed, or the
+///   run's handle declares no store.
 /// - [`RunErrorKind::Determinism`] - two live execution identities claimed
 ///   one store path; the run terminated on the spot, uncatchably from Lua.
 /// - [`RunErrorKind::Cancelled`] - the Host cancelled the run (mid-run

@@ -10,8 +10,7 @@ use promptforge_types::metrics::ToolCallEvent;
 use serde_json::json;
 
 use crate::execute::protocol::{
-    Answer, ChatResult, LocalToolOutcome, Request, StoreOp, StoreOutcome, ToolCallOutcome,
-    YieldParse,
+    Answer, ChatResult, LocalToolOutcome, Request, ToolCallOutcome, VfsOp, VfsOutcome, YieldParse,
 };
 use crate::model::ModelSet;
 
@@ -220,14 +219,14 @@ fn a_local_tool_handler_runs_inside_the_block_coroutine() {
     );
     match parse_request(&vm, yielded) {
         Request::Store {
-            op: StoreOp::Write { path, contents },
+            op: VfsOp::Write { path, contents },
         } => {
             assert_eq!(path, "grab.txt");
             assert_eq!(contents, "hi");
         }
         other => panic!("the handler's store call yields from the block, got {other:?}"),
     }
-    let yielded = resume_with(&vm, &thread, Answer::Store(Ok(StoreOutcome::Unit)));
+    let yielded = resume_with(&vm, &thread, Answer::Store(Ok(VfsOutcome::Unit)));
     match parse_request(&vm, yielded) {
         Request::LocalToolDone {
             outcome: LocalToolOutcome::Returned(text),

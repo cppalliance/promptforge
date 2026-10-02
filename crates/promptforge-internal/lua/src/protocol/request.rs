@@ -195,7 +195,7 @@ pub enum Request {
     /// backend.
     Store {
         /// The validated operation and its author-supplied arguments.
-        op: StoreOp,
+        op: VfsOp,
     },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     Mcp {
@@ -235,8 +235,14 @@ impl Request {
     }
 }
 
-/// One validated store operation: the `store.*` call's name and its
-/// author-supplied arguments, checked once here at the protocol boundary.
+/// One validated operation on the run's store view: the `store.*` call's
+/// name and its author-supplied arguments, checked once here at the
+/// protocol boundary.
+///
+/// Not the same as `vfs::Op`: that is the plain kind of file operation a
+/// policy matches on and a watcher is told about (`Read`, `Write`,
+/// `Rename`, and so on, with no path or contents), while this carries the
+/// full arguments of one of the eight `store.*` calls.
 ///
 /// The read bounds are `i64`: a negative bound converts to 0 at execution,
 /// which the facade's range validation rejects with the same error a zero
@@ -246,7 +252,7 @@ impl Request {
 /// through serde as the shim yielded it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
-pub enum StoreOp {
+pub enum VfsOp {
     /// `store.write(path, contents)`.
     Write {
         /// The author-supplied logical path.

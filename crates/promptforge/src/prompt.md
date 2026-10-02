@@ -101,7 +101,7 @@ use std::sync::Arc;
 
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::perform_store_op;
+use promptforge::vfs::perform_vfs_op;
 use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 // 1. The greeter declares `times` and `name`; `plain` has no `args:` key and greets `argv.prose`.
@@ -152,8 +152,8 @@ fn greet(prompt: Prompt, text: &str) -> RunResult {
         match run.step() {
             Step::Pending { effects, .. } => {
                 for (id, _provenance, effect) in effects {
-                    let Effect::Store { access, op } = effect else { panic!("the greeter only uses the store") };
-                    run.resume(id, EffectAnswer::Store(perform_store_op(&access, op)));
+                    let Effect::Vfs { access, op } = effect else { panic!("the greeter only uses the store") };
+                    run.resume(id, EffectAnswer::Vfs(perform_vfs_op(&access, op)));
                 }
             }
             Step::Done { result, .. } => return result,

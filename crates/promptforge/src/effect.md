@@ -22,7 +22,7 @@ The greeter prompt asks for all four. Its text sits in the example's collapsed s
 # use promptforge::model::{Completion, CompletionError, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
 # use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 # const GREETER: &str = concat!(
 #     "---\n",
@@ -90,7 +90,7 @@ fn answer(effect: Effect) -> EffectAnswer {
     match effect {
         Effect::Chat { .. } => EffectAnswer::Chat(canned_completion("hi there")),
         Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("HI THERE"))),
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         Effect::Timer { seconds } => {
             std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or_default());
             EffectAnswer::Timer
@@ -126,7 +126,7 @@ assert_eq!(text, "hi there / HI THERE");
 1. `answer` matches each effect with its answer.
    - For [`Effect::Chat`], forward live pieces to your streaming callback only when `stream` is `true`, as in rounds of `models.loop`, the section's chat loop. A `models.infer` round, a nested one-shot call over one user message with no tools, sets it `false`, so no live pieces arrive and a callback waiting on them never hears anything.
    - [`Effect::ToolCall`]'s `origin`, a [`ToolCallOrigin`], says whether Lua ([`ToolCaller::Script`]) or a model round ([`ToolCaller::Model`]) asked, so you can let a script call a tool freely and still check the call when a model asks for it.
-   - [`Effect::Store`] holds `access`, an [`Arc`](std::sync::Arc) around an [`Access`](crate::vfs::Access), the chain's permission to the store, where a *chain* is one walk over sibling sections. Pass it to [`perform_store_op`](crate::vfs::perform_store_op) as given, and never build a second access from it, widen it to more of the store, or use it for any store work beyond this one operation. Holding the `Arc` afterward is harmless, because the access refuses every operation once the run reaches `Done` or is dropped.
+   - [`Effect::Vfs`] holds `access`, an [`Arc`](std::sync::Arc) around an [`Access`](crate::vfs::Access), the chain's permission to the store, where a *chain* is one walk over sibling sections. Pass it to [`perform_vfs_op`](crate::vfs::perform_vfs_op) as given, and never build a second access from it, widen it to more of the store, or use it for any store work beyond this one operation. Holding the `Arc` afterward is harmless, because the access refuses every operation once the run reaches `Done` or is dropped.
    - Sleep for [`Effect::Timer`]'s `seconds`, then answer [`EffectAnswer::Timer`].
 2. `drive` resumes each effect from [`Step::Pending`](crate::Step::Pending) with [`Run::resume`](crate::Run::resume), backward when `reverse` is set.
 3. Both runs return the same text.
@@ -138,7 +138,7 @@ Every store operation leaves a claim on its path, and a claim clashes with one l
   ───────────────────       ──────────────────────────────────────────────
   Effect::Chat         ──>  EffectAnswer::Chat        completion or error
   Effect::ToolCall     ──>  EffectAnswer::ToolCall    tool output or error
-  Effect::Store        ──>  EffectAnswer::Store       store outcome or error
+  Effect::Vfs          ──>  EffectAnswer::Vfs         store outcome or error
   Effect::Timer        ──>  EffectAnswer::Timer       after the sleep ends
 
   any of the four      ──>  EffectAnswer::Dropped     given up, still its one answer
@@ -168,7 +168,7 @@ Logging effects is like logging requests and responses in web middleware, except
 # use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
 # use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 # const GREETER: &str = concat!(
 #     "---\n",
@@ -211,7 +211,7 @@ Logging effects is like logging requests and responses in web middleware, except
 #             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
 #         }
 #         Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("HI THERE"))),
-#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #         Effect::Timer { seconds } => {
 #             std::thread::sleep(Duration::try_from_secs_f64(seconds).unwrap_or_default());
 #             EffectAnswer::Timer
@@ -277,9 +277,9 @@ for line in &lines {
 }
 
 // 5. The note's write logs as an externally tagged store operation, answered with a unit outcome.
-let write = lines.iter().find(|line| line["effect"]["Store"]["op"].get("Write").is_some()).ok_or("the greeter writes its note")?;
-assert_eq!(write["effect"], json!({ "Store": { "op": { "Write": { "path": "note.md", "contents": "hello" } } } }));
-assert_eq!(write["answer"], json!({ "Store": { "Ok": "Unit" } }));
+let write = lines.iter().find(|line| line["effect"]["Vfs"]["op"].get("Write").is_some()).ok_or("the greeter writes its note")?;
+assert_eq!(write["effect"], json!({ "Vfs": { "op": { "Write": { "path": "note.md", "contents": "hello" } } } }));
+assert_eq!(write["answer"], json!({ "Vfs": { "Ok": "Unit" } }));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
@@ -290,7 +290,7 @@ assert_eq!(write["answer"], json!({ "Store": { "Ok": "Unit" } }));
    - A *replay* re-runs the prompt and compares each new effect's record with the logged one.
    - Records hold no id, so use the number from [`EffectId::get`] only to pair lines within one run.
 4. It parses every line back into both record types, and the line count equals the number of effects issued, so the log holds exactly one answer per effect.
-5. The note's write logs as `Store`, then `op`, then `Write`, answered by `Store` with `Ok` holding `Unit`. Both records use serde's external tagging, so you can match on variant names; only [`ToolCaller`] uses snake case, `"script"` and `"model"`.
+5. The note's write logs as `Vfs`, then `op`, then `Write`, answered by `Vfs` with `Ok` holding `Unit`. Both records use serde's external tagging, so you can match on variant names; only [`ToolCaller`] uses snake case, `"script"` and `"model"`.
 
 The records keep what identifies the work:
 
@@ -343,7 +343,7 @@ Log the records, keyed by provenance. Next, [ids](crate::ids) explains the tasks
 |---|---|
 | `Chat` | the round's [`ChatAnswerRecord`] or its failure text, recorded as `{ "Chat": { "Ok": { ... } } }` |
 | [`ToolCall`](AnswerRecord::ToolCall) | the tool's [`ToolAnswerRecord`] or its failure text |
-| `Store` | the [`StoreOutcome`](crate::vfs::StoreOutcome) or the failure text; a successful write records as `{ "Store": { "Ok": "Unit" } }` |
+| `Vfs` | the [`VfsOutcome`](crate::vfs::VfsOutcome) or the failure text; a successful write records as `{ "Vfs": { "Ok": "Unit" } }` |
 | `Timer` | nothing; the timer fired |
 | `Dropped` | nothing; you dropped the effect without performing it |
 
@@ -355,12 +355,12 @@ An [`Effect`] is one piece of outside work a run asks your program to perform; t
 |---|---|
 | `Chat` | one model round over `messages` with `tools` advertised, under the binding's frozen `options` |
 | [`ToolCall`](Effect::ToolCall) | one bound tool call; `tool` is the identity you resolve against your activated capabilities, and `alias` the name the prompt used |
-| `Store` | one store operation under the chain's store view |
+| `Vfs` | one operation on the run's store view, one of the eight `store.*` calls; other code that touches the VFS does not appear as this effect |
 | `Timer` | one sleep of `seconds`, the timeout behind a timed wait |
 
 - `record`: the request minus its live handles; it keeps only tool names, and leaves out `stream`, `options`, and the store access.
 - `Chat.stream`: when `true`, forward the round's live pieces to your streaming callback; a `models.infer` round sets `false` and sends none.
-- `Store.access`: the chain's permission to the store; use it exactly as given, and it refuses every operation once the run reaches `Done` or is dropped.
+- `Vfs.access`: the chain's permission to the store; use it exactly as given, and it refuses every operation once the run reaches `Done` or is dropped.
 - `Timer.seconds`: the sleep length, documented as non-negative and finite.
 
 ## EffectAnswer
@@ -371,7 +371,7 @@ An [`EffectAnswer`] answers one [`Effect`] with the variant of its own kind, or 
 |---|---|
 | `Chat` | the round's boxed [`Completion`](crate::model::Completion) or its [`CompletionError`](crate::model::CompletionError) |
 | [`ToolCall`](EffectAnswer::ToolCall) | the tool's own output or failure, before the run's trust and count rules apply |
-| `Store` | the operation's [`StoreOutcome`](crate::vfs::StoreOutcome) or the store's structured failure |
+| `Vfs` | the operation's [`VfsOutcome`](crate::vfs::VfsOutcome) or the store's structured failure |
 | `Timer` | nothing; the timer fired |
 | `Dropped` | nothing; you dropped the effect without performing it |
 
@@ -385,7 +385,7 @@ An [`EffectRecord`] is an [`Effect`] minus its live handles, in the form a run l
 |---|---|
 | `Chat` | the round's model name, alias, wire-form messages, tool names, and frozen invocation settings |
 | [`ToolCall`](EffectRecord::ToolCall) | the effect's tool identity, alias, arguments, and origin, copied unchanged |
-| `Store` | the validated operation, such as `{ "Store": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } }` |
+| `Vfs` | the validated operation, such as `{ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } }` |
 | `Timer` | the sleep length in seconds |
 
 - `Chat.model`: the bound model's name, which can differ from the served model that [`ChatAnswerRecord`] records.

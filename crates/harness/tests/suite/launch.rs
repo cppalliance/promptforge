@@ -20,7 +20,7 @@ fn a_client_hands_a_session_the_engines_filesystem_handle() {
 
 #[test]
 fn an_output_store_failure_renders_its_own_message_and_sources_the_engines_error() {
-    let error = OutputError::Store {
+    let error = OutputError::Vfs {
         path: "report.md".to_owned(),
         source: VfsError::NotFound {
             path: "report.md".to_owned(),

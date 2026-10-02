@@ -66,22 +66,22 @@ pub(crate) mod detail {
         MODEL_CATALOG_VALIDATION_STARTED => ModelCatalogValidationStarted,
         MODEL_CATALOG_VALIDATION_SUCCEEDED => ModelCatalogValidationSucceeded,
         MODEL_CATALOG_VALIDATION_FAILED => ModelCatalogValidationFailed,
-        STORE_WRITE_SUCCEEDED => StoreWriteSucceeded,
-        STORE_WRITE_FAILED => StoreWriteFailed,
-        STORE_APPEND_SUCCEEDED => StoreAppendSucceeded,
-        STORE_APPEND_FAILED => StoreAppendFailed,
-        STORE_READ_SUCCEEDED => StoreReadSucceeded,
-        STORE_READ_FAILED => StoreReadFailed,
-        STORE_READ_NUMBERED_SUCCEEDED => StoreReadNumberedSucceeded,
-        STORE_READ_NUMBERED_FAILED => StoreReadNumberedFailed,
-        STORE_REPLACE_SUCCEEDED => StoreReplaceSucceeded,
-        STORE_REPLACE_FAILED => StoreReplaceFailed,
-        STORE_DELETE_SUCCEEDED => StoreDeleteSucceeded,
-        STORE_DELETE_FAILED => StoreDeleteFailed,
-        STORE_GLOB_SUCCEEDED => StoreGlobSucceeded,
-        STORE_GLOB_FAILED => StoreGlobFailed,
-        STORE_EXISTS_SUCCEEDED => StoreExistsSucceeded,
-        STORE_EXISTS_FAILED => StoreExistsFailed,
+        VFS_WRITE_SUCCEEDED => VfsWriteSucceeded,
+        VFS_WRITE_FAILED => VfsWriteFailed,
+        VFS_APPEND_SUCCEEDED => VfsAppendSucceeded,
+        VFS_APPEND_FAILED => VfsAppendFailed,
+        VFS_READ_SUCCEEDED => VfsReadSucceeded,
+        VFS_READ_FAILED => VfsReadFailed,
+        VFS_READ_NUMBERED_SUCCEEDED => VfsReadNumberedSucceeded,
+        VFS_READ_NUMBERED_FAILED => VfsReadNumberedFailed,
+        VFS_REPLACE_SUCCEEDED => VfsReplaceSucceeded,
+        VFS_REPLACE_FAILED => VfsReplaceFailed,
+        VFS_DELETE_SUCCEEDED => VfsDeleteSucceeded,
+        VFS_DELETE_FAILED => VfsDeleteFailed,
+        VFS_GLOB_SUCCEEDED => VfsGlobSucceeded,
+        VFS_GLOB_FAILED => VfsGlobFailed,
+        VFS_EXISTS_SUCCEEDED => VfsExistsSucceeded,
+        VFS_EXISTS_FAILED => VfsExistsFailed,
     }
 }
 
@@ -160,37 +160,37 @@ pub enum Observation {
     /// Live-catalog model binding validation failed.
     ModelCatalogValidationFailed,
     /// A harness-mediated store write succeeded.
-    StoreWriteSucceeded,
+    VfsWriteSucceeded,
     /// A harness-mediated store write failed.
-    StoreWriteFailed,
+    VfsWriteFailed,
     /// A harness-mediated store append succeeded.
-    StoreAppendSucceeded,
+    VfsAppendSucceeded,
     /// A harness-mediated store append failed.
-    StoreAppendFailed,
+    VfsAppendFailed,
     /// A harness-mediated store read (verbatim) succeeded.
-    StoreReadSucceeded,
+    VfsReadSucceeded,
     /// A harness-mediated store read (verbatim) failed.
-    StoreReadFailed,
+    VfsReadFailed,
     /// A harness-mediated store read_numbered succeeded.
-    StoreReadNumberedSucceeded,
+    VfsReadNumberedSucceeded,
     /// A harness-mediated store read_numbered failed.
-    StoreReadNumberedFailed,
+    VfsReadNumberedFailed,
     /// A harness-mediated store replacement succeeded.
-    StoreReplaceSucceeded,
+    VfsReplaceSucceeded,
     /// A harness-mediated store replacement failed.
-    StoreReplaceFailed,
+    VfsReplaceFailed,
     /// A harness-mediated store deletion succeeded.
-    StoreDeleteSucceeded,
+    VfsDeleteSucceeded,
     /// A harness-mediated store deletion failed.
-    StoreDeleteFailed,
+    VfsDeleteFailed,
     /// A harness-mediated store glob succeeded.
-    StoreGlobSucceeded,
+    VfsGlobSucceeded,
     /// A harness-mediated store glob failed.
-    StoreGlobFailed,
+    VfsGlobFailed,
     /// A harness-mediated store existence check succeeded.
-    StoreExistsSucceeded,
+    VfsExistsSucceeded,
     /// A harness-mediated store existence check failed.
-    StoreExistsFailed,
+    VfsExistsFailed,
     /// A task chain was started; the payload is its spawn seeds.
     TaskStarted {
         /// The task's id.
@@ -275,22 +275,22 @@ impl Observation {
             Observation::ModelCatalogValidationStarted => "Model catalog validation started",
             Observation::ModelCatalogValidationSucceeded => "Model catalog validation succeeded",
             Observation::ModelCatalogValidationFailed => "Model catalog validation failed",
-            Observation::StoreWriteSucceeded => "Store write succeeded",
-            Observation::StoreWriteFailed => "Store write failed",
-            Observation::StoreAppendSucceeded => "Store append succeeded",
-            Observation::StoreAppendFailed => "Store append failed",
-            Observation::StoreReadSucceeded => "Store read succeeded",
-            Observation::StoreReadFailed => "Store read failed",
-            Observation::StoreReadNumberedSucceeded => "Store read_numbered succeeded",
-            Observation::StoreReadNumberedFailed => "Store read_numbered failed",
-            Observation::StoreReplaceSucceeded => "Store replace succeeded",
-            Observation::StoreReplaceFailed => "Store replace failed",
-            Observation::StoreDeleteSucceeded => "Store delete succeeded",
-            Observation::StoreDeleteFailed => "Store delete failed",
-            Observation::StoreGlobSucceeded => "Store glob succeeded",
-            Observation::StoreGlobFailed => "Store glob failed",
-            Observation::StoreExistsSucceeded => "Store exists succeeded",
-            Observation::StoreExistsFailed => "Store exists failed",
+            Observation::VfsWriteSucceeded => "Vfs write succeeded",
+            Observation::VfsWriteFailed => "Vfs write failed",
+            Observation::VfsAppendSucceeded => "Vfs append succeeded",
+            Observation::VfsAppendFailed => "Vfs append failed",
+            Observation::VfsReadSucceeded => "Vfs read succeeded",
+            Observation::VfsReadFailed => "Vfs read failed",
+            Observation::VfsReadNumberedSucceeded => "Vfs read_numbered succeeded",
+            Observation::VfsReadNumberedFailed => "Vfs read_numbered failed",
+            Observation::VfsReplaceSucceeded => "Vfs replace succeeded",
+            Observation::VfsReplaceFailed => "Vfs replace failed",
+            Observation::VfsDeleteSucceeded => "Vfs delete succeeded",
+            Observation::VfsDeleteFailed => "Vfs delete failed",
+            Observation::VfsGlobSucceeded => "Vfs glob succeeded",
+            Observation::VfsGlobFailed => "Vfs glob failed",
+            Observation::VfsExistsSucceeded => "Vfs exists succeeded",
+            Observation::VfsExistsFailed => "Vfs exists failed",
             Observation::TaskStarted { .. } => "Task started",
             Observation::TaskSucceeded { .. } => "Task succeeded",
             Observation::TaskFailed { .. } => "Task failed",

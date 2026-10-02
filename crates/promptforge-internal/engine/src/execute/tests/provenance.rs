@@ -103,7 +103,7 @@ async fn provenance_seq_is_strictly_increasing_within_one_task_across_a_fanout()
         assert!(
             arm_kinds
                 .iter()
-                .any(|event| matches!(event, Event::StoreWriteSucceeded { .. })),
+                .any(|event| matches!(event, Event::VfsWriteSucceeded { .. })),
             "arm {arm}'s store write is stamped with its own task: {arm_kinds:?}"
         );
         assert!(

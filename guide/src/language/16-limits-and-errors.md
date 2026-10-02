@@ -70,7 +70,7 @@ return reply
 
 Here an `internal` failure, such as a model call the Harness could not complete, becomes the section's result, and any other kind is raised again unchanged before any other suspending call, so the run ends exactly as it would have without the `pcall`.
 
-A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Store`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The Host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
+A failed run reports one run error kind naming what failed, from a fixed set of twelve: `Parse`, `Version`, `Binding`, `Completion`, `Tool`, `Vfs`, `Determinism`, `Lua`, `Quota`, `ContextExhausted`, `Internal`, and `RequirementsUnmet` ([How a failed run is classified](#how-a-failed-run-is-classified)). The Host decides how it shows the run error kind, the message, and, for a parse failure, the location to the person running the prompt.
 
 A run the Host cancels is not a failed run. A running prompt can be stopped at any point, even inside a Lua loop that never waits on the Harness, and the run then ends with the cancelled outcome ([Failure and cancellation](04-how-a-prompt-runs.md#failure-and-cancellation)), a clean stop rather than a failure. The Host triggers the cancel, for example on Ctrl-C. A prompt cannot cancel its own run; it only observes the outcome ([Cancelling a run](#cancelling-a-run)).
 
@@ -377,7 +377,7 @@ An error kind is what Lua sees at the call. A run error kind is what the Host re
 | `tasks_live` | `tasks` | `Lua` |
 | `task_not_owned` | `task` | `Lua` |
 | `task_consumed` | `task` | `Lua` |
-| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | `Store` |
+| `store` | `reason`, plus `path`, and `anchor` and `count` or `rule` | `Vfs` |
 
 Every other error value has only `kind` and `message`. In the H1 pass, some of these failures end the run as `RequirementsUnmet` instead, as [How a failed run is classified](#how-a-failed-run-is-classified) explains. An error value raised inside a local tool handler reaches a `pcall` around the call with its `kind` kept ([Local tools](12-tools.md#local-tools)).
 
@@ -391,7 +391,7 @@ When you catch an error value and raise it again with `error(err)`, the run's cl
 | `empty_model_reply` | `Completion` |
 | `context_exhausted`, with its `reason` | `ContextExhausted` |
 | `cancelled` | the cancelled outcome, not a failed run |
-| `store` | `Store` |
+| `store` | `Vfs` |
 | `task_not_owned`, `task_consumed`, with their `task` | `Lua`, in the H1 pass too |
 | `out_of_scope_tool`, `unbound_tool`, `tasks_live`, `lua`, `internal` | `Lua`, or `RequirementsUnmet` in the H1 pass |
 
@@ -408,7 +408,7 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Binding` | a model round had no model selected | `model binding required for section {section}` |
 | `Completion` | a model call failed, or an empty reply went uncaught | the call's own message, such as `non-success backend status {status}` |
 | `Tool` | a tool call failed, was out of scope, or named an unbound tool, or a `models.loop` call reached the round cap | `tool call failure: {message}`, or one of the other tool messages below |
-| `Store` | a `store` operation failed and went uncaught, or was caught and raised again, or the handle declares no store | the store failure's own message, such as `file not found in store: {path}` or `store operation failed` |
+| `Vfs` | a `store` operation failed and went uncaught, or was caught and raised again, or the handle declares no store | the store failure's own message, such as `file not found in store: {path}` or `store operation failed` |
 | `Determinism` | two accesses unordered by happens-before touched one store region in conflicting ways | `store determinism violation: {detail}` |
 | `Lua` | Lua failed at run time or returned an unusable value | the Lua error's message |
 | `Quota` | a section VM ran out a log quota | `lua log event quota exceeded` or `lua log byte quota exceeded` |
@@ -449,9 +449,9 @@ tool-call loop did not converge
 
 ### Store and Engine failures
 
-- An author's own failed `store` call is an error value of kind `store`, and ends the run as `Store` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
+- An author's own failed `store` call is an error value of kind `store`, and ends the run as `Vfs` when uncaught ([Store errors](09-the-store.md#store-errors)), in the H1 pass too.
 - `Determinism`: two accesses unordered by happens-before touch the same store region in conflicting ways ([Sharing the store across calls and tasks](09-the-store.md#sharing-the-store-across-calls-and-tasks)). The run ends on the spot: the store call never returns into Lua, so no `pcall` can catch it. The message names the path, both chains, and both claim kinds. A conflict in shared library code while it loads ends the run the same way.
-- `Store`: an uncaught `store` error value ends the run as `Store`, a caught one raised again keeps `Store`, a run whose handle declares no store fails with `Store`, and the Host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Store` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
+- `Vfs`: an uncaught `store` error value ends the run as `Vfs`, a caught one raised again keeps `Vfs`, a run whose handle declares no store fails with `Vfs`, and the Host's store backend failing outside any store call, as the run starts or as the store is opened for the H1 pass, the section walk, or a new task, ends the run as `Vfs` as well. Its message is the failure's own text, `store operation failed` for a failure outside any store call.
 - `Internal`: an Engine invariant broke, a fault in the Engine rather than a mistake in the prompt. Its location names an Engine source file and line.
 
 ### The H1 pass hard gate
@@ -491,7 +491,7 @@ Everything else keeps its own classification in the H1 pass:
 
 - Task errors stay `Lua`: an uncaught `tasks_live`, `task_not_owned`, or `task_consumed`, a delivered cancelled task's error value, and a `task_not_owned` or `task_consumed` value raised again later with its `task` field.
 - Tool failures stay `Tool`, and `Quota`, `Completion`, `Binding`, and `ContextExhausted` keep their kinds.
-- A failed store call stays `Store`, and a claims conflict stays `Determinism`.
+- A failed store call stays `Vfs`, and a claims conflict stays `Determinism`.
 - A Host cancel stays the cancelled outcome.
 - A `lua`-kind failure while the shared library loads, a failure in the `var` read-back, and a bad `jump` target from the H1 pass stay `Lua`.
 

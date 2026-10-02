@@ -16,13 +16,13 @@
 use promptforge_types::tools::{ToolError, ToolOutput};
 use promptforge_vfs::VfsError;
 
-use crate::execute::protocol::{Answer, StoreOutcome, ToolCallOutcome};
+use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
 use crate::execute::tools::accept_infer;
 use crate::lua::{ModelReport, prepare_dispatch, prepare_model_dispatch};
 use crate::model::{Completion, CompletionError};
 use crate::{Error, Result};
 
-use super::dispatch::classify_store_failure;
+use super::dispatch::classify_vfs_failure;
 use super::tasks::{TaskBacking, TaskState};
 use super::{
     ChainIndex, Continuation, EffectAnswer, EffectId, Pending, Scheduler, ToolCallContinuation,
@@ -39,7 +39,7 @@ fn dropped_answer(resume: &Continuation) -> Answer<Error> {
         Continuation::ToolCall(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
         // A timer's drop never reaches here; the cancelled store answer
         // is the harmless stand-in should it ever do so.
-        Continuation::Store(_) | Continuation::Timer => Answer::Store(Err(Error::Interrupted)),
+        Continuation::Vfs(_) | Continuation::Timer => Answer::Store(Err(Error::Interrupted)),
     }
 }
 
@@ -81,8 +81,8 @@ impl Scheduler {
             (Continuation::ToolCall(call), EffectAnswer::ToolCall(result)) => {
                 Answer::ToolCallResult(self.accept_tool_call(chain, &call, result))
             }
-            (Continuation::Store(continuation), EffectAnswer::Store(result)) => {
-                match self.accept_store(chain, &continuation, result) {
+            (Continuation::Vfs(continuation), EffectAnswer::Vfs(result)) => {
+                match self.accept_vfs(chain, &continuation, result) {
                     // A claims-model conflict is fatal: the suspended
                     // chains drop unarmed in the run's teardown, exactly
                     // as on the cancellation path.
@@ -182,12 +182,12 @@ impl Scheduler {
     /// outcome precedes the chunk's closing boundary), then the outcome,
     /// with a failure classified for the answer channel under the
     /// operation's own wording.
-    fn accept_store(
+    fn accept_vfs(
         &self,
         chain: ChainIndex,
-        continuation: &super::StoreContinuation,
-        result: std::result::Result<StoreOutcome, VfsError>,
-    ) -> Result<StoreOutcome> {
+        continuation: &super::VfsContinuation,
+        result: std::result::Result<VfsOutcome, VfsError>,
+    ) -> Result<VfsOutcome> {
         let chain = &self.chains[chain.index()];
         if let Some((succeeded, failed)) = continuation.observations {
             chain.ctx.emitter().report(
@@ -195,7 +195,7 @@ impl Scheduler {
                 if result.is_ok() { succeeded } else { failed },
             );
         }
-        result.map_err(|error| classify_store_failure(&continuation.op, &error))
+        result.map_err(|error| classify_vfs_failure(&continuation.op, &error))
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to

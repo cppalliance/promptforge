@@ -242,7 +242,7 @@ fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> Stri
     let chat = effects[1];
     assert_eq!(
         store.record.payload,
-        json!({ "Store": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
+        json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
     );
     assert_eq!(chat.record.payload["Chat"]["model"], "m");
     assert_eq!(chat.record.payload["Chat"]["alias"], "writer");
@@ -273,7 +273,7 @@ fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> Stri
             .payload
             .clone()
     };
-    assert_eq!(answer_for(store), json!({ "Store": { "Ok": "Unit" } }));
+    assert_eq!(answer_for(store), json!({ "Vfs": { "Ok": "Unit" } }));
     assert_eq!(
         answer_for(chat),
         json!({ "Chat": { "Ok": {

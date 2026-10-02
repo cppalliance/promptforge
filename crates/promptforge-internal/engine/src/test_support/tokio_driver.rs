@@ -7,7 +7,7 @@
 //! the matching performer closure, whose future is spawned as one task
 //! that posts its answer on a channel under the effect's id; the loop
 //! resumes the run with each arriving answer and steps again. The
-//! driver performs the engine-internal kinds itself: a `Store` operation
+//! driver performs the engine-internal kinds itself: a `Vfs` operation
 //! runs on the blocking pool (the VFS is synchronous by design), and a
 //! `Timer` sleeps on tokio's timer wheel.
 //!
@@ -355,7 +355,7 @@ impl<'a> TokioDriver<'a> {
                 let future = (self.performers.tool_call)(effect);
                 tokio::spawn(async move { post(&tx, id, future.await) })
             }
-            Effect::Store { access, op } => {
+            Effect::Vfs { access, op } => {
                 // spawn_blocking, not a plain task: the Vfs is sync by
                 // design, and the blocking pool keeps a slow real-filesystem
                 // op from stalling the loop. Aborting the handle detaches
@@ -368,7 +368,7 @@ impl<'a> TokioDriver<'a> {
                     // fresh-scope read never meets the run's claims
                     // however long the view is held.
                     drop(access);
-                    post(&tx, id, EffectAnswer::Store(result));
+                    post(&tx, id, EffectAnswer::Vfs(result));
                 })
             }
             Effect::Timer { seconds } => {

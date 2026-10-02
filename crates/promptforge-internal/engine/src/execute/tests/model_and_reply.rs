@@ -213,10 +213,7 @@ return 'epilog result'\n\
             ),
             ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
-            (
-                "Only".to_string(),
-                detail::STORE_WRITE_SUCCEEDED.to_string()
-            ),
+            ("Only".to_string(), detail::VFS_WRITE_SUCCEEDED.to_string()),
             ("Only".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (

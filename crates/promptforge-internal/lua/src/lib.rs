@@ -35,7 +35,7 @@
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
-//! re-exports only the store protocol ([`StoreOp`], [`StoreOutcome`]).
+//! re-exports only the store protocol ([`VfsOp`], [`VfsOutcome`]).
 //!
 //! ## Invariants
 //!
@@ -143,7 +143,7 @@ mod models;
 mod protocol;
 
 // The executor-facing surface: every item `promptforge-engine` names crosses
-// here. The facade re-exports only `StoreOp` and `StoreOutcome`.
+// here. The facade re-exports only `VfsOp` and `VfsOutcome`.
 pub use crate::argv::Argv;
 pub use collection::render_item;
 pub use compactors::{Compactor, OverflowReason, is_context_overflow, precheck};
@@ -162,7 +162,7 @@ pub use projection::project_messages;
 pub use prose::ProseState;
 pub use protocol::{
     Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole,
-    Request, StoreOp, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord,
+    Request, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome,
     YieldParse,
 };
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};

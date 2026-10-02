@@ -1,6 +1,6 @@
 # promptforge-engine
 
-A Rust library that turns Markdown files into executable AI prompt pipelines. You write a prompt as a document - YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions - and the library parses it into a validated representation, then runs it as a deterministic state machine: every model round (`Chat`), tool call (`ToolCall`), store operation (`Store`), and timer (`Timer`) is an effect value the Harness performs and answers, and every boundary is an event value the Harness logs. Structured multi-section prompts with tool dispatch, model orchestration, concurrent fanout, and a virtual filesystem, driven by a `step`/`resume` loop the Harness owns.
+A Rust library that turns Markdown files into executable AI prompt pipelines. You write a prompt as a document - YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions - and the library parses it into a validated representation, then runs it as a deterministic state machine: every model round (`Chat`), tool call (`ToolCall`), store operation (`Vfs`), and timer (`Timer`) is an effect value the Harness performs and answers, and every boundary is an event value the Harness logs. Structured multi-section prompts with tool dispatch, model orchestration, concurrent fanout, and a virtual filesystem, driven by a `step`/`resume` loop the Harness owns.
 
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 

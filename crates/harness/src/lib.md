@@ -795,7 +795,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 | `Unfinished` | No run has completed: it is still running, or it failed, was cancelled, or was closed first. |
 | `Undeclared` | The prompt declares no `output:` file; add one. |
 | `Missing` | The run completed without writing its declared output file; `path` holds that path. |
-| `Store` | The store refused the read of the output file at `path`; `source` holds the store's failure, also reachable through [`Error::source`](std::error::Error::source). |
+| `Vfs` | The store refused the read of the output file at `path`; `source` holds the store's failure, also reachable through [`Error::source`](std::error::Error::source). |
 
 ## Session
 

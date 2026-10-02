@@ -245,39 +245,39 @@ events! {
         ModelCatalogValidationSucceeded {},
         /// Live-catalog model binding validation failed.
         ModelCatalogValidationFailed {},
-        // Lifecycle: store operations.
+        // Lifecycle: operations on the run's store view (the `store.*` calls).
         /// A harness-mediated store write succeeded.
-        StoreWriteSucceeded {},
+        VfsWriteSucceeded {},
         /// A harness-mediated store write failed.
-        StoreWriteFailed {},
+        VfsWriteFailed {},
         /// A harness-mediated store append succeeded.
-        StoreAppendSucceeded {},
+        VfsAppendSucceeded {},
         /// A harness-mediated store append failed.
-        StoreAppendFailed {},
+        VfsAppendFailed {},
         /// A harness-mediated store read (verbatim) succeeded.
-        StoreReadSucceeded {},
+        VfsReadSucceeded {},
         /// A harness-mediated store read (verbatim) failed.
-        StoreReadFailed {},
+        VfsReadFailed {},
         /// A harness-mediated store read_numbered succeeded.
-        StoreReadNumberedSucceeded {},
+        VfsReadNumberedSucceeded {},
         /// A harness-mediated store read_numbered failed.
-        StoreReadNumberedFailed {},
+        VfsReadNumberedFailed {},
         /// A harness-mediated store replacement succeeded.
-        StoreReplaceSucceeded {},
+        VfsReplaceSucceeded {},
         /// A harness-mediated store replacement failed.
-        StoreReplaceFailed {},
+        VfsReplaceFailed {},
         /// A harness-mediated store deletion succeeded.
-        StoreDeleteSucceeded {},
+        VfsDeleteSucceeded {},
         /// A harness-mediated store deletion failed.
-        StoreDeleteFailed {},
+        VfsDeleteFailed {},
         /// A harness-mediated store glob succeeded.
-        StoreGlobSucceeded {},
+        VfsGlobSucceeded {},
         /// A harness-mediated store glob failed.
-        StoreGlobFailed {},
+        VfsGlobFailed {},
         /// A harness-mediated store existence check succeeded.
-        StoreExistsSucceeded {},
+        VfsExistsSucceeded {},
         /// A harness-mediated store existence check failed.
-        StoreExistsFailed {},
+        VfsExistsFailed {},
         // Lifecycle: the author's checkpoints.
         /// The one author-controlled checkpoint: a validated Lua
         /// `log(message)`. Prompt authors must never place arguments,

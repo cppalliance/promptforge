@@ -23,8 +23,9 @@ pub enum RunErrorKind {
     Completion,
     /// A dispatched tool failed, was unknown, or the tool loop did not converge.
     Tool,
-    /// A run-scoped store operation failed.
-    Store,
+    /// A run-scoped store operation failed, or the run's handle declares no
+    /// store.
+    Vfs,
     /// Two live execution identities claimed one store path: the claims
     /// model terminated the run to keep interleaving deterministic.
     Determinism,
@@ -124,7 +125,7 @@ impl RunError {
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal { .. } => RunErrorKind::Internal,
-            Error::Store { .. } => RunErrorKind::Store,
+            Error::Store { .. } => RunErrorKind::Vfs,
             Error::Determinism(_) => RunErrorKind::Determinism,
             Error::BindSchema { .. } | Error::ModelRequired { .. } => RunErrorKind::Binding,
         }

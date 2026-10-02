@@ -64,7 +64,7 @@ pub(super) fn perform_locally(
         Effect::ToolCall { alias, .. } => EffectAnswer::ToolCall(Err(ToolError::message(format!(
             "no tool is bound as {alias} in this test"
         )))),
-        Effect::Store { access, op } => EffectAnswer::Store(run_store_op(access, op.clone())),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
         Effect::Timer { .. } => EffectAnswer::Timer,
     }
 }
@@ -276,8 +276,8 @@ fn the_driver_performs_store_and_model_effects_and_keeps_the_events_in_order() {
     let order: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
-            Event::StoreWriteSucceeded { .. } => Some("write"),
-            Event::StoreReadSucceeded { .. } => Some("read"),
+            Event::VfsWriteSucceeded { .. } => Some("write"),
+            Event::VfsReadSucceeded { .. } => Some("read"),
             Event::ModelTurnCompleted { .. } => Some("turn"),
             _ => None,
         })
@@ -296,7 +296,7 @@ fn a_three_arm_fanout_fed_its_answers_in_reverse_order_packs_results_in_collecti
         panic!("the fanout parks on its arms' rounds");
     };
     let mut effects = effects;
-    let Effect::Store { .. } = &effects[0].2 else {
+    let Effect::Vfs { .. } = &effects[0].2 else {
         panic!("the parent's store write is issued first: {effects:?}");
     };
     let (id, _, store) = effects.remove(0);

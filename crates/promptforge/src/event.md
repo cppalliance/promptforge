@@ -16,7 +16,7 @@ Events feel like [`tracing`](https://docs.rs/tracing/latest/tracing/) events: re
 # use std::sync::Arc;
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 use std::collections::HashSet;
 
@@ -37,7 +37,7 @@ use promptforge::event::Event;
 # );
 # fn answer(effect: Effect) -> EffectAnswer {
 #     match effect {
-#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #         _ => EffectAnswer::Dropped,
 #     }
 # }
@@ -106,7 +106,7 @@ Building a transcript feels like folding over an iterator of enum values and kee
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::event::Event;
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::{Environment, tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput}};
@@ -129,7 +129,7 @@ assert!(requirements.refusal().is_none());
 // 3. Answer the model round with a canned reply, and the tool call with canned output.
 fn answer(effect: Effect) -> EffectAnswer {
     match effect {
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         Effect::Chat { .. } => EffectAnswer::Chat(
             Completion::from_result(CompletionResult::Text("hi there".to_owned()), "canned").map(Box::new).map_err(Into::into),
         ),
@@ -206,7 +206,7 @@ Capture feels like the verbose flag on an HTTP client that dumps request and res
 # use promptforge::event::Event;
 # use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput}};
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
@@ -223,7 +223,7 @@ Capture feels like the verbose flag on an HTTP client that dumps request and res
 # let environment = Environment::new().tools(ToolCatalog::new(&[shout])?);
 # fn answer(effect: Effect) -> EffectAnswer {
 #     match effect {
-#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #         Effect::Chat { .. } => EffectAnswer::Chat(
 #             Completion::from_result(CompletionResult::Text("hi there".to_owned()), "canned").map(Box::new).map_err(Into::into),
 #         ),
@@ -353,22 +353,22 @@ Turn capture on only to debug, and guard the bodies like the private text they a
 | [`ModelCatalogValidationStarted`](Event::ModelCatalogValidationStarted) | Live-catalog validation of a model binding began. |
 | [`ModelCatalogValidationSucceeded`](Event::ModelCatalogValidationSucceeded) | A model binding passed live-catalog validation. |
 | [`ModelCatalogValidationFailed`](Event::ModelCatalogValidationFailed) | A model binding failed live-catalog validation. |
-| [`StoreWriteSucceeded`](Event::StoreWriteSucceeded) | A store write completed. Store events carry no payload and have no started variant. |
-| [`StoreWriteFailed`](Event::StoreWriteFailed) | A store write returned an error. |
-| [`StoreAppendSucceeded`](Event::StoreAppendSucceeded) | A store append completed. |
-| [`StoreAppendFailed`](Event::StoreAppendFailed) | A store append returned an error. |
-| [`StoreReadSucceeded`](Event::StoreReadSucceeded) | A verbatim store read completed. |
-| [`StoreReadFailed`](Event::StoreReadFailed) | A verbatim store read returned an error. |
-| [`StoreReadNumberedSucceeded`](Event::StoreReadNumberedSucceeded) | A numbered store read completed. |
-| [`StoreReadNumberedFailed`](Event::StoreReadNumberedFailed) | A numbered store read returned an error. |
-| [`StoreReplaceSucceeded`](Event::StoreReplaceSucceeded) | A store replace completed. |
-| [`StoreReplaceFailed`](Event::StoreReplaceFailed) | A store replace returned an error. |
-| [`StoreDeleteSucceeded`](Event::StoreDeleteSucceeded) | A store delete completed. |
-| [`StoreDeleteFailed`](Event::StoreDeleteFailed) | A store delete returned an error. |
-| [`StoreGlobSucceeded`](Event::StoreGlobSucceeded) | A store glob completed. |
-| [`StoreGlobFailed`](Event::StoreGlobFailed) | A store glob returned an error. |
-| [`StoreExistsSucceeded`](Event::StoreExistsSucceeded) | A store existence check completed. |
-| [`StoreExistsFailed`](Event::StoreExistsFailed) | A store existence check returned an error. |
+| [`VfsWriteSucceeded`](Event::VfsWriteSucceeded) | A store write completed. The `Vfs` events carry no payload and have no started variant. |
+| [`VfsWriteFailed`](Event::VfsWriteFailed) | A store write returned an error. |
+| [`VfsAppendSucceeded`](Event::VfsAppendSucceeded) | A store append completed. |
+| [`VfsAppendFailed`](Event::VfsAppendFailed) | A store append returned an error. |
+| [`VfsReadSucceeded`](Event::VfsReadSucceeded) | A verbatim store read completed. |
+| [`VfsReadFailed`](Event::VfsReadFailed) | A verbatim store read returned an error. |
+| [`VfsReadNumberedSucceeded`](Event::VfsReadNumberedSucceeded) | A numbered store read completed. |
+| [`VfsReadNumberedFailed`](Event::VfsReadNumberedFailed) | A numbered store read returned an error. |
+| [`VfsReplaceSucceeded`](Event::VfsReplaceSucceeded) | A store replace completed. |
+| [`VfsReplaceFailed`](Event::VfsReplaceFailed) | A store replace returned an error. |
+| [`VfsDeleteSucceeded`](Event::VfsDeleteSucceeded) | A store delete completed. |
+| [`VfsDeleteFailed`](Event::VfsDeleteFailed) | A store delete returned an error. |
+| [`VfsGlobSucceeded`](Event::VfsGlobSucceeded) | A store glob completed. |
+| [`VfsGlobFailed`](Event::VfsGlobFailed) | A store glob returned an error. |
+| [`VfsExistsSucceeded`](Event::VfsExistsSucceeded) | A store existence check completed. |
+| [`VfsExistsFailed`](Event::VfsExistsFailed) | A store existence check returned an error. |
 | [`Lua`](Event::Lua) | Carries `message`, the text of a Lua `log(message)` call, verbatim. It is the one checkpoint a prompt author controls, and authors must never put arguments, replies, tool data, credentials, paths, or store contents in it. |
 | [`TaskStarted`](Event::TaskStarted) | Carries `task`, `target`, `origin`, `input`, `item`, `index`, and `var`. A chain started by `tasks.spawn`, a `fanout` arm, or the model's `task` tool. It reports under the spawning section, and its payload holds every seed needed to start the same chain again under the same id. |
 | [`TaskSucceeded`](Event::TaskSucceeded) | Carries `task`. The task's chain ended with a result. It reports under the task's target section, as the other ending variants do. |

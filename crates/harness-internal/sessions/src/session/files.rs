@@ -37,7 +37,7 @@ pub enum OutputError {
     },
     /// The store refused the read of the declared output file.
     #[error("the output file `{path}` could not be read")]
-    Store {
+    Vfs {
         /// The declared output path.
         path: String,
         /// The store's failure.
@@ -96,7 +96,7 @@ impl SessionFiles {
                 match read {
                     Ok(text) => Ok(text),
                     Err(VfsError::NotFound { .. }) => Err(OutputError::Missing { path }),
-                    Err(source) => Err(OutputError::Store { path, source }),
+                    Err(source) => Err(OutputError::Vfs { path, source }),
                 }
             }
         };
@@ -114,7 +114,7 @@ impl Session {
     /// good when it failed, was cancelled, or was closed first),
     /// [`OutputError::Undeclared`] for a prompt with no `output:` file,
     /// [`OutputError::Missing`] when the run never wrote it, and
-    /// [`OutputError::Store`] when the store refused the read.
+    /// [`OutputError::Vfs`] when the store refused the read.
     pub fn output_text(&self) -> Result<String, OutputError> {
         self.core
             .files

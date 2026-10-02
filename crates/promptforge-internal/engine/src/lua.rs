@@ -11,8 +11,8 @@
 //! The implementation sits in the `promptforge-lua` crate; this module is
 //! the crate-internal import surface for it.
 
-// The store operation behind `execute::perform_store_op`, the entry point
-// the Harness's store performer answers a `Store` effect through, and the
+// The store operation behind `execute::perform_vfs_op`, the entry point
+// the Harness's store performer answers a `Vfs` effect through, and the
 // model-facing message renderer a store failure carries.
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaProgram, MessageRecord, ModelReport, OverflowReason,

@@ -30,7 +30,7 @@ use promptforge::model::{
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
+use promptforge::vfs::{VfsError, VfsOp, VfsOutcome};
 use serde_json::Value;
 
 #[path = "performers-builtin.rs"]
@@ -75,7 +75,7 @@ pub trait ToolPerformer: Send + Sync {
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// Performs a `Store` effect: one store operation through the store
+/// Performs a `Vfs` effect: one store operation through the store
 /// view the effect carries.
 ///
 /// Synchronous: the loop runs it on the blocking pool. Dropping the
@@ -90,7 +90,7 @@ pub trait StorePerformer: Send + Sync {
     /// # Errors
     /// Returns the store's own structured failure, which the Engine
     /// raises at the author's call site as a store error.
-    fn perform(&self, access: &Access, op: StoreOp) -> Result<StoreOutcome, VfsError>;
+    fn perform(&self, access: &Access, op: VfsOp) -> Result<VfsOutcome, VfsError>;
 }
 
 /// Performs a `Timer` effect: one sleep.
@@ -109,7 +109,7 @@ pub struct Performers {
     pub chat: Arc<dyn ChatPerformer>,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
-    /// Performs `Store` effects.
+    /// Performs `Vfs` effects.
     pub store: Arc<dyn StorePerformer>,
     /// Performs `Timer` effects.
     pub timer: Arc<dyn TimerPerformer>,

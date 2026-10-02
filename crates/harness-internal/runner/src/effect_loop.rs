@@ -323,11 +323,11 @@ impl<'a> Driver<'a> {
                     answer.post(EffectAnswer::ToolCall(call.await));
                 })
             }
-            Effect::Store { access, op } => {
+            Effect::Vfs { access, op } => {
                 let store = Arc::clone(&self.performers.store);
                 spawn_blocking_tagged(tag, move || {
                     let result = perform_store(store.as_ref(), access, op);
-                    answer.post(EffectAnswer::Store(result));
+                    answer.post(EffectAnswer::Vfs(result));
                 })
             }
             Effect::Timer { seconds } => {

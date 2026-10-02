@@ -96,7 +96,7 @@ use super::context::RunState;
 use super::protocol::Answer;
 use super::run::{Effect, EffectAnswer, EffectId};
 use chain_record::Chain;
-use pending::{Continuation, Pending, StoreContinuation, ToolCallContinuation};
+use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
 
 /// Where a sibling slice sits in the prompt tree: the index of each

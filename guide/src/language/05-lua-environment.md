@@ -1013,7 +1013,7 @@ Only error values the Engine builds take a kind out of a block. A table you buil
 When a failed Engine call's error goes uncaught, the run reports the original failure with its kind and structure. If you catch it and raise a different error, the run reports your new error instead. Raising the caught error value again unchanged works like this:
 
 - Raised again with `error(err)` before any other suspending call, an error value ends the run exactly as if it had never been caught, with the same run error kind.
-- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Store`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
+- Raised again later, after another suspending call, an error value of kind `context_exhausted` (with its `reason`), `tool_loop_exhausted`, `empty_model_reply`, or `tool` keeps its run error kind, a `store` value keeps run error kind `Vfs`, and a `cancelled` value ends the run with the cancelled outcome. A `task_not_owned` or `task_consumed` value that still has its `task` field ends the run as `Lua`, in the H1 pass too. Any other error value, or one missing its fields, ends the run as `Lua`, or as `RequirementsUnmet` in the H1 pass.
 - A `lua`-kind error value that leaves a block surfaces as a Lua runtime error with the same message and the absolute prompt line.
 
 ### Uncaught failures

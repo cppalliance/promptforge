@@ -28,7 +28,7 @@ You build the request body with [`build_request_body`]. You own the connection a
 # use promptforge::model::{ModelDescriptor, ModelId, StreamDelta, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
 # use promptforge::transport::{ChunkSource, build_request_body, read_completion_stream};
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
 #     "---\n",
@@ -99,7 +99,7 @@ let stream_round = |body: serde_json::Value, max_bytes: u64| {
 #         Step::Pending { effects, .. } => {
 #             for (id, _provenance, effect) in effects {
 #                 let answer = match effect {
-#                     Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#                     Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 Effect::Chat { messages, tools, options, .. } => {
     let body = build_request_body(&messages, Some(tools.as_slice()), &options);
     let completion = stream_round(body, 1 << 20)?;
@@ -177,7 +177,7 @@ You build a [`ClientError`] variant that says what went wrong, convert it into a
 # use promptforge::model::{CompletionError, CompletionErrorKind, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
 # use promptforge::transport::ChunkSource;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
 #     "---\n",
@@ -240,7 +240,7 @@ let result = loop {
         Step::Pending { effects, .. } => {
             for (id, _provenance, effect) in effects {
                 let answer = match effect {
-                    Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+                    Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
                     Effect::Chat { .. } => {
                         let error = failed_round(&["overloaded\nretry later"], 4096);
                         assert_eq!(error.status(), Some(503));

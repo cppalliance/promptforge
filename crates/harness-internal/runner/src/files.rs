@@ -8,7 +8,7 @@
 //! each operation like any other. Both are synchronous, like the VFS; a
 //! caller runs them on the blocking pool.
 
-use promptforge::vfs::{Origin, StoreOp, StoreOutcome, VfsError, VfsRef, perform_store_op};
+use promptforge::vfs::{Origin, VfsError, VfsOp, VfsOutcome, VfsRef, perform_vfs_op};
 
 /// Why a run's declared input file could not be put in place.
 #[derive(Debug, thiserror::Error)]
@@ -30,7 +30,7 @@ pub enum InputFileError {
     },
     /// The store refused the staging write or the existence check.
     #[error("the input file `{path}` could not be staged")]
-    Store {
+    Vfs {
         /// The declared input path.
         path: String,
         /// The store's failure.
@@ -46,7 +46,7 @@ pub enum InputFileError {
 /// # Errors
 /// Returns [`InputFileError::Undeclared`] for text the prompt declares no
 /// file for, [`InputFileError::Missing`] for a declared file that is
-/// neither supplied nor present, and [`InputFileError::Store`] when the
+/// neither supplied nor present, and [`InputFileError::Vfs`] when the
 /// store refuses the write or the check.
 pub fn stage_input(
     vfs: &VfsRef,
@@ -58,7 +58,7 @@ pub fn stage_input(
         (None, Some(_)) => return Err(InputFileError::Undeclared),
         (Some(path), _) => path,
     };
-    let store = |source| InputFileError::Store {
+    let store = |source| InputFileError::Vfs {
         path: path.to_owned(),
         source,
     };
@@ -67,11 +67,11 @@ pub fn stage_input(
         .map_err(store)?;
     let path = path.to_owned();
     match text {
-        Some(contents) => perform_store_op(&view, StoreOp::Write { path, contents })
+        Some(contents) => perform_vfs_op(&view, VfsOp::Write { path, contents })
             .map(drop)
             .map_err(store),
-        None => match perform_store_op(&view, StoreOp::Exists { path: path.clone() }) {
-            Ok(StoreOutcome::Bool(true)) => Ok(()),
+        None => match perform_vfs_op(&view, VfsOp::Exists { path: path.clone() }) {
+            Ok(VfsOutcome::Bool(true)) => Ok(()),
             Ok(_) => Err(InputFileError::Missing { path }),
             Err(source) => Err(store(source)),
         },
@@ -85,13 +85,13 @@ pub fn stage_input(
 /// wrote the file.
 pub fn read_output(vfs: &VfsRef, path: &str) -> Result<String, VfsError> {
     let view = vfs.acquire_store(Origin::new(format!("output: {path}")))?;
-    let read = StoreOp::Read {
+    let read = VfsOp::Read {
         path: path.to_owned(),
         start: None,
         end: None,
     };
-    match perform_store_op(&view, read)? {
-        StoreOutcome::Text(text) => Ok(text),
+    match perform_vfs_op(&view, read)? {
+        VfsOutcome::Text(text) => Ok(text),
         other => Err(VfsError::Backend {
             message: format!("a whole-file store read answered {other:?} instead of text"),
         }),

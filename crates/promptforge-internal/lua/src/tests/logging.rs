@@ -114,7 +114,7 @@ fn compatibility_chunk_logs_interleave_with_engine_operations() {
             (
                 "compatibility-run".to_owned(),
                 "Compatibility".to_owned(),
-                detail::STORE_WRITE_SUCCEEDED.clone(),
+                detail::VFS_WRITE_SUCCEEDED.clone(),
             ),
             (
                 "compatibility-run".to_owned(),

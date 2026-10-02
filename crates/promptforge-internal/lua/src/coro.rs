@@ -427,7 +427,7 @@ pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
 /// sync VFS via the blocking pool - uniformly for all backends, with no
 /// inline fast path, so interleaving behavior never depends on which
 /// backend serves the mount. The Harness performs each one as an
-/// `Effect::Store`, and a claims-model conflict through any of them ends
+/// `Effect::Vfs`, and a claims-model conflict through any of them ends
 /// the run with a determinism violation that `pcall` cannot catch.
 ///
 /// The executor's section setup and live H1 setup are the only callers.

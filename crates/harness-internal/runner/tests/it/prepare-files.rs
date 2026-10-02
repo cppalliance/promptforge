@@ -133,7 +133,7 @@ async fn a_store_that_refuses_the_staging_write_refuses_the_run() {
         .build();
     let (log, prepared) = prepare(FILES, &vfs, Some("# Paper")).await;
     let source = refused(&log, prepared.expect_err("a refused write refuses")).await;
-    let InputFileError::Store { path, source } = source else {
+    let InputFileError::Vfs { path, source } = source else {
         panic!("the refusal is the store's: {source:?}");
     };
     assert_eq!(path, "paper.md");

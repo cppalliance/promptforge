@@ -459,14 +459,14 @@ Owns:
 - item: promptforge::vfs::Mode
 - item: promptforge::vfs::Op
 - item: promptforge::vfs::PathReason
-- item: promptforge::vfs::StoreOp
-- item: promptforge::vfs::StoreOutcome
+- item: promptforge::vfs::VfsOp
+- item: promptforge::vfs::VfsOutcome
 - item: promptforge::vfs::Verdict
 - item: promptforge::vfs::VfsError
 - item: promptforge::vfs::Policy
 - item: promptforge::vfs::Vfs
 - item: promptforge::vfs::VfsAccess
-- item: promptforge::vfs::perform_store_op
+- item: promptforge::vfs::perform_vfs_op
 - item: promptforge::vfs::OpSink
 
 </page-vfs>

@@ -301,27 +301,27 @@ fn number_lines_from(lines: &[&str], start: usize) -> String {
 /// conflict, or backend failure.
 pub fn run_store_op(
     view: &Access,
-    op: crate::protocol::StoreOp,
-) -> std::result::Result<crate::protocol::StoreOutcome, promptforge_vfs::VfsError> {
-    use crate::protocol::{StoreOp, StoreOutcome};
+    op: crate::protocol::VfsOp,
+) -> std::result::Result<crate::protocol::VfsOutcome, promptforge_vfs::VfsError> {
+    use crate::protocol::{VfsOp, VfsOutcome};
     match op {
-        StoreOp::Write { path, contents } => view
+        VfsOp::Write { path, contents } => view
             .write(&path, contents.as_bytes())
-            .map(|()| StoreOutcome::Unit),
-        StoreOp::Append { path, contents } => view
+            .map(|()| VfsOutcome::Unit),
+        VfsOp::Append { path, contents } => view
             .append(&path, contents.as_bytes())
-            .map(|()| StoreOutcome::Unit),
-        StoreOp::Read { path, start, end } => {
-            read_store(view, &path, start, end).map(StoreOutcome::Text)
+            .map(|()| VfsOutcome::Unit),
+        VfsOp::Read { path, start, end } => {
+            read_store(view, &path, start, end).map(VfsOutcome::Text)
         }
-        StoreOp::ReadNumbered { path, start, end } => {
-            read_store_numbered(view, &path, start, end).map(StoreOutcome::Text)
+        VfsOp::ReadNumbered { path, start, end } => {
+            read_store_numbered(view, &path, start, end).map(VfsOutcome::Text)
         }
-        StoreOp::StrReplace { path, old, new } => view
+        VfsOp::StrReplace { path, old, new } => view
             .str_replace(&path, &old, &new)
-            .map(|()| StoreOutcome::Unit),
-        StoreOp::Delete { path } => view.remove(&path, false).map(|_| StoreOutcome::Unit),
-        StoreOp::Glob { pattern } => view.glob(&pattern).map(StoreOutcome::Paths),
-        StoreOp::Exists { path } => view.exists(&path).map(StoreOutcome::Bool),
+            .map(|()| VfsOutcome::Unit),
+        VfsOp::Delete { path } => view.remove(&path, false).map(|_| VfsOutcome::Unit),
+        VfsOp::Glob { pattern } => view.glob(&pattern).map(VfsOutcome::Paths),
+        VfsOp::Exists { path } => view.exists(&path).map(VfsOutcome::Bool),
     }
 }

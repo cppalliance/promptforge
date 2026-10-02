@@ -9,7 +9,7 @@ use promptforge_types::capabilities::{CapabilityId, Prelude};
 
 use super::serial_driver::{perform_locally, text_reply};
 use super::*;
-use crate::execute::protocol::StoreOp;
+use crate::execute::protocol::VfsOp;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord, Run, ToolCallOrigin, ToolCaller};
 use crate::test_support::drive;
 
@@ -226,14 +226,14 @@ fn a_prelude_function_called_from_a_block_reaches_the_yielding_store_shims() {
     assert_eq!(
         records,
         vec![
-            EffectRecord::Store {
-                op: StoreOp::Write {
+            EffectRecord::Vfs {
+                op: VfsOp::Write {
                     path: "notes.md".to_owned(),
                     contents: "kept".to_owned(),
                 },
             },
-            EffectRecord::Store {
-                op: StoreOp::Read {
+            EffectRecord::Vfs {
+                op: VfsOp::Read {
                     path: "notes.md".to_owned(),
                     start: None,
                     end: None,

@@ -67,7 +67,7 @@ use std::sync::Arc;
 use promptforge::capabilities::{CapabilityId, Prelude};
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::perform_store_op;
+use promptforge::vfs::perform_vfs_op;
 use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 
 // 1. The greeter's section calls `greet`, which the prompt never defines, and stores its result.
@@ -102,8 +102,8 @@ let result = loop {
         Step::Done { result, .. } => break result,
     };
     for (id, _provenance, effect) in effects {
-        let Effect::Store { access, op } = effect else { panic!("the greeter issues only store effects") };
-        run.resume(id, EffectAnswer::Store(perform_store_op(&access, op)));
+        let Effect::Vfs { access, op } = effect else { panic!("the greeter issues only store effects") };
+        run.resume(id, EffectAnswer::Vfs(perform_vfs_op(&access, op)));
     }
 };
 assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
@@ -113,7 +113,7 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
 1. The greeter's only section writes `greet('world')` to `note.md` and returns it read back, though the prompt never defines `greet`.
 2. [`Prelude::new`] pairs the `promptforge/web` id, which names the prelude in tracebacks and error messages, with one line of Lua. A real prelude defines helpers, such as `sh.run(script)`, that reach the capability's tools through `tools.call`, the Lua call that asks your program to run a tool. The run hands you an [`Effect::ToolCall`](crate::effect::Effect::ToolCall) to answer, as [Call a tool](crate#call-a-tool) shows. Name each tool by its full `namespace/pack/name` path, and call tools only inside a prelude's functions, because a prelude that calls a tool while it loads fails the run.
 3. [`Environment::preludes`](crate::Environment::preludes) puts the preludes on the environment, and [`Environment::prepare`](crate::Environment::prepare) prepares the run with them. As in [Run a prompt](crate#run-a-prompt), [`RunContext::new`](crate::RunContext::new) takes the run's name, a seed, and a start time. The fixed seed `7` and [`Timestamp::UNIX_EPOCH`](crate::timestamp::Timestamp::UNIX_EPOCH) make the test repeat exactly, and a live program passes a secure random seed and the current time. Call [`Requirements::refusal`](crate::Requirements::refusal) on the report prepare returns, and when it returns an error, show it and do not call [`Run::new`](crate::Run::new). The greeter declares no tools or models, so its report has no gaps. The empty string passed to `Run::new` is the run's argument string, which reaches Lua as `args`.
-4. The loop answers the store effects with [`perform_store_op`](crate::vfs::perform_store_op) and steps until [`Step::Done`](crate::Step::Done). A context from `RunContext::new` starts with a fresh in-memory store at `/`, and `perform_store_op` reads and writes it through each effect's `access`, so the example needs no store of its own. The section calls `greet` without loading it, and the store reads back `hello world`.
+4. The loop answers the store effects with [`perform_vfs_op`](crate::vfs::perform_vfs_op) and steps until [`Step::Done`](crate::Step::Done). A context from `RunContext::new` starts with a fresh in-memory store at `/`, and `perform_vfs_op` reads and writes it through each effect's `access`, so the example needs no store of its own. The section calls `greet` without loading it, and the store reads back `hello world`.
 
 Every section, fanout arm, and spawned task installs the preludes afresh, so nothing one section does reaches another's copy. A table a prelude defines is read-only at its top level, so a section that assigns a new field gets an error naming the capability. Each prelude sees only the base Lua functions, `string`, `table`, `math`, `tools`, `store`, `untrusted`, and a read-only `var`, so it cannot call another prelude's helpers.
 

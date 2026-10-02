@@ -358,7 +358,7 @@ fn a_run_ends_its_scope_at_done_while_the_harness_still_holds_its_store_views()
     );
     assert!(
         held.iter()
-            .any(|effect| matches!(effect, Effect::Store { .. })),
+            .any(|effect| matches!(effect, Effect::Vfs { .. })),
         "the Harness holds the run's store views past Done: {held:?}"
     );
     // A fresh scope reads the run's write without a conflict: the run's
@@ -375,7 +375,7 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, _, held) = drive_holding_effects(&vfs);
-    let Some(Effect::Store { access, .. }) = held.first() else {
+    let Some(Effect::Vfs { access, .. }) = held.first() else {
         panic!("the run's first effect is its store write: {held:?}");
     };
     match access.write("kept.txt", b"after the run") {

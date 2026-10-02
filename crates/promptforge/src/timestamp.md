@@ -18,11 +18,11 @@ use std::time::SystemTime;
 
 # use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 # fn answer(effect: Effect) -> EffectAnswer {
 #     match effect {
-#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #         _ => EffectAnswer::Dropped,
 #     }
 # }

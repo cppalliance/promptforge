@@ -25,8 +25,8 @@
 #[non_exhaustive] pub enum promptforge::transport::ClientError
 #[non_exhaustive] pub enum promptforge::vfs::FileType
 #[non_exhaustive] pub enum promptforge::vfs::PathReason
-#[non_exhaustive] pub enum promptforge::vfs::StoreOp
 #[non_exhaustive] pub enum promptforge::vfs::VfsError
+#[non_exhaustive] pub enum promptforge::vfs::VfsOp
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::DuplicateId { .. }
@@ -190,10 +190,10 @@ auto promptforge::vfs::Origin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindS
 auto promptforge::vfs::PathReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::RealBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Stat: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::StoreOp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::vfs::StoreOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Verdict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsOp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::VfsOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsPath: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsPathBuf: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
@@ -312,10 +312,10 @@ derives promptforge::vfs::Origin: Clone, Debug
 derives promptforge::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::RealBackend: Clone, Debug
 derives promptforge::vfs::Stat: Clone, Debug
-derives promptforge::vfs::StoreOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
-derives promptforge::vfs::StoreOutcome: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsError: Clone, Debug, Eq, PartialEq
+derives promptforge::vfs::VfsOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives promptforge::vfs::VfsOutcome: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
 derives promptforge::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::VfsPathBuf: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 derives promptforge::vfs::VfsRef: Clone, Debug, Default
@@ -405,8 +405,8 @@ pub enum promptforge::effect::EffectRecord
 pub enum promptforge::event::DebugMode
 pub enum promptforge::vfs::Mode
 pub enum promptforge::vfs::Op
-pub enum promptforge::vfs::StoreOutcome
 pub enum promptforge::vfs::Verdict
+pub enum promptforge::vfs::VfsOutcome
 pub fn promptforge::CapabilityConflict::new(first: promptforge::capabilities::CapabilityId, second: promptforge::capabilities::CapabilityId) -> promptforge::CapabilityConflict
 pub fn promptforge::Environment::new() -> promptforge::Environment
 pub fn promptforge::Environment::preludes(self, preludes: alloc::vec::Vec<promptforge::capabilities::Prelude>) -> promptforge::Environment
@@ -694,7 +694,7 @@ pub fn promptforge::vfs::VfsRefBuilder::mount(self, prefix: &str, backend: impl 
 pub fn promptforge::vfs::VfsRefBuilder::on_op(self, sink: impl core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::policy(self, policy: impl promptforge::vfs::Policy + core::marker::Sync + 'static) -> promptforge::vfs::VfsRefBuilder
 pub fn promptforge::vfs::VfsRefBuilder::store(self, root: &str, backend: impl promptforge::vfs::Vfs + 'static) -> promptforge::vfs::VfsRefBuilder
-pub fn promptforge::vfs::perform_store_op(access: &promptforge::vfs::Access, op: promptforge::vfs::StoreOp) -> core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::perform_vfs_op(access: &promptforge::vfs::Access, op: promptforge::vfs::VfsOp) -> core::result::Result<promptforge::vfs::VfsOutcome, promptforge::vfs::VfsError>
 pub mod promptforge::cancel
 pub mod promptforge::capabilities
 pub mod promptforge::effect
@@ -733,10 +733,10 @@ pub promptforge::RunErrorKind::Lua
 pub promptforge::RunErrorKind::Parse
 pub promptforge::RunErrorKind::Quota
 pub promptforge::RunErrorKind::RequirementsUnmet
-pub promptforge::RunErrorKind::Store
 pub promptforge::RunErrorKind::Substitution
 pub promptforge::RunErrorKind::Tool
 pub promptforge::RunErrorKind::Version
+pub promptforge::RunErrorKind::Vfs
 pub promptforge::RunResult::Cancelled
 pub promptforge::RunResult::Failure(..)
 pub promptforge::RunResult::Failure::0: promptforge::RunError
@@ -765,11 +765,11 @@ pub promptforge::capabilities::GlobalNameErrorKind::SegmentCount
 pub promptforge::effect::AnswerRecord::Chat(..)
 pub promptforge::effect::AnswerRecord::Chat::0: core::result::Result<promptforge::effect::ChatAnswerRecord, alloc::string::String>
 pub promptforge::effect::AnswerRecord::Dropped
-pub promptforge::effect::AnswerRecord::Store(..)
-pub promptforge::effect::AnswerRecord::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, alloc::string::String>
 pub promptforge::effect::AnswerRecord::Timer
 pub promptforge::effect::AnswerRecord::ToolCall(..)
 pub promptforge::effect::AnswerRecord::ToolCall::0: core::result::Result<promptforge::effect::ToolAnswerRecord, alloc::string::String>
+pub promptforge::effect::AnswerRecord::Vfs(..)
+pub promptforge::effect::AnswerRecord::Vfs::0: core::result::Result<promptforge::vfs::VfsOutcome, alloc::string::String>
 pub promptforge::effect::ChatAnswerRecord::finish_reason: core::option::Option<alloc::string::String>
 pub promptforge::effect::ChatAnswerRecord::model: alloc::string::String
 pub promptforge::effect::ChatAnswerRecord::reply: core::option::Option<alloc::string::String>
@@ -780,9 +780,6 @@ pub promptforge::effect::Effect::Chat::messages: alloc::vec::Vec<promptforge::mo
 pub promptforge::effect::Effect::Chat::options: promptforge::model::CompletionOptions
 pub promptforge::effect::Effect::Chat::stream: bool
 pub promptforge::effect::Effect::Chat::tools: alloc::vec::Vec<promptforge::model::ToolSchema>
-pub promptforge::effect::Effect::Store { .. }
-pub promptforge::effect::Effect::Store::access: alloc::sync::Arc<promptforge::vfs::Access>
-pub promptforge::effect::Effect::Store::op: promptforge::vfs::StoreOp
 pub promptforge::effect::Effect::Timer { .. }
 pub promptforge::effect::Effect::Timer::seconds: f64
 pub promptforge::effect::Effect::ToolCall { .. }
@@ -790,14 +787,17 @@ pub promptforge::effect::Effect::ToolCall::alias: alloc::string::String
 pub promptforge::effect::Effect::ToolCall::args: serde_json::value::Value
 pub promptforge::effect::Effect::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::Effect::ToolCall::tool: promptforge::tools::ToolId
+pub promptforge::effect::Effect::Vfs { .. }
+pub promptforge::effect::Effect::Vfs::access: alloc::sync::Arc<promptforge::vfs::Access>
+pub promptforge::effect::Effect::Vfs::op: promptforge::vfs::VfsOp
 pub promptforge::effect::EffectAnswer::Chat(..)
 pub promptforge::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxed::Box<promptforge::model::Completion>, promptforge::model::CompletionError>
 pub promptforge::effect::EffectAnswer::Dropped
-pub promptforge::effect::EffectAnswer::Store(..)
-pub promptforge::effect::EffectAnswer::Store::0: core::result::Result<promptforge::vfs::StoreOutcome, promptforge::vfs::VfsError>
 pub promptforge::effect::EffectAnswer::Timer
 pub promptforge::effect::EffectAnswer::ToolCall(..)
 pub promptforge::effect::EffectAnswer::ToolCall::0: core::result::Result<promptforge::tools::ToolOutput, promptforge::tools::ToolError>
+pub promptforge::effect::EffectAnswer::Vfs(..)
+pub promptforge::effect::EffectAnswer::Vfs::0: core::result::Result<promptforge::vfs::VfsOutcome, promptforge::vfs::VfsError>
 pub promptforge::effect::EffectRecord::Chat { .. }
 pub promptforge::effect::EffectRecord::Chat::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
@@ -806,8 +806,6 @@ pub promptforge::effect::EffectRecord::Chat::model: alloc::string::String
 pub promptforge::effect::EffectRecord::Chat::temperature: core::option::Option<f64>
 pub promptforge::effect::EffectRecord::Chat::thinking: core::option::Option<bool>
 pub promptforge::effect::EffectRecord::Chat::tools: alloc::vec::Vec<alloc::string::String>
-pub promptforge::effect::EffectRecord::Store { .. }
-pub promptforge::effect::EffectRecord::Store::op: promptforge::vfs::StoreOp
 pub promptforge::effect::EffectRecord::Timer { .. }
 pub promptforge::effect::EffectRecord::Timer::seconds: f64
 pub promptforge::effect::EffectRecord::ToolCall { .. }
@@ -815,6 +813,8 @@ pub promptforge::effect::EffectRecord::ToolCall::alias: alloc::string::String
 pub promptforge::effect::EffectRecord::ToolCall::args: serde_json::value::Value
 pub promptforge::effect::EffectRecord::ToolCall::origin: promptforge::effect::ToolCallOrigin
 pub promptforge::effect::EffectRecord::ToolCall::tool: promptforge::tools::ToolId
+pub promptforge::effect::EffectRecord::Vfs { .. }
+pub promptforge::effect::EffectRecord::Vfs::op: promptforge::vfs::VfsOp
 pub promptforge::effect::ToolAnswerRecord::text: alloc::string::String
 pub promptforge::effect::ToolAnswerRecord::trusted: bool
 pub promptforge::effect::ToolCallOrigin::caller: promptforge::effect::ToolCaller
@@ -978,70 +978,6 @@ pub promptforge::event::Event::SectionStarted { .. }
 pub promptforge::event::Event::SectionStarted::execution: alloc::string::String
 pub promptforge::event::Event::SectionStarted::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::SectionStarted::section: alloc::string::String
-pub promptforge::event::Event::StoreAppendFailed { .. }
-pub promptforge::event::Event::StoreAppendFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreAppendFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreAppendFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreAppendSucceeded { .. }
-pub promptforge::event::Event::StoreAppendSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreAppendSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreAppendSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreDeleteFailed { .. }
-pub promptforge::event::Event::StoreDeleteFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreDeleteFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreDeleteFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreDeleteSucceeded { .. }
-pub promptforge::event::Event::StoreDeleteSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreDeleteSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreDeleteSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreExistsFailed { .. }
-pub promptforge::event::Event::StoreExistsFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreExistsFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreExistsFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreExistsSucceeded { .. }
-pub promptforge::event::Event::StoreExistsSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreExistsSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreExistsSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreGlobFailed { .. }
-pub promptforge::event::Event::StoreGlobFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreGlobFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreGlobFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreGlobSucceeded { .. }
-pub promptforge::event::Event::StoreGlobSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreGlobSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreGlobSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreReadFailed { .. }
-pub promptforge::event::Event::StoreReadFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreReadFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReadFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreReadNumberedFailed { .. }
-pub promptforge::event::Event::StoreReadNumberedFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreReadNumberedFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReadNumberedFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreReadNumberedSucceeded { .. }
-pub promptforge::event::Event::StoreReadNumberedSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreReadNumberedSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReadNumberedSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreReadSucceeded { .. }
-pub promptforge::event::Event::StoreReadSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreReadSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReadSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreReplaceFailed { .. }
-pub promptforge::event::Event::StoreReplaceFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreReplaceFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReplaceFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreReplaceSucceeded { .. }
-pub promptforge::event::Event::StoreReplaceSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreReplaceSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreReplaceSucceeded::section: alloc::string::String
-pub promptforge::event::Event::StoreWriteFailed { .. }
-pub promptforge::event::Event::StoreWriteFailed::execution: alloc::string::String
-pub promptforge::event::Event::StoreWriteFailed::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreWriteFailed::section: alloc::string::String
-pub promptforge::event::Event::StoreWriteSucceeded { .. }
-pub promptforge::event::Event::StoreWriteSucceeded::execution: alloc::string::String
-pub promptforge::event::Event::StoreWriteSucceeded::provenance: promptforge::ids::Provenance
-pub promptforge::event::Event::StoreWriteSucceeded::section: alloc::string::String
 pub promptforge::event::Event::TaskAbandoned { .. }
 pub promptforge::event::Event::TaskAbandoned::execution: alloc::string::String
 pub promptforge::event::Event::TaskAbandoned::provenance: promptforge::ids::Provenance
@@ -1128,6 +1064,70 @@ pub promptforge::event::Event::ToolScopeValidationSucceeded { .. }
 pub promptforge::event::Event::ToolScopeValidationSucceeded::execution: alloc::string::String
 pub promptforge::event::Event::ToolScopeValidationSucceeded::provenance: promptforge::ids::Provenance
 pub promptforge::event::Event::ToolScopeValidationSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsAppendFailed { .. }
+pub promptforge::event::Event::VfsAppendFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsAppendFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsAppendFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsAppendSucceeded { .. }
+pub promptforge::event::Event::VfsAppendSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsAppendSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsAppendSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsDeleteFailed { .. }
+pub promptforge::event::Event::VfsDeleteFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsDeleteFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsDeleteFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsDeleteSucceeded { .. }
+pub promptforge::event::Event::VfsDeleteSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsDeleteSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsDeleteSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsExistsFailed { .. }
+pub promptforge::event::Event::VfsExistsFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsExistsFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsExistsFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsExistsSucceeded { .. }
+pub promptforge::event::Event::VfsExistsSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsExistsSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsExistsSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsGlobFailed { .. }
+pub promptforge::event::Event::VfsGlobFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsGlobFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsGlobFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsGlobSucceeded { .. }
+pub promptforge::event::Event::VfsGlobSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsGlobSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsGlobSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsReadFailed { .. }
+pub promptforge::event::Event::VfsReadFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsReadFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReadFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsReadNumberedFailed { .. }
+pub promptforge::event::Event::VfsReadNumberedFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsReadNumberedFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReadNumberedFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsReadNumberedSucceeded { .. }
+pub promptforge::event::Event::VfsReadNumberedSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsReadNumberedSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReadNumberedSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsReadSucceeded { .. }
+pub promptforge::event::Event::VfsReadSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsReadSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReadSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsReplaceFailed { .. }
+pub promptforge::event::Event::VfsReplaceFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsReplaceFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReplaceFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsReplaceSucceeded { .. }
+pub promptforge::event::Event::VfsReplaceSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsReplaceSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsReplaceSucceeded::section: alloc::string::String
+pub promptforge::event::Event::VfsWriteFailed { .. }
+pub promptforge::event::Event::VfsWriteFailed::execution: alloc::string::String
+pub promptforge::event::Event::VfsWriteFailed::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsWriteFailed::section: alloc::string::String
+pub promptforge::event::Event::VfsWriteSucceeded { .. }
+pub promptforge::event::Event::VfsWriteSucceeded::execution: alloc::string::String
+pub promptforge::event::Event::VfsWriteSucceeded::provenance: promptforge::ids::Provenance
+pub promptforge::event::Event::VfsWriteSucceeded::section: alloc::string::String
 pub promptforge::event::ReplyOrigin::Chat
 pub promptforge::event::ReplyOrigin::Infer
 pub promptforge::ids::AbandonReason::OwnerAborted
@@ -1301,37 +1301,6 @@ pub promptforge::vfs::Stat::file_type: promptforge::vfs::FileType
 pub promptforge::vfs::Stat::mode: core::option::Option<u32>
 pub promptforge::vfs::Stat::modified: core::option::Option<std::time::SystemTime>
 pub promptforge::vfs::Stat::size: u64
-pub promptforge::vfs::StoreOp::Append { .. }
-pub promptforge::vfs::StoreOp::Append::contents: alloc::string::String
-pub promptforge::vfs::StoreOp::Append::path: alloc::string::String
-pub promptforge::vfs::StoreOp::Delete { .. }
-pub promptforge::vfs::StoreOp::Delete::path: alloc::string::String
-pub promptforge::vfs::StoreOp::Exists { .. }
-pub promptforge::vfs::StoreOp::Exists::path: alloc::string::String
-pub promptforge::vfs::StoreOp::Glob { .. }
-pub promptforge::vfs::StoreOp::Glob::pattern: alloc::string::String
-pub promptforge::vfs::StoreOp::Read { .. }
-pub promptforge::vfs::StoreOp::Read::end: core::option::Option<i64>
-pub promptforge::vfs::StoreOp::Read::path: alloc::string::String
-pub promptforge::vfs::StoreOp::Read::start: core::option::Option<i64>
-pub promptforge::vfs::StoreOp::ReadNumbered { .. }
-pub promptforge::vfs::StoreOp::ReadNumbered::end: core::option::Option<i64>
-pub promptforge::vfs::StoreOp::ReadNumbered::path: alloc::string::String
-pub promptforge::vfs::StoreOp::ReadNumbered::start: core::option::Option<i64>
-pub promptforge::vfs::StoreOp::StrReplace { .. }
-pub promptforge::vfs::StoreOp::StrReplace::new: alloc::string::String
-pub promptforge::vfs::StoreOp::StrReplace::old: alloc::string::String
-pub promptforge::vfs::StoreOp::StrReplace::path: alloc::string::String
-pub promptforge::vfs::StoreOp::Write { .. }
-pub promptforge::vfs::StoreOp::Write::contents: alloc::string::String
-pub promptforge::vfs::StoreOp::Write::path: alloc::string::String
-pub promptforge::vfs::StoreOutcome::Bool(..)
-pub promptforge::vfs::StoreOutcome::Bool::0: bool
-pub promptforge::vfs::StoreOutcome::Paths(..)
-pub promptforge::vfs::StoreOutcome::Paths::0: alloc::vec::Vec<alloc::string::String>
-pub promptforge::vfs::StoreOutcome::Text(..)
-pub promptforge::vfs::StoreOutcome::Text::0: alloc::string::String
-pub promptforge::vfs::StoreOutcome::Unit
 pub promptforge::vfs::Verdict::Allow
 pub promptforge::vfs::Verdict::Ask(..)
 pub promptforge::vfs::Verdict::Ask::0: alloc::string::String
@@ -1370,6 +1339,37 @@ pub promptforge::vfs::VfsError::PermissionDenied::reason: alloc::string::String
 pub promptforge::vfs::VfsError::Unsupported { .. }
 pub promptforge::vfs::VfsError::Unsupported::detail: alloc::string::String
 pub promptforge::vfs::VfsError::Unsupported::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Append { .. }
+pub promptforge::vfs::VfsOp::Append::contents: alloc::string::String
+pub promptforge::vfs::VfsOp::Append::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Delete { .. }
+pub promptforge::vfs::VfsOp::Delete::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Exists { .. }
+pub promptforge::vfs::VfsOp::Exists::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Glob { .. }
+pub promptforge::vfs::VfsOp::Glob::pattern: alloc::string::String
+pub promptforge::vfs::VfsOp::Read { .. }
+pub promptforge::vfs::VfsOp::Read::end: core::option::Option<i64>
+pub promptforge::vfs::VfsOp::Read::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Read::start: core::option::Option<i64>
+pub promptforge::vfs::VfsOp::ReadNumbered { .. }
+pub promptforge::vfs::VfsOp::ReadNumbered::end: core::option::Option<i64>
+pub promptforge::vfs::VfsOp::ReadNumbered::path: alloc::string::String
+pub promptforge::vfs::VfsOp::ReadNumbered::start: core::option::Option<i64>
+pub promptforge::vfs::VfsOp::StrReplace { .. }
+pub promptforge::vfs::VfsOp::StrReplace::new: alloc::string::String
+pub promptforge::vfs::VfsOp::StrReplace::old: alloc::string::String
+pub promptforge::vfs::VfsOp::StrReplace::path: alloc::string::String
+pub promptforge::vfs::VfsOp::Write { .. }
+pub promptforge::vfs::VfsOp::Write::contents: alloc::string::String
+pub promptforge::vfs::VfsOp::Write::path: alloc::string::String
+pub promptforge::vfs::VfsOutcome::Bool(..)
+pub promptforge::vfs::VfsOutcome::Bool::0: bool
+pub promptforge::vfs::VfsOutcome::Paths(..)
+pub promptforge::vfs::VfsOutcome::Paths::0: alloc::vec::Vec<alloc::string::String>
+pub promptforge::vfs::VfsOutcome::Text(..)
+pub promptforge::vfs::VfsOutcome::Text::0: alloc::string::String
+pub promptforge::vfs::VfsOutcome::Unit
 pub struct promptforge::Run { /* private fields */ }
 pub struct promptforge::SourceLocation { .. }
 pub struct promptforge::cancel::CancelHandle { /* private fields */ }

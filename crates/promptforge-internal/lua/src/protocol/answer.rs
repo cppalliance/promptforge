@@ -14,15 +14,15 @@ use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};
 
-/// The outcome of one dispatched store operation: the value the shim
-/// returns to its caller. Mutating ops produce `Unit` (the shim returns
+/// The outcome of one dispatched [`VfsOp`](super::VfsOp) on the run's store
+/// view: the value the shim returns to its caller. Mutating ops produce `Unit` (the shim returns
 /// nil).
 ///
 /// Serde's externally tagged form makes the outcome itself the log's
 /// success payload, so an answer record built from it serializes to the
 /// run log's fixed store-answer JSON.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum StoreOutcome {
+pub enum VfsOutcome {
     /// The operation succeeded with no return value.
     Unit,
     /// `read`/`read_numbered`: the (possibly bounded) file text.
@@ -239,7 +239,7 @@ pub enum Answer<E> {
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
     /// The outcome of a `store` request: the operation's return value.
-    Store(std::result::Result<StoreOutcome, E>),
+    Store(std::result::Result<VfsOutcome, E>),
 }
 
 impl<E> Answer<E> {
