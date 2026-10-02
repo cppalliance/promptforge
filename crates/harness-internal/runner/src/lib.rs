@@ -1,11 +1,11 @@
 //! harness-runner - the Harness effect loop: prepares an Engine `Run`
 //! from a prompt file (drawing the inputs the Engine refuses to draw
 //! itself, putting the declared input file in place, activating
-//! capabilities, opening the run's row), steps it,
+//! capabilities, beginning the run at its recorder), steps it,
 //! performs each chat, tool-call, and timer effect on tokio through its
 //! performer and answers each Vfs effect inline in the loop,
-//! feeds the answers back, records every event, effect, and answer in the
-//! run log, and owns cancellation.
+//! feeds the answers back, hands every event, effect, and answer to the
+//! run's recorder, and owns cancellation.
 //!
 //! ## Invariants
 //!
@@ -22,9 +22,9 @@
 //!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other Harness crate's
 //!   `clippy.toml` bans the raw calls, and `cargo test -p build-xtask`
 //!   checks the bans are declared.
-//! - The log is written in loop order: a step's events before the step's
-//!   effects are issued, each effect before its performer starts, each
-//!   answer before the run resumes with it. Every effect record has
+//! - The recorder is written in loop order: a step's events before the
+//!   step's effects are issued, each effect before its performer starts,
+//!   each answer before the run resumes with it. Every effect record has
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
 //! - The loop never reads an event to decide anything; control comes
 //!   from the run's own word (`Step`, `Run::decided`) and the cancel flag.
@@ -41,3 +41,7 @@ pub mod spawn;
 pub mod test_support;
 
 pub use display_chain::display_chain;
+pub use recorder::{
+    MemoryRecorder, Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome,
+    RunRecorder,
+};

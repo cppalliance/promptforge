@@ -10,10 +10,10 @@ use super::RunFailure;
 
 #[test]
 fn a_prepare_failure_pushed_to_the_client_keeps_its_cause_chain() {
-    let failure = RunFailure::Prepare(PrepareError::Read {
+    let failure = RunFailure::Prepare(Box::new(PrepareError::Read {
         path: PathBuf::from("agent.md"),
         source: io::Error::other("disk gone"),
-    });
+    }));
     let rendered = display_chain(&failure);
     assert!(
         rendered.contains("could not be read"),

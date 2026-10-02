@@ -2620,6 +2620,7 @@ dependencies = [
 name = "harness-log"
 version = "0.3.0"
 dependencies = [
+ "harness-runner",
  "promptforge",
  "serde_json",
  "tempfile",
@@ -2635,7 +2636,6 @@ version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",
- "harness-log",
  "harness-runner",
  "promptforge",
  "reqwest",
@@ -2654,7 +2654,6 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "harness-capabilities",
- "harness-log",
  "promptforge",
  "rand 0.9.5",
  "serde_json",

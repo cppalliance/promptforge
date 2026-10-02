@@ -6,7 +6,7 @@
 //! [`EffectAnswer`](promptforge::effect::EffectAnswer); a performer is
 //! the Harness code that turns the one into the other. Each trait takes the
 //! effect's fields and returns the answer's payload for its kind, so a
-//! performer never sees the run, the log, or another kind's effects. The
+//! performer never sees the run, the recorder, or another kind's effects. The
 //! effect loop owns the correlation: it hands each result back to the run
 //! under the effect's id and writes the answer's record.
 //!

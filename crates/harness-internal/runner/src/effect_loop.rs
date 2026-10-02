@@ -1,8 +1,8 @@
 //! The effect loop: the Harness steps an Engine `Run` and performs its effects.
 //!
 //! The loop is `step -> record -> perform -> await an answer -> record ->
-//! resume`. Every step's events are appended to the run log before any of
-//! the step's effects is issued, so an effect's record never precedes the
+//! resume`. Every step's events are handed to the run's recorder before any
+//! of the step's effects is issued, so an effect's record never precedes the
 //! events its step reported. Each effect is appended as its
 //! [`EffectRecord`](promptforge::effect::EffectRecord) and then handled by
 //! kind. A chat, tool-call, or timer effect is started as a plain task
@@ -23,8 +23,8 @@
 //! gone before the run ends, then answers each of those effects `Dropped`
 //! and steps the run to `Done`. A Vfs effect is never out at a cancel: it
 //! is answered before the loop looks at the flag again. A drop is an
-//! answer, recorded like any other, so every effect record in the log has
-//! exactly one answer record.
+//! answer, recorded like any other, so every effect record has exactly one
+//! answer record.
 //!
 //! A performer that panics posts nothing itself; tokio catches the panic
 //! and ends the task. Every performer task therefore holds an
@@ -34,23 +34,23 @@
 //! Vfs operation that panics is caught where it runs and answered
 //! `Dropped` the same way.
 //!
-//! The run's `Done` closes the run's row in the log with its outcome.
+//! The run's `Done` ends the run with its outcome at the recorder.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use harness_log::{LogError, Record, RecordKind, RunId, RunLog, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
 use promptforge::event::Event;
 use promptforge::ids::Provenance;
 use promptforge::vfs::{Access, VfsOp};
 use promptforge::{Run, RunError, RunResult, Step};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::display_chain::display_chain;
 use crate::performers::Performers;
+use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunOutcome, RunRecorder};
 use crate::spawn::spawn_tagged;
 
 #[path = "effect_loop-answering.rs"]
@@ -58,20 +58,14 @@ mod answering;
 
 use answering::{AnswerSender, Answering, answer_vfs};
 
-/// The run log as the loop and its other users share it: the loop is the
-/// writer during a run, the session transcript views and reconnect are
-/// the readers, and the mutex serializes them. Asynchronous because an
-/// append is awaited under it.
-pub type SharedLog = Arc<Mutex<RunLog>>;
-
 /// Why the loop stopped without an outcome.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum DriveError {
-    /// The run log refused a write; the run cannot be recorded, so it is
+    /// The recorder refused a write; the run cannot be recorded, so it is
     /// not driven further.
     #[error(transparent)]
-    Log(#[from] LogError),
+    Recorder(#[from] RecorderError),
     /// The run is pending with nothing issued and nothing out: the run
     /// reports a stall itself, so reaching this means the loop lost a
     /// performer.
@@ -80,10 +74,10 @@ pub enum DriveError {
 }
 
 /// Drives `run` to its end on the current tokio runtime: performs its
-/// effects through `performers`, records every event, effect, and answer
-/// under `run_id` in `log`, hands every event to `sink` once it is
-/// recorded, and cancels the run when `cancel` fires. Closes the run's
-/// row with its outcome and returns it.
+/// effects through `performers`, hands every event, effect, and answer to
+/// `recorder` under `run_id`, hands every event to `sink` once it is
+/// recorded, and cancels the run when `cancel` fires. Ends the run at the
+/// recorder with its outcome and returns it.
 ///
 /// The future is boxed internally: the step machinery is large, and the
 /// caller's own future stays small. It is `Send` when `sink` is, so the Harness
@@ -91,19 +85,19 @@ pub enum DriveError {
 /// shared across an await.
 ///
 /// # Errors
-/// Returns [`DriveError::Log`] when the log refuses a write and
+/// Returns [`DriveError::Recorder`] when the recorder refuses a write and
 /// [`DriveError::Stalled`] when the run pends with nothing to await. In
 /// either case every performer still out is aborted, the run is
-/// abandoned mid-flight, and its row is left open.
+/// abandoned mid-flight, and the recorder is not told it ended.
 pub async fn drive_run(
     run: Run,
     performers: Performers,
-    log: SharedLog,
+    recorder: Arc<dyn RunRecorder>,
     run_id: RunId,
     cancel: CancelHandle,
     sink: impl FnMut(Event) + Send,
 ) -> Result<RunOutcome, DriveError> {
-    let mut driver = Driver::new(run, performers, log, run_id, cancel, Box::new(sink));
+    let mut driver = Driver::new(run, performers, recorder, run_id, cancel, Box::new(sink));
     Box::pin(driver.drive()).await
 }
 
@@ -119,7 +113,7 @@ struct InFlight {
 struct Driver<'a> {
     run: Run,
     performers: Performers,
-    log: SharedLog,
+    recorder: Arc<dyn RunRecorder>,
     run_id: RunId,
     sink: Box<dyn FnMut(Event) + Send + 'a>,
     /// Unbounded, because each performer sends exactly once and the
@@ -138,7 +132,7 @@ impl<'a> Driver<'a> {
     fn new(
         run: Run,
         performers: Performers,
-        log: SharedLog,
+        recorder: Arc<dyn RunRecorder>,
         run_id: RunId,
         cancel: CancelHandle,
         sink: Box<dyn FnMut(Event) + Send + 'a>,
@@ -147,7 +141,7 @@ impl<'a> Driver<'a> {
         Self {
             run,
             performers,
-            log,
+            recorder,
             run_id,
             sink,
             tx,
@@ -165,11 +159,7 @@ impl<'a> Driver<'a> {
                     // `Done` is returned only once every effect is
                     // answered, so nothing is out.
                     let outcome = outcome_of(result);
-                    self.log
-                        .lock()
-                        .await
-                        .end_run(self.run_id, outcome.clone())
-                        .await?;
+                    self.recorder.end_run(self.run_id, outcome.clone()).await?;
                     return Ok(outcome);
                 }
                 Step::Pending { effects, events } => {
@@ -230,7 +220,7 @@ impl<'a> Driver<'a> {
     /// arms are event-driven: the channel wakes on a posted answer and the
     /// flag's future wakes on the cancel, so a fully suspended run costs
     /// no wakeups while it waits.
-    async fn await_answer(&mut self) -> Result<(), LogError> {
+    async fn await_answer(&mut self) -> Result<(), RecorderError> {
         tokio::select! {
             biased;
             arrival = self.rx.recv() => {
@@ -252,7 +242,7 @@ impl<'a> Driver<'a> {
     /// Records one performer's answer and resumes the run with it, unless
     /// the effect was already dropped, in which case the late answer is
     /// discarded.
-    async fn deliver(&mut self, id: EffectId, answer: EffectAnswer) -> Result<(), LogError> {
+    async fn deliver(&mut self, id: EffectId, answer: EffectAnswer) -> Result<(), RecorderError> {
         let Some(in_flight) = self.outstanding.remove(&id) else {
             return Ok(());
         };
@@ -281,7 +271,7 @@ impl<'a> Driver<'a> {
     /// held is gone before the effect is answered. Only chat, tool-call,
     /// and timer performers are ever out: a Vfs effect is answered inline
     /// and has none.
-    async fn drop_outstanding(&mut self) -> Result<(), LogError> {
+    async fn drop_outstanding(&mut self) -> Result<(), RecorderError> {
         let mut outstanding: Vec<(EffectId, InFlight)> =
             std::mem::take(&mut self.outstanding).into_iter().collect();
         outstanding.sort_by_key(|(id, _)| id.get());
@@ -314,7 +304,11 @@ impl<'a> Driver<'a> {
 
     /// Records the `Dropped` answer for one effect and resumes the run
     /// with it.
-    async fn drop_effect(&mut self, id: EffectId, provenance: &Provenance) -> Result<(), LogError> {
+    async fn drop_effect(
+        &mut self,
+        id: EffectId,
+        provenance: &Provenance,
+    ) -> Result<(), RecorderError> {
         let answer = EffectAnswer::Dropped;
         self.commit_answer(id, provenance, &answer).await?;
         self.run.resume(id, answer);
@@ -381,15 +375,15 @@ impl<'a> Driver<'a> {
         None
     }
 
-    /// Appends one step's events to the log, then hands each to the sink
-    /// once it is recorded.
-    async fn commit_events(&mut self, events: Vec<Event>) -> Result<(), LogError> {
+    /// Appends one step's events to the recorder, then hands each to the
+    /// sink once it is recorded.
+    async fn commit_events(&mut self, events: Vec<Event>) -> Result<(), RecorderError> {
         for event in events {
             let record = record(
                 event.provenance(),
                 RecordKind::Event,
                 None,
-                serde_json::to_value(&event)?,
+                serde_json::to_value(&event).map_err(RecorderError::new)?,
             );
             self.append(record).await?;
             (self.sink)(event);
@@ -403,8 +397,8 @@ impl<'a> Driver<'a> {
         id: EffectId,
         provenance: &Provenance,
         effect: &Effect,
-    ) -> Result<(), LogError> {
-        let payload = serde_json::to_value(effect.record())?;
+    ) -> Result<(), RecorderError> {
+        let payload = serde_json::to_value(effect.record()).map_err(RecorderError::new)?;
         self.append(record(
             provenance,
             RecordKind::Effect,
@@ -420,8 +414,8 @@ impl<'a> Driver<'a> {
         id: EffectId,
         provenance: &Provenance,
         answer: &EffectAnswer,
-    ) -> Result<(), LogError> {
-        let payload = serde_json::to_value(answer.record())?;
+    ) -> Result<(), RecorderError> {
+        let payload = serde_json::to_value(answer.record()).map_err(RecorderError::new)?;
         self.append(record(
             provenance,
             RecordKind::Answer,
@@ -431,18 +425,13 @@ impl<'a> Driver<'a> {
         .await
     }
 
-    async fn append(&mut self, record: Record) -> Result<(), LogError> {
-        self.log
-            .lock()
-            .await
-            .append(self.run_id, record)
-            .await
-            .map(|_seq| ())
+    async fn append(&mut self, record: Record) -> Result<(), RecorderError> {
+        self.recorder.append(self.run_id, record).await
     }
 }
 
 /// Aborts every performer still out when the driver is dropped mid-run -
-/// a log failure, or the Harness tearing the loop down. Dropping a bare
+/// a recorder failure, or the Harness tearing the loop down. Dropping a bare
 /// `JoinHandle` detaches the task, which would strand a tool call waiting
 /// on the operator or a model round forever, so the drop applies the same
 /// abort the run's end does.
@@ -470,7 +459,7 @@ fn record(
     }
 }
 
-/// The log's outcome for the run's result.
+/// The recorded outcome for the run's result.
 fn outcome_of(result: RunResult) -> RunOutcome {
     match result {
         RunResult::Ok(final_text) => RunOutcome::Completed { final_text },
@@ -479,10 +468,10 @@ fn outcome_of(result: RunResult) -> RunOutcome {
     }
 }
 
-/// The log's failed outcome for an Engine error: `runs.error_kind` is the
-/// kind's debug name and `runs.error_message` the error's text with its
+/// The failed outcome for an Engine error: the failure's kind is the
+/// error kind's debug name and its message the error's text with its
 /// cause chain. The one derivation for a run that failed under the loop
-/// and a run preparation refused, so the two agree in the log.
+/// and a run preparation refused, so the two agree in the record.
 pub(crate) fn failed_outcome(error: &RunError) -> RunOutcome {
     RunOutcome::Failed {
         kind: format!("{:?}", error.kind()),

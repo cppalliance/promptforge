@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_log::{LogError, RunLog};
-use harness_runner::effect_loop::SharedLog;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use promptforge::vfs::VfsRef;
 use tokio::sync::{OnceCell, mpsc};
@@ -29,8 +28,16 @@ use crate::session::files::SessionFiles;
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
 
+#[path = "log-recorder.rs"]
+pub(crate) mod log_recorder;
+
 /// The file under the state directory the run log is stored in.
 const RUN_LOG_FILE: &str = "runs.db";
+
+/// The run log as the sessions share it: the recorder over it writes
+/// during a run, the transcript views and reconnect read, and the mutex
+/// serializes them. Asynchronous because a write is awaited under it.
+pub type SharedLog = Arc<tokio::sync::Mutex<RunLog>>;
 
 /// What a client tells the Harness at construction.
 #[derive(Debug, Clone, PartialEq, Eq)]

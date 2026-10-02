@@ -2,13 +2,14 @@
 //! over it, and fake performers that answer by script.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Poll;
 
-use harness_log::{RunId, RunOutcome};
-use harness_runner::effect_loop::SharedLog;
 use harness_runner::performers::{
     BoxFuture, ChatPerformer, Performers, TimerPerformer, ToolPerformer,
+};
+use harness_runner::recorder::{
+    MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
@@ -189,10 +190,10 @@ impl ToolPerformer for PanickingTool {
     }
 }
 
-/// Closes the run's row in the log before answering, so the loop's next
-/// write is refused: the log failing under a live run.
+/// Ends the run at the recorder before answering, so the loop's next
+/// write is refused: the recorder failing under a live run.
 pub(crate) struct ClosingTool {
-    pub(crate) log: SharedLog,
+    pub(crate) recorder: Arc<MemoryRecorder>,
     pub(crate) run_id: RunId,
 }
 
@@ -203,15 +204,84 @@ impl ToolPerformer for ClosingTool {
         _alias: String,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
-        let log = Arc::clone(&self.log);
+        let recorder = Arc::clone(&self.recorder);
         let run_id = self.run_id;
         Box::pin(async move {
-            log.lock()
-                .await
+            recorder
                 .end_run(run_id, RunOutcome::Cancelled)
                 .await
-                .expect("the open row closes");
+                .expect("the open run ends");
             Ok(ToolOutput::trusted("late"))
+        })
+    }
+}
+
+/// A recorder that refuses one chosen call and keeps the rest in memory:
+/// the recorder failing under a live run. Calls count from one across
+/// `begin_run`, `append`, and `end_run` in the order they reach it, and a
+/// refused call records nothing. A test begins its run on `inner()`, which
+/// counts nothing, so the count starts at the loop's first write.
+pub(crate) struct FailingRecorder {
+    inner: MemoryRecorder,
+    fail_on: usize,
+    calls: AtomicUsize,
+}
+
+impl FailingRecorder {
+    /// A recorder that refuses its `call`th call, counting from one.
+    pub(crate) fn failing_on(call: usize) -> Self {
+        Self {
+            inner: MemoryRecorder::new(),
+            fail_on: call,
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    /// A recorder that refuses nothing, for counting the calls of a run.
+    pub(crate) fn never_failing() -> Self {
+        Self::failing_on(usize::MAX)
+    }
+
+    /// The calls that have reached the recorder, refused one included.
+    pub(crate) fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
+    /// The memory recorder behind the wrapper, which holds what was kept.
+    pub(crate) fn inner(&self) -> &MemoryRecorder {
+        &self.inner
+    }
+
+    fn count(&self) -> Result<(), RecorderError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if call == self.fail_on {
+            return Err(RecorderError::new(format!(
+                "the fixture recorder refuses call {call}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl RunRecorder for FailingRecorder {
+    fn begin_run(&self, meta: RunMeta) -> RecorderFuture<'_, RunId> {
+        Box::pin(async move {
+            self.count()?;
+            self.inner.begin_run(meta).await
+        })
+    }
+
+    fn append(&self, run: RunId, record: Record) -> RecorderFuture<'_, ()> {
+        Box::pin(async move {
+            self.count()?;
+            self.inner.append(run, record).await
+        })
+    }
+
+    fn end_run(&self, run: RunId, outcome: RunOutcome) -> RecorderFuture<'_, ()> {
+        Box::pin(async move {
+            self.count()?;
+            self.inner.end_run(run, outcome).await
         })
     }
 }

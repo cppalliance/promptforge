@@ -1,11 +1,11 @@
 //! One run of a session's program on the effect loop: resolve the
 //! client's current model, arm the run's cancel flag, build the session's
-//! performers, prepare the run (opening its row in the log and staging the
+//! performers, prepare the run (beginning it at its recorder and staging the
 //! declared input file), drive it to its end, and read the declared
 //! output file once it completes.
 //!
 //! Every event the run reports goes through the session core's sink once
-//! the log has recorded it, so the live broadcast and the transcript read
+//! the recorder has taken it, so the live broadcast and the transcript read
 //! from the log agree index for index. A run that ends before the loop
 //! sees it - a parse failure or a refusal - has its parse-time events in
 //! the log already; they are replayed into the sink from there, so the
@@ -18,6 +18,7 @@ use harness_log::{RunId as LogRunId, RunOutcome};
 use harness_models::{GatewayChatPerformer, GatewayClient};
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
+use harness_runner::recorder::RunRecorder;
 use promptforge::RunLimits;
 use promptforge::event::Event;
 
@@ -26,6 +27,7 @@ use crate::environment::{
     CatalogBinding, CurrentModelError, GatewayResources, HostSnapshot, current_model,
 };
 use crate::input::SessionInputBroker;
+use crate::runtime::log_recorder::LogRecorder;
 use crate::transition::RunId;
 
 use super::SessionCore;
@@ -38,10 +40,10 @@ pub(crate) enum RunFailure {
     #[error("the chat cannot launch")]
     Model(#[source] CurrentModelError),
     /// The run could not be prepared: the prompt does not parse, the
-    /// environment cannot satisfy it, or the log refused it. Renders and
-    /// sources as the preparation error does.
+    /// environment cannot satisfy it, or the recorder refused it. Renders
+    /// and sources as the preparation error does.
     #[error(transparent)]
-    Prepare(PrepareError),
+    Prepare(Box<PrepareError>),
     /// The effect loop stopped without an outcome. Renders and sources as
     /// the drive error does.
     #[error(transparent)]
@@ -86,12 +88,13 @@ pub(crate) async fn run_once(
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
     let vfs = core.files.run_vfs();
+    let recorder: Arc<dyn RunRecorder> = Arc::new(LogRecorder::new(Arc::clone(&core.log)));
     let services = Services {
         registry: Some(registry),
         vfs: vfs.clone(),
         input_text: core.files.input_text(),
         cancel: cancel.clone(),
-        log: Arc::clone(&core.log),
+        recorder: Arc::clone(&recorder),
         chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),
         input: Some(Arc::new(SessionInputBroker::new(
             Arc::clone(&core.waits),
@@ -110,7 +113,7 @@ pub(crate) async fn run_once(
                 core.record_run(run_id);
                 replay_recorded(&core, run_id).await;
             }
-            return Err(RunFailure::Prepare(error));
+            return Err(RunFailure::Prepare(Box::new(error)));
         }
     };
     core.record_run(prepared.run_id);
@@ -124,7 +127,7 @@ pub(crate) async fn run_once(
     let outcome = drive_run(
         prepared.run,
         prepared.performers,
-        Arc::clone(&core.log),
+        recorder,
         prepared.run_id,
         cancel,
         sink,
@@ -139,14 +142,14 @@ pub(crate) async fn run_once(
     Ok(outcome)
 }
 
-/// The row a failed preparation opened and closed, when it opened one.
+/// The run a failed preparation began and ended, when it began one.
 fn opened_run(error: &PrepareError) -> Option<LogRunId> {
     match error {
         PrepareError::Parse { run_id, .. }
         | PrepareError::Input { run_id, .. }
         | PrepareError::Refused { run_id, .. } => Some(*run_id),
-        // `Read`, `Log`, or a variant `harness-runner` adds behind its
-        // `#[non_exhaustive]` `PrepareError`: none of them opened a row.
+        // `Read`, `Recorder`, or a variant `harness-runner` adds behind its
+        // `#[non_exhaustive]` `PrepareError`: none of them names a run.
         _ => None,
     }
 }

@@ -1,11 +1,10 @@
 //! A capability's prelude through preparation: the prelude its `create`
 //! returns reaches every section VM of the prepared run, and each tool
-//! call a prelude function makes is logged as a `ToolCall` effect
+//! call a prelude function makes is recorded as a `ToolCall` effect
 //! attributed to the calling script, its execution, and its section.
 
 use super::*;
 
-use harness_log::{RecordFilter, RecordKind};
 use serde_json::json;
 
 /// The prelude the speaker contributes: one table global whose function
@@ -68,9 +67,9 @@ fn script_call(value: &str, section: &str) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn a_preludes_tool_calls_are_logged_as_script_calls_from_the_section_that_made_each() {
+async fn a_preludes_tool_calls_are_recorded_as_script_calls_from_the_section_that_made_each() {
     let dir = tempfile::tempdir().unwrap();
-    let log = log().await;
+    let recorder = recorder();
     let mut registry = CapabilityRegistry::new();
     registry
         .register(Arc::new(Speaker {
@@ -80,7 +79,7 @@ async fn a_preludes_tool_calls_are_logged_as_script_calls_from_the_section_that_
     let prepared = prepare_run(
         &prompt_file(dir.path(), SPEAKS),
         "",
-        services(&log, Some(Arc::new(registry))),
+        services(&recorder, Some(Arc::new(registry))),
     )
     .await
     .unwrap();
@@ -88,7 +87,7 @@ async fn a_preludes_tool_calls_are_logged_as_script_calls_from_the_section_that_
     let outcome = drive_run(
         prepared.run,
         prepared.performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
@@ -101,19 +100,15 @@ async fn a_preludes_tool_calls_are_logged_as_script_calls_from_the_section_that_
         "both sections reached the prelude's function, and its table refused a write"
     );
 
-    let effects: Vec<serde_json::Value> = log
-        .lock()
-        .await
-        .records(run_id, RecordFilter::default())
-        .await
-        .unwrap()
+    let effects: Vec<serde_json::Value> = recorder
+        .records(run_id)
         .into_iter()
-        .filter(|stored| stored.record.kind == RecordKind::Effect)
-        .map(|stored| stored.record.payload)
+        .filter(|record| record.kind == RecordKind::Effect)
+        .map(|record| record.payload)
         .collect();
     assert_eq!(
         effects,
         [script_call("one", "First"), script_call("two", "Second")],
-        "each prelude call is one logged ToolCall effect naming its caller and section"
+        "each prelude call is one recorded ToolCall effect naming its caller and section"
     );
 }

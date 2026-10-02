@@ -6,10 +6,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use harness_capabilities::{CapabilityRegistry, InputBroker, UserInput};
-use harness_log::{RunLog, RunOutcome};
-use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use harness_runner::prepare::{Services, prepare_source};
+use harness_runner::recorder::{MemoryRecorder, RunOutcome};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
@@ -284,15 +284,13 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
         .expect("an empty registry takes the capability");
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let log: SharedLog = Arc::new(tokio::sync::Mutex::new(
-        RunLog::in_memory().await.expect("the log opens"),
-    ));
+    let recorder = Arc::new(MemoryRecorder::new());
     let services = Services {
         registry: Some(Arc::new(capabilities)),
         vfs: VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
-        log: Arc::clone(&log),
+        recorder: recorder.clone(),
         chat: Arc::new(NoChat),
         input: Some(broker),
         session_id: "session-1".to_owned(),
@@ -303,6 +301,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let prepared = prepare_source(source, Path::new("ask.md"), "", services)
         .await
         .expect("a host with a broker satisfies the declaration");
+    let run_id = prepared.run_id;
     let answer = async {
         let token = required_token(&mut socket).await;
         registry
@@ -313,8 +312,8 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
         drive_run(
             prepared.run,
             prepared.performers,
-            log,
-            prepared.run_id,
+            recorder.clone(),
+            run_id,
             CancelHandle::new(),
             |_event| {},
         ),
@@ -326,6 +325,13 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
             final_text: GNARLY.to_owned()
         },
         "the operator's text is the section's return value, byte-exact"
+    );
+    assert_eq!(
+        recorder.outcome(run_id),
+        Some(RunOutcome::Completed {
+            final_text: GNARLY.to_owned()
+        }),
+        "the recorder holds the operator's text in the run's outcome"
     );
     assert!(
         registry.unresolved().is_empty(),

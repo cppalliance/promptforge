@@ -1,8 +1,9 @@
 //! Run preparation: a prompt whose requirements the environment cannot
-//! meet is refused with the Engine's own notice and its row closed as
+//! meet is refused with the Engine's own notice and its run ended as
 //! failed; a prompt that does not parse fails the same way under the
-//! `Parse` kind; each preparation draws a fresh seed and start, both
-//! written to `runs`; and the prepared tool performer resolves a
+//! `Parse` kind, and each failure returns the events it recorded; each
+//! preparation draws a fresh seed and start, both handed to the recorder
+//! when the run begins; and the prepared tool performer resolves a
 //! `ToolCall` effect's id in the activated table. The Host's optional
 //! input broker - handed to every activated capability and behind the
 //! `promptforge/user-input` capability - sits in the `input` child
@@ -17,13 +18,14 @@ use harness_capabilities::{
     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, RunServices, Tool,
     ToolTable,
 };
-use harness_log::{RunLog, RunOutcome};
 use harness_runner::display_chain;
-use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{ActivatedTools, ToolPerformer};
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare_run};
+use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
 use promptforge::RunErrorKind;
 use promptforge::cancel::CancelHandle;
+use promptforge::event::Event;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
 use crate::support::Unused;
@@ -59,20 +61,43 @@ fn prompt_file(dir: &Path, source: &str) -> PathBuf {
     path
 }
 
-/// An in-memory log behind the loop's mutex.
-async fn log() -> SharedLog {
-    Arc::new(tokio::sync::Mutex::new(RunLog::in_memory().await.unwrap()))
+/// An empty in-memory recorder.
+fn recorder() -> Arc<MemoryRecorder> {
+    Arc::new(MemoryRecorder::new())
 }
 
-/// The preparation services over `log` and `registry`, with the performers
-/// no test here reaches.
-fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Services {
+/// Asserts `events`, the ones a failed preparation returned, are what the
+/// recorder holds for `run_id`: a parse that reported, in order, and
+/// nothing else, because the loop never saw the run.
+fn assert_events_are_the_recorded_ones(recorder: &MemoryRecorder, run_id: RunId, events: &[Event]) {
+    assert!(
+        matches!(events.first(), Some(Event::ParseStarted { .. })),
+        "the events open with the parse: {events:?}"
+    );
+    let records = recorder.records(run_id);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.kind == RecordKind::Event),
+        "a failed preparation records only events"
+    );
+    let stored: Vec<serde_json::Value> = records.into_iter().map(|record| record.payload).collect();
+    let returned: Vec<serde_json::Value> = events
+        .iter()
+        .map(|event| serde_json::to_value(event).unwrap())
+        .collect();
+    assert_eq!(stored, returned, "the error carries what was recorded");
+}
+
+/// The preparation services over `recorder` and `registry`, with the
+/// performers no test here reaches.
+fn services(recorder: &Arc<MemoryRecorder>, registry: Option<Arc<CapabilityRegistry>>) -> Services {
     Services {
         registry,
         vfs: promptforge::vfs::VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
-        log: Arc::clone(log),
+        recorder: recorder.clone(),
         chat: Arc::new(Unused),
         input: None,
         session_id: "session-1".to_owned(),
@@ -166,18 +191,23 @@ fn completed(outcome: RunOutcome) -> String {
 }
 
 #[tokio::test]
-async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_row_closed_as_failed() {
+async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_run_ended_as_failed() {
     let dir = tempfile::tempdir().unwrap();
-    let log = log().await;
+    let recorder = recorder();
     let error = prepare_run(
         &prompt_file(dir.path(), NEEDS_WEB),
         "",
-        services(&log, None),
+        services(&recorder, None),
     )
     .await
     .expect_err("a missing required capability refuses the run");
 
-    let PrepareError::Refused { run_id, error } = error else {
+    let PrepareError::Refused {
+        run_id,
+        events,
+        error,
+    } = error
+    else {
         panic!("the refusal is a requirements refusal: {error}");
     };
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
@@ -189,30 +219,34 @@ async fn an_unmet_requirement_is_refused_with_the_engines_notice_and_its_row_clo
         "the refusal is the engine's notice, verbatim"
     );
 
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert!(row.ended_at.is_some(), "the refused run's row is closed");
     assert_eq!(
-        row.outcome,
+        recorder.outcome(run_id),
         Some(RunOutcome::Failed {
             kind: "RequirementsUnmet".to_owned(),
             message: notice.to_owned(),
         }),
-        "the row records the refusal as the run's failure"
+        "the recorder holds the refusal as the run's failure"
     );
+    assert!(
+        matches!(events.last(), Some(Event::ParseSucceeded { .. })),
+        "the prompt parsed before the environment refused it: {events:?}"
+    );
+    assert_events_are_the_recorded_ones(&recorder, run_id, &events);
 }
 
 #[tokio::test]
-async fn a_prompt_that_does_not_parse_fails_preparation_and_its_row_closes_as_a_parse_failure() {
+async fn a_prompt_that_does_not_parse_fails_preparation_and_its_run_ends_as_a_parse_failure() {
     let dir = tempfile::tempdir().unwrap();
     let path = prompt_file(dir.path(), UNCLOSED);
-    let log = log().await;
-    let error = prepare_run(&path, "", services(&log, None))
+    let recorder = recorder();
+    let error = prepare_run(&path, "", services(&recorder, None))
         .await
         .expect_err("a prompt without a closed frontmatter does not parse");
 
     let PrepareError::Parse {
         path: reported,
         run_id,
+        events,
         source,
     } = error
     else {
@@ -220,25 +254,32 @@ async fn a_prompt_that_does_not_parse_fails_preparation_and_its_row_closes_as_a_
     };
     assert_eq!(reported, path, "the failure names the prompt it read");
 
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert!(row.ended_at.is_some(), "the unparsed run's row is closed");
     assert_eq!(
-        row.outcome,
+        recorder.outcome(run_id),
         Some(RunOutcome::Failed {
             kind: "Parse".to_owned(),
             message: display_chain(&source),
         }),
-        "the row records the parse failure and its cause chain under the Parse kind"
+        "the recorder holds the parse failure and its cause chain under the Parse kind"
     );
+    assert!(
+        matches!(events.last(), Some(Event::ParseFailed { .. })),
+        "the events end with the failed parse: {events:?}"
+    );
+    assert_events_are_the_recorded_ones(&recorder, run_id, &events);
 }
 
 #[tokio::test]
-async fn two_prepared_runs_draw_different_seeds_and_both_appear_in_runs() {
+async fn two_prepared_runs_draw_different_seeds_and_both_begin_at_the_recorder() {
     let dir = tempfile::tempdir().unwrap();
     let path = prompt_file(dir.path(), PLAIN);
-    let log = log().await;
-    let first = prepare_run(&path, "", services(&log, None)).await.unwrap();
-    let second = prepare_run(&path, "", services(&log, None)).await.unwrap();
+    let recorder = recorder();
+    let first = prepare_run(&path, "", services(&recorder, None))
+        .await
+        .unwrap();
+    let second = prepare_run(&path, "", services(&recorder, None))
+        .await
+        .unwrap();
 
     assert_ne!(
         first.seed, second.seed,
@@ -246,49 +287,37 @@ async fn two_prepared_runs_draw_different_seeds_and_both_appear_in_runs() {
     );
     assert_ne!(
         first.run_id, second.run_id,
-        "each preparation opens its own row"
+        "each preparation begins its own run"
     );
     for prepared in [&first, &second] {
-        let row = log.lock().await.run(prepared.run_id).await.unwrap();
+        let meta = recorder
+            .meta(prepared.run_id)
+            .expect("the recorder began the run");
         assert_eq!(
-            row.meta.seed, prepared.seed,
-            "the row stores the seed the run was given"
+            meta.seed, prepared.seed,
+            "the recorder holds the seed the run was given"
         );
         assert_eq!(
-            row.meta.started_at,
+            meta.started_at,
             prepared.started_at.unix_millis(),
-            "the row stores the start the run was given"
+            "the recorder holds the start the run was given"
         );
-        assert_eq!(row.meta.session_id, "session-1");
-        assert_eq!(row.meta.agent, "prepare-test");
+        assert_eq!(meta.session_id, "session-1");
+        assert_eq!(meta.agent, "prepare-test");
         assert!(
-            row.meta.prompt_hash.starts_with("sha256:"),
+            meta.prompt_hash.starts_with("sha256:"),
             "the prompt hash names its algorithm: {}",
-            row.meta.prompt_hash
+            meta.prompt_hash
         );
-        assert!(
-            row.ended_at.is_none(),
-            "a prepared run's row stays open for the loop"
+        assert_eq!(
+            recorder.outcome(prepared.run_id),
+            None,
+            "a prepared run stays open for the loop"
         );
     }
-    let first_hash = log
-        .lock()
-        .await
-        .run(first.run_id)
-        .await
-        .unwrap()
-        .meta
-        .prompt_hash;
-    let second_hash = log
-        .lock()
-        .await
-        .run(second.run_id)
-        .await
-        .unwrap()
-        .meta
-        .prompt_hash;
     assert_eq!(
-        first_hash, second_hash,
+        recorder.meta(first.run_id).unwrap().prompt_hash,
+        recorder.meta(second.run_id).unwrap().prompt_hash,
         "the same prompt text hashes the same"
     );
 }
@@ -296,48 +325,52 @@ async fn two_prepared_runs_draw_different_seeds_and_both_appear_in_runs() {
 #[tokio::test]
 async fn a_prepared_run_drives_to_its_end_under_its_own_performers() {
     let dir = tempfile::tempdir().unwrap();
-    let log = log().await;
+    let recorder = recorder();
     let Prepared {
         run,
         run_id,
         performers,
         ..
-    } = prepare_run(&prompt_file(dir.path(), PLAIN), "", services(&log, None))
-        .await
-        .unwrap();
+    } = prepare_run(
+        &prompt_file(dir.path(), PLAIN),
+        "",
+        services(&recorder, None),
+    )
+    .await
+    .unwrap();
     let outcome = drive_run(
         run,
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
     )
     .await
     .unwrap();
-    assert_eq!(completed(outcome), "plain");
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert!(
-        row.ended_at.is_some(),
-        "the loop closes the row preparation opened"
+    assert_eq!(completed(outcome.clone()), "plain");
+    assert_eq!(
+        recorder.outcome(run_id),
+        Some(outcome),
+        "the loop ends the run preparation began"
     );
 }
 
 #[tokio::test]
 async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
     let dir = tempfile::tempdir().unwrap();
-    let log = log().await;
+    let recorder = recorder();
     let prepared = prepare_run(
         &prompt_file(dir.path(), CALLS_ECHO),
         "",
-        services(&log, Some(fixture_registry())),
+        services(&recorder, Some(fixture_registry())),
     )
     .await
     .unwrap();
     let outcome = drive_run(
         prepared.run,
         prepared.performers,
-        Arc::clone(&log),
+        recorder.clone(),
         prepared.run_id,
         CancelHandle::new(),
         |_event| {},
@@ -350,7 +383,6 @@ async fn the_tool_performer_resolves_the_effects_id_in_the_activated_table() {
         "the ToolCall effect reached the activated echo tool"
     );
 }
-
 #[tokio::test]
 async fn the_tool_performer_refuses_an_id_the_table_does_not_hold() {
     let performer = ActivatedTools::new(ToolTable::new());

@@ -1,11 +1,11 @@
 //! Checkpoint 4: a fixture prompt through `prepare_run` and `drive_run`
 //! with the real chat performer against the axum mock gateway and an
-//! in-memory log. The prompt writes to the store, spawns a task, waits on
-//! it, and asks the model once, so the record stream holds two effects
+//! in-memory recorder. The prompt writes to the store, spawns a task, waits
+//! on it, and asks the model once, so the record stream holds two effects
 //! under the main task and a second task's events beside them. The suite
-//! asserts the whole stream: the row's outcome, one answer row per
-//! effect, the `Provenance` columns per task, the payloads the effects
-//! and answers record, and that every logged event reached the sink.
+//! asserts the whole stream: the run's outcome, one answer record per
+//! effect, the `Provenance` fields per task, the payloads the effects
+//! and answers record, and that every recorded event reached the sink.
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -16,10 +16,10 @@ use axum::extract::{Json, State};
 use axum::http::HeaderMap;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::routing::post;
-use harness_log::{RecordFilter, RecordKind, RunId, RunLog, RunOutcome, StoredRecord};
 use harness_models::{GatewayChatPerformer, GatewayClient, GatewayEndpoint, SecretString};
-use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::effect_loop::drive_run;
 use harness_runner::prepare::{Prepared, Services, prepare_run};
+use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
@@ -131,43 +131,45 @@ fn current_model() -> ModelDescriptor {
     )
 }
 
-/// Every record of the run, in loop order.
-async fn records(log: &SharedLog, run_id: RunId) -> Vec<StoredRecord> {
-    log.lock()
-        .await
-        .records(run_id, RecordFilter::default())
-        .await
-        .unwrap()
-}
-
 /// The records of `kind`, in loop order.
-fn of_kind(records: &[StoredRecord], kind: RecordKind) -> Vec<&StoredRecord> {
+fn of_kind(records: &[Record], kind: RecordKind) -> Vec<&Record> {
     records
         .iter()
-        .filter(|stored| stored.record.kind == kind)
+        .filter(|record| record.kind == kind)
+        .collect()
+}
+
+/// Where in the stream the records of `kind` sit, in loop order.
+fn positions(records: &[Record], kind: RecordKind) -> Vec<usize> {
+    records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| record.kind == kind)
+        .map(|(position, _)| position)
         .collect()
 }
 
 /// Asserts every effect record has exactly one answer record, that the
 /// answer comes after its effect, and that the two share one provenance.
-fn assert_one_answer_per_effect(records: &[StoredRecord]) {
-    let effects = of_kind(records, RecordKind::Effect);
-    let answers = of_kind(records, RecordKind::Answer);
+fn assert_one_answer_per_effect(records: &[Record]) {
+    let effects = positions(records, RecordKind::Effect);
+    let answers = positions(records, RecordKind::Answer);
     assert_eq!(effects.len(), answers.len(), "one answer per effect");
     for effect in effects {
-        let id = effect
-            .record
+        let effect_record = &records[effect];
+        let id = effect_record
             .effect_id
             .expect("an effect record names its id");
-        let matching: Vec<&&StoredRecord> = answers
+        let matching: Vec<usize> = answers
             .iter()
-            .filter(|answer| answer.record.effect_id == Some(id))
+            .copied()
+            .filter(|answer| records[*answer].effect_id == Some(id))
             .collect();
         assert_eq!(matching.len(), 1, "effect {id} has exactly one answer");
         let answer = matching[0];
-        assert!(answer.seq > effect.seq, "the answer follows its effect");
-        assert_eq!(answer.record.task_id, effect.record.task_id);
-        assert_eq!(answer.record.task_seq, effect.record.task_seq);
+        assert!(answer > effect, "the answer follows its effect");
+        assert_eq!(records[answer].task_id, effect_record.task_id);
+        assert_eq!(records[answer].task_seq, effect_record.task_seq);
     }
 }
 
@@ -180,28 +182,28 @@ fn assert_one_answer_per_effect(records: &[StoredRecord]) {
 /// preparation seeds the run's main-task counter past them, so the run's
 /// first main-task record continues the parse's sequence rather than
 /// restarting it.
-fn assert_provenance_orders_each_task(records: &[StoredRecord]) {
+fn assert_provenance_orders_each_task(records: &[Record]) {
     let mut last_seq: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
     let mut keys: std::collections::BTreeSet<(&str, u32)> = std::collections::BTreeSet::new();
-    for stored in records {
-        // An answer repeats its effect's provenance; the effect's own row
+    for record in records {
+        // An answer repeats its effect's provenance; the effect's own record
         // is the one the counter stamped.
-        if stored.record.kind == RecordKind::Answer {
+        if record.kind == RecordKind::Answer {
             continue;
         }
-        let task = stored.record.task_id.as_str();
+        let task = record.task_id.as_str();
         if let Some(previous) = last_seq.get(task) {
             assert!(
-                stored.record.task_seq > *previous,
+                record.task_seq > *previous,
                 "task {task}: seq {} follows {previous} in loop order",
-                stored.record.task_seq
+                record.task_seq
             );
         }
-        last_seq.insert(task, stored.record.task_seq);
+        last_seq.insert(task, record.task_seq);
         assert!(
-            keys.insert((task, stored.record.task_seq)),
+            keys.insert((task, record.task_seq)),
             "task {task}: seq {} is stamped once across the whole stream",
-            stored.record.task_seq
+            record.task_seq
         );
     }
 }
@@ -210,22 +212,22 @@ fn assert_provenance_orders_each_task(records: &[StoredRecord]) {
 /// the run's first main-task record continues the main task's sequence
 /// where the parse left it, rather than restarting at zero.
 fn assert_parse_events_lead_and_the_run_continues_their_sequence(
-    records: &[StoredRecord],
+    records: &[Record],
     parsed: usize,
 ) {
     assert!(
         records[..parsed]
             .iter()
-            .all(|stored| stored.record.kind == RecordKind::Event),
+            .all(|record| record.kind == RecordKind::Event),
         "preparation records the parse events ahead of the run"
     );
-    let parse_task = records[0].record.task_id.as_str();
+    let parse_task = records[0].task_id.as_str();
     let first_of_run = records[parsed..]
         .iter()
-        .find(|stored| stored.record.task_id == parse_task)
+        .find(|record| record.task_id == parse_task)
         .expect("the run records under the main task");
     assert_eq!(
-        first_of_run.record.task_seq,
+        first_of_run.task_seq,
         u32::try_from(parsed).unwrap(),
         "the run's first main-task record continues the parse's sequence"
     );
@@ -235,41 +237,38 @@ fn assert_parse_events_lead_and_the_run_continues_their_sequence(
 /// round whose messages are `request`'s) and each one's answer payload,
 /// and returns the main task's id, which both effects name: the child
 /// issued none.
-fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> String {
+fn assert_effects_and_answers(records: &[Record], request: &Value) -> String {
     let effects = of_kind(records, RecordKind::Effect);
     assert_eq!(effects.len(), 2, "one store effect, one chat effect");
     let store = effects[0];
     let chat = effects[1];
     assert_eq!(
-        store.record.payload,
+        store.payload,
         json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
     );
-    assert_eq!(chat.record.payload["Chat"]["model"], "m");
-    assert_eq!(chat.record.payload["Chat"]["alias"], "writer");
-    assert_eq!(chat.record.payload["Chat"]["tools"], json!([]));
+    assert_eq!(chat.payload["Chat"]["model"], "m");
+    assert_eq!(chat.payload["Chat"]["alias"], "writer");
+    assert_eq!(chat.payload["Chat"]["tools"], json!([]));
     assert_eq!(
-        chat.record.payload["Chat"]["messages"]
-            .as_array()
-            .map(Vec::len),
+        chat.payload["Chat"]["messages"].as_array().map(Vec::len),
         request["messages"].as_array().map(Vec::len),
         "the record's messages are the request's"
     );
     assert_eq!(
-        store.record.task_id, chat.record.task_id,
+        store.task_id, chat.task_id,
         "both effects are the main task's"
     );
     assert!(
-        chat.record.task_seq > store.record.task_seq,
+        chat.task_seq > store.task_seq,
         "the round follows the write within the task"
     );
 
     // The answers, each under its effect's id.
-    let answer_for = |effect: &StoredRecord| -> Value {
+    let answer_for = |effect: &Record| -> Value {
         of_kind(records, RecordKind::Answer)
             .into_iter()
-            .find(|answer| answer.record.effect_id == effect.record.effect_id)
+            .find(|answer| answer.effect_id == effect.effect_id)
             .expect("the effect is answered")
-            .record
             .payload
             .clone()
     };
@@ -283,16 +282,16 @@ fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> Stri
             "tool_calls": [],
         } } })
     );
-    store.record.task_id.clone()
+    store.task_id.clone()
 }
 
 /// Asserts the task columns hold the main task and its one child, that
 /// the child's id extends the main task's, and that the child's section
 /// events are recorded under the child's own task.
-fn assert_task_columns(records: &[StoredRecord], main_task: &str) {
+fn assert_task_columns(records: &[Record], main_task: &str) {
     let mut tasks: Vec<&str> = records
         .iter()
-        .map(|stored| stored.record.task_id.as_str())
+        .map(|record| record.task_id.as_str())
         .collect();
     tasks.sort_unstable();
     tasks.dedup();
@@ -308,7 +307,7 @@ fn assert_task_columns(records: &[StoredRecord], main_task: &str) {
     assert!(
         of_kind(records, RecordKind::Event)
             .iter()
-            .any(|event| event.record.task_id == *child_task),
+            .any(|event| event.task_id == *child_task),
         "the child's section events are recorded under the child's task"
     );
 }
@@ -316,7 +315,7 @@ fn assert_task_columns(records: &[StoredRecord], main_task: &str) {
 #[tokio::test]
 async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let dir = tempfile::tempdir().unwrap();
-    let log: SharedLog = Arc::new(tokio::sync::Mutex::new(RunLog::in_memory().await.unwrap()));
+    let recorder = Arc::new(MemoryRecorder::new());
     let (client, seen) = mock_gateway().await;
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
     let services = Services {
@@ -324,7 +323,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
         vfs: promptforge::vfs::VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
-        log: Arc::clone(&log),
+        recorder: recorder.clone(),
         chat: Arc::new(GatewayChatPerformer::new(client, deltas)),
         input: None,
         session_id: "session-e2e".to_owned(),
@@ -347,7 +346,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let outcome = drive_run(
         run,
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         move |event| sink.lock().unwrap().push(event),
@@ -362,9 +361,14 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
             final_text: format!("{REPLY}|child-done"),
         }
     );
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert!(row.ended_at.is_some(), "the loop closes the row");
-    assert_eq!(row.outcome, Some(outcome));
+    assert_eq!(
+        recorder.outcome(run_id),
+        Some(outcome),
+        "the loop ends the run with its outcome"
+    );
+    let meta = recorder.meta(run_id).expect("the recorder began the run");
+    assert_eq!(meta.session_id, "session-e2e");
+    assert_eq!(meta.agent, "end-to-end");
 
     // The mock gateway saw one round, keyed, for the bound model.
     let requests = seen.requests.lock().unwrap().clone();
@@ -391,14 +395,14 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     );
 
     // The whole record stream: events, effects, and answers.
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_eq!(
-        records[0].record.kind,
+        records[0].kind,
         RecordKind::Event,
         "the stream opens with an event"
     );
     assert_eq!(
-        records.last().unwrap().record.kind,
+        records.last().unwrap().kind,
         RecordKind::Event,
         "the run's end is an event"
     );
@@ -412,7 +416,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     // Every logged event reached the sink after the parse events, in order.
     let logged: Vec<Value> = of_kind(&records, RecordKind::Event)
         .iter()
-        .map(|stored| stored.record.payload.clone())
+        .map(|record| record.payload.clone())
         .collect();
     let delivered: Vec<Value> = parse_events
         .iter()

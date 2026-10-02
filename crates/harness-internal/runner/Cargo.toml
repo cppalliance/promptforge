@@ -14,7 +14,6 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 harness-capabilities.workspace = true
-harness-log.workspace = true
 # The Engine's public API: the Run this crate drives, the effects and
 # answers it correlates, and the run's VFS handle.
 promptforge.workspace = true

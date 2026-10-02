@@ -8,18 +8,18 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use harness_log::{RecordKind, RunId, RunOutcome, StoredRecord};
-use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::effect_loop::drive_run;
+use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunId, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::VfsRef;
 use serde_json::json;
 
-use super::{answers, assert_one_answer_per_effect, begun_log, records};
-use crate::support::{GatedTool, HookedBackend, WAITS, run_over, run_with_child, unused};
+use super::{answers, assert_one_answer_per_effect, begun_log, kinds};
+use crate::support::{GatedTool, HookedBackend, TextTool, WAITS, run_over, run_with_child, unused};
 
 #[tokio::test]
 async fn a_run_of_only_vfs_operations_completes_with_one_answer_per_effect() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
 
     // Every effect of every step is a Vfs effect, so no performer is ever
     // out: a loop that awaited an answer, or reported a stall, after
@@ -32,7 +32,7 @@ async fn a_run_of_only_vfs_operations_completes_with_one_answer_per_effect() {
             VfsRef::default(),
         ),
         unused(),
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
@@ -46,13 +46,13 @@ async fn a_run_of_only_vfs_operations_completes_with_one_answer_per_effect() {
         }
     );
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_one_answer_per_effect(&records);
     let answers = answers(&records);
     assert_eq!(answers.len(), 3, "a write, an append, and a read");
     for answer in answers {
         assert_ne!(
-            answer.record.payload,
+            answer.payload,
             json!("Dropped"),
             "an inline answer carries the operation's outcome"
         );
@@ -61,7 +61,7 @@ async fn a_run_of_only_vfs_operations_completes_with_one_answer_per_effect() {
 
 #[tokio::test]
 async fn a_vfs_operation_runs_on_the_thread_that_drives_the_loop() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let ran_on: Arc<Mutex<Option<ThreadId>>> = Arc::new(Mutex::new(None));
     let seen = Arc::clone(&ran_on);
     let vfs = VfsRef::builder()
@@ -78,7 +78,7 @@ async fn a_vfs_operation_runs_on_the_thread_that_drives_the_loop() {
     drive_run(
         run_over("store.write('a.md', 'x')\nreturn 'ok'", vfs),
         unused(),
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
@@ -98,32 +98,31 @@ fn write_effect(path: &str, contents: &str) -> serde_json::Value {
 }
 
 /// Whether `records` hold the answer to the write of `second.md`.
-fn second_write_is_answered(records: &[StoredRecord]) -> bool {
+fn second_write_is_answered(records: &[Record]) -> bool {
     let second = write_effect("second.md", "2");
     let Some(effect) = records
         .iter()
-        .find(|stored| stored.record.kind == RecordKind::Effect && stored.record.payload == second)
+        .find(|record| record.kind == RecordKind::Effect && record.payload == second)
     else {
         return false;
     };
-    records.iter().any(|stored| {
-        stored.record.kind == RecordKind::Answer
-            && stored.record.effect_id == effect.record.effect_id
-    })
+    records
+        .iter()
+        .any(|record| record.kind == RecordKind::Answer && record.effect_id == effect.effect_id)
 }
 
-/// Polls the log until the second write's answer is recorded, then opens
-/// `gate` and returns the records seen at that moment. Nothing here
+/// Polls the recorder until the second write's answer is recorded, then
+/// opens `gate` and returns the records seen at that moment. Nothing here
 /// measures time: a loop that stopped stepping while the tool call was out
 /// would never record the second write, and the caller's bound fails the
 /// test.
 async fn open_gate_after_the_second_write(
-    log: &SharedLog,
+    recorder: &MemoryRecorder,
     run_id: RunId,
     gate: &tokio::sync::Semaphore,
-) -> Vec<StoredRecord> {
+) -> Vec<Record> {
     loop {
-        let seen = records(log, run_id).await;
+        let seen = recorder.records(run_id);
         if second_write_is_answered(&seen) {
             gate.add_permits(1);
             return seen;
@@ -141,7 +140,7 @@ const WRITES_BESIDE_A_PARKED_CALL: &str = "local t = tasks.spawn('## Child')\n\
 
 #[tokio::test]
 async fn a_vfs_chain_keeps_stepping_while_a_tool_call_is_parked() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     let mut performers = unused();
     performers.tool = Arc::new(GatedTool {
@@ -155,13 +154,16 @@ async fn a_vfs_chain_keeps_stepping_while_a_tool_call_is_parked() {
     let drive = drive_run(
         run_with_child(WRITES_BESIDE_A_PARKED_CALL, WAITS),
         performers,
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
     );
     let (outcome, before_gate) = tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::join!(drive, open_gate_after_the_second_write(&log, run_id, &gate))
+        tokio::join!(
+            drive,
+            open_gate_after_the_second_write(&recorder, run_id, &gate)
+        )
     })
     .await
     .expect("the loop kept stepping the Vfs chain while the tool call was parked");
@@ -179,14 +181,14 @@ async fn a_vfs_chain_keeps_stepping_while_a_tool_call_is_parked() {
         "only the two writes were answered before the gate opened"
     );
     for answer in before_gate_answers {
-        assert_eq!(answer.record.payload, json!({ "Vfs": { "Ok": "Unit" } }));
+        assert_eq!(answer.payload, json!({ "Vfs": { "Ok": "Unit" } }));
     }
-    assert_one_answer_per_effect(&records(&log, run_id).await);
+    assert_one_answer_per_effect(&recorder.records(run_id));
 }
 
 #[tokio::test]
 async fn a_backend_that_panics_drops_its_effect_instead_of_unwinding_the_run() {
-    let (log, run_id) = begun_log().await;
+    let (recorder, run_id) = begun_log().await;
     let vfs = VfsRef::builder()
         .store(
             "/",
@@ -200,7 +202,7 @@ async fn a_backend_that_panics_drops_its_effect_instead_of_unwinding_the_run() {
     let outcome = drive_run(
         run_over("store.write('a.md', 'x')\nreturn 'ok'", vfs),
         unused(),
-        Arc::clone(&log),
+        recorder.clone(),
         run_id,
         CancelHandle::new(),
         |_event| {},
@@ -209,11 +211,81 @@ async fn a_backend_that_panics_drops_its_effect_instead_of_unwinding_the_run() {
     .unwrap();
     assert_eq!(outcome, RunOutcome::Cancelled);
 
-    let records = records(&log, run_id).await;
+    let records = recorder.records(run_id);
     assert_one_answer_per_effect(&records);
     let answers = answers(&records);
     assert_eq!(answers.len(), 1, "the one write");
-    assert_eq!(answers[0].record.payload, json!("Dropped"));
-    let row = log.lock().await.run(run_id).await.unwrap();
-    assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
+    assert_eq!(answers[0].payload, json!("Dropped"));
+    assert_eq!(recorder.outcome(run_id), Some(RunOutcome::Cancelled));
+}
+
+/// A label for one record: an event's kind, or the effect or answer kind
+/// with the operation's name.
+fn label(record: &Record) -> String {
+    let named = |value: &serde_json::Value| match value {
+        serde_json::Value::Object(map) => map.keys().next().cloned().unwrap_or_default(),
+        other => other.to_string(),
+    };
+    match record.kind {
+        RecordKind::Event => format!("event:{}", record.payload["kind"].as_str().unwrap()),
+        RecordKind::Effect => format!("effect:{}", named(&record.payload)),
+        RecordKind::Answer => format!("answer:{}", named(&record.payload)),
+    }
+}
+
+#[tokio::test]
+async fn a_step_with_a_vfs_effect_records_its_inline_answer_before_the_next_effect() {
+    let (recorder, run_id) = begun_log().await;
+    let mut performers = unused();
+    performers.tool = Arc::new(TextTool("done"));
+
+    drive_run(
+        run_with_child(WRITES_BESIDE_A_PARKED_CALL, WAITS),
+        performers,
+        recorder.clone(),
+        run_id,
+        CancelHandle::new(),
+        |_event| {},
+    )
+    .await
+    .unwrap();
+
+    let records = recorder.records(run_id);
+    assert_one_answer_per_effect(&records);
+    let first_effect = records
+        .iter()
+        .position(|record| record.kind == RecordKind::Effect)
+        .expect("the run issues effects");
+    let first_tool_answer = records
+        .iter()
+        .position(|record| label(record) == "answer:ToolCall")
+        .expect("the tool call is answered");
+    let order: Vec<String> = records[first_effect..=first_tool_answer]
+        .iter()
+        .map(label)
+        .collect();
+    // The first step issues a write and the child's tool call: the write
+    // is answered the moment it is performed, before the tool call's
+    // effect is recorded. The next step's events precede the second
+    // write's effect, and the tool call's answer waits for the loop to
+    // await it.
+    assert_eq!(
+        order,
+        [
+            "effect:Vfs",
+            "answer:Vfs",
+            "effect:ToolCall",
+            "event:vfs_write_succeeded",
+            "effect:Vfs",
+            "answer:Vfs",
+            "event:vfs_write_succeeded",
+            "answer:ToolCall",
+        ]
+    );
+    assert!(
+        kinds(&records[..first_effect])
+            .iter()
+            .all(|kind| *kind == RecordKind::Event),
+        "the run opens with its own events"
+    );
 }

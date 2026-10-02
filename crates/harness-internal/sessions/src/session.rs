@@ -33,7 +33,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_log::{LogError, RunId as LogRunId};
-use harness_runner::effect_loop::SharedLog;
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -43,6 +42,7 @@ use crate::discovery::AgentSource;
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use crate::lifecycle::RunLifecycle;
 use crate::protocol::{Delta, DeltaKind, SessionEvent, SessionId};
+use crate::runtime::SharedLog;
 use crate::transition::{RunId, SessionState};
 
 /// Capacity of a session's event broadcast. The broadcast is the wakeup;

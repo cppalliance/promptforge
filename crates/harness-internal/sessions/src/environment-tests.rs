@@ -5,10 +5,10 @@
 use std::path::Path;
 
 use harness_capabilities::{CapabilityId, InputBroker, InputError};
-use harness_log::{RunLog, RunOutcome};
-use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use harness_runner::prepare::{Services, prepare_source};
+use harness_runner::recorder::{MemoryRecorder, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::model::{Completion, CompletionOptions, Message, ModelBinding, ToolSchema};
 use promptforge::vfs::VfsRef;
@@ -160,15 +160,13 @@ impl ChatPerformer for NoChat {
 #[tokio::test]
 async fn a_prompt_that_needs_only_user_input_prepares_and_runs_on_an_unusable_gateway() {
     let resources = GatewayResources::build(unusable_binding());
-    let log: SharedLog = Arc::new(tokio::sync::Mutex::new(
-        RunLog::in_memory().await.expect("the log opens"),
-    ));
+    let recorder = Arc::new(MemoryRecorder::new());
     let services = Services {
         registry: Some(Arc::clone(resources.registry())),
         vfs: VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
-        log: Arc::clone(&log),
+        recorder: recorder.clone(),
         chat: Arc::new(NoChat),
         input: Some(Arc::new(Typed("hello"))),
         session_id: "session-1".to_owned(),
@@ -179,11 +177,12 @@ async fn a_prompt_that_needs_only_user_input_prepares_and_runs_on_an_unusable_ga
     let prepared = prepare_source(ASKS, Path::new("asks.md"), "", services)
         .await
         .expect("the prompt is not refused");
+    let run_id = prepared.run_id;
     let outcome = drive_run(
         prepared.run,
         prepared.performers,
-        log,
-        prepared.run_id,
+        recorder.clone(),
+        run_id,
         CancelHandle::new(),
         |_event| {},
     )
@@ -194,6 +193,11 @@ async fn a_prompt_that_needs_only_user_input_prepares_and_runs_on_an_unusable_ga
         RunOutcome::Completed {
             final_text: "hello".to_owned()
         }
+    );
+    assert_eq!(
+        recorder.outcome(run_id),
+        Some(outcome),
+        "the recorder holds the outcome the loop returned"
     );
 }
 
