@@ -258,14 +258,41 @@ fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
 fn gateway_endpoint_keeps_the_url_parse_cause() {
     // AUDIT-DISCARDED-SOURCE: the url::ParseError survives as the source.
     let url_error = GatewayEndpoint::new("not a url").expect_err("malformed URL is rejected");
-    assert_eq!(
-        url_error.to_string(),
-        "gateway URL is not a valid URL: \"not a url\""
-    );
+    assert_eq!(url_error.to_string(), "gateway URL is not a valid URL");
     assert!(
         std::error::Error::source(&url_error)
             .is_some_and(|source| source.downcast_ref::<url::ParseError>().is_some()),
         "the url::ParseError cause must survive"
+    );
+}
+
+#[test]
+fn constructor_errors_preserve_sources_without_leaking_secrets() {
+    let parse = GatewayEndpoint::new("not a url hunter2").expect_err("malformed URL is rejected");
+    assert!(
+        std::error::Error::source(&parse).is_some(),
+        "the endpoint parse failure must be preserved as the source"
+    );
+    for url in [
+        "not a url hunter2",
+        "ftp://alice:hunter2@host/v1",
+        "http://alice:hunter2@host/v1",
+        "http://host/v1?token=hunter2",
+        "http://host/v1#hunter2",
+    ] {
+        let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
+        for rendered in [error.to_string(), format!("{error:?}")] {
+            assert!(
+                !rendered.contains("hunter2") && !rendered.contains("alice"),
+                "the rejected URL must not be echoed into diagnostics: {rendered}"
+            );
+        }
+    }
+    let secret =
+        GatewayConfigError::from(SecretString::new("").expect_err("blank key is rejected"));
+    assert!(
+        std::error::Error::source(&secret).is_some(),
+        "the empty-key failure must be preserved as the source"
     );
 }
 

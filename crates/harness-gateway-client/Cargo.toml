@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Gateway client: the HTTP client and the OpenAI chat-completions wire code that turn a Chat effect into a streamed round against the Gateway"
+description = "PromptForge Gateway client: the HTTP client and the OpenAI chat-completions wire code that turn a Chat effect into a streamed round against the Gateway, and the Gateway web search client"
 readme = "README.md"
 keywords = ["promptforge", "llm", "gateway", "openai", "sse"]
 categories = ["web-programming::http-client"]
@@ -23,7 +23,8 @@ promptforge.workspace = true
 bytes.workspace = true
 reqwest.workspace = true
 # Derives the private wire shapes of the `usage` and llama.cpp `timings`
-# metadata sections, and of the `GET /v1/models` list.
+# metadata sections and of the `GET /v1/models` list, and the public web
+# search request and reply.
 serde.workspace = true
 # The request body, every streamed payload, and the reassembled response
 # are JSON.

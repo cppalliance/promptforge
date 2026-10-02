@@ -136,7 +136,8 @@ impl GatewayEndpoint {
     /// URL, does not use an `http`/`https` scheme, names no host, embeds
     /// credentials (a `user:pass@` component), or has a query or fragment (an
     /// API root is a bare path). Parsing goes through a strict URL type (F12)
-    /// rather than a hand-rolled prefix/host scan.
+    /// rather than a hand-rolled prefix/host scan. No error echoes `url`,
+    /// which can embed a credential.
     ///
     /// # Examples
     ///
@@ -155,17 +156,17 @@ impl GatewayEndpoint {
         // Preserve the concrete `url::ParseError` as a private source rather than
         // flattening it into the message (AUDIT-DISCARDED-SOURCE).
         let parsed = url::Url::parse(trimmed).map_err(|error| GatewayConfigError::Config {
-            message: format!("gateway URL is not a valid URL: {trimmed:?}"),
+            message: "gateway URL is not a valid URL".to_owned(),
             source: Box::new(error),
         })?;
         if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(reject(format!(
-                "gateway URL must use the http or https scheme: {trimmed:?}"
-            )));
+            return Err(reject(
+                "gateway URL must use the http or https scheme".to_owned(),
+            ));
         }
         let loopback = match parsed.host() {
             None | Some(url::Host::Domain("")) => {
-                return Err(reject(format!("gateway URL names no host: {trimmed:?}")));
+                return Err(reject("gateway URL names no host".to_owned()));
             }
             // The URL parser lowercases the host of an http(s) URL, so the
             // literal comparison covers `LOCALHOST` too.

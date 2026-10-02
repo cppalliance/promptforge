@@ -503,7 +503,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-4>
 
-### Step 4: Gateway search client
+### Step 4: Gateway search client [completed]
 
 - Component: Gateway search client
 - Depends on: step 1 only. It can be built alongside steps 2 and 3.

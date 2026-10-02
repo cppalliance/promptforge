@@ -7,7 +7,8 @@ The standard way a Host talks to the PromptForge Gateway. `GatewayClient` sends 
 ## Public surface
 
 - `GatewayClient` - a chat-completions client bound to one Gateway URL and, usually, the Gateway's shared bearer key. `new` takes a key, `keyless` sends no `Authorization` header, `disabled` fails every round as `Unavailable` without sending, and `from_env` reads `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`, making the key optional only for a loopback URL. `with_request_limits` applies the run's per-receive timeout and response byte cap, and `complete` runs one streamed round.
-- `GatewayEndpoint`, `SecretString`, `GatewayConfigError`, and `SecretError` - the validated Gateway base URL, the redacted bearer key, and the setup errors they report.
+- `GatewayEndpoint`, `SecretString`, `GatewayConfigError`, and `SecretError` - the validated Gateway base URL, the redacted bearer key, and the setup errors they report. No setup error echoes the URL, which can embed a credential.
+- `GatewaySearch` - a web search client bound to one Gateway URL and its bearer key. `search` POSTs a `GatewaySearchRequest` to the Gateway's `/tools/web_search` relay under a 30-second deadline and returns the `GatewaySearchResponse` and its `GatewaySearchResult` rows, or a `GatewaySearchError` whose `GatewaySearchErrorKind` is `Transport` or `Backend`, with the cause kept as its source.
 - `fetch_model_catalog` - reads the Gateway's model list into a `ModelCatalog`, skipping entries with no context window, under a byte cap on both the success and the error body.
 - `CompletionError` and `CompletionErrorKind` - re-exported from `promptforge::model` so a caller can match failures without naming the facade.
 - `build_request_body` - the chat-completions JSON body for a `Chat` effect's messages, tools, and options. Every body streams and asks for the final usage chunk, wraps each tool in the OpenAI function shape, and adds `temperature`, `max_tokens`, and `chat_template_kwargs.enable_thinking` only when set.
@@ -20,7 +21,7 @@ The standard way a Host talks to the PromptForge Gateway. `GatewayClient` sends 
 ## Guarantees
 
 - The bearer key never appears in logs, `Debug`, `Display`, or error text.
-- A backend error body is bounded and control-escaped before it is kept, and is exposed only through the opt-in `CompletionError::detail`. A success stream is refused once it passes the byte cap, before decoding.
+- A backend error body is bounded and control-escaped before it is kept. A chat round exposes it only through the opt-in `CompletionError::detail`, and a search keeps it in the `GatewaySearchError` message. A success stream or search body is refused once it passes the byte cap, before decoding.
 - A keyless client is an explicit choice (`GatewayClient::keyless`, or `from_env` against a loopback URL); nothing here checks the endpoint's address on the caller's behalf.
 
 ## Minimum Rust Version

@@ -15,6 +15,11 @@
 //! client holds only the Gateway's URL and the shared key; the vendor
 //! credential sits in the Gateway.
 //!
+//! [`GatewaySearch`] runs one web search through the Gateway's
+//! `/tools/web_search` relay under a 30-second deadline and parses the
+//! reply into a [`GatewaySearchResponse`]; the search vendor's credential
+//! stays in the Gateway too.
+//!
 //! [`build_request_body`] builds the one JSON body every round sends.
 //! [`read_completion_stream`] reads the SSE reply over a caller's
 //! [`ChunkSource`] to its `[DONE]` sentinel under a byte cap, forwards each
@@ -38,7 +43,9 @@
 //! - A Gateway bearer key is never written to logs, `Debug`, `Display`, or
 //!   error text.
 //! - A backend error body is bounded and control-escaped before it is
-//!   kept, and only as the opt-in `CompletionError::detail`.
+//!   kept: a chat round keeps it only as the opt-in
+//!   `CompletionError::detail`, and a search keeps it in the
+//!   `GatewaySearchError` message.
 //! - A keyless client is an explicit choice; nothing here checks the
 //!   endpoint's address on the caller's behalf.
 //! - Every file in this crate stays under 500 lines; split first, then
@@ -47,6 +54,7 @@
 mod catalog;
 mod config;
 mod failure;
+mod search;
 mod transport;
 mod wire;
 
@@ -57,6 +65,12 @@ pub use config::SecretError;
 pub use config::SecretString;
 pub use promptforge::model::CompletionError;
 pub use promptforge::model::CompletionErrorKind;
+pub use search::GatewaySearch;
+pub use search::GatewaySearchError;
+pub use search::GatewaySearchErrorKind;
+pub use search::GatewaySearchRequest;
+pub use search::GatewaySearchResponse;
+pub use search::GatewaySearchResult;
 pub use transport::GatewayClient;
 pub use wire::classify::classify_http_failure;
 pub use wire::classify::classify_stream_error;
