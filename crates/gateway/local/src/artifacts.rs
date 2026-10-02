@@ -44,8 +44,8 @@ use archive::require_executable;
 use assets::ArchiveKind;
 use assets::FileAsset;
 use assets::{
-    CudaHost, LLAMA_RELEASE, NvidiaProbe, ServerAsset, WHISPER_RELEASE, WhisperAsset, server_asset,
-    whisper_asset_with_probe,
+    CudaMachine, LLAMA_RELEASE, NvidiaProbe, ServerAsset, WHISPER_RELEASE, WhisperAsset,
+    server_asset, whisper_asset_with_probe,
 };
 use confine::validate_tree_path;
 use digest::{file_digest_with_progress, tree_digest};
@@ -171,7 +171,7 @@ fn nvidia_probe() -> Option<NvidiaProbe> {
 /// Reads `nvidia-smi --query-gpu=compute_cap,driver_version
 /// --format=csv,noheader` output, one `8.6, 591.86` line per GPU. A line
 /// without a readable compute capability names no GPU, and `None` means no
-/// line did. Every GPU reports the host's one driver, so the lowest reading
+/// line did. Every GPU reports the machine's one driver, so the lowest reading
 /// stands for it, and an unreadable one reads lowest of all.
 fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
     let (compute_caps, driver_majors): (Vec<(u64, u64)>, Vec<Option<u64>>) = stdout
@@ -199,7 +199,7 @@ fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
 }
 
 /// Where Linux distributions install the C++ runtime, in the order
-/// [`host_libstdcxx`] tries them: the Debian multiarch and Fedora paths
+/// [`machine_libstdcxx`] tries them: the Debian multiarch and Fedora paths
 /// under `/usr`, then under an unmerged `/`, then Arch's.
 #[cfg(target_os = "linux")]
 const LIBSTDCXX_PATHS: &[&str] = &[
@@ -210,21 +210,21 @@ const LIBSTDCXX_PATHS: &[&str] = &[
     "/usr/lib/libstdc++.so.6",
 ];
 
-/// What the whisper `auto` pick reads from the host beside the NVIDIA
+/// What the whisper `auto` pick reads from the machine beside the NVIDIA
 /// probe. `CUDA_VISIBLE_DEVICES` is read lossily, so a value that is not
 /// UTF-8 reads as an invalid entry.
-fn host_cuda() -> CudaHost {
-    CudaHost {
+fn machine_cuda() -> CudaMachine {
+    CudaMachine {
         visible_devices: std::env::var_os("CUDA_VISIBLE_DEVICES")
             .map(|value| value.to_string_lossy().into_owned()),
-        libstdcxx: host_libstdcxx(),
+        libstdcxx: machine_libstdcxx(),
     }
 }
 
 /// The bytes of the first file among [`LIBSTDCXX_PATHS`] that exists,
 /// `None` when none does or the read fails, and always `None` off Linux,
 /// where no whisper row names a C++ runtime version.
-fn host_libstdcxx() -> Option<Vec<u8>> {
+fn machine_libstdcxx() -> Option<Vec<u8>> {
     #[cfg(target_os = "linux")]
     {
         let path = LIBSTDCXX_PATHS
@@ -241,7 +241,7 @@ fn host_libstdcxx() -> Option<Vec<u8>> {
 
 /// The [`assets::X86_BASELINE`] extensions this CPU reports, in baseline
 /// order; none off x86-64, where no whisper row needs them.
-fn host_x86_extensions() -> Vec<&'static str> {
+fn machine_x86_extensions() -> Vec<&'static str> {
     #[cfg(target_arch = "x86_64")]
     {
         // The detection macro takes only a literal, so each baseline
@@ -354,11 +354,11 @@ impl ArtifactStore {
     ///
     /// `backend` (the `[stt] whisper_backend` setting) chooses between the
     /// CPU and CUDA builds on Windows x86-64 and Linux x86-64, where `auto`
-    /// probes the host's NVIDIA GPUs and driver version and, once the probe
-    /// reports a GPU, reads `CUDA_VISIBLE_DEVICES` and, on Linux, the host's
-    /// `libstdc++.so.6`; every other platform has one build. On x86-64 the
-    /// host CPU must report every extension the builds execute, under every
-    /// setting.
+    /// probes the machine's NVIDIA GPUs and driver version and, once the
+    /// probe reports a GPU, reads `CUDA_VISIBLE_DEVICES` and, on Linux, the
+    /// machine's `libstdc++.so.6`; every other platform has one build. On
+    /// x86-64 the CPU must report every extension the builds execute, under
+    /// every setting.
     /// The archive is downloaded, digest-verified, and extracted under the
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
@@ -384,8 +384,8 @@ impl ArtifactStore {
             std::env::consts::ARCH,
             backend,
             nvidia_probe,
-            host_cuda,
-            &host_x86_extensions(),
+            machine_cuda,
+            &machine_x86_extensions(),
         )?;
         let archives = [asset.archive];
         self.provision_install(whisper_install_asset(asset, &archives), activity, token)

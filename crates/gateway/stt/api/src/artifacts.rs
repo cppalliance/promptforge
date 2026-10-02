@@ -55,7 +55,7 @@ pub(crate) fn prepare(
 
 /// Body of [`prepare`] with the whisper library provision injectable, so a
 /// test can observe the backend `[stt]` and the load token it hands over
-/// without probing the host's GPUs or downloading a runtime.
+/// without probing the machine's GPUs or downloading a runtime.
 fn prepare_impl(
     config: &Config,
     progress: Option<&Arc<Activity>>,

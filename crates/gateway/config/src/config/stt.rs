@@ -168,7 +168,7 @@ impl SttPipelineConfig {
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum WhisperBackend {
-    /// Lets the gateway choose the build for the host.
+    /// Lets the gateway choose the build for the machine it runs on.
     #[default]
     Auto,
     /// The CPU-only whisper.cpp build.

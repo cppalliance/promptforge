@@ -1486,7 +1486,7 @@ fn provision_server_writes_no_stage_text_on_a_warm_cache() {
 
 #[test]
 fn parse_nvidia_probe_reads_each_gpu_and_the_driver_major() {
-    // Two RTX 3090s on driver 591.86, recorded on one host under Windows
+    // Two RTX 3090s on driver 591.86, recorded on one machine under Windows
     // (CRLF) and under WSL (LF).
     for stdout in [
         "8.6, 591.86\r\n8.6, 591.86\r\n",
@@ -1538,7 +1538,7 @@ fn parse_nvidia_probe_answers_none_without_a_gpu() {
 
 #[test]
 fn provision_whisper_library_reuses_a_verified_install() {
-    // Explicit backends keep the host's GPU probe out of the test; on a
+    // Explicit backends keep the machine's GPU probe out of the test; on a
     // platform with both builds each one reuses its own install. The
     // provision itself checks this CPU against the x86 baseline.
     for backend in [WhisperBackend::Cpu, WhisperBackend::Cuda] {
@@ -1550,7 +1550,7 @@ fn provision_whisper_library_reuses_a_verified_install() {
             None,
             X86_BASELINE,
         )
-        .expect("host whisper asset");
+        .expect("this platform's whisper asset");
         let temp = TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
 
@@ -1593,7 +1593,7 @@ fn provision_whisper_library_reuses_a_verified_install() {
 
 #[test]
 fn a_cancelled_whisper_provision_downloads_nothing() {
-    // The explicit CPU backend keeps the host's GPU probe out of the test,
+    // The explicit CPU backend keeps the machine's GPU probe out of the test,
     // and the empty cache would otherwise start the pinned download.
     let asset = whisper_asset(
         std::env::consts::OS,
@@ -1603,7 +1603,7 @@ fn a_cancelled_whisper_provision_downloads_nothing() {
         None,
         X86_BASELINE,
     )
-    .expect("host whisper asset");
+    .expect("this platform's whisper asset");
     let temp = TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path()).expect("store");
     let token = CancellationToken::new();
@@ -1638,7 +1638,7 @@ fn whisper_installs_never_fall_back_to_an_older_abi() {
         None,
         X86_BASELINE,
     )
-    .expect("host whisper asset");
+    .expect("this platform's whisper asset");
     let archives = [asset.archive];
     let install = whisper_install_asset(asset, &archives);
     assert!(

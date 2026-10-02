@@ -24,7 +24,7 @@ pub enum LocalError {
         arch: String,
     },
 
-    /// The host CPU lacks an x86-64 extension the selected whisper.cpp build
+    /// The machine's CPU lacks an x86-64 extension the selected whisper.cpp build
     /// was compiled to use, so loading the build would fault on its first
     /// such instruction.
     #[error(
