@@ -118,6 +118,27 @@ pub struct ToolSchema {
     pub(crate) parameters: Value,
 }
 
+impl ToolSchema {
+    /// Returns the tool's wire name: never empty, and only `[A-Za-z0-9_.-]`.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the one-sentence description shown to the model.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the JSON Schema for the tool's parameters, always a JSON
+    /// object.
+    #[must_use]
+    pub fn parameters(&self) -> &Value {
+        &self.parameters
+    }
+}
+
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
 /// `ToolSchema` is built only inside the Engine (from the executor's `Tool`
@@ -375,6 +396,14 @@ impl Completion {
     #[must_use]
     pub fn reasoning_content(&self) -> Option<&str> {
         self.reasoning_content.as_deref()
+    }
+
+    /// Returns one line per response metadata section that was present but
+    /// malformed and degraded to `None`; empty for a well-formed body. The
+    /// Engine reports each line as a `model_metadata_degraded` event.
+    #[must_use]
+    pub fn metadata_diagnostics(&self) -> &[String] {
+        &self.metadata_diagnostics
     }
 
     /// Returns the model that served the call, as the backend named it in the

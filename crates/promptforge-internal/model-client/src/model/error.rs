@@ -55,9 +55,24 @@ pub enum CompletionErrorKind {
 }
 
 impl CompletionErrorKind {
-    /// The fixed message for this kind: one lowercase phrase written for a
-    /// model reader.
-    pub(crate) fn phrase(self) -> &'static str {
+    /// Returns the fixed message for this kind: one lowercase phrase written
+    /// for a model reader. A broker builds a [`CompletionError`] message
+    /// from it. Only `MalformedResponse`, `EmptyReply`, and `Unavailable`
+    /// may extend it with `: ` and a specific the broker's own code wrote
+    /// (see [`CompletionError`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge::model::{CompletionError, CompletionErrorKind};
+    ///
+    /// let kind = CompletionErrorKind::Timeout;
+    /// assert_eq!(kind.phrase(), "the model backend did not answer in time");
+    /// let error = CompletionError::new(kind, kind.phrase());
+    /// assert_eq!(error.to_string(), kind.phrase());
+    /// ```
+    #[must_use]
+    pub fn phrase(self) -> &'static str {
         match self {
             CompletionErrorKind::ContextOverflow => {
                 "the request is larger than the model's context window"
@@ -157,8 +172,10 @@ pub struct CompletionError {
 impl CompletionError {
     /// Builds a failure of `kind` with `message` as its display text.
     ///
-    /// A broker uses the fixed phrase for the kind, and may extend it with
-    /// `: ` and a specific its own code wrote. The message must not carry
+    /// A broker uses the kind's fixed
+    /// [`phrase`](CompletionErrorKind::phrase). For `MalformedResponse`,
+    /// `EmptyReply`, and `Unavailable` it may extend the phrase with `: `
+    /// and a specific its own code wrote. The message must not carry
     /// provider text, which belongs in
     /// [`with_detail`](CompletionError::with_detail).
     #[must_use]

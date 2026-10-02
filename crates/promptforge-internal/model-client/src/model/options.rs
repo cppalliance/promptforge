@@ -261,6 +261,30 @@ impl CompletionOptions {
         self.thinking = Some(thinking);
         self
     }
+
+    /// Returns the caller-facing model name sent on the wire.
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Returns the sampling temperature, when one was set.
+    #[must_use]
+    pub fn temperature(&self) -> Option<Temperature> {
+        self.temperature
+    }
+
+    /// Returns the maximum generation tokens, when a cap was set.
+    #[must_use]
+    pub fn max_tokens(&self) -> Option<NonZeroU32> {
+        self.max_tokens
+    }
+
+    /// Returns the `enable_thinking` switch, when it was set.
+    #[must_use]
+    pub fn thinking(&self) -> Option<bool> {
+        self.thinking
+    }
 }
 
 /// The run's model set: the prompt-level bindings produced by live H1

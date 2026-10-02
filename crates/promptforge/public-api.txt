@@ -492,14 +492,17 @@ pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option
 pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
 pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::Completion, promptforge::model::CompletionError>
+pub fn promptforge::model::Completion::metadata_diagnostics(&self) -> &[alloc::string::String]
 pub fn promptforge::model::Completion::metrics(&self) -> core::option::Option<&promptforge::metrics::CallMetrics>
 pub fn promptforge::model::Completion::model(&self) -> &str
 pub fn promptforge::model::Completion::raw(&self) -> core::option::Option<&promptforge::model::RawExchange>
 pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::CompletionResult
 pub fn promptforge::model::Completion::with_finish_reason(self, finish_reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::with_metadata_diagnostics(self, diagnostics: alloc::vec::Vec<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_metrics(self, metrics: promptforge::metrics::CallMetrics) -> promptforge::model::Completion
 pub fn promptforge::model::Completion::with_raw(self, raw: promptforge::model::RawExchange) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::with_reasoning_content(self, reasoning_content: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
 pub fn promptforge::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::detail(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
@@ -511,7 +514,12 @@ pub fn promptforge::model::CompletionError::overflow(&self) -> (core::option::Op
 pub fn promptforge::model::CompletionError::with_detail(self, text: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::with_finish_reason(self, reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>>) -> promptforge::model::CompletionError
+pub fn promptforge::model::CompletionErrorKind::phrase(self) -> &'static str
+pub fn promptforge::model::CompletionOptions::max_tokens(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn promptforge::model::CompletionOptions::model(&self) -> &str
 pub fn promptforge::model::CompletionOptions::new(model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionOptions
+pub fn promptforge::model::CompletionOptions::temperature(&self) -> core::option::Option<promptforge::model::Temperature>
+pub fn promptforge::model::CompletionOptions::thinking(&self) -> core::option::Option<bool>
 pub fn promptforge::model::CompletionOptions::with_max_tokens(self, max_tokens: core::num::nonzero::NonZeroU32) -> promptforge::model::CompletionOptions
 pub fn promptforge::model::CompletionOptions::with_temperature(self, temperature: f64) -> core::result::Result<promptforge::model::CompletionOptions, promptforge::model::TemperatureError>
 pub fn promptforge::model::CompletionOptions::with_thinking(self, thinking: bool) -> promptforge::model::CompletionOptions
@@ -563,6 +571,9 @@ pub fn promptforge::model::ToolCall::arguments(&self) -> promptforge::model::Too
 pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> core::result::Result<promptforge::model::ToolCall, promptforge::model::CompletionError>
 pub fn promptforge::model::ToolCall::id(&self) -> &str
 pub fn promptforge::model::ToolCall::name(&self) -> &str
+pub fn promptforge::model::ToolSchema::description(&self) -> &str
+pub fn promptforge::model::ToolSchema::name(&self) -> &str
+pub fn promptforge::model::ToolSchema::parameters(&self) -> &serde_json::value::Value
 pub fn promptforge::prompt::ArgDecl::default(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
 pub fn promptforge::prompt::ArgDecl::description(&self) -> core::option::Option<&str>
 pub fn promptforge::prompt::ArgDecl::is_optional(&self) -> bool

@@ -160,6 +160,38 @@ fn the_builders_set_metrics_the_raw_exchange_and_the_finish_reason() {
 }
 
 #[test]
+fn the_builders_set_the_reasoning_content_and_the_metadata_diagnostics() {
+    let bare = Completion::from_result(CompletionResult::Text("pong".to_owned()), "m")
+        .expect("a text result is accepted");
+    assert!(bare.metadata_diagnostics().is_empty());
+    let diagnostics = vec!["usage: expected an object".to_owned()];
+    let completion = bare
+        .with_reasoning_content("scratch work")
+        .with_metadata_diagnostics(vec!["timings: expected an object".to_owned()])
+        .with_metadata_diagnostics(diagnostics.clone());
+    assert_eq!(completion.reasoning_content(), Some("scratch work"));
+    assert_eq!(
+        completion.metadata_diagnostics(),
+        diagnostics.as_slice(),
+        "a second call replaces the first list"
+    );
+    assert_eq!(
+        completion.result(),
+        &CompletionResult::Text("pong".to_owned()),
+        "the builders leave the outcome as it was"
+    );
+}
+
+#[test]
+fn a_tool_schema_reads_back_its_name_description_and_parameters() {
+    let schema = tool_schema_new("web.search", "Search the web.", json_object())
+        .expect("a valid schema is accepted");
+    assert_eq!(schema.name(), "web.search");
+    assert_eq!(schema.description(), "Search the web.");
+    assert_eq!(schema.parameters(), &json_object());
+}
+
+#[test]
 fn tool_schema_new_validates_wire_name_and_object_schema() {
     // A valid name and object schema are accepted.
     let schema =

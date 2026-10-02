@@ -22,9 +22,11 @@ impl Completion {
     /// is the name the completion reports; every optional field is absent,
     /// so `metrics` and `raw` are `None`. A text result is not validated.
     /// [`with_metrics`](Completion::with_metrics),
-    /// [`with_raw`](Completion::with_raw), and
-    /// [`with_finish_reason`](Completion::with_finish_reason) add what a
-    /// broker knows beyond the result.
+    /// [`with_raw`](Completion::with_raw),
+    /// [`with_finish_reason`](Completion::with_finish_reason),
+    /// [`with_reasoning_content`](Completion::with_reasoning_content), and
+    /// [`with_metadata_diagnostics`](Completion::with_metadata_diagnostics)
+    /// add what a broker knows beyond the result.
     ///
     /// # Errors
     /// Returns an `EmptyReply`-kind [`CompletionError`] for an empty
@@ -77,6 +79,24 @@ impl Completion {
     #[must_use]
     pub fn with_finish_reason(mut self, finish_reason: impl Into<String>) -> Completion {
         self.finish_reason = Some(finish_reason.into());
+        self
+    }
+
+    /// Returns the completion with `reasoning_content` as the reasoning side
+    /// channel the backend supplied. It is never promoted into the answer.
+    #[must_use]
+    pub fn with_reasoning_content(mut self, reasoning_content: impl Into<String>) -> Completion {
+        self.reasoning_content = Some(reasoning_content.into());
+        self
+    }
+
+    /// Returns the completion with `diagnostics` as its metadata
+    /// diagnostics, replacing any it held: one line per response metadata
+    /// section that was present but malformed. The Engine reports each line
+    /// as a `model_metadata_degraded` event.
+    #[must_use]
+    pub fn with_metadata_diagnostics(mut self, diagnostics: Vec<String>) -> Completion {
+        self.metadata_diagnostics = diagnostics;
         self
     }
 }
