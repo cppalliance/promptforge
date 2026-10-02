@@ -258,9 +258,9 @@ impl Gateway {
     /// deadline, the speech service retires: admission closes, which ends
     /// Realtime sessions and aborts running decodes after their current
     /// encoder pass or decoder step, admitted speech work drains, and the
-    /// engine's workers are joined, so a native decoder frees its context
-    /// before the process exits. A retirement still draining at the
-    /// deadline is abandoned the same way.
+    /// speech engine's workers are joined, so a native decoder frees its
+    /// context before the process exits. A retirement still draining at
+    /// the deadline is abandoned the same way.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
@@ -334,9 +334,9 @@ impl Gateway {
                 "the command worker did not stop within {WORKER_JOIN_TIMEOUT:?}; abandoning it"
             );
         }
-        // Speech retires before `serve` returns, so the engine's workers
-        // free their native contexts while the process is still whole:
-        // CUDA memory freed during process exit fails with "driver
+        // Speech retires before `serve` returns, so the speech engine's
+        // workers free their native contexts while the process is still
+        // whole: CUDA memory freed during process exit fails with "driver
         // shutting down". The retirement blocks until admitted speech work
         // drains, so it runs on the blocking pool, and a drain still
         // waiting at the deadline is abandoned to the runtime teardown

@@ -219,8 +219,8 @@ async fn both_workers_drop(
 }
 
 /// A graceful stop retires the speech service before `serve` returns:
-/// admission closes and both engine workers are joined, so a native
-/// decoder frees its context before the process exits.
+/// admission closes and both speech engine workers are joined, so a
+/// native decoder frees its context before the process exits.
 #[cfg(feature = "stt")]
 #[tokio::test]
 async fn serve_retires_speech_before_it_returns() {

@@ -8,7 +8,7 @@ use std::path::Path;
 
 #[cfg(target_arch = "x86_64")]
 use super::super::assets::X86_BASELINE;
-use super::super::assets::{CudaHost, NvidiaProbe};
+use super::super::assets::{CudaMachine, NvidiaProbe};
 
 /// Queries the machine's NVIDIA GPUs and driver version through `nvidia-smi`.
 /// Returns `None` when the driver or the tool is absent or fails, or it
@@ -35,7 +35,7 @@ pub(super) fn nvidia_probe() -> Option<NvidiaProbe> {
 /// Reads `nvidia-smi --query-gpu=compute_cap,driver_version
 /// --format=csv,noheader` output, one `8.6, 591.86` line per GPU. A line
 /// without a readable compute capability names no GPU, and `None` means no
-/// line did. Every GPU reports the host's one driver, so the lowest reading
+/// line did. Every GPU reports the machine's one driver, so the lowest reading
 /// stands for it, and an unreadable one reads lowest of all.
 fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
     let (compute_caps, driver_majors): (Vec<(u64, u64)>, Vec<Option<u64>>) = stdout
@@ -63,7 +63,7 @@ fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
 }
 
 /// Where Linux distributions install the C++ runtime, in the order
-/// [`host_libstdcxx`] tries them: the Debian multiarch and Fedora paths
+/// [`machine_libstdcxx`] tries them: the Debian multiarch and Fedora paths
 /// under `/usr`, then under an unmerged `/`, then Arch's.
 #[cfg(target_os = "linux")]
 const LIBSTDCXX_PATHS: &[&str] = &[
@@ -74,21 +74,21 @@ const LIBSTDCXX_PATHS: &[&str] = &[
     "/usr/lib/libstdc++.so.6",
 ];
 
-/// What the whisper `auto` pick reads from the host beside the NVIDIA
+/// What the whisper `auto` pick reads from the machine beside the NVIDIA
 /// probe. `CUDA_VISIBLE_DEVICES` is read lossily, so a value that is not
 /// UTF-8 reads as an invalid entry.
-pub(super) fn host_cuda() -> CudaHost {
-    CudaHost {
+pub(super) fn machine_cuda() -> CudaMachine {
+    CudaMachine {
         visible_devices: std::env::var_os("CUDA_VISIBLE_DEVICES")
             .map(|value| value.to_string_lossy().into_owned()),
-        libstdcxx: host_libstdcxx(),
+        libstdcxx: machine_libstdcxx(),
     }
 }
 
 /// The bytes of the first file among [`LIBSTDCXX_PATHS`] that exists,
 /// `None` when none does or the read fails, and always `None` off Linux,
 /// where no whisper row names a C++ runtime version.
-fn host_libstdcxx() -> Option<Vec<u8>> {
+fn machine_libstdcxx() -> Option<Vec<u8>> {
     #[cfg(target_os = "linux")]
     {
         let path = LIBSTDCXX_PATHS
@@ -105,7 +105,7 @@ fn host_libstdcxx() -> Option<Vec<u8>> {
 
 /// The [`X86_BASELINE`] extensions this CPU reports, in baseline
 /// order; none off x86-64, where no whisper row needs them.
-pub(super) fn host_x86_extensions() -> Vec<&'static str> {
+pub(super) fn machine_x86_extensions() -> Vec<&'static str> {
     #[cfg(target_arch = "x86_64")]
     {
         // The detection macro takes only a literal, so each baseline
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn parse_nvidia_probe_reads_each_gpu_and_the_driver_major() {
-        // Two RTX 3090s on driver 591.86, recorded on one host under Windows
+        // Two RTX 3090s on driver 591.86, recorded on one machine under Windows
         // (CRLF) and under WSL (LF).
         for stdout in [
             "8.6, 591.86\r\n8.6, 591.86\r\n",

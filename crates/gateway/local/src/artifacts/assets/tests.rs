@@ -97,33 +97,33 @@ fn runtime_defining(versions: &[&str]) -> Vec<u8> {
     library
 }
 
-/// A host that leaves `CUDA_VISIBLE_DEVICES` unset and whose C++
+/// A machine that leaves `CUDA_VISIBLE_DEVICES` unset and whose C++
 /// runtime defines `GLIBCXX_3.4.30`, so it meets every CUDA row.
-fn cuda_ready() -> CudaHost {
-    CudaHost {
+fn cuda_ready() -> CudaMachine {
+    CudaMachine {
         visible_devices: None,
         libstdcxx: Some(runtime_defining(&["GLIBCXX_3.4.29", "GLIBCXX_3.4.30"])),
     }
 }
 
 /// [`cuda_ready`] with `CUDA_VISIBLE_DEVICES` set to `value`.
-fn visible(value: &str) -> CudaHost {
-    CudaHost {
+fn visible(value: &str) -> CudaMachine {
+    CudaMachine {
         visible_devices: Some(value.to_owned()),
         ..cuda_ready()
     }
 }
 
 /// [`cuda_ready`] with the C++ runtime `libstdcxx`, `None` for none read.
-fn runtime(libstdcxx: Option<Vec<u8>>) -> CudaHost {
-    CudaHost {
+fn runtime(libstdcxx: Option<Vec<u8>>) -> CudaMachine {
+    CudaMachine {
         libstdcxx,
         ..cuda_ready()
     }
 }
 
 /// The `auto` pick on `os` x86-64 for GPUs at `compute_caps` on driver
-/// `driver_major`, on a [`cuda_ready`] host.
+/// `driver_major`, on a [`cuda_ready`] machine.
 fn auto_platform(os: &str, compute_caps: &[(u64, u64)], driver_major: u64) -> &'static str {
     let probe = NvidiaProbe {
         compute_caps: compute_caps.to_vec(),
@@ -132,14 +132,14 @@ fn auto_platform(os: &str, compute_caps: &[(u64, u64)], driver_major: u64) -> &'
     auto_pick(os, &probe, Some(&cuda_ready()))
 }
 
-/// The `auto` pick on `os` x86-64 for `probe` on `host`.
-fn auto_pick(os: &str, probe: &NvidiaProbe, host: Option<&CudaHost>) -> &'static str {
+/// The `auto` pick on `os` x86-64 for `probe` on `machine`.
+fn auto_pick(os: &str, probe: &NvidiaProbe, machine: Option<&CudaMachine>) -> &'static str {
     whisper_asset(
         os,
         "x86_64",
         WhisperBackend::Auto,
         Some(probe),
-        host,
+        machine,
         X86_BASELINE,
     )
     .expect("auto whisper asset")
@@ -147,9 +147,9 @@ fn auto_pick(os: &str, probe: &NvidiaProbe, host: Option<&CudaHost>) -> &'static
 }
 
 /// Runs [`whisper_asset_with_probe`] on the full x86 baseline with a
-/// probe that reports `answer` and a [`cuda_ready`] host, returning the
-/// pick, how many times the probe ran, and how many times the host was
-/// read.
+/// probe that reports `answer` and a [`cuda_ready`] machine, returning
+/// the pick, how many times the probe ran, and how many times the machine
+/// was read.
 fn pick_with_probe(
     os: &str,
     arch: &str,
@@ -157,7 +157,7 @@ fn pick_with_probe(
     answer: Option<NvidiaProbe>,
 ) -> (Result<WhisperAsset<'static>>, usize, usize) {
     let mut probes = 0;
-    let mut host_reads = 0;
+    let mut machine_reads = 0;
     let pick = whisper_asset_with_probe(
         os,
         arch,
@@ -167,10 +167,10 @@ fn pick_with_probe(
             answer
         },
         || {
-            host_reads += 1;
+            machine_reads += 1;
             cuda_ready()
         },
         X86_BASELINE,
     );
-    (pick, probes, host_reads)
+    (pick, probes, machine_reads)
 }

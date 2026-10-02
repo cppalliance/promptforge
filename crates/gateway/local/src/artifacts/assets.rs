@@ -26,7 +26,7 @@ pub(super) const WHISPER_RELEASE: &str = "b4938";
 /// and F16C. A release bump re-derives the list.
 pub(super) const X86_BASELINE: &[&str] = &["sse4.2", "avx", "avx2", "bmi2", "fma", "f16c"];
 
-/// What the host's `nvidia-smi` reported: each GPU's compute capability as
+/// What the machine's `nvidia-smi` reported: each GPU's compute capability as
 /// `(major, minor)`, and the driver version's major number, `None` when it
 /// cannot be read.
 #[derive(Debug, Eq, PartialEq)]
@@ -35,12 +35,12 @@ pub(super) struct NvidiaProbe {
     pub(super) driver_major: Option<u64>,
 }
 
-/// What the whisper `auto` pick reads from the host beside the NVIDIA
+/// What the whisper `auto` pick reads from the machine beside the NVIDIA
 /// probe: `visible_devices`, the `CUDA_VISIBLE_DEVICES` value, `None` when
-/// unset, and `libstdcxx`, the bytes of the host's `libstdc++.so.6`, `None`
-/// when none was read.
+/// unset, and `libstdcxx`, the bytes of the machine's `libstdc++.so.6`,
+/// `None` when none was read.
 #[derive(Debug, Default)]
-pub(super) struct CudaHost {
+pub(super) struct CudaMachine {
     pub(super) visible_devices: Option<String>,
     pub(super) libstdcxx: Option<Vec<u8>>,
 }
@@ -123,8 +123,8 @@ pub(super) struct ServerAsset<'a> {
 /// `(major, minor)`, the build carries native code for, which only the
 /// `auto` pick consults: every probed GPU must be in the list. `None` checks
 /// nothing. `min_glibcxx` is the `libstdc++` symbol version the build needs,
-/// which only the `auto` pick consults: the host's C++ runtime must define
-/// it. `None` checks nothing.
+/// which only the `auto` pick consults: the machine's C++ runtime must
+/// define it. `None` checks nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
@@ -294,32 +294,32 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 ///
 /// `backend` (the `[stt] whisper_backend` setting), `gpus` (what the
 /// NVIDIA probe reported, when a probe was needed and worked), and
-/// `cuda_host` (what was read from the host for the CUDA row, when it was
-/// read) are consulted only on Windows x86-64 and Linux x86-64, the two
+/// `cuda_machine` (what was read from the machine for the CUDA row, when it
+/// was read) are consulted only on Windows x86-64 and Linux x86-64, the two
 /// platforms with a choice; every other platform has exactly one row. There
 /// `auto` takes the CUDA row only when `gpus` names a GPU that
 /// `CUDA_VISIBLE_DEVICES` leaves visible, the driver meets the row's
 /// `min_driver_major`, every GPU's compute capability is in the row's
-/// `native_compute_caps` when it lists them, and the host's C++ runtime
+/// `native_compute_caps` when it lists them, and the machine's C++ runtime
 /// defines the row's `min_glibcxx` when it names one. On x86-64, under
 /// every setting, the selected row needs every [`X86_BASELINE`] extension
-/// in `x86_extensions`, the ones the host CPU reports.
+/// in `x86_extensions`, the ones the CPU reports.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
-/// host, and [`LocalError::UnsupportedCpu`] when an x86-64 host lacks a
+/// platform, and [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks a
 /// baseline extension.
 pub(super) fn whisper_asset(
     os: &str,
     arch: &str,
     backend: WhisperBackend,
     gpus: Option<&NvidiaProbe>,
-    cuda_host: Option<&CudaHost>,
+    cuda_machine: Option<&CudaMachine>,
     x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
     let wanted = if whisper_backend_applies(os, arch) {
         Some(match backend {
-            WhisperBackend::Auto => auto_whisper_backend(os, arch, gpus, cuda_host),
+            WhisperBackend::Auto => auto_whisper_backend(os, arch, gpus, cuda_machine),
             explicit => explicit,
         })
     } else {
@@ -350,31 +350,31 @@ pub(super) fn whisper_asset(
 }
 
 /// [`whisper_asset`] with the GPU evidence gathered on demand: `probe`
-/// (the host's `nvidia-smi` query in production) runs only for `auto` on a
+/// (the machine's `nvidia-smi` query in production) runs only for `auto` on a
 /// platform with both builds, because every explicit backend and every
-/// other platform already knows its row. `cuda_host` (the host's
+/// other platform already knows its row. `cuda_machine` (the machine's
 /// `CUDA_VISIBLE_DEVICES` and C++ runtime in production) runs there too,
 /// and only after the probe reports a GPU. `x86_extensions` passes through.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
-/// host, and [`LocalError::UnsupportedCpu`] when an x86-64 host lacks a
+/// platform, and [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks a
 /// baseline extension.
 pub(super) fn whisper_asset_with_probe(
     os: &str,
     arch: &str,
     backend: WhisperBackend,
     probe: impl FnOnce() -> Option<NvidiaProbe>,
-    cuda_host: impl FnOnce() -> CudaHost,
+    cuda_machine: impl FnOnce() -> CudaMachine,
     x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
-    let (gpus, host) = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
+    let (gpus, machine) = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
         let gpus = probe();
-        let host = gpus
+        let machine = gpus
             .as_ref()
             .is_some_and(|probe| !probe.compute_caps.is_empty())
-            .then(cuda_host);
-        (gpus, host)
+            .then(cuda_machine);
+        (gpus, machine)
     } else {
         (None, None)
     };
@@ -383,7 +383,7 @@ pub(super) fn whisper_asset_with_probe(
         arch,
         backend,
         gpus.as_ref(),
-        host.as_ref(),
+        machine.as_ref(),
         x86_extensions,
     )
 }
