@@ -8,6 +8,9 @@ overview: >-
   llama-server: auto picks the CUDA build when nvidia-smi reports an NVIDIA GPU, and the CPU
   build otherwise. The Linux CUDA build compiles only on a release dispatch. The pull request
   merges with the two new rows fail-closed, and one commit after merge pins them.
+  End-to-end testing of the built archives found defects this work introduces, and the last
+  steps fix them: auto also checks what each CUDA build needs from the host, and a graceful
+  stop aborts running decodes and cancels speech downloads.
 todos:
   - id: export-vibe-plan
     content: Run /export-vibe-plan before any other step
@@ -31,11 +34,20 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Local testing of the new builds on the operator's hosts found two process-level defects:
     - the Windows CPU build ends the process when `whisper.dll` is unloaded after a CPU transcription;
     - a gateway on the Linux CUDA build prints CUDA-error aborts at every graceful stop, because speech frees GPU memory after the CUDA runtime has shut down.
+  - End-to-end testing on 2026-10-01 and 2026-10-02 found more defects in this work. It ran the archives a fork dispatch built (CI run 36900875610) on the operator's Windows host and its WSL2 Ubuntu 24.04, with two RTX 3090 GPUs on driver 591.86:
+    - On Windows, a graceful stop crashes the gateway with `0xC0000005` once the published CUDA build has decoded on the CPU. That build falls back to the CPU when CUDA finds no usable device, as under a driver older than CUDA 13's 580, and it keeps OpenMP, so Step 12's retirement unloads it under a live OpenMP thread team. The gateway built at Step 11 stopped cleanly in the same runs.
+    - On Windows, `auto` gives the CUDA build to GPUs it has no native code for. Its native code covers compute capability 8.6, 8.9, 12.0, and 12.1. GPUs at 7.5, 8.0, and 9.0 get PTX from CUDA 13.3, which a driver with an older CUDA cannot compile, and ggml then ends the process at the first transcription.
+    - On Linux, the CUDA build needs `GLIBCXX_3.4.30`, a GCC 12 or later C++ runtime, where the CPU build needs `GLIBCXX_3.4.29`. RHEL 9, its rebuilds, and Amazon Linux 2023 cannot load it, so on those hosts with an NVIDIA GPU, `auto` replaces a working CPU build with a failed speech load.
+    - `auto` reads GPUs from `nvidia-smi`, which ignores `CUDA_VISIBLE_DEVICES`, so a host that hides every GPU from CUDA still gets the CUDA build. On Windows that build then decodes on the CPU and crashes at a graceful stop.
+    - On the Linux CUDA build, a graceful stop with long decodes running can still end in a CUDA error or a segmentation fault. A running decode cannot be interrupted, so admitted decodes that outlast the retirement deadline leave the retirement abandoned, and the process exits mid-decode.
+    - A stop during the 743 MB Linux CUDA download takes 10 s and abandons both the boot command and the speech retirement, because the whisper download ignores the boot command's cancellation token.
 - Goals:
   - A CUDA build for linux-x86_64 and a CPU build for windows-x86_64, from the same whisper.cpp tag, `b4938`, built and published by the existing whisper build workflow and pinned by digest like every other runtime. The pins land in one commit after this work merges.
   - One setting, `[stt] whisper_backend`, chooses the build on Windows x86-64 and Linux x86-64 the way `[local] llama_backend` chooses llama-server: `auto` detects an NVIDIA GPU, and an explicit value forces a build.
-  - The C ABI, the FFI crate, the model files, and decoding stay as they are.
+  - The C ABI, the model files, and decoding stay as they are. The FFI crate changes only to hand a decode's abort flag to whisper.
   - Under the default `auto`, a host the selection cannot serve gets the CPU build or a failed speech load, never an ended gateway process.
+  - Under `auto`, a host whose GPU the platform's CUDA build cannot use gets the CPU build: on Windows, a driver older than 580, a GPU without native code in the build, or GPUs hidden from CUDA; on Linux, a C++ runtime without the build's `GLIBCXX` version, or GPUs hidden from CUDA.
+  - A graceful stop aborts running decodes and cancels speech downloads, so speech retires within the existing deadline.
   - The native speech fixtures name their build, so no test depends on the host's GPU.
   - A graceful stop retires speech before the process exits, so no speech thread frees native state after the CUDA runtime's teardown.
   - The Windows CPU build survives being unloaded, as the other builds do.
@@ -46,16 +58,22 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Any change to llama-server selection.
   - A config UI control for the setting.
   - Running whisper out of process.
-  - Older debt this work touches but did not introduce: the Windows CUDA build's own driver floor, the MSVC runtime the Windows archives import without bundling it, `speech.gpu` reporting how a build was compiled, and the test-only eager gateway constructor.
+  - Older debt this work touches but did not introduce: the MSVC runtime the Windows archives import without bundling it, `speech.gpu` reporting how a build was compiled, and the test-only eager gateway constructor. The Windows CUDA build's driver floor, once listed here, is in scope since end-to-end testing tied it to a defect this work introduces.
+  - Rebuilding either CUDA archive: the Windows one without OpenMP, or the Linux one against an older C++ runtime.
+  - Issues the end-to-end testing found that predate this work: the gateway log dropping a failed command's cause, the Windows native fixtures' leftover temporary caches, the batch route's status for a full worker queue, the guide not listing the Linux host libraries the archives and the gateway load (libgomp, CA certificates), and SIGTERM and Ctrl-Break skipping the graceful stop.
 - Success criteria:
   - The criteria that load a new build hold once the post-merge commit pins the two new rows. Until then those rows fail closed, as the Functional Specification states.
   - A Linux x86-64 host with an NVIDIA GPU and driver 570 or later, on `auto`, downloads, verifies, and loads the CUDA build: the boot log's library path names it, and `/admin/status` reports `speech.gpu` true. The final `small.en` pass takes about 0.13 s.
   - A Linux x86-64 host with an older or unreadable driver, or without an NVIDIA GPU, gets the CPU build under `auto`, as today.
-  - A Windows x86-64 host with an NVIDIA GPU keeps the CUDA build. One without an NVIDIA GPU, whose CPU has the x86 baseline, loads the CPU build and transcribes.
+  - A Windows x86-64 host with an NVIDIA GPU on driver 580 or later, every GPU at compute capability 8.6, 8.9, 12.0, or 12.1, keeps the CUDA build under `auto`. A host without an NVIDIA GPU, on an older driver, or with any other GPU, whose CPU has the x86 baseline, loads the CPU build and transcribes.
+  - On Linux, `auto` takes the CUDA build only where the host's `libstdc++.so.6` defines `GLIBCXX_3.4.30`, and the CPU build elsewhere.
+  - With `CUDA_VISIBLE_DEVICES` hiding every GPU, `auto` takes the CPU build on both platforms, and a Windows gateway so configured exits 0 at a graceful stop after transcriptions.
   - A host whose CPU lacks a baseline extension fails the speech load with an error naming the required and missing extensions, and the gateway keeps serving.
   - `cpu` and `cuda` force their build on both platforms.
   - The native fixtures pass on a Linux host with an NVIDIA GPU without extra setup, and CI's native job still exercises the CUDA build.
   - A gateway on the Linux CUDA build stops through `POST /shutdown` or SIGINT with no CUDA error and exit status 0, within the existing shutdown bounds.
+  - That holds with six 11-minute batch requests in flight: the stop exits 0 with no CUDA error and no `speech did not retire` warning.
+  - A stop during a whisper download ends the boot command with no `did not stop` or `did not retire` warning.
   - On the Windows CPU build, the Windows native suites pass, including unloading the library after a CPU transcription.
   - A push-triggered run of the whisper build workflow does not compile the Linux CUDA build. A release dispatch compiles it and adds both new archives to `whisper-lib-b4938`, leaving every existing asset untouched.
   - Every exit gate in the Testing Plan passes.
@@ -70,7 +88,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - whisper runs in the gateway process, and ggml ends the process with `abort()` on a CUDA error, so `auto` must never select a CUDA build for a host whose driver cannot run it.
   - Every x86 whisper build is compiled with ggml's fixed non-native baseline, which includes AVX2. Running one on a CPU without that baseline raises an illegal-instruction fault that ends the gateway process.
 - Open questions:
-  - None that block. The glibc floor is 2.35, set by the hosted `ubuntu-22.04` runner, the same floor as the existing Linux archives.
+  - None that block. Both Linux archives need glibc 2.34, read from their symbol versions, not the 2.35 first recorded here. Their C++ runtimes differ: the CPU archive needs `GLIBCXX_3.4.29` and the CUDA archive `GLIBCXX_3.4.30`.
 
 ## Functional Specification
 
@@ -79,7 +97,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - After this work merges, anyone with write access to `cppalliance/promptforge` dispatches the whisper build workflow on `master` for the tag. One commit then pins the two new rows' digests from the release's `SHA256SUMS`.
 - Inputs and outputs:
   - Input: `[stt] whisper_backend` is `auto` (the default), `cpu`, or `cuda`. Serialization omits it when it is `auto`.
-  - Host inputs to selection: the NVIDIA probe's answer, which is each GPU's compute capability and the driver version, and the host CPU's instruction-set extensions.
+  - Host inputs to selection: the NVIDIA probe's answer, which is each GPU's compute capability and the driver version; whether `CUDA_VISIBLE_DEVICES` hides every GPU; on Linux, whether the host's `libstdc++.so.6` defines the CUDA build's `GLIBCXX` version; and the host CPU's instruction-set extensions.
   - Output: the whisper.cpp library speech loads, or a named selection error that fails the speech load, and one boot log line, `provisioned whisper library`, with the library's path.
     - The install directory in that path names the build, such as `b4938-linux-x86_64-cuda`. The path reaches stdout and so a service's journal, but `gateway.log` redacts local paths.
     - `GET /admin/status` reports `speech.gpu`, true when the loaded build has CUDA, whichever log is read.
@@ -89,25 +107,36 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 
     | Setting | `nvidia-smi` reports an NVIDIA GPU | No NVIDIA GPU, or the probe fails |
     | --- | --- | --- |
-    | `auto` | The CUDA build. | The CPU build. |
+    | `auto` | The CUDA build when the host meets its requirements below, and the CPU build otherwise. | The CPU build. |
     | `cpu` | The CPU build. | The CPU build. |
     | `cuda` | The CUDA build. | The CUDA build, which fails to load without a driver. |
 
-  - On Linux x86-64, `auto` also requires driver 570 or later, the Linux CUDA build's floor, and an older or unreadable driver gets the CPU build. Windows x86-64 has no floor.
+  - `auto` takes the CUDA build only when every host requirement of the platform's CUDA build holds, and the CPU build otherwise:
+    - the driver meets the build's floor: 570 on Linux (CUDA 12.8) and 580 on Windows (CUDA 13). An unreadable version meets no floor.
+    - On Windows, every GPU's compute capability is one the build has native code for: 8.6, 8.9, 12.0, or 12.1.
+    - On Linux, the host's `libstdc++.so.6` defines `GLIBCXX_3.4.30`.
+    - `CUDA_VISIBLE_DEVICES` leaves a GPU visible: it is unset, or its first entry is a device index below the GPU count or a `GPU-` or `MIG-` identifier. This follows CUDA's rule that only the devices before the first invalid entry are visible.
   - On an x86 host, every setting first requires the builds' shared CPU baseline, and a missing extension fails selection.
-  - The probe runs only under `auto`, and only on those two platforms.
+  - The probe and the other host checks run only under `auto`, and only on those two platforms.
   - Every other platform has exactly one build, and every setting selects it. The setting is documented as consulted only on Windows x86-64 and Linux x86-64, as `[local] llama_backend` is documented as consulted only on Windows x86-64.
   - An unknown value is a configuration error that names the rejected value and the accepted ones.
   - Until the post-merge pin commit, the two new rows fail closed:
-    - Under `auto`, a Linux x86-64 host with an NVIDIA GPU on driver 570 or later, and a Windows x86-64 host whose probe finds no NVIDIA GPU, select an unpinned row. Their speech load fails at the download or the digest check, and the gateway keeps serving.
+    - Under `auto`, a Linux x86-64 host that meets the CUDA build's requirements, and a Windows x86-64 host that does not meet them, select an unpinned row. Their speech load fails at the download or the digest check, and the gateway keeps serving.
+    - That Windows set includes NVIDIA hosts the requirements turn away, such as a Turing GPU or a driver older than 580, which get the pinned CUDA build on `master` today. `cuda` keeps them on it until the pin commit.
     - Meanwhile `cpu` on Linux and `cuda` on Windows select today's pinned builds.
 - Errors and recovery:
   - The chosen build downloads when missing and is verified against its pin. A download, verification, or load failure fails the speech load and names its stage, and the gateway never switches builds on its own.
-  - Under `auto` on Linux, a driver below the floor gets the CPU build, so it never reaches the CUDA runtime.
-  - An explicit `cuda` below the floor is honored, and on a GPU the build has no native code for it can end the gateway at the first transcription. The docs name the floor, with `auto` or `cpu` as the recovery.
+  - Under `auto`, a host that fails a requirement gets the CPU build, so it never reaches a CUDA build it cannot run.
+  - An explicit `cuda` is honored on both platforms whatever the host, and each failed requirement has its own outcome. The docs name every requirement, with `auto` or `cpu` as the recovery.
+    - On Linux below the floor, it can end the gateway at the first transcription on a GPU the build has no native code for.
+    - On Windows, a GPU without native code under a driver older than CUDA 13.3's ends the gateway at the first transcription.
+    - On Windows, where CUDA finds no usable device, the build decodes on the CPU, and a graceful stop then ends the gateway.
+    - On Linux without the C++ runtime, the build fails to load.
   - A CPU missing a baseline extension fails the speech load with an error naming the required and missing extensions. Speech stays unavailable and the gateway keeps serving; no setting recovers it, because every x86 build shares the baseline.
   - As today, a failed speech load never stops the gateway and is never retried in-process. A restart is the recovery.
-  - A graceful stop retires speech after the command worker stops: admission closes, Realtime sessions end, and the speech workers join, within the command worker's `WORKER_JOIN_TIMEOUT` deadline. Past that deadline the retirement is abandoned with a warning, as a stuck command already is.
+  - A graceful stop retires speech after the command worker stops, within the command worker's `WORKER_JOIN_TIMEOUT` deadline. Admission closes, which ends Realtime sessions and aborts every running decode after its current encoder pass or decoder step. The speech workers then join. Past that deadline the retirement is abandoned with a warning, as a stuck command already is.
+  - A request whose decode is aborted fails, as admitted requests already do at shutdown.
+  - A stop during speech provisioning cancels the whisper library and speech model downloads between chunks. An extraction already under way finishes.
 - Security and privacy behavior:
   - The new rows are fail-closed with all-zero digests until the post-merge commit pins them from the release's `SHA256SUMS`.
   - Publishing is add-only: an archive the release already holds is never uploaded again.
@@ -120,8 +149,8 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 - Architecture:
   - `.github/workflows/whisper-lib.yml` gains the two builds and an add-only publish. No workflow is added.
   - `gateway-config` owns the setting, and `gateway-stt`'s `prepare()` passes it through and logs the library.
-  - `gateway-local` owns the GPU probe, reused from llama-server, and row selection with its host-capability checks (the driver floor and the CPU baseline), and provisioning.
-  - `gateway-whisper-ffi` and `gateway-stt-backend-whisper` do not change.
+  - `gateway-local` owns the GPU probe, reused from llama-server, and row selection with its host-capability checks (the driver floor, the native-code list, the C++ runtime, CUDA's device visibility, and the CPU baseline), and provisioning.
+  - `gateway-whisper-ffi` and `gateway-stt-backend-whisper` change only to hand a decode's abort flag to whisper's `abort_callback`. `gateway-stt-engine` carries the flag on each decode request, and `gateway-stt` sets it from the runtime's admission epoch.
   - The native speech fixtures and CI's native job name their backend explicitly.
   - `gateway`'s `Gateway::serve` retires speech at a graceful stop, through the existing `SpeechService::shutdown`.
 - Modules and interfaces:
@@ -143,37 +172,80 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - `WhisperAsset.backend: Option<WhisperBackend>`, in `crates/gateway/local/src/artifacts/assets.rs`, is `Some` on the four rows of Windows x86-64 and Linux x86-64, and `None` elsewhere.
     - The new rows are `windows-x86_64` (`whisper.dll`) and `linux-x86_64-cuda` (`libwhisper.so`). Their URLs are under the existing `whisper-lib-b4938` release, and their digests are all zeros until the post-merge pin commit.
     - Until then each carries the placeholder comment that `WINDOWS_X86_64_CUDA_BLACKWELL` carried from `66f8f95f` until `56feb2dd` pinned it: the pin is filled in once the release holds the archive, and the row stays fail-closed until then.
-    - `WhisperAsset` also carries an optional minimum driver version: 570 on `linux-x86_64-cuda`, the CUDA 12.8 floor, and none on `windows-x86_64-cuda`, so Windows behavior is unchanged.
+    - `WhisperAsset` also carries an optional minimum driver version: 570 on `linux-x86_64-cuda`, the CUDA 12.8 floor, and 580 on `windows-x86_64-cuda`, the CUDA 13 floor.
   - Selection mirrors `server_asset`: `whisper_asset(os, arch, backend, gpus)` picks the row, and `whisper_asset_with_probe` runs the probe only for `auto` where both builds exist.
     - On the two platforms, `auto` becomes `Cuda` when the probe reports an NVIDIA GPU that meets the row's driver floor, and `Cpu` otherwise, including when the driver version cannot be read. An explicit value selects its own row.
     - Every other platform matches its single row.
     - Before any x86 row is returned, under every setting, the host must support every extension the pinned `GGML_NATIVE=OFF` baseline enables. The list is read from whisper.cpp `371b5a75`'s `ggml/CMakeLists.txt`, the host's side comes from `std::arch::is_x86_feature_detected!`, and other architectures skip the check.
     - A missing extension fails selection with a new `LocalError` variant naming the required and missing extensions. `LocalError` is `#[non_exhaustive]`, so the variant is additive.
     - Both checks take their inputs (the probe's answer, the host's extensions) as arguments, so tests run on any host.
+  - Each CUDA row's host requirements are data on the row, beside `min_driver_major`. Like `X86_BASELINE`, they are tied to `WHISPER_RELEASE`, and a release bump re-reads them from its archives.
+    - `WhisperAsset.native_compute_caps: Option<&[(u64, u64)]>` is `Some(&[(8, 6), (8, 9), (12, 0), (12, 1)])` on `windows-x86_64-cuda` and `None` elsewhere. Those are the capabilities the pinned archive's `ggml-cuda.dll` fatbinary carries native code for; its PTX, ISA 9.3 from CUDA 13.3, covers 7.5, 8.0, and 9.0.
+    - `WhisperAsset.min_glibcxx: Option<&str>` is `Some("GLIBCXX_3.4.30")` on `linux-x86_64-cuda` and `None` elsewhere. `libggml-cuda.so.0` needs that version for `std::condition_variable::wait`.
+  - `auto_whisper_backend` takes the CUDA row only when all of these hold. Every input stays an argument, so tests run on any host.
+    - The probe reports a GPU, and `CUDA_VISIBLE_DEVICES` does not hide every GPU.
+    - The driver meets the row's floor.
+    - When the row lists native capabilities, every probed GPU's capability is in the list.
+    - When the row names a `min_glibcxx`, the host's C++ runtime defines it.
+  - Two pure helpers sit in `assets.rs`:
+    - `cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool` applies CUDA's rule that only the devices before the first invalid entry are visible.
+    - `libstdcxx_defines(library: &[u8], version: &str) -> bool` finds the version name, NUL-terminated, in the library's bytes.
+  - `ArtifactStore::provision_whisper_library` gathers the two host answers beside `nvidia_probe`, only under `auto` where both builds exist, and only after the probe reports a GPU. They travel to selection as a `CudaHost`.
+    - It reads `CUDA_VISIBLE_DEVICES`.
+    - On Linux it reads the first that exists of `/usr/lib/x86_64-linux-gnu/libstdc++.so.6`, `/usr/lib64/libstdc++.so.6`, `/lib/x86_64-linux-gnu/libstdc++.so.6`, `/lib64/libstdc++.so.6`, and `/usr/lib/libstdc++.so.6`, and no library found counts as lacking the version.
+    - llama-server's selection reads neither.
   - The NVIDIA probe in `crates/gateway/local/src/artifacts.rs` reads each GPU's compute capability and the driver version in one `nvidia-smi --query-gpu=compute_cap,driver_version --format=csv,noheader` call. llama-server's selection keeps reading only the capabilities, so its behavior is unchanged.
   - `ArtifactStore::provision_whisper_library(backend, activity)`, in `crates/gateway/local/src/artifacts.rs`, still returns the library path, and goes through the existing verified install path once a row is selected.
+    - `ArtifactStore::provision_whisper_library_with_cancellation(backend, activity, token)` passes `token` to `provision_install`. `provision_whisper_library` calls it with `None`, as `provision_llama_server_with_progress` calls its cancellable twin.
+    - A fired token stops a download between chunks and at phase boundaries, not inside an extraction or the probe, and returns `LocalError::Cancelled`.
   - `prepare()`, in `crates/gateway/stt/api/src/artifacts.rs`, reads the setting from `[stt]`, passes it to provisioning through `prepare_impl`, which takes the provisioning as an argument, and logs `provisioned whisper library` with the path, as `crates/gateway/local/src/runtime.rs` logs `provisioned llama-server`.
+    - It takes the load's `CancellationToken` and passes it to the library download and, through the existing `ensure_model_with_cancellation`, to each speech model download.
+    - A `LocalError::Cancelled` from either download becomes `SpeechError::InitialLoadCancelled`, the error `SpeechService::load_initial` already documents for a cancelled load.
+    - `GenerationState::load_initial`, in `crates/gateway/stt/api/src/generation.rs`, passes its `cancel`. The boot command's token already reaches `load_initial` through `load_speech` in `crates/gateway/app/src/boot_load.rs`.
+  - A running decode aborts when the runtime's admission shuts down:
+    - `SessionEpoch`, in `crates/gateway/stt/api/src/admission.rs`, keeps its cancelled flag in a shareable `Arc<AtomicBool>`. `GenerationLease::decode`, in `generation-lease.rs`, is the one funnel every batch and Realtime decode takes, and it attaches that flag to the request.
+    - `DecodeRequest`, in `crates/gateway/stt/engine/src/decoder.rs`, carries the flag through a new `with_cancellation` builder and an accessor. The worker passes it on untouched.
+    - `transcribe_blocking`, in `crates/gateway/stt/backend-whisper/src/model.rs`, sets it on the pass's `FullParams` through a new `FullParams::set_abort_flag(Arc<AtomicBool>)` in `crates/gateway/stt/whisper-ffi/src/params.rs`.
+    - `transcribe_blocking` fails at once when the flag already reads true. whisper first reads the flag only after an encoder pass, which takes seconds per queued `small.en` request on the CPU build, so a decode still queued at the stop would otherwise outlast the deadline.
+    - `FullParams::apply` writes a non-panicking `extern "C"` callback that loads the flag with Acquire ordering, and the flag's address as its user data. `raw::FullParams.abort_callback` becomes a nullable function pointer of the same size, so the 304-byte layout test still holds.
+    - whisper.cpp b4938 polls the callback after each encoder pass, one per 30 s window, and after each decoder step, never inside a graph computation. The pass then returns -6, -8, or -9, which surfaces as the existing `WhisperError::Inference`.
+    - The decode's job is then released, `wait_until_idle` returns, and the engine's workers join.
+    - A load (`whisper_init`) has no abort, so it keeps its residual risk.
   - The native fixture configs in `crates/gateway/stt/api/tests/common/mod.rs`, `crates/gateway/stt/api/src/batch-native-tests.rs`, and `crates/gateway/app/tests/it/realtime_stt.rs` set `whisper_backend` from a test-only `PROMPTFORGE_WHISPER_BACKEND`, defaulting to `cpu`. It sits beside the existing `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO`, and the `native-whisper` job in `.github/workflows/stt-miri.yml` sets it to `cuda`.
   - `Gateway::serve`, in `crates/gateway/app/src/runner.rs`, keeps a clone of the process's `SpeechService` under the `stt` feature.
     - After the bounded command-worker join, it runs `SpeechService::shutdown` on `spawn_blocking` under a deadline shared with that join.
     - On expiry it logs a warning and abandons the call, as the join abandons a stuck command.
-    - The engine, its signal-and-detach `Drop`, and the FFI do not change.
+    - The engine's signal-and-detach `Drop` does not change. The retirement first closes admission, which aborts running decodes as above.
 - File and public API changes:
   - Changed: `.github/workflows/whisper-lib.yml`, and `.github/workflows/stt-miri.yml`'s native job with the three native fixture files; `Gateway::serve` in `crates/gateway/app/src/runner.rs`, `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`, and `crates/gateway/app/tests/it/realtime_stt/authentication.rs`.
+  - Changed by the fixes after Step 12:
+    - selection and provisioning in `crates/gateway/local/src/artifacts/assets.rs` and `crates/gateway/local/src/artifacts.rs`;
+    - `crates/gateway/stt/api/src/artifacts.rs`, `generation.rs`, `generation-lease.rs`, and `admission.rs`, with the `gateway-stt` test fixtures;
+    - `crates/gateway/stt/engine/src/decoder.rs`, with the engine's test fixtures;
+    - `crates/gateway/stt/backend-whisper/src/model.rs`;
+    - `crates/gateway/stt/whisper-ffi/src/raw.rs`, `params.rs`, and `context.rs`.
   - New public API: `gateway_config::WhisperBackend`, `SttPipelineConfig::whisper_backend`, and the `LocalError` variant for an unsupported CPU.
-  - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`.
+    - The fixes add `ArtifactStore::provision_whisper_library_with_cancellation`, `DecodeRequest::with_cancellation` and its accessor, and `FullParams::set_abort_flag`.
+  - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`, which the fixes move to the cancellable twin.
   - Docs:
     - `gateway.local.example.toml`: a commented `whisper_backend` line with the three values.
     - `guide/src/gateway/05-speech.md`: the two builds on Windows x86-64 and Linux x86-64, how the setting chooses between them, the Linux CUDA build's driver floor with the `auto` fallback below it, and the x86 CPU baseline. The `[stt]` row in `crates/gateway/app/README.md` and the example config state the floor and the baseline too.
     - `guide/src/gateway/04-local-models.md`: the `whisper.cpp/` cache directory, with one directory per pinned build, such as `b4938-windows-x86_64` and `b4938-linux-x86_64-cuda`.
     - `guide/promptforge-gateway-guide.md`, the assembled guide, carries the same two changes.
     - `crates/gateway/app/README.md`: the `whisper_backend` row in the `[stt]` table, matching the `[local]` table's `llama_backend` row, and the speech-runtime sentence.
+    - The fixes extend the same four places, and the assembled guide is regenerated:
+      - `auto`'s requirements: the Windows floor and native capabilities, the Linux C++ runtime (a GCC 12 or later `libstdc++`, which RHEL 9 and Amazon Linux 2023 lack), and hidden GPUs.
+      - The outcomes of an explicit `cuda` for each failed requirement.
+      - The first-use PTX compilation on GPUs without native code.
+      - The CUDA builds' cache use, about 1.2 GB on Windows and 1.7 GB on Linux counting the downloaded archive the cache keeps.
   - No config UI change. The Speech card in `crates/gateway/config-ui/ui/src/pages/settings-page.ts` saves the loaded section plus its own edits, so the setting survives a save.
 - Data, persistence, failure, security, and privacy constraints:
   - Cache layout: `<cache_dir>/whisper.cpp/<release>-<platform>/`, so a host's CPU and CUDA installs sit side by side.
   - The probe is one `nvidia-smi` run per speech boot, only under `auto` on the two platforms. On Windows it runs without a console window, as llama-server's probe does.
   - The setting persists only in `gateway.toml`, and it is never written when `auto`.
   - Selection is the only guard against the runtime's process-ending failures, because whisper runs in-process and ggml aborts on a CUDA error. A selection failure reaches the existing provisioning-stage speech error, which leaves speech unavailable and the gateway serving.
+  - The host checks run once per speech boot, only under `auto` where both builds exist. The C++ runtime is read only on Linux and only after the probe found a GPU.
+  - The abort flag lives in an `Arc` that the pass's `FullParams` owns, and `WhisperState::full` borrows those params for the whole native call, so the callback's user data outlives every read.
 
 ## Testing Plan
 
@@ -189,9 +261,20 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - every other platform returns its single row under every setting;
     - the platform coverage test covers all seven rows, each a zip with a 64-hex digest under `whisper-lib-b4938`.
   - Host-capability checks, in `crates/gateway/local`, through injected inputs:
-    - under `auto` on Linux x86-64, driver 569 or an unreadable version selects the CPU row, and 570 or later selects the CUDA row, while Windows x86-64 is unchanged at any driver version;
+    - under `auto` on Linux x86-64, driver 569 or an unreadable version selects the CPU row, and 570 or later selects the CUDA row. Under `auto` on Windows x86-64, driver 579 or an unreadable version selects the CPU row, and 580 or later selects the CUDA row when every GPU is native. The Windows case replaces `auto_takes_the_windows_cuda_whisper_build_at_any_driver_version`.
     - the probe parser reads `compute_cap, driver_version` lines, and llama-server's existing selection tests still pass;
     - a host missing any baseline extension fails selection on every x86 row under every setting, with an error naming it; a complete set selects as before, and other architectures skip the check.
+    - under `auto` on Windows x86-64 at driver 591, a GPU at 7.5, 8.0, 9.0, or 6.1, alone or beside a native one, selects the CPU row;
+    - under `auto` on Linux x86-64 with a GPU on driver 570 or later, a C++ runtime without `GLIBCXX_3.4.30` selects the CPU row and one with it the CUDA row;
+    - a `CUDA_VISIBLE_DEVICES` that hides every GPU selects the CPU row on both platforms;
+    - `cuda_visible_devices_hides_every_gpu`: unset, `0`, `1,0`, `0,-1`, `GPU-...`, and `MIG-...` leave a GPU visible; empty, `-1`, `2` with two GPUs, and `none` hide them;
+    - `libstdcxx_defines` finds a NUL-terminated version, and rejects a longer one that shares its prefix, such as `GLIBCXX_3.4.300`;
+    - explicit `cpu` and `cuda` ignore every host check, and the seven-row coverage test asserts each row's new fields.
+  - Provisioning cancellation, in `crates/gateway/local` and `gateway-stt`: a fired token makes `provision_whisper_library_with_cancellation` return `LocalError::Cancelled` without downloading, and `prepare` hands the load's token to the library and model provisioning.
+  - Decode abort, with scripted decoders and no GPU:
+    - in `gateway-stt`, with a scripted decoder parked until its request's cancellation fires, `SpeechService::shutdown` returns within a second and the decoder saw the flag; without the change the shutdown waits on the park;
+    - batch, Realtime interim, and Realtime final decodes all carry the flag;
+    - the runner's drain tests that hold a bare worker job still abandon the retirement at the bound.
   - Speech retirement at a graceful stop, in `crates/gateway/app/src/runner.rs` beside `serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound`, with a scripted speech service and no GPU:
     - when `serve` returns, both scripted decoders report their workers dropped and speech reports not ready;
     - with a worker job held across the stop, `serve` returns within one to two join bounds, and releasing the job then lets the workers drop;
@@ -220,6 +303,12 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Optionally, before the pin commit merges, a gateway built from it smoke-tests each new archive on real hardware, while the selection unit tests cover `auto`'s choice between builds. A bad archive found this way is withdrawn before any merged pin names it.
     - The Linux CUDA build, on a Linux host with an NVIDIA GPU on driver 570 or later: under `auto` it loads, the log path names `b4938-linux-x86_64-cuda`, `/admin/status` reports `speech.gpu` true, and the final `small.en` pass takes about 0.13 s.
     - The Windows CPU build, on a Windows host with `whisper_backend = "cpu"`: it loads and transcribes.
+  - The ignored `native_whisper` suite in `gateway-stt-backend-whisper` gains an abort test. A final decode of the fixture audio, repeated to several minutes, fails within a second of its flag being set mid-pass; a decode whose flag is already set fails at once; and the clip with its flag unset transcribes. It runs on the Linux CUDA package, the pinned Linux CPU build, the Windows CPU build, and the pinned Windows CUDA build.
+  - The fixes are checked with the end-to-end round's scratch harness in `vibe/scratch/run-36900875610/scripts/`. It runs on scratch clones of each step's commit, whose two new rows point at run 36900875610's archives served from loopback:
+    - Windows, `win_gateway.py hidden`: under `auto` with `CUDA_VISIBLE_DEVICES=-1` the gateway takes the CPU build, and every stop exits 0.
+    - Windows, `win_gateway.py boots`: on this host (RTX 3090 at 8.6, driver 591) `auto` still takes the CUDA build.
+    - Linux, `wsl-longaudio.sh`: ten stops, by `POST /shutdown` and SIGINT, with six 11-minute requests in flight exit 0 with no CUDA error and no `speech did not retire` warning. `win_gateway.py long` shows the same on both Windows builds.
+    - Linux, `wsl-lifecycle2.sh` with `ONLY=download`: the mid-download stop exits within a second with no abandonment warning, and the next boot resumes the partial download.
 - Regression, security, and performance:
   - Fail-closed needs no test of its own. No download hashes to all zeros, and the existing pin tests cover a mismatch.
   - A push-triggered run grows only by the Windows CPU row.
@@ -251,6 +340,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - It follows master's Blackwell llama-server row. `66f8f95f` added that row with an all-zero digest and a placeholder comment, and after the first release run `56feb2dd` pinned it in one commit.
     - It replaces the dispatch from the pull request's head, which needed that head pushed to `cppalliance/promptforge` and published archives from workflow changes no reviewer had approved. That dispatch had replaced the earlier two-PR landing.
     - Consequence: until the pin commit, `master`'s `auto` sends a Linux NVIDIA host on driver 570 or later, and a Windows host whose probe finds no NVIDIA GPU, to an unpinned row whose speech load fails. `cpu` on Linux and `cuda` on Windows keep today's builds. The Blackwell row had the same window.
+    - The host requirements the fixes add widen the Windows side of that window. A Windows NVIDIA host they turn away, such as one with a Turing GPU or a driver older than 580, also reaches the unpinned CPU row until the pin commit, and `cuda` keeps it on the pinned CUDA build.
   - The setting lives in `[stt]`, not `[local]`. It is a speech concern read at speech boot, and `[local]` configures llama-server and the cache.
   - The CUDA runtime ships inside the Linux archive. cudart, cuBLAS, and cuBLASLt ride along, as the Windows CUDA archive's DLLs do, so a host needs a driver and no toolkit.
   - Each library is packaged once, under its soname. Copying every symlink name, as the CPU archive does, would triple the 170 MB CUDA backend.
@@ -273,6 +363,22 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - Once a merged pin names an archive, it never changes.
   - Real-hardware checks of the new archives leave this pull request with the pins, because the archives exist only after the post-merge dispatch. They become the optional smoke test before the pin commit merges, and the withdrawal rule, which the user confirmed with "ok to both", stays.
     - The selection unit tests cover `auto`'s choice, so forcing the Windows CPU build with `cpu` on an NVIDIA machine stands in for a Windows machine without an NVIDIA GPU.
+  - The defects the end-to-end testing found in this work are fixed in this pull request, ahead of the pins. The user asked to "fix every found issue that are specific to this PR's change or regression from this PR". Issues the same testing found that predate this work stay out and are tracked apart.
+  - Selection stays the guard. Each CUDA row's host requirements are data on the row, which `auto` checks the way it already checks the driver floor and the x86 baseline.
+    - Windows `auto` requires driver 580, CUDA 13's floor, and native code for every GPU.
+      - The native list was read from the pinned archive's fatbinary on 2026-10-02. It has native code for sm_86, sm_89, sm_120, and sm_121, and PTX for compute_75, compute_80, and compute_90 at ISA 9.3, which is CUDA 13.3 (cudart's file version is 13030).
+      - On this host's driver 591.86 (CUDA 13.1), forcing the PTX path failed with "the provided PTX was compiled with an unsupported toolchain", and ggml ended the process.
+    - The compute-capability match rejected below now applies to the Windows row, because its revisit condition holds: the two CUDA builds' lists differ. The Windows list describes an archive pinned forever, so it cannot drift from the code it gates.
+    - Every GPU must be native, not just one, because whisper uses CUDA's device 0, whose fastest-first order need not match `nvidia-smi`'s.
+    - The gate closes the Windows stop crash under `auto` for its likely cause, a driver older than 580, and for GPUs hidden from CUDA. Hosts it turns away keep `cuda` as their override, as Linux sm_86 and sm_89 GPUs on drivers 525 to 569 do.
+    - Linux `auto` requires the CUDA row's `GLIBCXX_3.4.30` in the host's C++ runtime, so RHEL 9, its rebuilds, and Amazon Linux 2023 keep the CPU build they had before this work. The archive itself does not change, and the alternative of rebuilding it is rejected below.
+    - A `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, by CUDA's documented rule, because `nvidia-smi` ignores the variable.
+  - A graceful stop aborts running decodes through whisper.cpp's own `abort_callback`.
+    - It is fed by the runtime's admission epoch, the signal that already settles admitted requests at shutdown.
+    - The engine worker's stopping flag cannot serve, because it is set only after the drain wait.
+  - The boot command's token reaches the whisper library and speech model downloads, as it reaches llama-server's.
+    - That matches the runner's comment that a quit during provisioning stops the download.
+    - The models ride along because the cancellable model download already exists and costs nothing more.
 - Rejected alternatives:
   - A separate workflow and release tag for the CUDA build: it duplicates the Linux flags and packaging and splits one tag across two releases. Revisit if a build ever needs a different whisper.cpp tag than the other rows.
   - Re-dispatching the workflow as it is: it would replace the five pinned archives with rebuilt ones whose digests differ. No revisit condition.
@@ -283,7 +389,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - An operator path override for the whisper library: llama-server has one (`llama_server_path` and `PROMPTFORGE_LLAMA_SERVER`), but it is a separate capability this work does not need, since both new builds are published. Revisit if an operator needs a build this repository does not publish.
   - A warning when the setting is set on a platform with one build: `llama_backend` has none, and the docs say where the setting is consulted. No revisit condition.
   - A config UI control: `llama_backend` has none either, and the Speech card already preserves the field. Revisit if the UI gains controls for build selection generally.
-  - Matching the GPU's compute capability against the archive's native-code list: it couples selection to device code frozen at dispatch. Revisit if a second CUDA build with a different list is added.
+  - Matching the GPU's compute capability against the archive's native-code list: it couples selection to device code frozen at dispatch. Revisit if a second CUDA build with a different list is added. That condition was met, and the Windows row now matches, as the Decisions record.
   - Adding more native CUDA architectures: it departs from the Windows CUDA row, grows the archive, and cannot change after the dispatch. Revisit at the next whisper.cpp tag.
   - Refusing an explicit `cuda` below the floor: it blocks native-code GPUs that run on drivers 525 to 569. Revisit if crashes under an explicit `cuda` are reported.
   - A lower Windows CPU baseline: slower on every host, different from the other x86 rows, and frozen at dispatch. No revisit condition.
@@ -298,6 +404,13 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Skipping the native free at process exit: it cannot stop an in-flight decode's CUDA calls, it breaks the engine's tested detach contract, and it needs process-global state to detect exit. No revisit condition.
   - Making the engine's `Drop` join its workers again: it undoes `6aa3409c`, which made `Drop` signal and detach so that no drop site blocks. No revisit condition.
   - Allowing reloads on the same thread, by setting `GGML_NO_BACKTRACE` or by patching ggml's terminate-handler check in the workflow: the variable is process-global state in a serve path, which `AGENTS.md` forbids, and the patch diverges from the pinned upstream source. Revisit if a product path ever reloads speech on the thread that loaded it.
+  - Keeping the whisper library loaded after the retirement, so the published Windows CUDA build's OpenMP runtime never unloads: still rejected, for the reasons the never-unload entry above gives. The gate removes the `auto` exposure. Revisit if an explicit `cuda` on a Windows host whose GPU CUDA cannot use must stop cleanly.
+  - Rebuilding the Windows CUDA archive without OpenMP under a new name: it needs the self-hosted runner, a new pin, and a new pin in `.github/workflows/stt-miri.yml`, for an exposure the gate already closes under `auto`. Revisit at the next whisper.cpp tag.
+  - Building the Linux CUDA archive against an older C++ runtime, in a container whose `libstdc++` predates GCC 12: CUDA speech would reach RHEL 9 and Amazon Linux 2023, but the dispatch-only job would change and need another hosted run before merge. Revisit at the next whisper.cpp tag, or when those hosts need CUDA speech.
+  - A second Windows driver floor for GPUs without native code, at CUDA 13.3's driver: it adds a floor this host cannot verify, and those GPUs would compile the PTX at every first use. Revisit if Turing, A100, or H100 Windows hosts need CUDA speech under `auto`.
+  - Asking the CUDA driver which devices it can use: it is new unsafe code outside the FFI crates. No revisit condition.
+  - whisper's `encoder_begin_callback` as the abort: returning false stops the pass with partial text and success. No revisit condition.
+  - The engine worker's stopping flag as the abort signal: it is set only after the drain wait. No revisit condition.
 - Assumptions, risks, and notes:
   - The hosted Linux CUDA compile is slow. The hosted Windows CUDA compile took 95 minutes before that row moved to the self-hosted runner.
   - At the post-merge release dispatch, a failed build publishes nothing, because publishing waits for every build, and the dispatch is re-run after a fix.
@@ -308,14 +421,19 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - The cause: on Windows the C++ terminate handler is per thread, so the reload finds the handler the previous load left behind.
     - It affects every Windows build, the published CUDA archive included.
     - No product path reaches it. The gateway loads speech once per process, and the test harness gives each test its own thread.
-  - A stop while a CUDA speech load outlasts the shared deadline still abandons the retirement, so that rare stop can still race the CUDA runtime's teardown.
+  - A stop while a CUDA speech load outlasts the shared deadline still abandons the retirement, so that rare stop can still race the CUDA runtime's teardown. A load has no abort, and the decode abort does not cover it.
+  - Before the decode abort, decodes could outlast the deadline too. Of four Linux CUDA stops with six 11-minute requests in flight, one printed `CUDA error: driver shutting down` and one exited 139. Windows exited 0 in three of three, because process exit ends the decode thread before the CUDA runtime unloads.
+  - With the abort, a request whose decode is aborted fails, as admitted requests already do at shutdown. In the long-decode stops, every request still queued at the drain bound got HTTP 500.
   - The published Windows CUDA archive keeps OpenMP. Its decodes run on the GPU, and CI's native job, which loads and frees it test after test, passes.
   - `auto` depends on `nvidia-smi` being on the gateway's PATH. WSL2 keeps it in `/usr/lib/wsl/lib`, which systemd's default service PATH lacks, so a WSL2 service needs `cuda` set, or that directory on its PATH.
-  - A card without native code compiles the PTX once, at first load. That start is slow, and it was not measured.
+  - A card without native code compiles the PTX at its first decode. This was measured on 2026-10-02 with the Linux CUDA package in WSL on an RTX 3090, its sm_86 code relabeled so the GPU had to compile compute_80 PTX.
+    - One native test took 22.8 s with an empty JIT cache, against 1.0 s with native code, and 1.1 s once the 44 MB cache was warm. With the cache disabled, every run took 22.5 s.
+    - The shipped systemd unit's `DynamicUser` probably leaves no writable home for the cache. This was not verified.
+  - On Windows with GPUs hidden (`CUDA_VISIBLE_DEVICES=-1`), the published CUDA build's CPU fallback crashed at a graceful stop after transcriptions in 10 of 10 runs. The gateway built at Step 11 exited 0 in the same five cases, and idle stops and stops with GPUs visible exited 0.
+  - The Linux CUDA archive's `GLIBCXX_3.4.30` comes from `std::condition_variable::wait` in `libggml-cuda.so.0`. Both Linux jobs compile with GCC 11.4, and Ubuntu 22.04's GCC 12 `libstdc++` binds that symbol's newest version at link time.
   - The CUDA 12.8 floor is driver 570, and CUDA's minor-version compatibility from driver 525 cannot compile newer PTX, per NVIDIA's compatibility documentation as read on 2026-09-29. Neither crash was reproduced on a host.
   - The implementation reads the baseline extensions from the pinned ggml CMake rather than assuming a list.
   - Older debt stays recorded and unfixed:
-    - the Windows CUDA build's own driver floor, since that archive's toolkit, possibly CUDA 13 with floor 580, is unverified; the per-row floor then makes it a one-value change;
     - the MSVC runtime that the Windows archives import without bundling it;
     - `speech.gpu` reporting how a build was compiled even when ggml finds no device;
     - the test-only eager gateway constructor that provisions speech before binding.
@@ -419,6 +537,8 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   3. Backend-aware whisper provisioning in `gateway-local` and `gateway-stt`, with its docs, the explicit fixture backend, the host-capability gate, and the markers on the two unpinned rows, Steps 5 to 8. It comes after the setting because it uses the setting's type, and its new rows install only once the post-merge commit pins their archives.
   4. Release pipeline follow-ups in `.github/workflows/whisper-lib.yml`, Steps 9 and 10: the Windows CUDA package's runtime check, and the Windows CPU build without OpenMP. They return to the pipeline after the other components, because the user added them once Steps 1 to 8 were planned.
   5. Speech retirement before exit, Steps 11 and 12: the native whisper suite ends its engines with a joined shutdown, and `gateway`'s `Gateway::serve` retires speech at a graceful stop. It comes after Step 10, because both move the library's unload before the process exits, and the Windows CPU build survives that only without OpenMP.
+  6. Host-requirement gates for `auto` in `gateway-local`, Steps 13 and 14. They come first among the fixes because they close a crash this work introduced, and their tests need no GPU.
+  7. Prompt stops, Steps 15 to 17, after component 6: the boot command's token cancels speech downloads in `gateway-local` and `gateway-stt`, and admission's shutdown aborts running decodes across `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, and `gateway-whisper-ffi`. They follow component 6 because they share none of its code or tests, and they finish the retirement Step 12 began.
 - Pieces:
   - The pipeline's three pieces, Steps 1 to 3, are built one after another, add-only publish first. Each has its own check, and with the publish first no commit pairs the new builds with a publish that replaces archives.
   - The setting, Step 4, is one piece, covered by the config tests.
@@ -432,9 +552,16 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Speech retirement is two pieces, built one after another, because neither uses the other's code and each has its own tests:
     - The native whisper suite's engine shutdown, Step 11, goes first. Its native runs cover it. On the Linux CUDA package they confirm at the engine level that joining the workers before exit removes the CUDA error, which is the mechanism Step 12 reaches through `SpeechService::shutdown`. On the pinned Windows CUDA build, which keeps OpenMP, they test that an in-process unload is safe before Step 12 relies on it.
     - The retirement in `Gateway::serve`, Step 12, is one piece: the change to `serve`, its doc comments, its unit tests, and the one realtime test that serves a single speech service from two servers, which the change would otherwise break.
+  - The gates are two pieces, built one after another:
+    - First come the row data and the pick, Step 13: the Windows floor and native list, which change only `assets.rs` and its selection tests, with their docs.
+    - Then come the host inputs and their readers, Step 14: hidden GPUs and the Linux C++ runtime. They add arguments the first piece's tests would otherwise rewrite twice.
+  - The download cancellation, Step 15, is one piece, one token threaded through two crates. It shares nothing with the decode abort.
+  - The decode abort is two pieces, built one after another, engine side first:
+    - First, Step 16: every decode request carries the epoch's flag, which proves with scripted decoders that the retirement waits on the flag.
+    - Then, Step 17: whisper's `abort_callback` reads the flag, with native tests. This piece uses the first piece's request accessor.
 - Landing:
   - The work happens on branch `whisper-cuda-backend`, fast-forwarded to `master` at `a7e50ec5` before Step 1. `/export-vibe-plan` runs before Step 1.
-  - `/export-vibe-plan` runs again before Step 6, before Step 8, and before Step 10. Each time it rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`, and the rewrite rides in that step's commit. The export before Step 10 carries Steps 10 to 12.
+  - `/export-vibe-plan` runs again before Step 6, before Step 8, before Step 10, and before Step 13. Each time it rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`, and the rewrite rides in that step's commit. The export before Step 10 carries Steps 10 to 12, and the export before Step 13 carries the fixes from the end-to-end testing.
   - Every step reaches `master` in one pull request, #91 on `cppalliance/promptforge`, which merges after review with the two new rows fail-closed.
   - No step depends on the release, because the new rows' zero digests keep them fail-closed.
   - After merge, anyone with write access runs the release and pins both rows in one commit, as the Deferred list sets out. Until then `master` selects an unpinned row where the Functional Specification says, and never a build that can end the gateway.
@@ -449,6 +576,15 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - A linux-aarch64 CUDA build, a Vulkan whisper build, runtime backend loading, llama-server selection, an operator library override, and a config UI control.
   - A future whisper.cpp tag bump. It publishes a new release whole, and the add-only publish does not block it. It also re-reads Step 7's x86 baseline list from the new tag's ggml.
   - The older debt listed under the Decision Record's notes, running whisper out of process, and further changes to `whisper-lib.yml`'s build steps or its CUDA architecture list beyond Steps 2, 3, 9, and 10.
+  - The residuals the fixes leave, which the docs record:
+    - an explicit `cuda` on a Windows host whose GPU CUDA cannot use decodes on the CPU and ends the gateway at a graceful stop;
+    - a stop while a speech load outlasts the deadline still abandons the retirement.
+  - Issues the end-to-end testing found that predate this work, tracked apart:
+    - the gateway log dropping a failed command's cause;
+    - the Windows native fixtures' temporary caches;
+    - the batch route's status for a full worker queue;
+    - the guide's Linux host libraries;
+    - SIGTERM and Ctrl-Break skipping the graceful stop.
 
 ### Step 1: Make the whisper release publish add-only [completed]
 
@@ -673,3 +809,152 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Linux CUDA package, with the change: 10 of 10 stops exited 0 with no `CUDA error`. Five were `POST /shutdown` and five SIGINT, and six came after transcriptions on both models. Both stops on the pinned Linux CPU build, each after a transcription, exited 0.
   - Windows CPU build without OpenMP: the gateway exited 0 after a transcription. The `gateway-stt` native suites passed: 1 test from `--lib` and 2 from `--test it`.
   - Pinned Windows CUDA build: both runs reported `gpu: true` and exited 0 after transcriptions.
+
+### Step 13: Gate Windows `auto` on the CUDA build's driver floor and native GPU code [completed]
+
+- In `crates/gateway/local/src/artifacts/assets.rs`:
+  - The `windows-x86_64-cuda` row's `min_driver_major` becomes `Some(580)`, with a comment naming it the CUDA 13 floor on Windows, as the Linux row's comment names CUDA 12.8's.
+  - `WhisperAsset` gains `native_compute_caps: Option<&'a [(u64, u64)]>`, the GPU compute capabilities the build carries native code for, which only the `auto` pick consults; `None` checks nothing.
+  - The field is `Some(&[(8, 6), (8, 9), (12, 0), (12, 1)])` on `windows-x86_64-cuda` and `None` on every other row, `linux-x86_64-cuda` included.
+  - Its comment names the source, the pinned archive's `ggml-cuda.dll` fatbinary as read on 2026-10-02, whose PTX for compute_75, compute_80, and compute_90 is ISA 9.3 from CUDA 13.3. Like `X86_BASELINE`, the list is tied to `WHISPER_RELEASE`, and a release bump re-reads it from the new archive.
+  - In each row literal the field sits beside `min_driver_major`, ahead of `platform`, because the scratch harness's `patch-assets.py` matches `platform` directly followed by `archive`.
+  - `auto_whisper_backend` takes `Cuda` only when the probe reports a GPU, the driver meets the CUDA row's floor, and, when the row lists native capabilities, every probed GPU's capability is in the list.
+  - A comment there says why every GPU counts: whisper uses CUDA's device 0, whose fastest-first order need not match `nvidia-smi`'s.
+  - The doc comments of `WhisperAsset`, `auto_whisper_backend`, and `whisper_asset` name the native-code requirement. `whisper_asset`'s signature does not change.
+- Docs, including the first residual in the Deferred list:
+  - `guide/src/gateway/05-speech.md`, under "The runtime": the Windows CUDA build needs driver 580 or later and carries native code only for compute capability 8.6, 8.9, 12.0, and 12.1, so `auto` takes the CPU build below that driver, at an unreadable version, or when any GPU has another capability.
+  - The same paragraph gives an explicit `cuda`'s outcomes on Windows, with `auto` or `cpu` as the recovery: a GPU without native code under a driver older than CUDA 13.3's ends the gateway at the first transcription, and where CUDA finds no usable device the build decodes on the CPU and a graceful stop ends the gateway.
+  - It also says that a GPU without native code, such as a Linux GPU at 7.5, 8.0, or 9.0, compiles the build's PTX at its first decode, which took about 20 seconds with an empty driver JIT cache.
+  - `guide/src/gateway/04-local-models.md`, under "The cache directory": a CUDA build takes about 1.2 GB of cache on Windows and 1.7 GB on Linux, counting the downloaded archive the cache keeps.
+  - The `whisper_backend` row of the `[stt]` table in `crates/gateway/app/README.md` and the commented `whisper_backend` lines in `gateway.local.example.toml` state the Windows floor, the native list, and the explicit `cuda` outcomes.
+  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+- The commit also carries the plan's re-export, as the Landing sets out.
+- Tests, in `assets.rs`:
+  - `auto_takes_the_windows_cuda_whisper_build_at_any_driver_version` becomes `auto_takes_the_windows_cuda_whisper_build_from_driver_580`, shaped like the Linux test: with a GPU at 8.6, an unreadable version, 0, or 579 selects `windows-x86_64`, and 580 or 591 selects `windows-x86_64-cuda`.
+  - `auto_takes_the_windows_cpu_whisper_build_for_a_gpu_without_native_code`: at driver 591, a GPU at 7.5, 8.0, 9.0, or 6.1, alone or beside one at 8.6, selects `windows-x86_64`, while each native capability alone, and 8.6 beside 12.0, selects `windows-x86_64-cuda`.
+  - `auto_takes_the_linux_cuda_whisper_build_for_any_gpu_above_its_floor`: at driver 570, a GPU at 7.5 still selects `linux-x86_64-cuda`, because that row lists no native capabilities.
+  - `an_explicit_whisper_backend_ignores_the_probe` gains a probe below the Windows floor and one with a GPU at 7.5, so explicit `cpu` and `cuda` ignore both checks.
+  - `whisper_assets_cover_the_seven_release_builds` asserts each row's `min_driver_major` and `native_compute_caps`.
+- Checks:
+  - `cargo test --locked -p gateway-local --lib artifacts::` passes, with llama-server's selection tests unchanged among them.
+  - The end-to-end checks of Steps 13 to 17 run the scratch harness in `vibe/scratch/run-36900875610/scripts/`, as the Testing Plan sets out, on its WSL clone `~/promptforge-e2e` and its Windows clone `vibe/scratch/pf-e2e`. The coder runs them before the step's commit exists, so each clone moves to the previous step's commit and takes the step's working-tree diff on top.
+  - The harness's `wsl-env.sh` and `win-env.sh` accept only `4b2ab768` today, so each step first names its own commit there. `wsl-prepare.sh` and `win-prepare.sh` then point the clones' two new rows at run 36900875610's archives, served from loopback, and build the gateways.
+  - Windows, `win_gateway.py boots`: on this host, whose two RTX 3090s report 8.6 on driver 591, `auto` still takes the CUDA build, and `cpu` takes the CPU build.
+
+### Step 14: Gate `auto` on hidden GPUs and the Linux C++ runtime
+
+- In `crates/gateway/local/src/artifacts/assets.rs`:
+  - `WhisperAsset` gains `min_glibcxx: Option<&'a str>`, beside `native_compute_caps`: the `libstdc++` symbol version the build needs, which only the `auto` pick consults.
+  - It is `Some("GLIBCXX_3.4.30")` on `linux-x86_64-cuda`, the version `libggml-cuda.so.0` needs for `std::condition_variable::wait`, and `None` elsewhere. Like the native list, it is tied to `WHISPER_RELEASE`.
+  - A new `CudaHost` holds what `auto` reads from the host beside the probe: `visible_devices: Option<String>`, the `CUDA_VISIBLE_DEVICES` value, and `libstdcxx: Option<Vec<u8>>`, the host's `libstdc++.so.6`, `None` when none was read.
+  - `cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool` applies CUDA's rule that only the devices before the first invalid entry are visible: a set value hides every GPU unless its first entry is an index below `gpu_count` or a `GPU-` or `MIG-` identifier.
+  - `libstdcxx_defines(library: &[u8], version: &str) -> bool` finds `version` followed by a NUL in the library's bytes, so a longer version that shares its prefix does not count.
+  - `auto_whisper_backend` also requires that `CUDA_VISIBLE_DEVICES` leaves a probed GPU visible and, when the CUDA row names a `min_glibcxx`, that the host's runtime defines it. No runtime read counts as lacking it.
+  - `whisper_asset(os, arch, backend, gpus, cuda_host: Option<&CudaHost>, x86_extensions)` hands the host answers to the pick.
+  - `whisper_asset_with_probe` gains `cuda_host: impl FnOnce() -> CudaHost`, which runs only for `auto` where both builds exist, and only after the probe reports a GPU.
+- In `crates/gateway/local/src/artifacts.rs`:
+  - A new `host_cuda()` reads `CUDA_VISIBLE_DEVICES` lossily, so a value that is not UTF-8 reads as an invalid entry, and reads the C++ runtime through `host_libstdcxx()`.
+  - A new `host_libstdcxx()`, under `#[cfg(target_os = "linux")]` and `None` elsewhere, reads the first file that exists among `LIBSTDCXX_PATHS`: `/usr/lib/x86_64-linux-gnu/libstdc++.so.6`, `/usr/lib64/libstdc++.so.6`, `/lib/x86_64-linux-gnu/libstdc++.so.6`, `/lib64/libstdc++.so.6`, and `/usr/lib/libstdc++.so.6`. No file found, or a failed read, is `None`.
+  - `ArtifactStore::provision_whisper_library` passes `host_cuda` beside `nvidia_probe`, and its doc names both host reads. llama-server's selection reads neither.
+- Docs, including the hidden-GPU case of the Deferred list's first residual:
+  - `guide/src/gateway/05-speech.md`, under "The runtime": on Linux, `auto` takes the CUDA build only where the host's `libstdc++.so.6` comes from GCC 12 or later and defines `GLIBCXX_3.4.30`, so RHEL 9, its rebuilds, and Amazon Linux 2023 keep the CPU build, and an explicit `cuda` there fails to load.
+  - The same paragraph says that on both platforms a `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, and that an explicit `cuda` on Windows with every GPU hidden decodes on the CPU and ends the gateway at a graceful stop.
+  - The `whisper_backend` row in `crates/gateway/app/README.md` and the commented lines in `gateway.local.example.toml` state both requirements.
+  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+- Tests, in `assets.rs`, where the selection tests move to the new signature with a host runtime that defines `GLIBCXX_3.4.30`:
+  - `cuda_visible_devices_hides_every_gpu_by_cudas_rule`: with two GPUs, unset, `0`, `1,0`, `0,-1`, `GPU-...`, and `MIG-...` leave a GPU visible, and empty, `-1`, `2`, and `none` hide them.
+  - `libstdcxx_defines_matches_only_the_whole_version`: it finds a NUL-terminated `GLIBCXX_3.4.30`, and rejects bytes that hold only `GLIBCXX_3.4.29` or only `GLIBCXX_3.4.300`.
+  - `auto_takes_the_linux_cuda_whisper_build_only_with_glibcxx_3_4_30`: with a GPU on driver 591, a runtime that defines the version selects `linux-x86_64-cuda`, and one that lacks it, or no runtime, selects `linux-x86_64`. Windows ignores the runtime.
+  - `gpus_hidden_from_cuda_select_the_cpu_whisper_build`: on both platforms, a value that hides every GPU selects the CPU row, and one that leaves a GPU visible keeps the CUDA row.
+  - `an_explicit_whisper_backend_ignores_the_probe` gains hidden GPUs and a missing runtime, and `whisper_assets_cover_the_seven_release_builds` asserts each row's `min_glibcxx`.
+  - `auto_probes_where_both_whisper_builds_exist_and_follows_the_answer` and `the_whisper_probe_runs_only_for_auto_where_both_builds_exist` also count the host read: once under `auto` after the probe reports a GPU, and never otherwise.
+- In `crates/gateway/local/src/artifacts/tests.rs`, `provision_whisper_library_reuses_a_verified_install` and `whisper_installs_never_fall_back_to_an_older_abi` move to the new signature.
+- Checks:
+  - `cargo test --locked -p gateway-local --lib artifacts::` passes.
+  - Windows, `win_gateway.py hidden`: under `auto` with `CUDA_VISIBLE_DEVICES=-1` the gateway takes the CPU build, and every stop exits 0, where the published CUDA build's CPU fallback crashed in 10 of 10 runs.
+  - In WSL, `wsl-extra.sh hidden` takes the CPU build the same way, and `wsl-gateway.sh`'s `auto` boots still name `b4938-linux-x86_64-cuda`, which runs the C++ runtime reader against Ubuntu 24.04's `libstdc++.so.6`.
+  - As the last step of its component, it runs the full suite.
+
+### Step 15: Cancel speech downloads with the boot command's token
+
+- In `crates/gateway/local/src/artifacts.rs`:
+  - A new `ArtifactStore::provision_whisper_library_with_cancellation(backend, activity, token: Option<&CancellationToken>)` selects the row as before and passes `token` to `provision_install`.
+  - `provision_whisper_library(backend, activity)` calls it with `None`, as `provision_llama_server_with_progress` calls its cancellable twin.
+  - The twin's doc says a fired token stops the download at its next chunk or the next phase boundary, never inside an extraction or the probe, and returns `LocalError::Cancelled`.
+- In `crates/gateway/stt/api/src/artifacts.rs`:
+  - `prepare(config, progress, cancel: &CancellationToken)` hands the token to `prepare_impl`, whose injected library provision gains an `Option<&CancellationToken>` parameter and is `ArtifactStore::provision_whisper_library_with_cancellation` in production.
+  - `provision_models` gains the token and calls `ensure_model_with_cancellation` for each speech model.
+  - A `LocalError::Cancelled` from either provision becomes `SpeechError::InitialLoadCancelled`, the error `SpeechService::load_initial` already documents for a cancellation before publication.
+- In `crates/gateway/stt/api/src/generation.rs`, `GenerationState::load_initial` passes its `cancel` to `artifacts::prepare`.
+- The boot command does not change. Its token already reaches `load_initial` through `load_speech` in `crates/gateway/app/src/boot_load.rs`, which reports any failure under a fired token as `GatewayError::CommandCancelled`.
+- `SpeechService::load_initial`'s doc, in `crates/gateway/stt/api/src/service.rs`, adds that cancellation stops the whisper library and speech model downloads at their next chunk.
+- Docs:
+  - `guide/src/gateway/05-speech.md`, under "The runtime": a stop during the speech load cancels the whisper library and speech model downloads at their next chunk, the next start resumes them, and an extraction already under way finishes first.
+  - The speech paragraph of `crates/gateway/app/README.md` says the same.
+  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+- Tests:
+  - In `crates/gateway/local/src/artifacts/tests.rs`, `a_cancelled_whisper_provision_downloads_nothing`: with a fired token and an explicit backend, `provision_whisper_library_with_cancellation` returns `LocalError::Cancelled`, and the store holds no download and no install.
+  - In `crates/gateway/stt/api/src/artifacts.rs`, `prepare_hands_the_load_token_to_the_library_provision`: the injected provision receives the load's token, and its `LocalError::Cancelled` reaches the caller as `SpeechError::InitialLoadCancelled`.
+  - In the same file, `a_fired_token_stops_a_speech_model_download`: with the library provision injected, a pinned `https` model source under a fired token fails as `SpeechError::InitialLoadCancelled` without making a request.
+  - `prepare_passes_the_stt_whisper_backend_to_the_library_provision` moves to the new closure.
+- Checks:
+  - `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`, and `cargo test --locked -p gateway --lib boot_load::` pass.
+  - Linux, `wsl-lifecycle2.sh` with `ONLY=download`: the stop during the throttled 743 MB download exits within a second with no `did not stop` or `did not retire` warning, where the end-to-end round's took 10 s and logged both, and the next boot resumes the partial download.
+
+### Step 16: Carry the admission epoch's cancellation flag on every decode request
+
+- In `crates/gateway/stt/engine/src/decoder.rs`:
+  - `DecodeRequest` gains `cancellation: Option<Arc<AtomicBool>>`, set by `#[must_use] pub fn with_cancellation(self, flag: Arc<AtomicBool>) -> Self` and read by `pub fn cancellation(&self) -> Option<&Arc<AtomicBool>>`.
+  - Their docs say the flag reads true once the caller has abandoned the decode, that a decoder may then stop early and fail, and that clones share it.
+- `crates/gateway/stt/engine/src/worker.rs` does not change: the worker hands each request to `Decoder::decode` with its flag untouched.
+- In `crates/gateway/stt/engine/src/test_fixtures/scenarios.rs`, `ScriptedDecoder` gains two controls:
+  - `park_next_until_cancelled(bound: Duration)` makes its next decode poll that request's flag until it reads true or `bound` passes, and then fail;
+  - `observed_cancellation()` reports whether a parked decode saw its flag set.
+- In `crates/gateway/stt/api/src/admission.rs`, `EpochState.cancelled` becomes an `Arc<AtomicBool>`, and `SessionEpoch::cancellation_flag()` returns a clone of it. `cancel` and `is_cancelled` keep their Release and Acquire orderings.
+- In `crates/gateway/stt/api/src/generation-lease.rs`, `GenerationLease::decode`, the one path every batch and Realtime decode takes, attaches the epoch's flag with `with_cancellation` before it hands the request to the runtime.
+- `SpeechService::shutdown`'s doc, in `crates/gateway/stt/api/src/service.rs`, says that closing admission sets the flag every admitted decode carries.
+- Tests:
+  - In `decoder.rs`, `miri_a_cancellation_flag_reaches_every_clone`: a request's clone shares its flag, and a request built without one has none.
+  - In `admission.rs`, `miri_shutdown_cancels_the_epoch_and_stops_admission` also asserts that a flag taken before the shutdown reads false until it and true after.
+  - In `crates/gateway/stt/engine/src/test_fixtures/tests.rs`, `a_decode_parked_until_cancelled_follows_its_request_flag`: the parked decode returns once its request's flag is set, and fails at the bound for a request without one.
+  - In `crates/gateway/stt/api/tests/it/generation.rs`, `shutdown_ends_a_decode_that_watches_its_cancellation_flag`: with a batch decode parked until cancelled under a 10 s bound, `SpeechService::shutdown` on a blocking thread returns within a second, and the decoder saw the flag. Without the flag from `GenerationLease::decode`, the shutdown waits out the park.
+  - In the same file, `batch_decodes_carry_the_epoch_cancellation_flag`: a finished batch decode's captured request carries a flag that reads false, and true after `SpeechService::shutdown_admission`.
+  - In `crates/gateway/stt/api/tests/it/realtime_session.rs`, `realtime_interim_and_final_decodes_carry_a_cancellation_flag`: a scripted session's `run_interim` decode and its committed item's final decode each carry an unset flag.
+- Checks:
+  - `cargo test --locked -p gateway-stt-engine --all-features` and `cargo test --locked -p gateway-stt --all-features` pass.
+  - The runner's drain tests that hold a bare worker job, run with `cargo test --locked -p gateway --lib drain_tests::`, still abandon the retirement at the bound, because a job that runs no decode has no flag to read.
+  - CI's STT gate, `RUSTFLAGS="-D warnings" cargo rustc --locked -p <crate> --lib -- -F unsafe-code`, passes for `gateway-stt-engine` and `gateway-stt`.
+  - CI's Miri jobs run the new `miri_` tests. Their pinned nightly is not installed on this host.
+
+### Step 17: Abort running whisper decodes when admission shuts down
+
+- In `crates/gateway/stt/whisper-ffi/src/raw.rs`, a new `AbortCallback`, `Option<extern "C" fn(*mut c_void) -> bool>`, is `ggml_abort_callback` from the pinned ggml.h, and `FullParams.abort_callback` takes that type in place of `*mut c_void`. A nullable function pointer is pointer-sized, so `pinned_b4938_parameter_layout_matches_the_64_bit_c_abi` still holds at 304 bytes.
+- In `crates/gateway/stt/whisper-ffi/src/params.rs`:
+  - `FullParams` gains `abort_flag: Option<Arc<AtomicBool>>` and `pub fn set_abort_flag(&mut self, flag: Arc<AtomicBool>)`. Its doc says whisper reads the flag after each encoder pass and decoder step, and that a set flag ends the pass with `WhisperError::Inference`.
+  - A new `extern "C" fn abort_requested(data: *mut c_void) -> bool` loads the flag at `data` with Acquire ordering, answers false for a null pointer, and never panics, as `tracing_bridge` in `log.rs` is written. Its one unsafe read carries a `// SAFETY:` line naming the ownership below.
+  - `FullParams::apply` writes `abort_requested` and `Arc::as_ptr` of the flag as its user data when a flag is set, and leaves whisper's null defaults otherwise.
+- In `crates/gateway/stt/whisper-ffi/src/context.rs`, the `// SAFETY:` comment in `WhisperState::full` adds that the abort flag stays owned by `params`, which the call borrows throughout, and its `# Errors` section names the aborted pass.
+- In `crates/gateway/stt/backend-whisper/src/model.rs`:
+  - `WhisperDecoder::decode` passes `request.cancellation()` to `transcribe_blocking`, which hands the flag to `FullParams::set_abort_flag`.
+  - `transcribe_blocking` returns an inference error at once when the flag already reads true, so a decode still queued at the stop runs no encoder pass. whisper first reads the flag after an encoder pass, and on the CPU build one `small.en` pass takes seconds per queued request, enough to outlast the shared deadline.
+  - An aborted pass surfaces through `inference_error` as the existing `TranscribeError::Inference`, and its request fails.
+- In `crates/gateway/app/src/runner.rs`, the shutdown paragraph of `Gateway::serve` adds that closing admission aborts running decodes after their current encoder pass or decoder step.
+- Docs, including the second residual in the Deferred list:
+  - `guide/src/gateway/05-speech.md`, under "The runtime": a graceful stop aborts running transcriptions after their current encoder pass or decoder step, their requests fail, and speech retires within the existing shutdown bounds.
+  - The same paragraph says that a stop while a speech model is still loading can outlast those bounds, and the gateway then exits without retiring speech.
+  - The speech paragraph of `crates/gateway/app/README.md` says the same.
+  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+- Tests:
+  - In `params.rs`, `abort_requested` reads false for null data and for an unset flag, and true once the flag is set. With a flag set, `apply` writes the callback and the flag's address, and without one it leaves both null.
+  - `crates/gateway/stt/backend-whisper/tests/native_whisper.rs` gains `a_decode_ends_when_its_cancellation_flag_is_set`, through an `SttEngine`. It is the native check of the FFI's abort path too, so `gateway-whisper-ffi` gains no native test and no dev-dependency:
+    - a final decode of the clip repeated to several minutes fails with `TranscribeError::Inference` within a second of its flag being set mid-pass;
+    - a decode whose flag is already set fails at once, and the clip with its flag unset transcribes;
+    - like the suite's other tests, it ends its engine with `SttEngine::shutdown()`.
+- Checks:
+  - `cargo test --locked -p gateway-whisper-ffi --lib` and `cargo test --locked -p gateway-stt-backend-whisper --lib` pass, as do CI's STT gates for the two crates: `RUSTFLAGS="-D warnings" cargo check --locked -p gateway-whisper-ffi --lib`, and the `-F unsafe-code` build of `gateway-stt-backend-whisper`.
+  - The ignored native suites `cargo test --locked -p gateway-whisper-ffi --lib -- --ignored --test-threads=1` and `cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1` pass on four builds, with the model and audio in `vibe/scratch/stt-native/`:
+    - run 36900875610's Linux CUDA archive and the pinned Linux CPU build, in WSL;
+    - run 36900875610's Windows CPU archive and the pinned Windows CUDA build, on this Windows host.
+  - Linux, `wsl-longaudio.sh`: ten stops, by `POST /shutdown` and SIGINT, with six 11-minute requests in flight, exit 0 with no `CUDA error` and no `speech did not retire` warning, where the end-to-end round recorded one `CUDA error` and one exit 139 in four such stops.
+  - Windows, `win_gateway.py long` shows the same on the CUDA and CPU builds.
+  - As the final step, it runs the full suite: every exit gate in the Testing Plan, run on this host as its last bullet describes.

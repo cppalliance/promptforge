@@ -31,9 +31,15 @@ vocabulary = ["PromptForge", "WG21", "GGUF"]
 # "auto" (the default) picks CUDA when an NVIDIA GPU is found and CPU
 # otherwise; "cpu" and "cuda" force the build. The Linux CUDA build needs
 # NVIDIA driver 570 or later: below it "auto" picks CPU, while "cuda" is
-# still honored and loading it can end the gateway. Every x86-64 build needs
-# SSE4.2, AVX, AVX2, BMI2, FMA, and F16C; on a CPU without one, speech fails
-# to load and the gateway serves without it.
+# still honored and loading it can end the gateway. The Windows CUDA build
+# needs driver 580 or later and has native code only for compute capability
+# 8.6, 8.9, 12.0, and 12.1: on an older driver, an unreadable version, or any
+# other GPU "auto" picks CPU. There "cuda" is still honored: a GPU without
+# native code under a driver older than CUDA 13.3's ends the gateway at the
+# first transcription, and with no usable CUDA device the build decodes on
+# the CPU and a graceful stop crashes the gateway; "auto" or "cpu" recovers.
+# Every x86-64 build needs SSE4.2, AVX, AVX2, BMI2, FMA, and F16C; on a CPU
+# without one, speech fails to load and the gateway serves without it.
 # whisper_backend = "auto"
 
 # Optional artifact cache root. The default is ~/.promptforge, or

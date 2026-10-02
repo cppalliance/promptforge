@@ -71,12 +71,17 @@ pub(super) struct ServerAsset<'a> {
 /// linux-aarch64 rows are each their platform's one build and carry `None`.
 /// `min_driver_major` is the lowest NVIDIA driver major version the build
 /// runs on, which only the `auto` pick consults; `None` sets no floor.
+/// `native_compute_caps` lists the GPU compute capabilities, as
+/// `(major, minor)`, the build carries native code for, which only the
+/// `auto` pick consults: every probed GPU must be in the list. `None` checks
+/// nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     pub(super) arch: &'a str,
     pub(super) backend: Option<WhisperBackend>,
     pub(super) min_driver_major: Option<u64>,
+    pub(super) native_compute_caps: Option<&'a [(u64, u64)]>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
@@ -91,6 +96,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "windows-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
@@ -104,7 +110,14 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "windows",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cuda),
-        min_driver_major: None,
+        // CUDA 13 runs on Windows driver 580 or later.
+        min_driver_major: Some(580),
+        // The native code in the pinned archive's `ggml-cuda.dll` fatbinary,
+        // as read on 2026-10-02. Its PTX for compute_75, compute_80, and
+        // compute_90 is ISA 9.3 from CUDA 13.3, which an older driver cannot
+        // compile. Like `X86_BASELINE`, the list is tied to `WHISPER_RELEASE`,
+        // and a release bump re-reads it from the new archive.
+        native_compute_caps: Some(&[(8, 6), (8, 9), (12, 0), (12, 1)]),
         platform: "windows-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
@@ -119,6 +132,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "aarch64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "macos-aarch64-metal",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
@@ -133,6 +147,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "macos-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
@@ -147,6 +162,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "linux-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
@@ -165,6 +181,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: Some(WhisperBackend::Cuda),
         // CUDA 12.8 runs on Linux driver 570 or later.
         min_driver_major: Some(570),
+        native_compute_caps: None,
         platform: "linux-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
@@ -179,6 +196,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "aarch64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "linux-aarch64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",
@@ -344,15 +362,25 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 
 /// The whisper `auto` pick on a platform with both builds: an NVIDIA GPU
 /// gets the CUDA build when the platform's CUDA row sets no driver floor or
-/// the driver meets it, and anything else - including a failed probe or an
-/// unreadable driver version under a floor - gets the CPU build.
+/// the driver meets it, and the row lists no native compute capabilities or
+/// every probed GPU's is among them. Anything else - including a failed
+/// probe, an unreadable driver version under a floor, or any GPU without
+/// native code - gets the CPU build.
 fn auto_whisper_backend(os: &str, arch: &str, gpus: Option<&NvidiaProbe>) -> WhisperBackend {
     let Some(probe) = gpus.filter(|probe| !probe.compute_caps.is_empty()) else {
         return WhisperBackend::Cpu;
     };
-    let floor =
-        whisper_row(os, arch, Some(WhisperBackend::Cuda)).and_then(|cuda| cuda.min_driver_major);
-    if floor.is_none_or(|floor| probe.driver_major.is_some_and(|major| major >= floor)) {
+    let cuda = whisper_row(os, arch, Some(WhisperBackend::Cuda));
+    let meets_floor = cuda
+        .and_then(|cuda| cuda.min_driver_major)
+        .is_none_or(|floor| probe.driver_major.is_some_and(|major| major >= floor));
+    // Every GPU counts, not only the first: whisper decodes on CUDA's device
+    // 0, and CUDA orders devices fastest first, which need not match
+    // `nvidia-smi`'s order.
+    let all_native = cuda
+        .and_then(|cuda| cuda.native_compute_caps)
+        .is_none_or(|native| probe.compute_caps.iter().all(|cap| native.contains(cap)));
+    if meets_floor && all_native {
         WhisperBackend::Cuda
     } else {
         WhisperBackend::Cpu
@@ -386,7 +414,10 @@ fn whisper_row(
 /// `backend` (the `[stt] whisper_backend` setting) and `gpus` (what the
 /// NVIDIA probe reported, when a probe was needed and worked) are consulted
 /// only on Windows x86-64 and Linux x86-64, the two platforms with a
-/// choice; every other platform has exactly one row. On x86-64, under every
+/// choice; every other platform has exactly one row. There `auto` takes the
+/// CUDA row only when `gpus` names a GPU, the driver meets the row's
+/// `min_driver_major`, and every GPU's compute capability is in the row's
+/// `native_compute_caps` when it lists them. On x86-64, under every
 /// setting, the selected row needs every [`X86_BASELINE`] extension in
 /// `x86_extensions`, the ones the host CPU reports.
 ///
@@ -633,8 +664,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_takes_the_windows_cuda_whisper_build_at_any_driver_version() {
-        for driver_major in [None, Some(0), Some(569), Some(570), Some(591)] {
+    fn auto_takes_the_windows_cuda_whisper_build_from_driver_580() {
+        for (driver_major, platform) in [
+            (None, "windows-x86_64"),
+            (Some(0), "windows-x86_64"),
+            (Some(579), "windows-x86_64"),
+            (Some(580), "windows-x86_64-cuda"),
+            (Some(591), "windows-x86_64-cuda"),
+        ] {
             let probe = nvidia(driver_major);
             let asset = whisper_asset(
                 "windows",
@@ -644,23 +681,74 @@ mod tests {
                 X86_BASELINE,
             )
             .expect("auto windows whisper asset");
+            assert_eq!(asset.platform, platform, "driver {driver_major:?}");
+        }
+    }
+
+    /// The `auto` pick on `os` x86-64 for GPUs at `compute_caps` on driver
+    /// `driver_major`.
+    fn auto_platform(os: &str, compute_caps: &[(u64, u64)], driver_major: u64) -> &'static str {
+        let probe = NvidiaProbe {
+            compute_caps: compute_caps.to_vec(),
+            driver_major: Some(driver_major),
+        };
+        whisper_asset(
+            os,
+            "x86_64",
+            WhisperBackend::Auto,
+            Some(&probe),
+            X86_BASELINE,
+        )
+        .expect("auto whisper asset")
+        .platform
+    }
+
+    #[test]
+    fn auto_takes_the_windows_cpu_whisper_build_for_a_gpu_without_native_code() {
+        for foreign in [(7, 5), (8, 0), (9, 0), (6, 1)] {
+            for caps in [vec![foreign], vec![foreign, (8, 6)], vec![(8, 6), foreign]] {
+                assert_eq!(
+                    auto_platform("windows", &caps, 591),
+                    "windows-x86_64",
+                    "{caps:?}"
+                );
+            }
+        }
+        for caps in [
+            vec![(8, 6)],
+            vec![(8, 9)],
+            vec![(12, 0)],
+            vec![(12, 1)],
+            vec![(8, 6), (12, 0)],
+        ] {
             assert_eq!(
-                asset.platform, "windows-x86_64-cuda",
-                "driver {driver_major:?}"
+                auto_platform("windows", &caps, 591),
+                "windows-x86_64-cuda",
+                "{caps:?}"
             );
         }
     }
 
     #[test]
+    fn auto_takes_the_linux_cuda_whisper_build_for_any_gpu_above_its_floor() {
+        assert_eq!(auto_platform("linux", &[(7, 5)], 570), "linux-x86_64-cuda");
+    }
+
+    #[test]
     fn an_explicit_whisper_backend_ignores_the_probe() {
-        // The drivers below the Linux CUDA floor are included: an explicit
-        // `cuda` is honored there.
+        // The drivers below each CUDA floor and a GPU without native code in
+        // the Windows build are included: an explicit `cuda` is honored there.
         let probes = [
             None,
             Some(no_gpu()),
             Some(rtx_3090s()),
             Some(nvidia(Some(569))),
+            Some(nvidia(Some(579))),
             Some(nvidia(None)),
+            Some(NvidiaProbe {
+                compute_caps: vec![(7, 5)],
+                driver_major: Some(591),
+            }),
         ];
         for os in ["windows", "linux"] {
             for gpus in &probes {
@@ -861,17 +949,32 @@ mod tests {
     fn whisper_assets_cover_the_seven_release_builds() {
         use WhisperBackend::{Cpu, Cuda};
 
+        const WINDOWS_CUDA_NATIVE: &[(u64, u64)] = &[(8, 6), (8, 9), (12, 0), (12, 1)];
         let builds = [
-            ("windows", "x86_64", Some(Cpu), "windows-x86_64"),
-            ("windows", "x86_64", Some(Cuda), "windows-x86_64-cuda"),
-            ("macos", "aarch64", None, "macos-aarch64-metal"),
-            ("macos", "x86_64", None, "macos-x86_64"),
-            ("linux", "x86_64", Some(Cpu), "linux-x86_64"),
-            ("linux", "x86_64", Some(Cuda), "linux-x86_64-cuda"),
-            ("linux", "aarch64", None, "linux-aarch64"),
+            ("windows", "x86_64", Some(Cpu), "windows-x86_64", None, None),
+            (
+                "windows",
+                "x86_64",
+                Some(Cuda),
+                "windows-x86_64-cuda",
+                Some(580),
+                Some(WINDOWS_CUDA_NATIVE),
+            ),
+            ("macos", "aarch64", None, "macos-aarch64-metal", None, None),
+            ("macos", "x86_64", None, "macos-x86_64", None, None),
+            ("linux", "x86_64", Some(Cpu), "linux-x86_64", None, None),
+            (
+                "linux",
+                "x86_64",
+                Some(Cuda),
+                "linux-x86_64-cuda",
+                Some(570),
+                None,
+            ),
+            ("linux", "aarch64", None, "linux-aarch64", None, None),
         ];
         assert_eq!(WHISPER_ASSETS.len(), builds.len(), "one row per build");
-        for (os, arch, backend, platform) in builds {
+        for (os, arch, backend, platform, min_driver_major, native_compute_caps) in builds {
             let library = match os {
                 "windows" => "whisper.dll",
                 "macos" => "libwhisper.dylib",
@@ -881,6 +984,8 @@ mod tests {
                 .expect("supported whisper build");
             assert_eq!(asset.platform, platform);
             assert_eq!(asset.backend, backend, "{platform}");
+            assert_eq!(asset.min_driver_major, min_driver_major, "{platform}");
+            assert_eq!(asset.native_compute_caps, native_compute_caps, "{platform}");
             assert_eq!(asset.library_name, library, "{platform}");
             assert_eq!(
                 asset.archive.archive_name,

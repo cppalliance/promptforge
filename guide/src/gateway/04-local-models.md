@@ -31,7 +31,7 @@ Set `[local].cache_dir` for GGUF files and the pinned llama-server install:
 cache_dir = "~/.promptforge"
 ````
 
-The default is `~/.promptforge`, or `%USERPROFILE%\.promptforge` on Windows, where the location inherits the per-user ACL. Models land in `<cache_dir>/models`, keyed by a hash of the full source URL, so two distinct URLs that share a filename never collide. The llama.cpp runtime installs in `<cache_dir>/llama.cpp`. The whisper.cpp speech runtime installs in `<cache_dir>/whisper.cpp`, with one directory per pinned build, such as `b4938-windows-x86_64` or `b4938-linux-x86_64-cuda`.
+The default is `~/.promptforge`, or `%USERPROFILE%\.promptforge` on Windows, where the location inherits the per-user ACL. Models land in `<cache_dir>/models`, keyed by a hash of the full source URL, so two distinct URLs that share a filename never collide. The llama.cpp runtime installs in `<cache_dir>/llama.cpp`. The whisper.cpp speech runtime installs in `<cache_dir>/whisper.cpp`, with one directory per pinned build, such as `b4938-windows-x86_64` or `b4938-linux-x86_64-cuda`. A CUDA build takes about 1.2 GB of cache on Windows and 1.7 GB on Linux, counting the downloaded archive the cache keeps.
 
 On Windows x86-64 you can pick the llama-server build with `[local].llama_backend`: `auto`, `cuda-blackwell`, `cuda`, or `vulkan`. The `auto` setting picks from the host's GPUs. You can also force an explicit llama-server executable with `[local].llama_server_path`; it wins over the `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed download.
 
