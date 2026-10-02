@@ -26,7 +26,7 @@ use crate::error::LocalError;
 #[path = "install-machine.rs"]
 mod machine;
 
-use machine::{host_x86_extensions, nvidia_probe};
+use machine::{host_cuda, host_x86_extensions, nvidia_probe};
 
 /// Validates an operator-supplied `llama-server` path (the config key or
 /// the environment variable) and returns it as the provisioned server. A
@@ -110,9 +110,11 @@ impl ArtifactStore {
     ///
     /// `backend` (the `[stt] whisper_backend` setting) chooses between the
     /// CPU and CUDA builds on Windows x86-64 and Linux x86-64, where `auto`
-    /// probes the host's NVIDIA GPUs and driver version; every other
-    /// platform has one build. On x86-64 the host CPU must report every
-    /// extension the builds execute, under every setting.
+    /// probes the host's NVIDIA GPUs and driver version and, once the probe
+    /// reports a GPU, reads `CUDA_VISIBLE_DEVICES` and, on Linux, the host's
+    /// `libstdc++.so.6`; every other platform has one build. On x86-64 the
+    /// host CPU must report every extension the builds execute, under every
+    /// setting.
     /// The archive is downloaded, digest-verified, and extracted under the
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
@@ -132,6 +134,7 @@ impl ArtifactStore {
             std::env::consts::ARCH,
             backend,
             nvidia_probe,
+            host_cuda,
             &host_x86_extensions(),
         )?;
         let archives = [asset.archive];
