@@ -3431,13 +3431,13 @@ Topic: lighthouses
 
 The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
 
-Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
+Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. The capability reads it as the service `promptforge/input-broker`. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
 
-A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice, which names the missing service by its id:
 
 ````text
 the environment cannot satisfy this prompt:
-- promptforge/user-input needs an input broker, and this host provides none
+- promptforge/user-input needs promptforge/input-broker, and this host provides none
 ````
 
 An entry with `optional: true` always runs. On a Host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:
@@ -7706,7 +7706,7 @@ Tools let a prompt reach past the model's own text: in the middle of a conversat
 
 ## Tools at a glance
 
-Every tool comes from the Harness. The Harness registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
+Every tool comes from the Harness. The Host registers capabilities with the Harness, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
 
 ````markdown
 ---
@@ -7812,7 +7812,7 @@ The map form has three keys, and plain and map entries mix freely in one list:
 
 With `optional: true`, a capability the Harness lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a Harness without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
 
-`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
+`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and the services the Host provides, each named by an id such as `promptforge/input-broker`, the input broker that waits for the operator's next message on a Host with someone to ask. No shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
 
 Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
 
@@ -8552,14 +8552,16 @@ return msgs[#msgs].content
 
 The search tool takes a search query and returns a list of search results. `tools.add({"search", "fetch"})` puts both aliases in scope at once, and the prose tells the model to search first and then fetch the best results.
 
-Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. Every search goes through the Host's PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server. The Host provides the gateway address and token, the Harness passes them to the capability when it registers it, and the prompt only declares the capability id. The Harness provides `promptforge/web` as a built-in capability when the Host configures it with a PromptForge gateway connection.
+Neither tool takes a credential argument, and the prompt never supplies an API key, a gateway address, or a token. The Host registers `promptforge/web` and provides the search provider every search goes through, and the prompt only declares the capability id. Workshop's provider searches through its PromptForge gateway, so the prompt never touches a search provider credential and the provider's key never leaves the server.
 
-When the Harness cannot supply `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
+When the Host has not registered `promptforge/web`, prepare refuses the run before any section runs ([capability activation](04-how-a-prompt-runs.md#capability-activation)). The run error kind is `RequirementsUnmet` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the requirements notice reads:
 
 ````text
 the environment cannot satisfy this prompt:
 - missing required capability: promptforge/web
 ````
+
+When the Host registers the capability but provides no search provider, the notice names the missing service instead, as `- promptforge/web needs promptforge/search-provider, and this host provides none`.
 
 ## Calling the fetch tool
 
@@ -8938,13 +8940,13 @@ return tools.call('search', { query = 'rust async runtime' })
 ```
 ````
 
-`tools.call` returns the search result as text wrapped in the untrusted envelope, not as a Lua table. Inside the envelope is the gateway's JSON text, returned unchanged:
+`tools.call` returns the search result as text wrapped in the untrusted envelope, not as a Lua table. Inside the envelope is compact JSON text holding the query the search ran and its results:
 
 ````text
-{"results": [{"title": "T", "url": "https://e.com", "description": "D"}]}
+{"query":"rust async runtime","results":[{"title":"T","url":"https://e.com","description":"D"}]}
 ````
 
-A successful search is an object with a `results` array whose rows each carry a non-empty `url` plus fields such as `title` and `description`, and every field the gateway sends is kept. The model sends the same search as `{"query": "rust async runtime"}` and receives the results the same way, as untrusted text inside the envelope.
+A successful search is an object with the `query` string and a `results` array whose rows each carry a non-empty `url`, a `title`, and a `description`, in that order. A row also carries `age`, `site_name`, and `extra_snippets` when the search provider reports them, and leaves each out when it does not. No other field reaches the prompt. The model sends the same search as `{"query": "rust async runtime"}` and receives the results the same way, as untrusted text inside the envelope.
 
 `query` is a string of 1 to 400 characters, counted as characters rather than bytes, with at least one character that is not whitespace. A blank query fails with `web_search: query must not be empty`, a query over 400 characters with `web_search: query exceeds 400 characters`, and a call with no `query` with `web_search: invalid arguments`; all three carry tool error kind `InvalidArguments`.
 
@@ -9008,7 +9010,9 @@ tool call failure: web_search: request failed
 
 Inside `models.loop`, the failure still reaches the model, as the result text of its tool call inside the untrusted envelope, and the run goes on.
 
-Each search call finishes or fails within a fixed 30-second request deadline that a prompt cannot change, so a stalled gateway fails the call instead of hanging the run. Network failures carry tool error kind `Transport`:
+The search tool sets no deadline of its own: the search provider the Host supplies owns the transport. A provider's failure reaches the prompt as `web_search: {message}`, with the provider's own message and tool error kind `Transport` or `Backend`. Whatever the provider, the tool checks every result row it returns: a row whose `url` is empty or only whitespace fails the search with tool error kind `Backend` and a message naming the zero-based row, `web_search: malformed search response: result {index} has an empty url`, such as `result 0 has an empty url`.
+
+The network and response failures below are those of the Gateway provider that Workshop supplies, which sends each search to its PromptForge gateway. Under it, each search call finishes or fails within a fixed 30-second request deadline that a prompt cannot change, so a stalled gateway fails the call instead of hanging the run. Network failures carry tool error kind `Transport`:
 
 - A refused or failed connection, or the deadline passing while the request is sent, gives `web_search: request failed`.
 - A failed read of the response body, including the deadline passing mid-read, gives `web_search: reading response failed`.
@@ -9018,7 +9022,6 @@ Problems with the gateway's response carry tool error kind `Backend`:
 - A successful response larger than 256 KiB (262,144 bytes) is rejected whole with `web_search: response body exceeded 262144 bytes` instead of being silently cut. The size is checked before the JSON shape.
 - A successful response that is not valid UTF-8 fails with `web_search: response body was not valid UTF-8`.
 - A response that is not JSON, has no `results` array, or has a row without a string `url` fails with `web_search: malformed search response` instead of handing the model a wrong-shaped body. Fields the tool does not check are ignored.
-- A row whose `url` is empty or only whitespace fails the search with a message naming the zero-based row, `web_search: malformed search response: result {index} has an empty url`, such as `result 0 has an empty url`.
 - A gateway error status, meaning any status outside the 2xx range, fails with `web_search: backend returned {code}: {body}`, naming the HTTP status code and the gateway's error body; an empty body shows as `(empty body)`.
 - When the gateway sends an error status but the connection drops while its body is being read, the call fails with the separate message `web_search: backend returned {code}, and its error body could not be read`, such as `web_search: backend returned 500, and its error body could not be read`.
 
@@ -9031,7 +9034,7 @@ web_search: backend returned 503: (empty body)
 
 ### Every search failure message
 
-Every one of these fails the call. The tool error kind is the search tool's own class for the failure, and a script sees each of them as an error value of kind `tool`.
+Every one of these fails the call. The tool error kind is the search tool's own class for the failure, and a script sees each of them as an error value of kind `tool`. The `InvalidArguments` rows and the empty-`url` row hold for any search provider; the other `Transport` and `Backend` rows are the Gateway provider's messages.
 
 | Message | Tool error kind | When |
 |---|---|---|

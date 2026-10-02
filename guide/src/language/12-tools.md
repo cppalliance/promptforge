@@ -4,7 +4,7 @@ Tools let a prompt reach past the model's own text: in the middle of a conversat
 
 ## Tools at a glance
 
-Every tool comes from the Harness. The Harness registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
+Every tool comes from the Harness. The Host registers capabilities with the Harness, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
 
 ````markdown
 ---
@@ -110,7 +110,7 @@ The map form has three keys, and plain and map entries mix freely in one list:
 
 With `optional: true`, a capability the Harness lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a Harness without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
 
-`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
+`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and the services the Host provides, each named by an id such as `promptforge/input-broker`, the input broker that waits for the operator's next message on a Host with someone to ask. No shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
 
 Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
 

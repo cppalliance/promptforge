@@ -724,13 +724,13 @@ Topic: lighthouses
 
 The `input` table exists only in a prompt that declares `promptforge/user-input` ([Declaring capabilities](12-tools.md#declaring-capabilities)). Without the declaration there is no `input` global, and calling `input.ask()` fails with Lua's own error `attempt to index a nil value (global 'input')`.
 
-Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
+Asking needs an input broker: the part of the Host that carries a question to a person and brings the reply back. The capability reads it as the service `promptforge/input-broker`. A chat window has one. A batch or evaluation Host, with nobody to ask, has none. How the prompt declares the capability decides what happens on a Host without one.
 
-A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice:
+A plain entry, as in the prompt above, declares the capability required. On a Host with no input broker, prepare refuses the run before it starts, with run error kind `RequirementsUnmet` ([When a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)) and this requirements notice, which names the missing service by its id:
 
 ````text
 the environment cannot satisfy this prompt:
-- promptforge/user-input needs an input broker, and this host provides none
+- promptforge/user-input needs promptforge/input-broker, and this host provides none
 ````
 
 An entry with `optional: true` always runs. On a Host with no input broker the prompt still gets `input`, and each ask answers with a fixed sentence instead of the operator's text:

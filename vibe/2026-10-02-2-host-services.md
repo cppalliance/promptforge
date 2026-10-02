@@ -577,7 +577,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-6>
 
-### Step 6: Docs and exit criteria
+### Step 6: Docs and exit criteria [completed]
 
 - Component: Docs and exit criteria
 - Depends on: step 5.

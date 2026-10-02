@@ -16,7 +16,11 @@ The PromptForge API: the one promptforge crate outside crates may name. A facade
 
 ## harness-gateway-client
 
-The standard way a Host talks to the PromptForge Gateway: `GatewayClient`, which sends a `Chat` effect's round over HTTP and streams the reply back, and `fetch_model_catalog`. Under them sits the OpenAI chat-completions wire code that turns a `Chat` effect into the one request body every round sends, reads the streamed reply over a caller's `ChunkSource` into a `Completion` under the byte cap and the `[DONE]` rule, and classifies a failed response into a `CompletionError`. The wire code opens no connection and reads no clock, so another broker can reuse it. A root Harness crate beside `harness`; like every Harness crate it depends only on `promptforge` among the workspace crates.
+The standard way a Host talks to the PromptForge Gateway: `GatewayClient`, which sends a `Chat` effect's round over HTTP and streams the reply back, `GatewaySearch`, which runs one web search through the Gateway's search relay under a 30-second deadline, and `fetch_model_catalog`. Under them sits the OpenAI chat-completions wire code that turns a `Chat` effect into the one request body every round sends, reads the streamed reply over a caller's `ChunkSource` into a `Completion` under the byte cap and the `[DONE]` rule, and classifies a failed response into a `CompletionError`. The wire code opens no connection and reads no clock, so another broker can reuse it. A root Harness crate beside `harness`; like every Harness crate it depends only on `promptforge` among the workspace crates.
+
+## harness-web
+
+The `promptforge/web` capability a Host registers: `Web`, which contributes the fetch tool and the search tool as one pair. The fetch tool is the SSRF boundary between a model-supplied URL and the network, and every fetch runs on the tokio runtime handle the Host provides under `TOKIO_RUNTIME`. The search tool validates the model's arguments and runs the search through the `SearchProvider` the Host provides under `SEARCH_PROVIDER`; Workshop's provider searches through `GatewaySearch`. A root Harness crate beside `harness`; it depends on `harness` and `promptforge` among the workspace crates, and no Harness crate depends on it.
 
 ## shared-error-source
 

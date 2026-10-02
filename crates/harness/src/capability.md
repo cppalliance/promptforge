@@ -4,7 +4,7 @@ You need this when an agent lists a capability under `capabilities:` in its fron
 
 # Where this fits
 
-[The crate overview](crate) builds `desk`, a Host that runs the built-in `chat` agent. A *capability* is a named set of tools and Lua that the Harness adds to a run when the agent declares it, such as `promptforge/user-input`, which gives the agent `input.ask()`. Your program registers each one it offers in a [`CapabilityRegistry`] and hands the registry to [`Harness::new`](crate::Harness::new). Every run of every session resolves its declarations against that registry. The Harness adds one capability of its own: when your registry holds no `promptforge/web`, each gateway you push builds the Harness's web capability, the fetch and search tools `chat` declares.
+[The crate overview](crate) builds `desk`, a Host that runs the built-in `chat` agent. A *capability* is a named set of tools and Lua that the Harness adds to a run when the agent declares it, such as `promptforge/user-input`, which gives the agent `input.ask()`. Your program registers each one it offers in a [`CapabilityRegistry`] and hands the registry to [`Harness::new`](crate::Harness::new). Every run of every session resolves its declarations against that registry, and the Harness adds no capability of its own. `promptforge/web`, the fetch and search tools `chat` declares, is the `harness_web::Web` capability of the `harness-web` crate, which your program registers like any other.
 
 Some capabilities need something only your program has, such as a client, a setting, or a runtime handle. Each such thing is a *service*: an object your program puts in a [`HostServices`] map under a named id, beside the registry. A capability names the services it needs, and reads them when a run activates it.
 
@@ -89,7 +89,7 @@ What reaches a run depends on how the agent declares the capability:
 
 Each refusal fails the run as it prepares, not the launch: [`Harness::launch`](crate::Harness::launch) returns the session, and [`Session::subscribe_errors`](crate::Session::subscribe_errors) reports [`FailureKind::RunFailed`](crate::FailureKind::RunFailed) as the session closes.
 
-You might expect the Harness to bring the capabilities it ships, the way a framework turns on its defaults. Instead, it adds only its web, and only when your registry holds no `promptforge/web`: even `promptforge/user-input` reaches an agent only when your program registers [`UserInput`]. Your program decides what every agent may do, and a `promptforge/web` you register replaces the Harness's.
+You might expect the Harness to bring the capabilities PromptForge ships, the way a framework turns on its defaults. Instead, it adds none: `promptforge/user-input` reaches an agent only when your program registers [`UserInput`], and `promptforge/web` only when it registers `harness_web::Web` and provides the search provider and tokio runtime handle that crate's `SEARCH_PROVIDER` and `TOKIO_RUNTIME` keys name. Your program decides what every agent may do. A `desk` that registers only `UserInput`, as the example above does, has every `chat` run refused as it prepares, because `chat` requires `promptforge/web`.
 
 Register what your agents declare, provide what those capabilities need, and hand both to `Harness::new`. [Where to go next](crate#where-to-go-next) lists the other pages.
 
@@ -118,7 +118,7 @@ Register what your agents declare, provide what those capabilities need, and han
 
 ## CapabilityRegistry
 
-[`CapabilityRegistry`] holds the capabilities your program offers, by id. Pass it to [`Harness::new`](crate::Harness::new); an empty one is a Harness whose agents may declare no required capability except `promptforge/web`, which each gateway you push builds while your registry holds none.
+[`CapabilityRegistry`] holds the capabilities your program offers, by id. Pass it to [`Harness::new`](crate::Harness::new); an empty one is a Harness whose agents may declare no required capability.
 
 - [`CapabilityRegistry::register`]: refuses a repeated id, or a punctuation twin of a registered one, with a [`RegistryError`].
 - [`CapabilityRegistry::get`]: the capability under an id.
