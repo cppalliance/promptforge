@@ -194,7 +194,7 @@ fn a_re_export_rooted_outside_the_facade_dependencies_is_rejected() {
         ),
         ("pub use std::fmt::Debug;", 1),
         ("pub use ::serde::Serialize;", 1),
-        ("pub use promptforge_lua::StoreOp;", 1),
+        ("pub use promptforge_lua::VfsOp;", 1),
     ] {
         assert_one(text, line, RULE);
     }

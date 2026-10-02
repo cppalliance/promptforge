@@ -30,7 +30,7 @@ use crate::model::{Completion, CompletionError, CompletionResult, Message, ToolS
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
 use promptforge_vfs::{Access, VfsError};
 
-use crate::execute::protocol::{StoreOp, StoreOutcome};
+use crate::execute::protocol::{VfsOp, VfsOutcome};
 
 /// Run-wide handle of one in-flight effect: an opaque correlation key
 /// between an issued [`Effect`] and its [`EffectAnswer`]. Allocated from a
@@ -93,20 +93,22 @@ pub enum Effect {
         /// call.
         origin: ToolCallOrigin,
     },
-    /// One store operation under the chain's store view: an ordinary
-    /// access the Engine derived from the chain's capability at dispatch,
-    /// rooted at the handle's declared store. The Harness, performing the
-    /// effect, uses it exactly as given and within the scope it carries.
-    /// When it drops never affects correctness:
-    /// claims follow happens-before within the run's scope, which the
-    /// run ends at `Done` or when it is dropped, after which the view
-    /// refuses every operation.
-    Store {
+    /// One operation on the run's store view - one of the eight `store.*`
+    /// calls a prompt makes - under an ordinary access the Engine derived
+    /// from the chain's capability at dispatch, rooted at the handle's
+    /// declared store. Other code that touches the VFS, such as a tool or
+    /// the Host reading files, does not appear as this effect. The
+    /// Harness, performing the effect, uses the access exactly as given
+    /// and within the scope it carries. When it drops never affects
+    /// correctness: claims follow happens-before within the run's scope,
+    /// which the run ends at `Done` or when it is dropped, after which the
+    /// view refuses every operation.
+    Vfs {
         /// The chain's store view: the chain's identity over the store
         /// root alone.
         access: Arc<Access>,
         /// The validated operation.
-        op: StoreOp,
+        op: VfsOp,
     },
     /// One sleep of `seconds`: the internal timeout behind a timed wait.
     Timer {
@@ -160,7 +162,7 @@ impl Effect {
                 args: args.clone(),
                 origin: origin.clone(),
             },
-            Effect::Store { op, .. } => EffectRecord::Store { op: op.clone() },
+            Effect::Vfs { op, .. } => EffectRecord::Vfs { op: op.clone() },
             Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
         }
     }
@@ -204,10 +206,10 @@ pub enum EffectRecord {
         /// call.
         origin: ToolCallOrigin,
     },
-    /// One store operation.
-    Store {
+    /// One operation on the run's store view.
+    Vfs {
         /// The validated operation.
-        op: StoreOp,
+        op: VfsOp,
     },
     /// One sleep.
     Timer {
@@ -253,9 +255,9 @@ pub enum EffectAnswer {
     /// The tool's own output or its own failure, before the Engine's
     /// trust and count rules apply.
     ToolCall(std::result::Result<ToolOutput, ToolError>),
-    /// The store operation's outcome or the store's own structured
-    /// failure.
-    Store(std::result::Result<StoreOutcome, VfsError>),
+    /// The outcome of the operation on the run's store view, or the
+    /// store's own structured failure.
+    Vfs(std::result::Result<VfsOutcome, VfsError>),
     /// The timer fired.
     Timer,
     /// The Harness dropped the effect without performing it (a cancelled
@@ -284,7 +286,7 @@ impl EffectAnswer {
                 }),
                 Err(error) => Err(error.to_string()),
             }),
-            EffectAnswer::Store(result) => AnswerRecord::Store(match result {
+            EffectAnswer::Vfs(result) => AnswerRecord::Vfs(match result {
                 Ok(outcome) => Ok(outcome.clone()),
                 Err(error) => Err(error.to_string()),
             }),
@@ -303,9 +305,10 @@ pub enum AnswerRecord {
     Chat(std::result::Result<ChatAnswerRecord, String>),
     /// The tool call's outcome.
     ToolCall(std::result::Result<ToolAnswerRecord, String>),
-    /// The store operation's outcome, the [`StoreOutcome`] itself as the
-    /// success payload, or its failure's display text.
-    Store(std::result::Result<StoreOutcome, String>),
+    /// The outcome of the operation on the run's store view, the
+    /// [`VfsOutcome`] itself as the success payload, or its failure's
+    /// display text.
+    Vfs(std::result::Result<VfsOutcome, String>),
     /// The timer fired.
     Timer,
     /// The Harness dropped the effect without performing it.

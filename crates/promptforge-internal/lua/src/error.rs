@@ -207,7 +207,7 @@ impl Error {
 
     /// Wraps a store operation's failure as [`Error::Store`], rendering
     /// the model-facing message with the operation for its wording.
-    pub(crate) fn store(op: &crate::protocol::StoreOp, source: promptforge_vfs::VfsError) -> Error {
+    pub(crate) fn store(op: &crate::protocol::VfsOp, source: promptforge_vfs::VfsError) -> Error {
         Error::Store {
             message: crate::engine_globals::store_error_message(op, &source),
             source,

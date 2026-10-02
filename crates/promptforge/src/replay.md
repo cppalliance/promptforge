@@ -23,7 +23,7 @@ use promptforge::replay::Flags;
 # use std::sync::Arc;
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
 #     "---\n",
@@ -46,7 +46,7 @@ use promptforge::replay::Flags;
 #             Step::Pending { effects, .. } => {
 #                 for (id, _provenance, effect) in effects {
 #                     let answer = match effect {
-#                         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#                         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #                         _ => EffectAnswer::Dropped,
 #                     };
 #                     run.resume(id, answer);

@@ -368,7 +368,7 @@ async fn stage_declared_input(
     })
     .await
     .unwrap_or_else(|join| {
-        Err(InputFileError::Store {
+        Err(InputFileError::Vfs {
             path: declared.unwrap_or_default(),
             source: VfsError::Backend {
                 message: format!("the staging task failed: {join}"),

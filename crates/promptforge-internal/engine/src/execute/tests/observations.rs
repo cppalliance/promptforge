@@ -54,7 +54,7 @@ fn event_trace(event: &Event) -> (String, String) {
 }
 
 /// An observer detail in the serialized `kind` spelling:
-/// `Store read_numbered succeeded` is `store_read_numbered_succeeded`.
+/// `Vfs read_numbered succeeded` is `vfs_read_numbered_succeeded`.
 fn observer_kind(detail: &str) -> String {
     detail.to_ascii_lowercase().replace(' ', "_")
 }
@@ -420,11 +420,11 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         detail::RUN_STARTED,
         detail::SECTION_STARTED,
         detail::LUA_CHUNK_STARTED,
-        detail::STORE_WRITE_SUCCEEDED,
+        detail::VFS_WRITE_SUCCEEDED,
         detail::MODEL_TURN_COMPLETED,
         detail::TOOL_CALL_SUCCEEDED,
         detail::LUA_CHUNK_STARTED,
-        detail::STORE_APPEND_SUCCEEDED,
+        detail::VFS_APPEND_SUCCEEDED,
         detail::RUN_SUCCEEDED,
     ] {
         assert!(

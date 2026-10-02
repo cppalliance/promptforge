@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::perform_store_op;
+use promptforge::vfs::perform_vfs_op;
 use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 
 # let source = concat!(
@@ -82,7 +82,7 @@ let mut run = Run::new(prompt, "", ctx);
 // 3. Answer each store effect from the run's in-memory store.
 fn answer(effect: Effect) -> EffectAnswer {
     match effect {
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         _ => EffectAnswer::Dropped,
     }
 }
@@ -106,7 +106,7 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
 2. Step 2 builds the context and then the run.
    - [`RunContext::new`] takes the run's name, which the run stamps on every event, then the seed and the start time. The fixed seed `7` and [`Timestamp::UNIX_EPOCH`](timestamp::Timestamp::UNIX_EPOCH) make this test repeat exactly. A live program passes a seed from a secure random source and the current time instead, because a secret seed keeps the wrapping around [untrusted output](tools) unguessable.
    - [`Run::new`] takes the prompt in an [`Arc`](std::sync::Arc), the argument string that reaches Lua as `args`, here empty, and the context. Creating a run cannot fail.
-3. `answer` performs each [`Effect::Store`](effect::Effect::Store) with [`perform_store_op`](vfs::perform_store_op) against the context's default in-memory store, and drops any other kind. Your program, not the run, does the store work. The greeter issues only store effects, so the last arm never runs here. A Harness answers every kind of effect its prompts use, and keeps [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped) for work it gives up on. [Stop a run](#stop-a-run) shows what a drop does.
+3. `answer` performs each [`Effect::Vfs`](effect::Effect::Vfs) with [`perform_vfs_op`](vfs::perform_vfs_op) against the context's default in-memory store, and drops any other kind. Your program, not the run, does the store work. The greeter issues only store effects, so the last arm never runs here. A Harness answers every kind of effect its prompts use, and keeps [`EffectAnswer::Dropped`](effect::EffectAnswer::Dropped) for work it gives up on. [Stop a run](#stop-a-run) shows what a drop does.
 4. The loop calls `step`, hands each answer to [`Run::resume`] under its effect's id, and stops only at `Step::Done`. Each effect also comes with its *provenance*: the [task](ids) that issued it and that task's position in its own order. The greeter ignores it, and [Group a log by task](ids#group-a-log-by-task) explains provenance in full. The result `hello` proves the note went out and came back through two store effects.
 
 When the file has a mistake, such as a missing title or a Lua syntax error, `Prompt::parse` returns a [`ParseError`] of kind [`ParseErrorKind::Structure`] or [`ParseErrorKind::Lua`], with no line or column. Show the user the error's message, because it tells the author what is wrong and, for Lua, which block it is in.
@@ -129,7 +129,7 @@ A model role works like a generic parameter with a trait bound: the prompt names
 # use std::sync::Arc;
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::Environment;
@@ -168,7 +168,7 @@ let mut run = Run::new(Arc::new(prompt), "", ctx);
 // 4. Add a chat arm that answers with the canned reply, and drive the run as before.
 fn answer(effect: Effect) -> EffectAnswer {
     match effect {
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         Effect::Chat { .. } => {
             let reply = CompletionResult::Text("hi there".to_owned());
             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
@@ -216,7 +216,7 @@ Offering a tool is like publishing a remote API: the caller sees the tool's name
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
 
@@ -259,7 +259,7 @@ assert!(requirements.refusal().is_none());
 // 3. Add a tool call arm that answers with the canned output, and drive the run as before.
 fn answer(effect: Effect) -> EffectAnswer {
     match effect {
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         Effect::Chat { .. } => {
             let reply = CompletionResult::Text("hi there".to_owned());
             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
@@ -310,7 +310,7 @@ A cancel handle works like a shared [`AtomicBool`](std::sync::atomic::AtomicBool
 # use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 # use promptforge::timestamp::Timestamp;
 # use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
 #     "---\n",
@@ -346,7 +346,7 @@ A cancel handle works like a shared [`AtomicBool`](std::sync::atomic::AtomicBool
 # let mut run = Run::new(Arc::new(prompt), "", ctx);
 # fn answer(effect: Effect) -> EffectAnswer {
 #     match effect {
-#         Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#         Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #         Effect::Chat { .. } => {
 #             let reply = CompletionResult::Text("hi there".to_owned());
 #             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
@@ -413,7 +413,7 @@ use promptforge::event::Event;
 use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-use promptforge::vfs::perform_store_op;
+use promptforge::vfs::perform_vfs_op;
 use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
 
 const GREETER: &str = concat!(
@@ -438,7 +438,7 @@ const GREETER: &str = concat!(
 
 fn answer(effect: Effect) -> EffectAnswer {
     match effect {
-        Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
         Effect::Chat { .. } => {
             let reply = CompletionResult::Text("hi there".to_owned());
             EffectAnswer::Chat(Completion::from_result(reply, "canned").map(Box::new).map_err(Into::into))
@@ -609,7 +609,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 
 ## RunContext
 
-[`RunContext`] holds what one run gets from your program: name, seed, start time, limits, cancel flag, files, and current model. Build one per run, and set its model before [`Environment::prepare`], which binds every role to it once. With no model, selecting a role fails at run time. A store handle without a working store ends the first step with [`RunErrorKind::Store`], so pass a working store or keep the default in-memory one. [Run a prompt](#run-a-prompt) teaches it.
+[`RunContext`] holds what one run gets from your program: name, seed, start time, limits, cancel flag, files, and current model. Build one per run, and set its model before [`Environment::prepare`], which binds every role to it once. With no model, selecting a role fails at run time. A store handle without a working store ends the first step with [`RunErrorKind::Vfs`], so pass a working store or keep the default in-memory one. [Run a prompt](#run-a-prompt) teaches it.
 
 - [`RunContext::new`]: a live Harness passes the current time and a cryptographically random seed, which feeds a security nonce.
 - [`RunContext::report_debug`]: turning debug mode on adds `Request` and `Response` events with the raw model bodies, which the `Chat` effect and its answer already hold.
@@ -680,7 +680,7 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 | [`Binding`](RunErrorKind::Binding) | Only a failed schema binding or a missing required model. Absent or clashing capabilities arrive as `RequirementsUnmet` instead. |
 | [`Completion`](RunErrorKind::Completion) | A model call: transport, backend, undecodable or empty replies, missing or invalid client configuration, or a disabled model gateway. |
 | [`Tool`](RunErrorKind::Tool) | A tool loop ran out of rounds, a call reached a tool outside the section's scope or one that is not bound, or a tool failed. |
-| [`Store`](RunErrorKind::Store) | A store operation failed, or, when the run starts, its files have no declared store or the store fails its probe. |
+| [`Vfs`](RunErrorKind::Vfs) | A store operation failed, or, when the run starts, its files have no declared store or the store fails its probe. |
 | [`Determinism`](RunErrorKind::Determinism) | Two tasks that run at the same time claimed the same store path. The run ends at once, and the prompt's Lua cannot catch it. |
 | [`Lua`](RunErrorKind::Lua) | Lua compile and runtime failures, and task misuse, such as a leaked task, a result awaited twice, or an uncaught task cancellation. |
 | [`Quota`](RunErrorKind::Quota) | The run used up its Lua log events, its log bytes, or its instructions. |

@@ -16,7 +16,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::{Origin, perform_store_op};
+use promptforge::vfs::{Origin, perform_vfs_op};
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
 /// A [`RunContext`] for the run `name` under fixed Harness inputs: no fixture
@@ -72,18 +72,18 @@ pub(super) fn run_activated(
     drive_store_only(Run::new(Arc::new(prompt.clone()), "", ctx))
 }
 
-/// Drives `run` to its result, answering [`Effect::Store`] through
-/// [`perform_store_op`] and panicking on any other effect, which names a
+/// Drives `run` to its result, answering [`Effect::Vfs`] through
+/// [`perform_vfs_op`] and panicking on any other effect, which names a
 /// fixture that issues something this suite does not answer.
 fn drive_store_only(mut run: Run) -> RunResult {
     loop {
         match run.step() {
             Step::Pending { effects, .. } => {
                 for (id, _provenance, effect) in effects {
-                    let Effect::Store { access, op } = effect else {
+                    let Effect::Vfs { access, op } = effect else {
                         panic!("the activation suite performs only store effects: {effect:?}");
                     };
-                    run.resume(id, EffectAnswer::Store(perform_store_op(&access, op)));
+                    run.resume(id, EffectAnswer::Vfs(perform_vfs_op(&access, op)));
                 }
             }
             Step::Done { result, .. } => return result,

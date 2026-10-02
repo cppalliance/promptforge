@@ -4,7 +4,7 @@ You need this when your prompts read or write files, or several runs share a fol
 
 # Where this fits
 
-[Run a prompt](crate#run-a-prompt) showed you how to step a run and answer each [effect](crate) it asks for, using the greeter prompt from [Before you start](crate#before-you-start). A prompt's file work reaches your program as one of those effects, an [`Effect::Store`](crate::effect::Effect::Store). This page shows what stands behind your answer: where a run's files live, what it may change, and how you see each file operation.
+[Run a prompt](crate#run-a-prompt) showed you how to step a run and answer each [effect](crate) it asks for, using the greeter prompt from [Before you start](crate#before-you-start). A prompt's file work reaches your program as one of those effects, an [`Effect::Vfs`](crate::effect::Effect::Vfs). This page shows what stands behind your answer: where a run's files live, what it may change, and how you see each file operation.
 
 # Give a run its files
 
@@ -118,7 +118,7 @@ The example below gates the greeter's store handle with a mode policy that start
 
 ````
 use promptforge::vfs::{
-    perform_store_op, MemoryBackend, Mode, ModePolicy, Origin, StoreOp, StoreOutcome, VfsError, VfsRef,
+    perform_vfs_op, MemoryBackend, Mode, ModePolicy, Origin, VfsOp, VfsOutcome, VfsError, VfsRef,
 };
 # use std::sync::Arc;
 # use promptforge::effect::{Effect, EffectAnswer};
@@ -153,7 +153,7 @@ let ctx = context("greeter").vfs(vfs.clone());
 #         Step::Pending { effects, .. } => {
 #             for (id, _provenance, effect) in effects {
 #                 let answer = match effect {
-#                     Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#                     Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #                     _ => EffectAnswer::Dropped,
 #                 };
 #                 run.resume(id, answer);
@@ -167,20 +167,20 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello"));
 // 3. Switch to Ask through the mode handle, and answer a second write of the note.
 mode.set(Mode::Ask);
 let store = vfs.acquire_store(Origin::new("host"))?;
-let second = StoreOp::Write { path: "note.md".to_owned(), contents: "changed".to_owned() };
-let refused = perform_store_op(&store, second);
+let second = VfsOp::Write { path: "note.md".to_owned(), contents: "changed".to_owned() };
+let refused = perform_vfs_op(&store, second);
 assert!(matches!(&refused, Err(VfsError::PermissionDenied { reason, .. }) if reason.contains("Ask")));
 
 // 4. Read the note back through the same store view, and it still holds the first write.
-let read = StoreOp::Read { path: "note.md".to_owned(), start: None, end: None };
-assert_eq!(perform_store_op(&store, read)?, StoreOutcome::Text("hello".to_owned()));
+let read = VfsOp::Read { path: "note.md".to_owned(), start: None, end: None };
+assert_eq!(perform_vfs_op(&store, read)?, VfsOutcome::Text("hello".to_owned()));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
 1. The first step keeps the `ModeHandle` and gates the handle. [`ModePolicy::new`] makes a policy that starts in `Agent`, and the example takes the `ModeHandle` from it before the builder moves the policy in. [`VfsRefBuilder::store`] mounts a [`MemoryBackend`] at `/` and declares it the store. The [`VfsRef`] is gated from the start, and the `ModeHandle` is your only way to switch the mode.
-2. The second step gives the greeter's run a clone of the gated handle with [`RunContext::vfs`](crate::RunContext::vfs), and `Agent` mode lets its note calls succeed. The page hides the lines that build the run and drive it, as in [Run a prompt](crate#run-a-prompt). The loop answers each store effect with [`perform_store_op`], gives up on any other effect, and stops at `Done`. The assertion checks that the run returns `hello`, so both the note write and the note read succeed.
-3. The third step switches the mode to `Ask` through the `ModeHandle`, and then answers a second write of the note. A [`StoreOp`] carries one `store.*` call from a prompt to your program, a [`StoreOutcome`] carries the result back, and `perform_store_op` runs the first against a store view and returns the second. [`ModeHandle::set`] changes the mode, [`VfsRef::acquire_store`] opens a store view for an [`Origin`] labeled `host`, and `perform_store_op` runs the [`StoreOp::Write`] against it. The write fails with [`VfsError::PermissionDenied`], and the policy's reason names the `Ask` mode. The example flips the mode after the run has finished, so it shows the next operation seeing `Ask`; it does not interrupt a run. The mode is read at every operation, so a flip during a run applies to that run's next file operation in the same way.
-4. The fourth step reads the note back through the same store view with a [`StoreOp::Read`], and it still holds the first write. The refused write changed nothing, and reads flow even in `Ask` mode.
+2. The second step gives the greeter's run a clone of the gated handle with [`RunContext::vfs`](crate::RunContext::vfs), and `Agent` mode lets its note calls succeed. The page hides the lines that build the run and drive it, as in [Run a prompt](crate#run-a-prompt). The loop answers each store effect with [`perform_vfs_op`], gives up on any other effect, and stops at `Done`. The assertion checks that the run returns `hello`, so both the note write and the note read succeed.
+3. The third step switches the mode to `Ask` through the `ModeHandle`, and then answers a second write of the note. A [`VfsOp`] carries one `store.*` call from a prompt to your program, a [`VfsOutcome`] carries the result back, and `perform_vfs_op` runs the first against a store view and returns the second. [`ModeHandle::set`] changes the mode, [`VfsRef::acquire_store`] opens a store view for an [`Origin`] labeled `host`, and `perform_vfs_op` runs the [`VfsOp::Write`] against it. The write fails with [`VfsError::PermissionDenied`], and the policy's reason names the `Ask` mode. The example flips the mode after the run has finished, so it shows the next operation seeing `Ask`; it does not interrupt a run. The mode is read at every operation, so a flip during a run applies to that run's next file operation in the same way.
+4. The fourth step reads the note back through the same store view with a [`VfsOp::Read`], and it still holds the first write. The refused write changed nothing, and reads flow even in `Ask` mode.
 
 A `str_replace` counts as a write.
 
@@ -216,7 +216,7 @@ use std::sync::{Arc, Mutex};
 use promptforge::vfs::{MemoryBackend, Op, OpEvent, VfsRef};
 # use promptforge::effect::{Effect, EffectAnswer};
 # use promptforge::timestamp::Timestamp;
-# use promptforge::vfs::perform_store_op;
+# use promptforge::vfs::perform_vfs_op;
 # use promptforge::{Prompt, Run, RunContext, RunResult, Step};
 # let source = concat!(
 #     "---\n",
@@ -255,7 +255,7 @@ let ctx = context("greeter").vfs(vfs);
 #         Step::Pending { effects, .. } => {
 #             for (id, _provenance, effect) in effects {
 #                 let answer = match effect {
-#                     Effect::Store { access, op } => EffectAnswer::Store(perform_store_op(&access, op)),
+#                     Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
 #                     _ => EffectAnswer::Dropped,
 #                 };
 #                 run.resume(id, answer);
@@ -274,7 +274,7 @@ assert!(matches!(note.as_slice(), [(Op::Write, _, first), (Op::Read, _, second)]
 ````
 
 1. The first step installs the watcher. The closure prints each operation, its path, and its origin label, and copies those three values into a shared log. It must copy them, because an `OpEvent` only borrows its values and is not `Clone`, so a stored event would not outlive the call.
-2. The second step gives the watched handle to the greeter's run. The page hides the lines that build the run and answer each store effect with [`perform_store_op`], as in [Keep a run from changing files](#keep-a-run-from-changing-files). The run still returns `hello`, so you can see the watcher only looks.
+2. The second step gives the watched handle to the greeter's run. The page hides the lines that build the run and answer each store effect with [`perform_vfs_op`], as in [Keep a run from changing files](#keep-a-run-from-changing-files). The run still returns `hello`, so you can see the watcher only looks.
 3. The third step filters the log to the note's path and matches it. The run's `store.write` fired one [`Op::Write`] and its `store.read` one [`Op::Read`], in that order. The run supplies the origin itself, so you never pass one for the run's calls. Its label is the section or pass that made the call, and the prompt's title stands in for the file name, so both note events carry the same label. A watcher can print `event.origin().label`, `file`, and `line` to see them.
 
 The watcher fires after the policy and the claims admit an operation, and before the backend runs. A refused operation never reaches it, and an event does not mean the operation succeeded, so read the log as what was allowed to start, not as what finished.
@@ -459,9 +459,9 @@ A watcher sees what the rules allowed, not what happened. The [Reference](#refer
 | `Wildcard` | Invalid glob grammar, such as a run of three `*`; only glob reports it. |
 | `IntoDescendant` | A rename into the source's own subtree; only rename reports it. |
 
-## StoreOp
+## VfsOp
 
-[`StoreOp`] carries one `store.*` call from a prompt's Lua to your program. Use it to answer a store effect yourself, or to log what a prompt asked. A [`StoreOp::StrReplace`] whose `old` is empty, missing, or repeated fails with [`VfsError::Anchor`]; make `old` occur exactly once. Match it with a wildcard arm, because it is `#[non_exhaustive]`. It is plain data with [serde](https://docs.rs/serde) support, so a recorded operation replays unchanged.
+[`VfsOp`] carries one `store.*` call from a prompt's Lua to your program. Use it to answer a store effect yourself, or to log what a prompt asked. A [`VfsOp::StrReplace`] whose `old` is empty, missing, or repeated fails with [`VfsError::Anchor`]; make `old` occur exactly once. Match it with a wildcard arm, because it is `#[non_exhaustive]`. It is plain data with [serde](https://docs.rs/serde) support, so a recorded operation replays unchanged.
 
 | Variant | Meaning |
 |---|---|
@@ -474,9 +474,9 @@ A watcher sees what the rules allowed, not what happened. The [Reference](#refer
 | `Glob { pattern }` | `store.glob(pattern)`. A pattern follows the same strict path rules as a path: `/etc/*` is `InvalidPath` with `Absolute`, and `../*.txt` and `a/./b` are `InvalidPath` with `Traversal`. `**` as a whole segment is accepted, and results come back in the logical form, such as `a.txt`, never under the store root. |
 | `Exists { path }` | `store.exists(path)`. |
 
-## StoreOutcome
+## VfsOutcome
 
-[`StoreOutcome`] carries the result of one store operation back to the prompt. You read it from [`perform_store_op`], or build one to answer a [`StoreOp`] yourself. Unlike `StoreOp` and [`VfsError`], it is not `#[non_exhaustive]`, so you can match all four cases without a wildcard, and a new variant would break your build. Its serde form is the run log's success payload for a store answer, so the variant names are part of the log shape.
+[`VfsOutcome`] carries the result of one store operation back to the prompt. You read it from [`perform_vfs_op`], or build one to answer a [`VfsOp`] yourself. Unlike `VfsOp` and [`VfsError`], it is not `#[non_exhaustive]`, so you can match all four cases without a wildcard, and a new variant would break your build. Its serde form is the run log's success payload for a store answer, so the variant names are part of the log shape.
 
 | Variant | Meaning |
 |---|---|
@@ -537,9 +537,9 @@ A watcher sees what the rules allowed, not what happened. The [Reference](#refer
 - [`VfsAccess::str_replace`]: the default reads, counts non-overlapping matches, replaces, and writes; an empty `old` is refused first as `Anchor`.
 - [`VfsAccess::read_range`]: the default reads the whole file and slices it; an offset past the end gives an empty vec, not an error.
 
-## perform_store_op
+## perform_vfs_op
 
-[`perform_store_op`] runs one [`StoreOp`] against the run's store view and returns its [`StoreOutcome`]; it is the work behind an [`Effect::Store`](crate::effect::Effect::Store). It is synchronous, so run it off your async executor. On failure it returns the store's [`VfsError`], and you resume the run with that error as the answer. The run raises it at the call site in the prompt, except [`VfsError::Conflict`], which ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism) and no Lua `pcall` can catch it.
+[`perform_vfs_op`] runs one [`VfsOp`] against the run's store view and returns its [`VfsOutcome`]; it is the work behind an [`Effect::Vfs`](crate::effect::Effect::Vfs). It is synchronous, so run it off your async executor. On failure it returns the store's [`VfsError`], and you resume the run with that error as the answer. The run raises it at the call site in the prompt, except [`VfsError::Conflict`], which ends the run with [`RunErrorKind::Determinism`](crate::RunErrorKind::Determinism) and no Lua `pcall` can catch it.
 
 ## OpSink
 

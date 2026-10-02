@@ -10,7 +10,7 @@ use promptforge_types::wire::StreamDelta;
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
 use super::*;
-use crate::execute::protocol::StoreOp;
+use crate::execute::protocol::VfsOp;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::lua::ToolSet;
 use crate::test_support::tokio_driver::TokioDriver;
@@ -215,14 +215,14 @@ async fn a_store_operation_issues_exactly_one_store_effect() {
     assert_eq!(
         *records,
         vec![
-            EffectRecord::Store {
-                op: StoreOp::Write {
+            EffectRecord::Vfs {
+                op: VfsOp::Write {
                     path: "notes.md".to_owned(),
                     contents: "kept".to_owned(),
                 },
             },
-            EffectRecord::Store {
-                op: StoreOp::Read {
+            EffectRecord::Vfs {
+                op: VfsOp::Read {
                     path: "notes.md".to_owned(),
                     start: None,
                     end: None,

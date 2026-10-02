@@ -75,10 +75,10 @@ fn a_seeded_sink_continues_the_root_sequence_and_leaves_other_tasks_at_zero() {
 fn a_lifecycle_report_becomes_the_matching_event_with_its_coordinates() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    walk.report("Gather", lifecycle::STORE_WRITE_SUCCEEDED);
+    walk.report("Gather", lifecycle::VFS_WRITE_SUCCEEDED);
     assert_eq!(
         sink.take(),
-        vec![Event::StoreWriteSucceeded {
+        vec![Event::VfsWriteSucceeded {
             execution: "run-1".to_owned(),
             section: "Gather".to_owned(),
             provenance: Provenance {

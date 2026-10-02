@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use mlua::Table;
 use promptforge_types::event::lifecycle::Lifecycle;
 
-use crate::protocol::StoreOp;
+use crate::protocol::VfsOp;
 
 use super::{read_store, read_store_numbered};
 use crate::{
@@ -57,7 +57,7 @@ impl StoreReporter {
 /// path, rule, anchor, and count.
 #[must_use]
 pub fn store_error_message(
-    op: &crate::protocol::StoreOp,
+    op: &crate::protocol::VfsOp,
     error: &promptforge_vfs::VfsError,
 ) -> String {
     use promptforge_vfs::VfsError;
@@ -69,7 +69,7 @@ pub fn store_error_message(
         VfsError::DirectoryNotEmpty { path } => format!("directory not empty in store: {path}"),
         VfsError::NotUtf8 { path } => format!("file in store is not UTF-8: {path}"),
         VfsError::InvalidPath { path, reason } => {
-            if matches!(op, crate::protocol::StoreOp::Glob { .. }) {
+            if matches!(op, crate::protocol::VfsOp::Glob { .. }) {
                 format!("invalid glob pattern {path:?}: {reason}")
             } else {
                 format!("invalid path {path:?}: {reason}")
@@ -229,9 +229,9 @@ pub(crate) fn install_store_table(
         handle,
         (path, contents),
         (String, String),
-        lifecycle::STORE_WRITE_SUCCEEDED,
-        lifecycle::STORE_WRITE_FAILED,
-        StoreOp::Write {
+        lifecycle::VFS_WRITE_SUCCEEDED,
+        lifecycle::VFS_WRITE_FAILED,
+        VfsOp::Write {
             path: path.clone(),
             contents: contents.clone(),
         },
@@ -242,9 +242,9 @@ pub(crate) fn install_store_table(
         handle,
         (path, contents),
         (String, String),
-        lifecycle::STORE_APPEND_SUCCEEDED,
-        lifecycle::STORE_APPEND_FAILED,
-        StoreOp::Append {
+        lifecycle::VFS_APPEND_SUCCEEDED,
+        lifecycle::VFS_APPEND_FAILED,
+        VfsOp::Append {
             path: path.clone(),
             contents: contents.clone(),
         },
@@ -255,9 +255,9 @@ pub(crate) fn install_store_table(
         handle,
         (path, start, end),
         (String, Option<i64>, Option<i64>),
-        lifecycle::STORE_READ_SUCCEEDED,
-        lifecycle::STORE_READ_FAILED,
-        StoreOp::Read {
+        lifecycle::VFS_READ_SUCCEEDED,
+        lifecycle::VFS_READ_FAILED,
+        VfsOp::Read {
             path: path.clone(),
             start,
             end,
@@ -269,9 +269,9 @@ pub(crate) fn install_store_table(
         handle,
         (path, start, end),
         (String, Option<i64>, Option<i64>),
-        lifecycle::STORE_READ_NUMBERED_SUCCEEDED,
-        lifecycle::STORE_READ_NUMBERED_FAILED,
-        StoreOp::ReadNumbered {
+        lifecycle::VFS_READ_NUMBERED_SUCCEEDED,
+        lifecycle::VFS_READ_NUMBERED_FAILED,
+        VfsOp::ReadNumbered {
             path: path.clone(),
             start,
             end,
@@ -283,9 +283,9 @@ pub(crate) fn install_store_table(
         handle,
         (path, old, new),
         (String, String, String),
-        lifecycle::STORE_REPLACE_SUCCEEDED,
-        lifecycle::STORE_REPLACE_FAILED,
-        StoreOp::StrReplace {
+        lifecycle::VFS_REPLACE_SUCCEEDED,
+        lifecycle::VFS_REPLACE_FAILED,
+        VfsOp::StrReplace {
             path: path.clone(),
             old: old.clone(),
             new: new.clone(),
@@ -297,9 +297,9 @@ pub(crate) fn install_store_table(
         handle,
         path,
         String,
-        lifecycle::STORE_DELETE_SUCCEEDED,
-        lifecycle::STORE_DELETE_FAILED,
-        StoreOp::Delete { path: path.clone() },
+        lifecycle::VFS_DELETE_SUCCEEDED,
+        lifecycle::VFS_DELETE_FAILED,
+        VfsOp::Delete { path: path.clone() },
         { handle.remove(&path, false).map(|_| ()) }
     );
 
@@ -312,12 +312,12 @@ pub(crate) fn install_store_table(
             record_store_conflict(&glob_conflicts, &result);
             report.report(
                 result.is_ok(),
-                lifecycle::STORE_GLOB_SUCCEEDED,
-                lifecycle::STORE_GLOB_FAILED,
+                lifecycle::VFS_GLOB_SUCCEEDED,
+                lifecycle::VFS_GLOB_FAILED,
             );
             let paths = result.map_err(|source| {
                 mlua::Error::external(Error::store(
-                    &StoreOp::Glob {
+                    &VfsOp::Glob {
                         pattern: pattern.clone(),
                     },
                     source,
@@ -337,14 +337,11 @@ pub(crate) fn install_store_table(
             record_store_conflict(&exists_conflicts, &result);
             report.report(
                 result.is_ok(),
-                lifecycle::STORE_EXISTS_SUCCEEDED,
-                lifecycle::STORE_EXISTS_FAILED,
+                lifecycle::VFS_EXISTS_SUCCEEDED,
+                lifecycle::VFS_EXISTS_FAILED,
             );
             result.map_err(|source| {
-                mlua::Error::external(Error::store(
-                    &StoreOp::Exists { path: path.clone() },
-                    source,
-                ))
+                mlua::Error::external(Error::store(&VfsOp::Exists { path: path.clone() }, source))
             })
         })
         .map_err(Error::lua)?;

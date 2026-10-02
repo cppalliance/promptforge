@@ -30,8 +30,8 @@ fn store_exists_reports_its_pair_from_the_shared_library() {
         recorder.observations(),
         [
             detail::LUA_SHARED_LOAD_STARTED,
-            detail::STORE_EXISTS_SUCCEEDED,
-            detail::STORE_EXISTS_SUCCEEDED,
+            detail::VFS_EXISTS_SUCCEEDED,
+            detail::VFS_EXISTS_SUCCEEDED,
             detail::LUA_SHARED_LOAD_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
@@ -60,7 +60,7 @@ fn store_exists_reports_its_pair_from_the_shared_library() {
         recorder.observations(),
         [
             detail::LUA_SHARED_LOAD_STARTED,
-            detail::STORE_EXISTS_FAILED,
+            detail::VFS_EXISTS_FAILED,
             detail::LUA_SHARED_LOAD_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
@@ -94,9 +94,9 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
     assert_eq!(
         observations,
         vec![
-            ("Gather".to_string(), detail::STORE_WRITE_SUCCEEDED.clone()),
-            ("Gather".to_string(), detail::STORE_READ_SUCCEEDED.clone()),
-            ("Gather".to_string(), detail::STORE_REPLACE_FAILED.clone()),
+            ("Gather".to_string(), detail::VFS_WRITE_SUCCEEDED.clone()),
+            ("Gather".to_string(), detail::VFS_READ_SUCCEEDED.clone()),
+            ("Gather".to_string(), detail::VFS_REPLACE_FAILED.clone()),
         ]
     );
     let trace = format!("{observations:?}");
@@ -141,62 +141,62 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
     let cases = [
         Case {
             source: "store.write('a.txt', 'new')",
-            success: detail::STORE_WRITE_SUCCEEDED,
-            failure: detail::STORE_WRITE_FAILED,
+            success: detail::VFS_WRITE_SUCCEEDED,
+            failure: detail::VFS_WRITE_FAILED,
             prepare: empty,
         },
         Case {
             source: "store.append('a.txt', 'new')",
-            success: detail::STORE_APPEND_SUCCEEDED,
-            failure: detail::STORE_APPEND_FAILED,
+            success: detail::VFS_APPEND_SUCCEEDED,
+            failure: detail::VFS_APPEND_FAILED,
             prepare: empty,
         },
         Case {
             source: "store.read('a.txt')",
-            success: detail::STORE_READ_SUCCEEDED,
-            failure: detail::STORE_READ_FAILED,
+            success: detail::VFS_READ_SUCCEEDED,
+            failure: detail::VFS_READ_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read('a.txt', 1, 1)",
-            success: detail::STORE_READ_SUCCEEDED,
-            failure: detail::STORE_READ_FAILED,
+            success: detail::VFS_READ_SUCCEEDED,
+            failure: detail::VFS_READ_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read_numbered('a.txt')",
-            success: detail::STORE_READ_NUMBERED_SUCCEEDED,
-            failure: detail::STORE_READ_NUMBERED_FAILED,
+            success: detail::VFS_READ_NUMBERED_SUCCEEDED,
+            failure: detail::VFS_READ_NUMBERED_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read_numbered('a.txt', 1, 1)",
-            success: detail::STORE_READ_NUMBERED_SUCCEEDED,
-            failure: detail::STORE_READ_NUMBERED_FAILED,
+            success: detail::VFS_READ_NUMBERED_SUCCEEDED,
+            failure: detail::VFS_READ_NUMBERED_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.str_replace('a.txt', 'old', 'new')",
-            success: detail::STORE_REPLACE_SUCCEEDED,
-            failure: detail::STORE_REPLACE_FAILED,
+            success: detail::VFS_REPLACE_SUCCEEDED,
+            failure: detail::VFS_REPLACE_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.delete('a.txt')",
-            success: detail::STORE_DELETE_SUCCEEDED,
-            failure: detail::STORE_DELETE_FAILED,
+            success: detail::VFS_DELETE_SUCCEEDED,
+            failure: detail::VFS_DELETE_FAILED,
             prepare: existing,
         },
         Case {
             source: "local matches = store.glob('*.txt')",
-            success: detail::STORE_GLOB_SUCCEEDED,
-            failure: detail::STORE_GLOB_FAILED,
+            success: detail::VFS_GLOB_SUCCEEDED,
+            failure: detail::VFS_GLOB_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.exists('a.txt')",
-            success: detail::STORE_EXISTS_SUCCEEDED,
-            failure: detail::STORE_EXISTS_FAILED,
+            success: detail::VFS_EXISTS_SUCCEEDED,
+            failure: detail::VFS_EXISTS_FAILED,
             prepare: existing,
         },
     ];
@@ -256,9 +256,9 @@ fn store_observations_happen_before_later_lua_side_effects() {
     assert_eq!(
         recorder.observations(),
         vec![
-            ("Store".to_owned(), detail::STORE_WRITE_SUCCEEDED),
+            ("Store".to_owned(), detail::VFS_WRITE_SUCCEEDED),
             ("Store".to_owned(), Observation::Lua("mark".to_owned())),
-            ("Store".to_owned(), detail::STORE_WRITE_SUCCEEDED),
+            ("Store".to_owned(), detail::VFS_WRITE_SUCCEEDED),
         ],
         "each write's report lands before the next Lua statement runs"
     );

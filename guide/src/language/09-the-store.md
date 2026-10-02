@@ -624,7 +624,7 @@ local count = tonumber(ok and v or '0')
 if not ok then assert(v.reason == 'not_found', 'unexpected store failure') end
 ````
 
-Left uncaught, a store failure aborts the block, and the run fails with [run error kind](16-limits-and-errors.md#how-a-failed-run-is-classified) `Store`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
+Left uncaught, a store failure aborts the block, and the run fails with [run error kind](16-limits-and-errors.md#how-a-failed-run-is-classified) `Vfs`, in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass) too.
 
 ### Store messages
 
@@ -667,10 +667,10 @@ A store problem that ends a run is classified by one of two run error kinds ([Ho
 
 | Run error kind | When |
 |---|---|
-| `Store` | An uncaught `store.*` failure, in block code, in the H1 pass, or while the shared library loads; a caught store error raised again; a run whose handle declares no store; or the storage behind the store failing outside any `store.*` call |
+| `Vfs` | An uncaught `store.*` failure, in block code, in the H1 pass, or while the shared library loads; a caught store error raised again; a run whose handle declares no store; or the storage behind the store failing outside any `store.*` call |
 | `Determinism` | A claims conflict, from block code or while the shared library loads |
 
-When the Host's store is failing as the run starts, the run fails at once with `Store` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Store` as well. An uncaught store failure ends the run as `Store` everywhere, and a caught store error raised again keeps `Store`, even after another suspending call.
+When the Host's store is failing as the run starts, the run fails at once with `Vfs` rather than quietly running against a throwaway store, and a run whose handle declares no store fails with `Vfs` as well. An uncaught store failure ends the run as `Vfs` everywhere, and a caught store error raised again keeps `Vfs`, even after another suspending call.
 
 A Host-supplied store can also refuse to open store access for a new task. Then [`tasks.spawn`](15-tasks.md#starting-a-task) fails with an error value of kind `store` whose message is `store operation failed`, naming nothing more, and `pcall` catches it. The run's own in-memory store never refuses, so this appears only with a Host-supplied store.
 

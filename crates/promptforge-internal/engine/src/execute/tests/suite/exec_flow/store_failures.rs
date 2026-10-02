@@ -60,7 +60,7 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
-/// An uncaught store failure ends the run as a `Store` run error whose
+/// An uncaught store failure ends the run as a `Vfs` run error whose
 /// message is the model-facing rendering.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_uncaught_store_failure_ends_the_run_as_a_store_error() {
@@ -76,7 +76,7 @@ return store.read('missing.txt')\n\
         .expect_err("an uncaught store failure must fail the run");
     assert_eq!(
         error.kind(),
-        RunErrorKind::Store,
+        RunErrorKind::Vfs,
         "the run fails as a store error: {error:?}"
     );
     assert!(
@@ -87,7 +87,7 @@ return store.read('missing.txt')\n\
     );
 }
 
-/// An uncaught store failure in the H1 pass ends the run as a `Store`
+/// An uncaught store failure in the H1 pass ends the run as a `Vfs`
 /// run error: the H1 blocks run through the same coroutine machinery as
 /// any section.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -105,13 +105,13 @@ Done.\n"
         .expect_err("an uncaught store failure in H1 must fail the run");
     assert_eq!(
         error.kind(),
-        RunErrorKind::Store,
+        RunErrorKind::Vfs,
         "the H1 failure is a store error: {error:?}"
     );
 }
 
 /// A caught store error raised again, after another suspending call,
-/// keeps its classification: the run ends as a `Store` run error whose
+/// keeps its classification: the run ends as a `Vfs` run error whose
 /// message is the original rendering.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_caught_store_error_raised_again_after_a_suspending_call_keeps_store() {
@@ -134,7 +134,7 @@ return 'sibling'\n\
         .expect_err("the re-raised store error must fail the run");
     assert_eq!(
         error.kind(),
-        RunErrorKind::Store,
+        RunErrorKind::Vfs,
         "the re-raised error keeps its store classification: {error:?}"
     );
     assert!(
@@ -282,13 +282,13 @@ return item\n\
 }
 
 /// A store function the shared library captured at load time reaches the
-/// Harness as an `Effect::Store` when called after load, like `store.*` does.
+/// Harness as an `Effect::Vfs` when called after load, like `store.*` does.
 #[test]
 fn a_captured_store_function_called_after_load_reaches_the_harness_as_a_store_effect() {
     use super::super::super::context::{parse, test_context};
     use super::super::super::serial_driver::perform_locally;
     use crate::{Effect, EffectRecord, Run};
-    use promptforge_lua::StoreOp;
+    use promptforge_lua::VfsOp;
 
     let md = [
         flow_prompt!(""),
@@ -315,7 +315,7 @@ return 'saved'\n\
     assert!(
         records.iter().any(|record| matches!(
             record,
-            EffectRecord::Store { op: StoreOp::Write { path, .. } } if path == "note.txt"
+            EffectRecord::Vfs { op: VfsOp::Write { path, .. } } if path == "note.txt"
         )),
         "the captured write is performed by the Harness: {records:?}"
     );

@@ -192,7 +192,7 @@ fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
     for case in cases {
         let reason = crate::store_error_reason(&case.error);
         let fields = crate::store_error_fields(&case.error);
-        let op = crate::StoreOp::Read {
+        let op = crate::VfsOp::Read {
             path: "x".to_owned(),
             start: None,
             end: None,
@@ -213,10 +213,10 @@ fn store_error_messages_use_the_operations_wording() {
         path: "a**b".to_owned(),
         reason: PathReason::Wildcard,
     };
-    let glob = crate::StoreOp::Glob {
+    let glob = crate::VfsOp::Glob {
         pattern: "a**b".to_owned(),
     };
-    let read = crate::StoreOp::Read {
+    let read = crate::VfsOp::Read {
         path: "a**b".to_owned(),
         start: None,
         end: None,
@@ -242,7 +242,7 @@ fn a_raised_store_error_renders_an_integer_count_and_the_message() {
         count: 3,
     };
     let error = Error::store(
-        &crate::StoreOp::StrReplace {
+        &crate::VfsOp::StrReplace {
             path: "notes.md".to_owned(),
             old: "TODO".to_owned(),
             new: "DONE".to_owned(),

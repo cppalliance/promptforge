@@ -14,7 +14,7 @@ use promptforge_types::tools::ToolId;
 use serde_json::json;
 
 use super::*;
-use crate::execute::protocol::StoreOp;
+use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
 
@@ -134,9 +134,9 @@ fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
             .acquire(promptforge_vfs::Origin::new("run test fixture"))
             .expect("the stock backend acquires"),
     );
-    let effect = Effect::Store {
+    let effect = Effect::Vfs {
         access,
-        op: StoreOp::Read {
+        op: VfsOp::Read {
             path: "notes.md".to_owned(),
             start: Some(1),
             end: None,
@@ -145,8 +145,8 @@ fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
     let record = effect.record();
     assert_eq!(
         record,
-        EffectRecord::Store {
-            op: StoreOp::Read {
+        EffectRecord::Vfs {
+            op: VfsOp::Read {
                 path: "notes.md".to_owned(),
                 start: Some(1),
                 end: None,
@@ -219,7 +219,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
     );
     let (id, effect) = only_effect(run.step());
     assert!(
-        matches!(effect, Effect::Store { .. }),
+        matches!(effect, Effect::Vfs { .. }),
         "the store call is one store effect: {effect:?}"
     );
     // The Host cancels while the store operation is out. The next step
@@ -250,7 +250,7 @@ fn done_is_withheld_while_a_store_effect_is_outstanding_and_delivered_after_drop
 fn a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error() {
     let mut run = run_of("return store.exists('x')", run_context());
     let (id, effect) = only_effect(run.step());
-    assert!(matches!(effect, Effect::Store { .. }));
+    assert!(matches!(effect, Effect::Vfs { .. }));
     run.resume(id, EffectAnswer::Dropped);
     let step = run.step();
     let Step::Done { result, .. } = step else {
@@ -275,7 +275,7 @@ fn an_orphaned_effects_real_answer_is_discarded_and_still_counts_as_the_answer()
     // its answer is the effect's one answer, discarded rather than applied.
     run.resume(
         id,
-        EffectAnswer::Store(Ok(crate::execute::protocol::StoreOutcome::Unit)),
+        EffectAnswer::Vfs(Ok(crate::execute::protocol::VfsOutcome::Unit)),
     );
     assert!(
         matches!(

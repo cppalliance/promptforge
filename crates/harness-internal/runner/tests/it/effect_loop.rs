@@ -151,11 +151,11 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     let payload = |position: usize| records[position].record.payload.clone();
     assert_eq!(
         payload(effect_positions[0]),
-        json!({ "Store": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
+        json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
     );
     assert_eq!(
         payload(effect_positions[0] + 1),
-        json!({ "Store": { "Ok": "Unit" } })
+        json!({ "Vfs": { "Ok": "Unit" } })
     );
     assert_eq!(
         payload(effect_positions[1]),

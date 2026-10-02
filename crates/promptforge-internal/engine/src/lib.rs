@@ -32,5 +32,5 @@ pub use crate::execute::{
     AnswerRecord, CapabilityConflict, ChatAnswerRecord, Effect, EffectAnswer, EffectId,
     EffectRecord, Environment, MissingService, ModelBindings, RequirementCheck, Requirements, Run,
     RunContext, RunError, RunErrorKind, RunLimits, RunResult, SourceLocation, Step,
-    ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement, perform_store_op,
+    ToolAnswerRecord, ToolBindings, ToolCallOrigin, ToolCaller, UnmetRequirement, perform_vfs_op,
 };

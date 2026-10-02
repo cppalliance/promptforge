@@ -181,10 +181,10 @@ fn section_vm_reports_store_operations_in_each_chunk() {
         recorder.observations(),
         vec![
             ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
-            ("Gather".to_owned(), detail::STORE_WRITE_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), detail::VFS_WRITE_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
-            ("Gather".to_owned(), detail::STORE_READ_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), detail::VFS_READ_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.clone(),),

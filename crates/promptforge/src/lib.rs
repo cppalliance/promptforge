@@ -137,9 +137,9 @@ pub mod prompt {
 pub mod vfs {
     #![doc = include_str!("vfs.md")]
 
-    pub use promptforge_engine::perform_store_op;
-    pub use promptforge_lua::StoreOp;
-    pub use promptforge_lua::StoreOutcome;
+    pub use promptforge_engine::perform_vfs_op;
+    pub use promptforge_lua::VfsOp;
+    pub use promptforge_lua::VfsOutcome;
     pub use promptforge_vfs::Access;
     pub use promptforge_vfs::AcquireContext;
     pub use promptforge_vfs::AllowAll;

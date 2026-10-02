@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::super::support::{Recorder, context, parse_execution_fixture};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
-/// with [`RunErrorKind::Store`]: every run needs a declared store, and
+/// with [`RunErrorKind::Vfs`]: every run needs a declared store, and
 /// the defensive fallback overlay is gone. (`Environment::prepare` never
 /// replaces the handle, so the raw handle's declaration is what the run
 /// sees.)
@@ -31,7 +31,7 @@ async fn a_handle_without_a_declared_store_fails_the_run() {
         .expect_err("a run whose handle declares no store must be refused");
     assert_eq!(
         result.kind(),
-        crate::RunErrorKind::Store,
+        crate::RunErrorKind::Vfs,
         "the run fails as a store error: {result}"
     );
 }
@@ -68,7 +68,7 @@ fn a_store_backend_that_refuses_its_session_fails_the_run_at_the_first_step() {
         crate::execute::run::Step::Done {
             result: RunResult::Failure(error),
             ..
-        } => assert_eq!(error.kind(), RunErrorKind::Store, "{error}"),
+        } => assert_eq!(error.kind(), RunErrorKind::Vfs, "{error}"),
         other => panic!("expected the first step to fail the run, got {other:?}"),
     }
 }

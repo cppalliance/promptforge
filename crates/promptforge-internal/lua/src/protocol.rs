@@ -12,7 +12,7 @@
 //! per-message contract.
 //!
 //! The submodules split the protocol along that boundary: `request` the
-//! request vocabulary (the [`Request`] and [`StoreOp`] enums and the
+//! request vocabulary (the [`Request`] and [`VfsOp`] enums and the
 //! message-record types), `answer` the answer vocabulary (the [`Answer`]
 //! enum and its payload types), `parse` the yield-to-request validation,
 //! and `render` the answer-to-envelope rendering.
@@ -24,9 +24,9 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
+pub use answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
 pub use parse::YieldParse;
 pub use request::{
-    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request, StoreOp,
-    ToolCallRecord,
+    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request,
+    ToolCallRecord, VfsOp,
 };

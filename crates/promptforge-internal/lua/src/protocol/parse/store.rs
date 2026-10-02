@@ -5,7 +5,7 @@ use mlua::Value;
 
 use crate::Error;
 
-use super::super::request::{Request, StoreOp};
+use super::super::request::{Request, VfsOp};
 use super::{FieldFailure, call_string};
 
 /// Reads one author-supplied optional line bound: absent or nil is `None`,
@@ -44,36 +44,36 @@ fn call_optional_line(
 pub(super) fn parse_store(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let op = call_string(table, "store_op")?;
     let op = match op.as_str() {
-        "write" => StoreOp::Write {
+        "write" => VfsOp::Write {
             path: call_string(table, "path")?,
             contents: call_string(table, "contents")?,
         },
-        "append" => StoreOp::Append {
+        "append" => VfsOp::Append {
             path: call_string(table, "path")?,
             contents: call_string(table, "contents")?,
         },
-        "read" => StoreOp::Read {
+        "read" => VfsOp::Read {
             path: call_string(table, "path")?,
             start: call_optional_line(table, "start")?,
             end: call_optional_line(table, "end")?,
         },
-        "read_numbered" => StoreOp::ReadNumbered {
+        "read_numbered" => VfsOp::ReadNumbered {
             path: call_string(table, "path")?,
             start: call_optional_line(table, "start")?,
             end: call_optional_line(table, "end")?,
         },
-        "str_replace" => StoreOp::StrReplace {
+        "str_replace" => VfsOp::StrReplace {
             path: call_string(table, "path")?,
             old: call_string(table, "old")?,
             new: call_string(table, "new")?,
         },
-        "delete" => StoreOp::Delete {
+        "delete" => VfsOp::Delete {
             path: call_string(table, "path")?,
         },
-        "glob" => StoreOp::Glob {
+        "glob" => VfsOp::Glob {
             pattern: call_string(table, "pattern")?,
         },
-        "exists" => StoreOp::Exists {
+        "exists" => VfsOp::Exists {
             path: call_string(table, "path")?,
         },
         other => {

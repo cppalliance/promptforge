@@ -6,7 +6,7 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 use crate::error_value::{ErrorValue, error_table};
 use crate::tools::local_handler;
 
-use super::answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
+use super::answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
 
 /// Renders one [`TaskStatus`] as the plain Lua status table. Absent
 /// optional fields are never set, so they resume as nil; `tasks` is always
@@ -97,12 +97,12 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
 
 /// Renders a store op's return value: nil for the mutating ops, the text
 /// for reads, a sequence table for glob, a boolean for exists.
-fn store_value(lua: &Lua, outcome: StoreOutcome) -> mlua::Result<Value> {
+fn store_value(lua: &Lua, outcome: VfsOutcome) -> mlua::Result<Value> {
     Ok(match outcome {
-        StoreOutcome::Unit => Value::Nil,
-        StoreOutcome::Text(text) => Value::String(lua.create_string(&text)?),
-        StoreOutcome::Paths(paths) => Value::Table(lua.create_sequence_from(paths)?),
-        StoreOutcome::Bool(exists) => Value::Boolean(exists),
+        VfsOutcome::Unit => Value::Nil,
+        VfsOutcome::Text(text) => Value::String(lua.create_string(&text)?),
+        VfsOutcome::Paths(paths) => Value::Table(lua.create_sequence_from(paths)?),
+        VfsOutcome::Bool(exists) => Value::Boolean(exists),
     })
 }
 

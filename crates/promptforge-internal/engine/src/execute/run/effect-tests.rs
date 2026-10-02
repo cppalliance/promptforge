@@ -151,38 +151,38 @@ fn a_failed_tool_call_answer_records_the_errors_display_text_and_hides_its_sourc
 
 #[test]
 fn the_store_answer_records_byte_identical_json_for_every_outcome() {
-    // `AnswerRecord::Store` holds the `StoreOutcome` itself, and its JSON
+    // `AnswerRecord::Vfs` holds the `VfsOutcome` itself, and its JSON
     // is a fixed run-log format: the unit outcome as a bare string, the
     // payload outcomes in serde's externally tagged form.
-    let unit = EffectAnswer::Store(Ok(StoreOutcome::Unit)).record();
+    let unit = EffectAnswer::Vfs(Ok(VfsOutcome::Unit)).record();
     assert_eq!(
         serde_json::to_string(&unit).expect("a store answer records"),
-        r#"{"Store":{"Ok":"Unit"}}"#
+        r#"{"Vfs":{"Ok":"Unit"}}"#
     );
     assert_eq!(round_trip(&unit), unit);
 
-    let text = EffectAnswer::Store(Ok(StoreOutcome::Text("the read".to_owned()))).record();
+    let text = EffectAnswer::Vfs(Ok(VfsOutcome::Text("the read".to_owned()))).record();
     assert_eq!(
         serde_json::to_string(&text).expect("a store answer records"),
-        r#"{"Store":{"Ok":{"Text":"the read"}}}"#
+        r#"{"Vfs":{"Ok":{"Text":"the read"}}}"#
     );
     assert_eq!(round_trip(&text), text);
 
-    let paths = EffectAnswer::Store(Ok(StoreOutcome::Paths(vec![
+    let paths = EffectAnswer::Vfs(Ok(VfsOutcome::Paths(vec![
         "a.txt".to_owned(),
         "b.txt".to_owned(),
     ])))
     .record();
     assert_eq!(
         serde_json::to_string(&paths).expect("a store answer records"),
-        r#"{"Store":{"Ok":{"Paths":["a.txt","b.txt"]}}}"#
+        r#"{"Vfs":{"Ok":{"Paths":["a.txt","b.txt"]}}}"#
     );
     assert_eq!(round_trip(&paths), paths);
 
-    let flag = EffectAnswer::Store(Ok(StoreOutcome::Bool(true))).record();
+    let flag = EffectAnswer::Vfs(Ok(VfsOutcome::Bool(true))).record();
     assert_eq!(
         serde_json::to_string(&flag).expect("a store answer records"),
-        r#"{"Store":{"Ok":{"Bool":true}}}"#
+        r#"{"Vfs":{"Ok":{"Bool":true}}}"#
     );
     assert_eq!(round_trip(&flag), flag);
 }
@@ -194,11 +194,11 @@ fn a_failed_store_answer_records_the_vfs_errors_display_text() {
     };
     let expected = error.to_string();
     assert_eq!(expected, "not found: missing.txt");
-    let record = EffectAnswer::Store(Err(error)).record();
-    assert_eq!(record, AnswerRecord::Store(Err(expected)));
+    let record = EffectAnswer::Vfs(Err(error)).record();
+    assert_eq!(record, AnswerRecord::Vfs(Err(expected)));
     assert_eq!(
         serde_json::to_string(&record).expect("a store answer records"),
-        r#"{"Store":{"Err":"not found: missing.txt"}}"#,
+        r#"{"Vfs":{"Err":"not found: missing.txt"}}"#,
         "a failure keeps the `{{\"Err\": \"...\"}}` shape, now holding the \
          VfsError's display text"
     );

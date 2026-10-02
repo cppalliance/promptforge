@@ -92,8 +92,8 @@ impl Observer for GateObserver {
     fn observe(&self, execution: &str, section: &str, event: Observation) {
         if matches!(
             event,
-            Observation::StoreWriteFailed
-                | Observation::StoreAppendFailed
+            Observation::VfsWriteFailed
+                | Observation::VfsAppendFailed
                 | Observation::TaskCancelled { .. }
         ) {
             self.gate.open();

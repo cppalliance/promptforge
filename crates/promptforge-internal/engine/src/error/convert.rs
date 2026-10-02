@@ -62,7 +62,7 @@ impl Error {
     /// Wraps one store operation's failure as [`Error::Store`], rendering
     /// the model-facing message with the operation for its wording.
     pub(crate) fn store_op(
-        op: &promptforge_lua::StoreOp,
+        op: &promptforge_lua::VfsOp,
         source: promptforge_vfs::VfsError,
     ) -> Error {
         Error::Store {

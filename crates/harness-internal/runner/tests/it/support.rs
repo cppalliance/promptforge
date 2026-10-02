@@ -17,7 +17,7 @@ use promptforge::model::{
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
 use promptforge::vfs::Access;
-use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
+use promptforge::vfs::{VfsError, VfsOp, VfsOutcome};
 use promptforge::{Environment, Prompt, Run, RunContext};
 use serde_json::{Value, json};
 
@@ -116,8 +116,8 @@ impl ToolPerformer for Unused {
 }
 
 impl StorePerformer for Unused {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        unreachable!("this test issues no Store effect")
+    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
+        unreachable!("this test issues no Vfs effect")
     }
 }
 
@@ -243,8 +243,8 @@ impl TimerPerformer for PendingTimer {
 pub(crate) struct UnitStore;
 
 impl StorePerformer for UnitStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        Ok(StoreOutcome::Unit)
+    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
+        Ok(VfsOutcome::Unit)
     }
 }
 
@@ -255,9 +255,9 @@ pub(crate) struct SlowStore {
 }
 
 impl StorePerformer for SlowStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
+    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
         std::thread::sleep(self.delay);
         self.finished.store(true, Ordering::SeqCst);
-        Ok(StoreOutcome::Unit)
+        Ok(VfsOutcome::Unit)
     }
 }

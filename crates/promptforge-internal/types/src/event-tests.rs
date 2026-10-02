@@ -91,22 +91,22 @@ fn lifecycle_of(event: &Event) -> Option<Lifecycle> {
         Event::ModelCatalogValidationFailed { .. } => {
             Some(lifecycle::MODEL_CATALOG_VALIDATION_FAILED)
         }
-        Event::StoreWriteSucceeded { .. } => Some(lifecycle::STORE_WRITE_SUCCEEDED),
-        Event::StoreWriteFailed { .. } => Some(lifecycle::STORE_WRITE_FAILED),
-        Event::StoreAppendSucceeded { .. } => Some(lifecycle::STORE_APPEND_SUCCEEDED),
-        Event::StoreAppendFailed { .. } => Some(lifecycle::STORE_APPEND_FAILED),
-        Event::StoreReadSucceeded { .. } => Some(lifecycle::STORE_READ_SUCCEEDED),
-        Event::StoreReadFailed { .. } => Some(lifecycle::STORE_READ_FAILED),
-        Event::StoreReadNumberedSucceeded { .. } => Some(lifecycle::STORE_READ_NUMBERED_SUCCEEDED),
-        Event::StoreReadNumberedFailed { .. } => Some(lifecycle::STORE_READ_NUMBERED_FAILED),
-        Event::StoreReplaceSucceeded { .. } => Some(lifecycle::STORE_REPLACE_SUCCEEDED),
-        Event::StoreReplaceFailed { .. } => Some(lifecycle::STORE_REPLACE_FAILED),
-        Event::StoreDeleteSucceeded { .. } => Some(lifecycle::STORE_DELETE_SUCCEEDED),
-        Event::StoreDeleteFailed { .. } => Some(lifecycle::STORE_DELETE_FAILED),
-        Event::StoreGlobSucceeded { .. } => Some(lifecycle::STORE_GLOB_SUCCEEDED),
-        Event::StoreGlobFailed { .. } => Some(lifecycle::STORE_GLOB_FAILED),
-        Event::StoreExistsSucceeded { .. } => Some(lifecycle::STORE_EXISTS_SUCCEEDED),
-        Event::StoreExistsFailed { .. } => Some(lifecycle::STORE_EXISTS_FAILED),
+        Event::VfsWriteSucceeded { .. } => Some(lifecycle::VFS_WRITE_SUCCEEDED),
+        Event::VfsWriteFailed { .. } => Some(lifecycle::VFS_WRITE_FAILED),
+        Event::VfsAppendSucceeded { .. } => Some(lifecycle::VFS_APPEND_SUCCEEDED),
+        Event::VfsAppendFailed { .. } => Some(lifecycle::VFS_APPEND_FAILED),
+        Event::VfsReadSucceeded { .. } => Some(lifecycle::VFS_READ_SUCCEEDED),
+        Event::VfsReadFailed { .. } => Some(lifecycle::VFS_READ_FAILED),
+        Event::VfsReadNumberedSucceeded { .. } => Some(lifecycle::VFS_READ_NUMBERED_SUCCEEDED),
+        Event::VfsReadNumberedFailed { .. } => Some(lifecycle::VFS_READ_NUMBERED_FAILED),
+        Event::VfsReplaceSucceeded { .. } => Some(lifecycle::VFS_REPLACE_SUCCEEDED),
+        Event::VfsReplaceFailed { .. } => Some(lifecycle::VFS_REPLACE_FAILED),
+        Event::VfsDeleteSucceeded { .. } => Some(lifecycle::VFS_DELETE_SUCCEEDED),
+        Event::VfsDeleteFailed { .. } => Some(lifecycle::VFS_DELETE_FAILED),
+        Event::VfsGlobSucceeded { .. } => Some(lifecycle::VFS_GLOB_SUCCEEDED),
+        Event::VfsGlobFailed { .. } => Some(lifecycle::VFS_GLOB_FAILED),
+        Event::VfsExistsSucceeded { .. } => Some(lifecycle::VFS_EXISTS_SUCCEEDED),
+        Event::VfsExistsFailed { .. } => Some(lifecycle::VFS_EXISTS_FAILED),
         Event::ModelMetadataDegraded { .. }
         | Event::Lua { .. }
         | Event::TaskStarted { .. }
@@ -366,14 +366,14 @@ fn a_serialized_event_is_tagged_by_kind_with_its_coordinates_beside_the_payload(
     // The tag and the three coordinates are the log schema the Harness
     // writes `task_id` and `task_seq` from without inspecting the payload;
     // renaming any of them breaks every log written before it.
-    let event = Event::StoreWriteSucceeded {
+    let event = Event::VfsWriteSucceeded {
         execution: "run-1".to_owned(),
         section: "Gather".to_owned(),
         provenance: provenance("0.2", 9),
     };
     assert_eq!(
         serde_json::to_string(&event).expect("an event serializes"),
-        r#"{"kind":"store_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}"#
+        r#"{"kind":"vfs_write_succeeded","execution":"run-1","section":"Gather","provenance":{"task":"0.2","seq":9}}"#
     );
     let notice = Event::TaskNotice {
         execution: "run-1".to_owned(),

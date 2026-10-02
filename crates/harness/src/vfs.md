@@ -113,11 +113,11 @@ No public call returns a run error kind. [`Session::subscribe_errors`](crate::Se
 `Session::output_text` reads the same file for you. The Harness reads it once, as the run completes and before `Closed`, so calling it after `Closed` never races the run. For what each of its errors means, see [`OutputError`](crate::OutputError). Two come from the store:
 
 - [`OutputError::Missing`](crate::OutputError::Missing) when the run completed without writing the file; the run still counts as a success.
-- [`OutputError::Store`](crate::OutputError::Store) when the store refused the read for another reason, such as a refusal by a policy you install, as the next tour shows; only then does [`Error::source`](std::error::Error::source) give the [`VfsError`].
+- [`OutputError::Vfs`](crate::OutputError::Vfs) when the store refused the read for another reason, such as a refusal by a policy you install, as the next tour shows; only then does [`Error::source`](std::error::Error::source) give the [`VfsError`].
 
 A reused store still holds an earlier run's output file. When the new run never writes it, `Session::output_text` returns the old text, not `OutputError::Missing`, so delete or check the output path before you launch again.
 
-You might expect any `VfsRef` to work as a session's store. Instead, [`VfsRef::new`] and [`VfsRef::with_policy`] declare no store, so `acquire_store` on them returns [`VfsError::Unsupported`]. A prompt with an `input:` file, like `summarize`, then fails at once with run error kind `Input`, because the Harness places that file through `acquire_store`. A prompt with no `input:` file fails with run error kind `Store` before any section runs. Use the default handle, or declare a store through [`VfsRef::builder`].
+You might expect any `VfsRef` to work as a session's store. Instead, [`VfsRef::new`] and [`VfsRef::with_policy`] declare no store, so `acquire_store` on them returns [`VfsError::Unsupported`]. A prompt with an `input:` file, like `summarize`, then fails at once with run error kind `Input`, because the Harness places that file through `acquire_store`. A prompt with no `input:` file fails with run error kind `Vfs` before any section runs. Use the default handle, or declare a store through [`VfsRef::builder`].
 
 Seed before launch, read after close, and never hold a store access across the run. Next, [Guard and watch a session's files](#guard-and-watch-a-sessions-files) limits and records what the run touches.
 
@@ -241,11 +241,11 @@ Steps 4 and 5 look like this:
 
 Which access reports a conflict does depend on timing: the one that touches the path second fails and never reaches the files. Yours returns the conflict, whose `detail` names both sides; a run access ends the run with run error kind `Determinism`, which the prompt cannot catch. The first write stays either way, so check the file before you retry.
 
-A denial reaches the prompt as a store error with reason `permission_denied`, which it can catch with `pcall`, Lua's protected call; uncaught, it ends the run with kind `Store`. Your own `Access` gets `PermissionDenied` with the verdict text in `reason`. A third variant, `Verdict::Ask(String)`, for an operation that needs user approval, arrives exactly as [`Verdict::Deny`](promptforge::vfs::Verdict::Deny) does, so read `reason` to tell them apart.
+A denial reaches the prompt as a store error with reason `permission_denied`, which it can catch with `pcall`, Lua's protected call; uncaught, it ends the run with kind `Vfs`. Your own `Access` gets `PermissionDenied` with the verdict text in `reason`. A third variant, `Verdict::Ask(String)`, for an operation that needs user approval, arrives exactly as [`Verdict::Deny`](promptforge::vfs::Verdict::Deny) does, so read `reason` to tell them apart.
 
 The builder takes the policy by value, so to change it mid-run, have it read shared state such as an `Arc<Mutex<Verdict>>` field and keep a clone; the next operation sees the change.
 
-The Harness's own file work, labeled `input: <path>` before the run and `output: <path>` after it, passes through your policy and sink too. A policy that refuses the input fails the run with kind `Input`, and one that refuses the output read makes [`Session::output_text`](crate::Session::output_text) return [`OutputError::Store`](crate::OutputError::Store).
+The Harness's own file work, labeled `input: <path>` before the run and `output: <path>` after it, passes through your policy and sink too. A policy that refuses the input fails the run with kind `Input`, and one that refuses the output read makes [`Session::output_text`](crate::Session::output_text) return [`OutputError::Vfs`](crate::OutputError::Vfs).
 
 `Access` has no `Clone`, so each `acquire` gives you exactly one `Access`, and dropping it ends its scope and its claims; keep each one short.
 
