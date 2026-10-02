@@ -2616,20 +2616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-log"
-version = "0.3.0"
-dependencies = [
- "harness-runner",
- "promptforge",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "turso",
- "workspace-hack",
-]
-
-[[package]]
 name = "harness-models"
 version = "0.3.0"
 dependencies = [
@@ -8552,6 +8538,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "workshop-run-log"
+version = "0.0.0"
+dependencies = [
+ "harness",
+ "promptforge",
+ "serde_json",
+ "shared-error-source",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "turso",
+ "workspace-hack",
+]
+
+[[package]]
 name = "workshop-server"
 version = "0.3.0"
 dependencies = [
@@ -8578,6 +8579,7 @@ dependencies = [
  "workshop-menu",
  "workshop-protocol",
  "workshop-registry",
+ "workshop-run-log",
  "workshop-server",
  "workshop-status",
  "workshop-support",

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/harness-internal/runner", "crates/harness-internal/models", "crates/harness-internal/capabilities", "crates/harness-internal/log", "crates/harness-internal/sessions", "crates/harness-internal/web", "crates/harness-internal/webfetch", "crates/harness-internal/web-search"]
+members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/harness-internal/runner", "crates/harness-internal/models", "crates/harness-internal/capabilities", "crates/harness-internal/sessions", "crates/harness-internal/web", "crates/harness-internal/webfetch", "crates/harness-internal/web-search"]
 # crates/shared-ui is not a Rust crate: it is the TypeScript+CSS package
 # the Gateway config UI consumes (the Workshop uses its fork in
 # crates/workshop/look), so the crates/* glob skips it.
@@ -45,7 +45,6 @@ harness = { path = "crates/harness", version = "0.3.0" }
 harness-runner = { path = "crates/harness-internal/runner", version = "0.3.0" }
 harness-models = { path = "crates/harness-internal/models", version = "0.3.0" }
 harness-capabilities = { path = "crates/harness-internal/capabilities", version = "0.3.0" }
-harness-log = { path = "crates/harness-internal/log", version = "0.3.0" }
 harness-sessions = { path = "crates/harness-internal/sessions", version = "0.3.0" }
 harness-web = { path = "crates/harness-internal/web", version = "0.3.0" }
 harness-webfetch = { path = "crates/harness-internal/webfetch", version = "0.3.0" }
@@ -69,6 +68,7 @@ workshop-status = { path = "crates/workshop/status", version = "0.0.0" }
 workshop-support = { path = "crates/workshop/support", version = "0.0.0" }
 workshop-registry = { path = "crates/workshop/registry", version = "0.0.0" }
 workshop-workspace = { path = "crates/workshop/workspace", version = "0.0.0" }
+workshop-run-log = { path = "crates/workshop/run-log", version = "0.0.0" }
 workshop-user-state = { path = "crates/workshop/user-state", version = "0.0.0" }
 gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi", version = "0.3.0" }
 # cargo-hakari's feature-unification crate; every member inherits it.

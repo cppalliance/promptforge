@@ -1,7 +1,7 @@
 //! The read path: the whole transcript for session views.
 
-use harness_log::{LogError, Record, RecordKind, RunId, RunLog, RunMeta};
 use serde_json::json;
+use workshop_run_log::{LogError, Record, RecordKind, RunId, RunLog, RunMeta};
 
 /// A run's opening row.
 fn meta() -> RunMeta {

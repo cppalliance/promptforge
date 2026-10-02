@@ -29,8 +29,8 @@ fn a_harness_crate_depending_on_a_shared_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/log",
-        "harness-log",
+        "harness-internal/models",
+        "harness-models",
         "[dependencies]\nshared-error-source = { path = \"../../shared-error-source\" }\n",
     );
     write_crate(
@@ -42,7 +42,7 @@ fn a_harness_crate_depending_on_a_shared_crate_is_reported() {
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-log depends on shared-error-source:")
+        violations[0].starts_with("harness-models depends on shared-error-source:")
             && violations[0].contains("harness crates must not depend on shared crates"),
         "shared-* crates are closed to harness crates: {violations:?}"
     );
@@ -91,15 +91,15 @@ fn a_harness_crate_depending_on_an_unaffiliated_crate_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "harness-internal/log",
-        "harness-log",
+        "harness-internal/models",
+        "harness-models",
         "[dependencies]\nsome-tool = { path = \"../../some-tool\" }\n",
     );
     write_crate(root.path(), "some-tool", "some-tool", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-log depends on some-tool:")
+        violations[0].starts_with("harness-models depends on some-tool:")
             && violations[0].contains(
                 "harness crates must not depend on unaffiliated crates other than workspace-hack; outside their family they may name only promptforge and workspace-hack"
             ),

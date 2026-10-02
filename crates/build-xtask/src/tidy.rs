@@ -39,6 +39,7 @@ const SERVICES: &[Tiered] = &[
 /// sessions subsystem sits inside the server since Workshop moved onto the
 /// Harness, so it has no crate here.
 const FEATURES: &[Tiered] = &[
+    ("workshop-run-log", "run-log"),
     ("workshop-user-state", "user-state"),
     ("workshop-workspace", "workspace"),
 ];

@@ -1,12 +1,13 @@
 //! The values the run log stores and returns.
 //!
 //! The values the Harness hands a recorder (`Record`, `RunMeta`,
-//! `RunOutcome`, and their parts) are the runner's own, re-exported here,
-//! so a log and the effect loop share one definition of each.
+//! `RunOutcome`, and their parts) are the Harness's own, re-exported from
+//! `harness::record`, so a log and the effect loop share one definition
+//! of each.
 
 use std::fmt;
 
-pub use harness_runner::{Record, RecordKind, RunId, RunMeta, RunOutcome};
+pub use harness::record::{Record, RecordKind, RunId, RunMeta, RunOutcome};
 
 /// A record's position in its run: the effect loop's order, assigned by
 /// the log in call order, starting at `0` and strictly increasing.

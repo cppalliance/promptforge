@@ -94,7 +94,7 @@ impl RunLog {
     }
 
     /// Every `event` record of `run` in `seq` order, the loop's order:
-    /// what a session view renders and what a reconnecting client replays.
+    /// what a session view renders.
     ///
     /// # Errors
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,

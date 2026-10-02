@@ -13,7 +13,8 @@
 //! `workshop-workspace`, and the agent-sessions subsystem in `agents`,
 //! which serves the `/agents/ws` agent-session socket and the
 //! `/v1/models` catalog relay and owns that socket's wire frames in
-//! `agents::wire`), the `/ws` workshop socket in
+//! `agents::wire`, and which records every run in the run log of
+//! `workshop-run-log`), the `/ws` workshop socket in
 //! `workshop_socket` (the two sockets share `websocket`), the
 //! domain services (`workshop-gateway`, `workshop-status`,
 //! `workshop-menu`), and the vocabulary crates (`workshop-protocol`,
@@ -27,8 +28,9 @@
 //! - Tier: server; may depend on: the vocabulary crates
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
-//!   `workshop-status`), the feature crates (`workshop-user-state`,
-//!   `workshop-workspace`), the Harness's public API `harness`, and
+//!   `workshop-status`), the feature crates (`workshop-run-log`,
+//!   `workshop-user-state`, `workshop-workspace`), the Harness's public
+//!   API `harness`, and
 //!   the Engine's public API `promptforge`. Read the repository-root
 //!   `AGENTS.md` and `crates/workshop/server/AGENTS.md` before adding
 //!   an import.

@@ -1,23 +1,25 @@
 [package]
-name = "harness-log"
-version.workspace = true
+name = "workshop-run-log"
+version = "0.0.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
 
-description = "PromptForge Harness run log: the append-only Turso record of every run's effects, answers, and events"
+description = "Workshop run log: the append-only Turso record of every run the Harness hands the Host's recorder, and the recorder that writes it"
 readme = "README.md"
-keywords = ["promptforge", "llm", "agent", "harness", "log"]
+keywords = ["promptforge", "llm", "agent", "workshop", "log"]
 categories = ["development-tools", "database"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-# The record values the log stores and returns, defined once beside the
-# effect loop that produces them.
-harness-runner.workspace = true
+# The recorder trait and the record values the log stores and returns,
+# through the Harness's public API.
+harness.workspace = true
 serde_json.workspace = true
+shared-error-source = { workspace = true, features = ["database", "json"] }
 thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "sync"] }
 turso.workspace = true
 workspace-hack.workspace = true
 

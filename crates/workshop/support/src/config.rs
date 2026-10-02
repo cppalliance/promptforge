@@ -137,11 +137,11 @@ pub struct GatewayConfig {
 pub struct ServerConfig {
     /// Address the workshop server binds to.
     pub bind: String,
-    /// Directory holding the server's persistent state: agent session
-    /// event logs sit under `state_dir/sessions/`, and the per-profile
-    /// model memory and boot orphan sweep anchor here. Defaults to the
-    /// config file's own directory (`Config::parse` anchors the empty
-    /// default there).
+    /// Directory holding the server's persistent state: the run log of
+    /// every agent session sits at `state_dir/harness/runs.db`, and the
+    /// per-profile model memory and boot orphan sweep anchor here.
+    /// Defaults to the config file's own directory (`Config::parse`
+    /// anchors the empty default there).
     pub state_dir: PathBuf,
 }
 

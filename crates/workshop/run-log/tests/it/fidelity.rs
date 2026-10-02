@@ -5,11 +5,11 @@
 //! so a float whose text does not parse exactly, or an object whose key
 //! order changes, would make a replayed run differ from the run that ran.
 
-use harness_log::{Record, RecordFilter, RecordKind, RunLog, RunMeta};
 use promptforge::event::{Event, ReplyOrigin};
 use promptforge::ids::{ParseIdError, Provenance, TaskId};
 use promptforge::metrics::{CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::{Map, Value, json};
+use workshop_run_log::{Record, RecordFilter, RecordKind, RunLog, RunMeta};
 
 /// A double whose shortest decimal text a plain parser reads back as the
 /// neighbour `3.9078`: the defect exact parsing removes.

@@ -34,6 +34,7 @@ workshop-gateway.workspace = true
 workshop-menu.workspace = true
 workshop-protocol.workspace = true
 workshop-registry.workspace = true
+workshop-run-log.workspace = true
 workshop-status.workspace = true
 workshop-support.workspace = true
 workshop-user-state.workspace = true

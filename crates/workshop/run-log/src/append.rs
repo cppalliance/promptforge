@@ -14,8 +14,8 @@ use crate::schema;
 ///
 /// Every method takes `&mut self`: the effect loop is the log's one
 /// writer, and exclusive access is what lets `append` read the next `seq`
-/// and insert under it without a transaction. The Harness uses the log
-/// from several tasks and wraps it in its own serialization.
+/// and insert under it without a transaction. [`TursoRecorder`](crate::TursoRecorder)
+/// serves several tasks and wraps the log in its own lock.
 pub struct RunLog {
     conn: turso::Connection,
 }

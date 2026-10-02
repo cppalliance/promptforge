@@ -1,13 +1,19 @@
-//! harness-log - the Harness run log: an append-only Turso record of every
-//! run and, per run, every effect, answer, and event in loop order.
+//! workshop-run-log - the Workshop run log: an append-only Turso record of
+//! every run and, per run, every effect, answer, and event in loop order,
+//! and the recorder that lets the Harness write to it.
 //!
 //! ## Invariants
 //!
-//! - Family: Harness, private to `crates/harness-internal/`; may depend
-//!   on: `promptforge` and container siblings only.
-//!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
-//!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
-//!   import.
+//! - Tier: feature; may depend on: `workshop-protocol`,
+//!   `workshop-registry`, `workshop-support`, and the service crates;
+//!   today it names none of them. Outside the family it may name the
+//!   Harness's public API `harness`, the Engine's public API
+//!   `promptforge`, and `shared-*` crates. Never on `workshop-server`, a
+//!   private Harness, Engine, or Gateway crate. Read the repository-root
+//!   `AGENTS.md` before adding an import.
+//! - The Harness holds no database and no storage path: this crate is
+//!   where the Host's recorder keeps a run's history. It reaches the
+//!   Harness only through `harness::record`.
 //! - `records` is append-only: a record's `seq` is the effect loop's
 //!   order, not the clock's, assigned by the log in call order, and no
 //!   record is updated or deleted once written. A `runs` row is written
@@ -24,20 +30,24 @@
 //!   `serde_json`'s `float_roundtrip` feature, and `Value::Object` orders
 //!   keys by `BTreeMap` rather than by insertion, so both hold. The
 //!   fidelity test in `tests/it/fidelity.rs` pins it.
+//! - `TursoRecorder` serializes every call behind its own lock, and calls
+//!   from different runs may overlap. The database opens on the first
+//!   call, and an open that fails leaves nothing behind, so the next call
+//!   tries again. A write the log refuses fails the run it belongs to; the
+//!   recorder never skips a record.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
-//! - Nothing in this crate spawns a tokio task directly; the Harness
-//!   spawns only through the instrumented wrapper in `harness-runner`
-//!   (enforced by this crate's `clippy.toml`).
 
 mod append;
 mod error;
 mod read;
 mod record;
+mod recorder;
 mod schema;
 
 pub use append::RunLog;
-pub use error::{DatabaseSource, JsonSource, LogError};
+pub use error::LogError;
 pub use record::{
     Record, RecordFilter, RecordKind, RunId, RunMeta, RunOutcome, RunRow, Seq, StoredRecord,
 };
+pub use recorder::TursoRecorder;

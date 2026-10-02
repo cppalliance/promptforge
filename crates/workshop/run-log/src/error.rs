@@ -2,63 +2,13 @@
 
 use std::io;
 
+// The causes behind `LogError::Database` and `LogError::Payload`. A
+// caller that needs the database's or serde's own error names
+// `shared_error_source` directly; this crate does not re-export the
+// wrappers, so there is one name for each cause across the workspace.
+use shared_error_source::{DatabaseSource, JsonSource};
+
 use crate::RunId;
-
-/// The database's error behind [`LogError::Database`], so the
-/// public error surface names no database type. Renders and sources exactly
-/// as the database's error does; [`as_inner`](Self::as_inner) restores
-/// branching on the database's own variant, which the chain walks past.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct DatabaseSource(turso::Error);
-
-impl DatabaseSource {
-    /// The wrapped database error.
-    #[must_use]
-    pub fn as_inner(&self) -> &turso::Error {
-        &self.0
-    }
-
-    /// Takes the wrapped database error out of the wrapper.
-    #[must_use]
-    pub fn into_inner(self) -> turso::Error {
-        self.0
-    }
-}
-
-impl From<turso::Error> for DatabaseSource {
-    fn from(source: turso::Error) -> Self {
-        DatabaseSource(source)
-    }
-}
-
-/// The JSON error behind [`LogError::Payload`], so the public error
-/// surface names no `serde_json` type. Renders and sources exactly as the
-/// JSON error does; [`as_inner`](Self::as_inner) restores serde's own
-/// classification, which the chain walks past.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct JsonSource(serde_json::Error);
-
-impl JsonSource {
-    /// The wrapped JSON error.
-    #[must_use]
-    pub fn as_inner(&self) -> &serde_json::Error {
-        &self.0
-    }
-
-    /// Takes the wrapped JSON error out of the wrapper.
-    #[must_use]
-    pub fn into_inner(self) -> serde_json::Error {
-        self.0
-    }
-}
-
-impl From<serde_json::Error> for JsonSource {
-    fn from(source: serde_json::Error) -> Self {
-        JsonSource(source)
-    }
-}
 
 /// Why a run log operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -125,10 +75,12 @@ impl From<serde_json::Error> for LogError {
 mod tests {
     use std::error::Error as _;
 
-    use crate::{DatabaseSource, JsonSource, LogError};
+    use shared_error_source::{DatabaseSource, JsonSource};
+
+    use crate::LogError;
 
     #[test]
-    fn the_database_variant_reaches_the_database_error_through_the_log_wrapper() {
+    fn the_database_variant_reaches_the_database_error_through_the_shared_wrapper() {
         let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
         let rendered = database.to_string();
         let error = LogError::from(database);
@@ -137,13 +89,13 @@ mod tests {
         };
         assert_eq!(cause.to_string(), rendered);
         let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
-            panic!("the database cause is harness-log's DatabaseSource");
+            panic!("the database cause is shared_error_source's DatabaseSource");
         };
         assert!(matches!(wrapper.as_inner(), turso::Error::Corrupt(_)));
     }
 
     #[test]
-    fn the_payload_variant_reaches_the_serde_error_through_the_log_wrapper() {
+    fn the_payload_variant_reaches_the_serde_error_through_the_shared_wrapper() {
         let Err(json) = serde_json::from_str::<u32>("nope") else {
             panic!("`nope` must not parse as a u32");
         };
@@ -154,28 +106,8 @@ mod tests {
         };
         assert_eq!(cause.to_string(), rendered);
         let Some(wrapper) = cause.downcast_ref::<JsonSource>() else {
-            panic!("the serde cause is harness-log's JsonSource");
+            panic!("the serde cause is shared_error_source's JsonSource");
         };
         assert!(wrapper.as_inner().is_syntax());
-    }
-
-    #[test]
-    fn the_database_wrapper_hands_back_the_database_error_it_wraps() {
-        let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
-        let rendered = database.to_string();
-        let inner = DatabaseSource::from(database).into_inner();
-        assert_eq!(inner.to_string(), rendered);
-        assert!(matches!(inner, turso::Error::Corrupt(_)));
-    }
-
-    #[test]
-    fn the_json_wrapper_hands_back_the_serde_error_it_wraps() {
-        let Err(json) = serde_json::from_str::<u32>("nope") else {
-            panic!("`nope` must not parse as a u32");
-        };
-        let rendered = json.to_string();
-        let inner = JsonSource::from(json).into_inner();
-        assert_eq!(inner.to_string(), rendered);
-        assert!(inner.is_syntax());
     }
 }

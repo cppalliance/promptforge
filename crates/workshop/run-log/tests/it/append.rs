@@ -1,7 +1,9 @@
 //! The write path: a run begins, records append in loop order, the run ends.
 
-use harness_log::{LogError, Record, RecordFilter, RecordKind, RunId, RunLog, RunMeta, RunOutcome};
 use serde_json::json;
+use workshop_run_log::{
+    LogError, Record, RecordFilter, RecordKind, RunId, RunLog, RunMeta, RunOutcome,
+};
 
 /// Every record of a run, in loop order.
 const ALL: RecordFilter = RecordFilter {
@@ -137,7 +139,7 @@ async fn a_filter_selects_by_kind_and_keeps_the_last_n() {
         record.task_id = task_id.to_owned();
         log.append(run, record).await.unwrap();
     }
-    let positions = |records: Vec<harness_log::StoredRecord>| -> Vec<(String, u32)> {
+    let positions = |records: Vec<workshop_run_log::StoredRecord>| -> Vec<(String, u32)> {
         records
             .into_iter()
             .map(|stored| (stored.record.task_id, stored.record.task_seq))
