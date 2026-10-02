@@ -12,7 +12,7 @@
 //! the crate-internal import surface for it.
 
 // The store operation behind `execute::perform_vfs_op`, the entry point
-// the Harness's store performer answers a `Vfs` effect through, and the
+// the Harness's effect loop answers a `Vfs` effect through, and the
 // model-facing message renderer a store failure carries.
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, LuaBlockResult, LuaProgram, MessageRecord, ModelReport, OverflowReason,

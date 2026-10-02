@@ -70,15 +70,15 @@ pub use run::{
 pub(crate) use promptforge_lua::{VfsOp, VfsOutcome};
 
 /// Performs one operation on the run's store view through `access`: the
-/// work behind an [`Effect::Vfs`], for the Harness's store performer.
+/// work behind an [`Effect::Vfs`], for the Harness's effect loop.
 /// `access` is the store view the effect carries - derived from the
 /// chain's capability at dispatch - and each [`VfsOp`] maps onto one
 /// `Access` call over it, so the Harness answers a `Vfs` effect exactly as
 /// the Engine's test drivers do. The `i64` line bounds convert to `usize` here, and an
 /// `end` without a `start` is refused as an invalid range.
 ///
-/// Synchronous, because the VFS is synchronous by design; the Harness runs it
-/// off its async executor.
+/// Synchronous, because the VFS is synchronous by design; the Harness's
+/// effect loop calls it inline, on the thread that runs the loop.
 ///
 /// # Errors
 /// Returns the store's own structured failure for the operation (path

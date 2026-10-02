@@ -363,7 +363,7 @@ impl<'a> TokioDriver<'a> {
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&access, op);
-                    // Hygiene only, as in the Harness's `perform_store`:
+                    // Hygiene only, as in the Harness's inline Vfs answer:
                     // the run ends its scope at `Done`, so a post-run
                     // fresh-scope read never meets the run's claims
                     // however long the view is held.

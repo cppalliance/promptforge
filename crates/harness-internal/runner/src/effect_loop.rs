@@ -4,27 +4,35 @@
 //! resume`. Every step's events are appended to the run log before any of
 //! the step's effects is issued, so an effect's record never precedes the
 //! events its step reported. Each effect is appended as its
-//! [`EffectRecord`](promptforge::effect::EffectRecord) and then
-//! started through the tagged spawn wrapper: a plain task for the
-//! asynchronous kinds, the blocking pool for a store operation (the VFS is
-//! synchronous by design). Each task posts `(EffectId, EffectAnswer)` on
-//! one channel; the loop appends the answer's record and resumes the run
-//! with it, then steps again.
+//! [`EffectRecord`](promptforge::effect::EffectRecord) and then handled by
+//! kind. A chat, tool-call, or timer effect is started as a plain task
+//! through the tagged spawn wrapper; each task posts
+//! `(EffectId, EffectAnswer)` on one channel, and the loop appends the
+//! answer's record and resumes the run with it, then steps again. A Vfs
+//! effect starts no task: the VFS is synchronous by design, so the loop
+//! performs the operation on its own thread, appends the answer's record,
+//! and resumes the run at once. It resumes every Vfs effect of a step this
+//! way and then steps once, so the loop awaits an answer only when it
+//! answered nothing inline. Real-disk operations therefore block the
+//! thread that runs the loop, and Vfs operations from different chains run
+//! one at a time in issue order.
 //!
 //! Cancellation is the caller's synchronous flag, awaited beside the
 //! answer channel. When it fires the loop cancels the run, aborts every
-//! performer still out and joins it - a blocking-pool store operation
-//! cannot be interrupted, so the join waits for it to finish, and only
-//! then is its access clone gone and the claims it held released - then
-//! answers each of those effects `Dropped` and steps the run to `Done`. A
-//! drop is an answer, recorded like any other, so every effect record in
-//! the log has exactly one answer record.
+//! performer still out and joins it, so whatever the performer held is
+//! gone before the run ends, then answers each of those effects `Dropped`
+//! and steps the run to `Done`. A Vfs effect is never out at a cancel: it
+//! is answered before the loop looks at the flag again. A drop is an
+//! answer, recorded like any other, so every effect record in the log has
+//! exactly one answer record.
 //!
 //! A performer that panics posts nothing itself; tokio catches the panic
 //! and ends the task. Every performer task therefore holds an
 //! `Answering` guard that posts `Dropped` for its effect when the task
 //! ends without having answered, so the loop hears from every performer
-//! it started and a lost one can never leave the run waiting forever.
+//! it started and a lost one can never leave the run waiting forever. A
+//! Vfs operation that panics is caught where it runs and answered
+//! `Dropped` the same way.
 //!
 //! The run's `Done` closes the run's row in the log with its outcome.
 
@@ -36,18 +44,19 @@ use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer, EffectId};
 use promptforge::event::Event;
 use promptforge::ids::Provenance;
+use promptforge::vfs::{Access, VfsOp};
 use promptforge::{Run, RunError, RunResult, Step};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::display_chain::display_chain;
 use crate::performers::Performers;
-use crate::spawn::{spawn_blocking_tagged, spawn_tagged};
+use crate::spawn::spawn_tagged;
 
 #[path = "effect_loop-answering.rs"]
 mod answering;
 
-use answering::{AnswerSender, Answering, perform_store};
+use answering::{AnswerSender, Answering, answer_vfs};
 
 /// The run log as the loop and its other users share it: the loop is the
 /// writer during a run, the session transcript views and reconnect are
@@ -185,9 +194,27 @@ impl<'a> Driver<'a> {
                         self.drop_outstanding().await?;
                         continue;
                     }
+                    let mut answered_inline = false;
                     for (id, provenance, effect) in effects {
                         self.commit_effect(id, &provenance, &effect).await?;
-                        self.perform(id, provenance, effect);
+                        // A Vfs effect comes back from `perform` and is
+                        // answered here; every other kind is out as a
+                        // task. The run is not stepped between inline
+                        // answers: the whole batch is resumed, then
+                        // stepped once.
+                        if let Some((access, op)) = self.perform(id, &provenance, effect) {
+                            let answer = answer_vfs(id, &provenance, access, op);
+                            self.commit_answer(id, &provenance, &answer).await?;
+                            self.run.resume(id, answer);
+                            answered_inline = true;
+                        }
+                    }
+                    if answered_inline {
+                        // Stepping again, not awaiting: the answers just
+                        // resumed may have made chains ready, and a step
+                        // whose every effect was a Vfs effect has nothing
+                        // out to await.
+                        continue;
                     }
                     if self.outstanding.is_empty() {
                         return Err(DriveError::Stalled);
@@ -249,11 +276,11 @@ impl<'a> Driver<'a> {
     }
 
     /// Aborts and joins every performer still out, in effect order, and
-    /// answers each of their effects `Dropped`. A blocking-pool store
-    /// operation cannot be interrupted, so its join waits for it to
-    /// finish; only then is its access clone - and the claims it holds -
-    /// gone, which is what keeps claim release bounded to the run's
-    /// lifetime.
+    /// answers each of their effects `Dropped`. The join waits for an
+    /// aborted task to finish tearing down, so whatever the performer
+    /// held is gone before the effect is answered. Only chat, tool-call,
+    /// and timer performers are ever out: a Vfs effect is answered inline
+    /// and has none.
     async fn drop_outstanding(&mut self) -> Result<(), LogError> {
         let mut outstanding: Vec<(EffectId, InFlight)> =
             std::mem::take(&mut self.outstanding).into_iter().collect();
@@ -294,10 +321,19 @@ impl<'a> Driver<'a> {
         Ok(())
     }
 
-    /// Starts one effect's performer, which posts the effect's answer
-    /// under `id`.
-    fn perform(&mut self, id: EffectId, provenance: Provenance, effect: Effect) {
-        let answer = Answering::new(self.tx.clone(), id);
+    /// Starts the performer of a chat, tool-call, or timer effect, which
+    /// posts the effect's answer under `id`, and returns `None`.
+    ///
+    /// A Vfs effect starts nothing and is handed back as the access and
+    /// operation it carries, for the caller to answer inline. It never
+    /// gets an [`Answering`] guard: a guard dropped without posting sends
+    /// `Dropped`, and the inline answer is the effect's only one.
+    fn perform(
+        &mut self,
+        id: EffectId,
+        provenance: &Provenance,
+        effect: Effect,
+    ) -> Option<(Arc<Access>, VfsOp)> {
         let tag = (id, provenance.clone());
         let handle = match effect {
             Effect::Chat {
@@ -307,6 +343,7 @@ impl<'a> Driver<'a> {
                 options,
                 stream,
             } => {
+                let answer = Answering::new(self.tx.clone(), id);
                 let round = self
                     .performers
                     .chat
@@ -318,19 +355,15 @@ impl<'a> Driver<'a> {
             Effect::ToolCall {
                 tool, alias, args, ..
             } => {
+                let answer = Answering::new(self.tx.clone(), id);
                 let call = self.performers.tool.call(tool, alias, args);
                 spawn_tagged(tag, async move {
                     answer.post(EffectAnswer::ToolCall(call.await));
                 })
             }
-            Effect::Vfs { access, op } => {
-                let store = Arc::clone(&self.performers.store);
-                spawn_blocking_tagged(tag, move || {
-                    let result = perform_store(store.as_ref(), access, op);
-                    answer.post(EffectAnswer::Vfs(result));
-                })
-            }
+            Effect::Vfs { access, op } => return Some((access, op)),
             Effect::Timer { seconds } => {
+                let answer = Answering::new(self.tx.clone(), id);
                 let sleep = self.performers.timer.sleep(seconds);
                 spawn_tagged(tag, async move {
                     sleep.await;
@@ -338,7 +371,14 @@ impl<'a> Driver<'a> {
                 })
             }
         };
-        self.outstanding.insert(id, InFlight { provenance, handle });
+        self.outstanding.insert(
+            id,
+            InFlight {
+                provenance: provenance.clone(),
+                handle,
+            },
+        );
+        None
     }
 
     /// Appends one step's events to the log, then hands each to the sink

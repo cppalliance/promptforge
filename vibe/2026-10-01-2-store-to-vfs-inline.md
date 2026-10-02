@@ -336,7 +336,7 @@ Before the first step: read this whole file, confirm `git status` is clean and t
 </step-1>
 <step-2>
 
-### Step 2: Answer Vfs effects inline in the Harness
+### Step 2: Answer Vfs effects inline in the Harness [completed]
 
 - Component: none
 - Artifacts: `crates/harness-internal/runner/src/effect_loop.rs`, `effect_loop-answering.rs`, `performers.rs`, `performers-builtin.rs`, `prepare.rs`, the tests `crates/harness-internal/runner/tests/it/support.rs`, `effect_loop.rs` and `performers.rs`, and `vibe/archdoc.md` (the Harness component line only). Key symbols: `Driver::drive`, `Driver::perform`, `answer_vfs`, `Answering`, `StorePerformer`, `VfsStore`, `Performers.store`. Every edit is listed under Technical Design, "File and public API changes", inline work.

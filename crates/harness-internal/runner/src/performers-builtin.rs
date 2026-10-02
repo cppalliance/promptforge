@@ -1,16 +1,11 @@
-//! The performers the runner supplies itself: the timer and the store.
-//! Each is machinery the runner already holds - tokio's timer wheel and
-//! the Engine's store operation over the effect's own access - so
-//! neither needs a crate of its own. The chat and tool performers reach
-//! outward (a gateway and the activated capabilities) and live with what
-//! they reach.
+//! The performer the runner supplies itself: the timer. It is machinery
+//! the runner already holds - tokio's timer wheel - so it needs no crate
+//! of its own. The chat and tool performers reach outward (a gateway and
+//! the activated capabilities) and live with what they reach.
 
 use std::time::Duration;
 
-use promptforge::vfs::Access;
-use promptforge::vfs::{VfsError, VfsOp, VfsOutcome, perform_vfs_op};
-
-use super::{BoxFuture, StorePerformer, TimerPerformer};
+use super::{BoxFuture, TimerPerformer};
 
 /// Sleeps on tokio's timer wheel.
 ///
@@ -28,20 +23,5 @@ impl TimerPerformer for TokioTimer {
         // own tokio test driver does.
         let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO);
         Box::pin(tokio::time::sleep(duration))
-    }
-}
-
-/// Performs a store operation through the Engine's store facade over the
-/// store view the effect carries.
-///
-/// Synchronous: the loop runs it on the blocking pool. When the access
-/// drops never affects correctness: claims follow happens-before within
-/// the run's scope, and the run ends that scope at `Done`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct VfsStore;
-
-impl StorePerformer for VfsStore {
-    fn perform(&self, access: &Access, op: VfsOp) -> Result<VfsOutcome, VfsError> {
-        perform_vfs_op(access, op)
     }
 }

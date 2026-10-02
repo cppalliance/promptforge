@@ -4,20 +4,20 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
-use std::time::Duration;
 
 use harness_log::{RunId, RunOutcome};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::performers::{
-    BoxFuture, ChatPerformer, Performers, StorePerformer, TimerPerformer, ToolPerformer,
+    BoxFuture, ChatPerformer, Performers, TimerPerformer, ToolPerformer,
 };
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
-use promptforge::vfs::Access;
-use promptforge::vfs::{VfsError, VfsOp, VfsOutcome};
+use promptforge::vfs::{
+    AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+};
 use promptforge::{Environment, Prompt, Run, RunContext};
 use serde_json::{Value, json};
 
@@ -53,9 +53,10 @@ pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
 }
 
 /// A capability-free run over `prompt` with a fixed seed and start,
-/// prepared against the fixture [`catalog`].
-fn prepared(prompt: Arc<Prompt>) -> Run {
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
+/// prepared against the fixture [`catalog`], over the run's filesystem
+/// `vfs`.
+fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
+    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).vfs(vfs);
     let (ctx, requirements) = Environment::new().tools(catalog()).prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
@@ -64,9 +65,17 @@ fn prepared(prompt: Arc<Prompt>) -> Run {
     Run::new(prompt, "", ctx)
 }
 
-/// A capability-free run over `lua` with a fixed seed and start.
+/// A capability-free run over `lua` with a fixed seed and start, over a
+/// fresh memory store.
 pub(crate) fn run(lua: &str) -> Run {
-    prepared(prompt(lua))
+    run_over(lua, VfsRef::default())
+}
+
+/// A capability-free run over `lua` whose `store` table operates on
+/// `vfs`: the test holds the handle, so it can read what the run wrote or
+/// mount a backend of its own.
+pub(crate) fn run_over(lua: &str, vfs: VfsRef) -> Run {
+    prepared(prompt(lua), vfs)
 }
 
 /// A capability-free run over two sections: `## Main` runs `main`, and
@@ -78,7 +87,7 @@ pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     );
     let (prompt, _parse_events) = Prompt::parse(&source, EXECUTION);
     let prompt = Arc::new(prompt.expect("the two-section fixture prompt parses"));
-    prepared(prompt)
+    prepared(prompt, VfsRef::default())
 }
 
 /// A main section that parks on a 30-second timer beside its child: the
@@ -115,12 +124,6 @@ impl ToolPerformer for Unused {
     }
 }
 
-impl StorePerformer for Unused {
-    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
-        unreachable!("this test issues no Vfs effect")
-    }
-}
-
 impl TimerPerformer for Unused {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         unreachable!("no test issues a Timer effect")
@@ -134,7 +137,6 @@ pub(crate) fn unused() -> Performers {
     Performers {
         chat: unused.clone(),
         tool: unused.clone(),
-        store: unused.clone(),
         timer: unused,
     }
 }
@@ -239,25 +241,112 @@ impl TimerPerformer for PendingTimer {
     }
 }
 
-/// Answers every store operation with the unit outcome at once.
-pub(crate) struct UnitStore;
+/// Parks every tool call until the test adds a permit to `gate`, then
+/// answers it: a tool call that stays out for exactly as long as the test
+/// says, with no timer involved.
+pub(crate) struct GatedTool {
+    pub(crate) gate: Arc<tokio::sync::Semaphore>,
+}
 
-impl StorePerformer for UnitStore {
-    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
-        Ok(VfsOutcome::Unit)
+impl ToolPerformer for GatedTool {
+    fn call(
+        &self,
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
+        let gate = Arc::clone(&self.gate);
+        Box::pin(async move {
+            gate.acquire()
+                .await
+                .expect("the gate semaphore is never closed")
+                .forget();
+            Ok(ToolOutput::trusted("opened"))
+        })
     }
 }
 
-/// Blocks for `delay` before answering, and raises `finished` when it has.
-pub(crate) struct SlowStore {
-    pub(crate) delay: Duration,
-    pub(crate) finished: Arc<AtomicBool>,
+/// A [`MemoryBackend`] that runs `on_write` as each write starts and
+/// delegates every operation to the memory backend: a test mounts it as
+/// the run's store, so a store operation reaches it through the run's
+/// real store view, and the hook sees where the operation runs or makes
+/// the backend panic in the one chosen operation.
+pub(crate) struct HookedBackend {
+    inner: MemoryBackend,
+    on_write: Arc<dyn Fn() + Send + Sync>,
 }
 
-impl StorePerformer for SlowStore {
-    fn perform(&self, _access: &Access, _op: VfsOp) -> Result<VfsOutcome, VfsError> {
-        std::thread::sleep(self.delay);
-        self.finished.store(true, Ordering::SeqCst);
-        Ok(VfsOutcome::Unit)
+impl HookedBackend {
+    pub(crate) fn new(on_write: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            inner: MemoryBackend::new(),
+            on_write: Arc::new(on_write),
+        }
+    }
+}
+
+impl Vfs for HookedBackend {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+        Ok(Box::new(HookedAccess {
+            inner: self.inner.acquire(cx)?,
+            on_write: Arc::clone(&self.on_write),
+        }))
+    }
+
+    fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
+        self.inner.release(id)
+    }
+}
+
+/// One session with a [`HookedBackend`].
+struct HookedAccess {
+    inner: Box<dyn VfsAccess>,
+    on_write: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl VfsAccess for HookedAccess {
+    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
+        self.inner.read(path)
+    }
+
+    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        (self.on_write)();
+        self.inner.write(path, contents)
+    }
+
+    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.inner.append(path, contents)
+    }
+
+    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner.remove(path, recursive)
+    }
+
+    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
+        self.inner.exists(path)
+    }
+
+    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        self.inner.glob(pattern)
+    }
+
+    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
+        self.inner.list(path)
+    }
+
+    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
+        self.inner.stat(path)
+    }
+
+    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner.mkdir(path, recursive)
+    }
+
+    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.rename(from, to)
+    }
+
+    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.copy(from, to)
     }
 }
