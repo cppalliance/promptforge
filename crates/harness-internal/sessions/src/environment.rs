@@ -1,11 +1,11 @@
 //! The session run's environment: the bindings a client pushes through
-//! the public API (the gateway, the chat catalog, the host snapshot), the
-//! resources the harness builds from one gateway generation (the
+//! the public API (the gateway, the chat catalog, the Host snapshot), the
+//! resources the Harness builds from one gateway generation (the
 //! capability registry of first-party capabilities and the model client),
 //! and the launch-time resolution of the client's selected model into the
 //! run's context.
 //!
-//! Everything here arrives as data. The harness never resolves a gateway,
+//! Everything here arrives as data. The Harness never resolves a gateway,
 //! reads a menu, or names a workspace crate: the client pushes a
 //! [`GatewayBinding`] at startup and on every replacement, a
 //! [`CatalogBinding`] whenever its chat-capable model list changes, and a
@@ -17,21 +17,20 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use harness_capabilities::CapabilityRegistry;
+use harness_capabilities::{CapabilityRegistry, UserInput};
 use harness_models::{
     CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
 };
 use harness_web::Web;
 use promptforge::model::{ModelDescriptor, ModelId};
-use promptforge::tools::ToolError;
 use tokio::sync::watch;
 
-/// One generation of the gateway a client has bound the harness to.
+/// One generation of the gateway a client has bound the Harness to.
 ///
 /// The client pushes a binding at startup and on every gateway
-/// replacement; the harness rebuilds its capability registry and model
+/// replacement; the Harness rebuilds its capability registry and model
 /// client when `generation` changes. The binding is data pushed through
-/// the public API: the harness never resolves a gateway itself.
+/// the public API: the Harness never resolves a gateway itself.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GatewayBinding {
     /// The gateway's base URL.
@@ -78,7 +77,7 @@ pub struct CatalogBinding {
     pub models: Vec<serde_json::Value>,
 }
 
-/// The host state a run reads at launch: what the `ui()` global serves
+/// The Host state a run reads at launch: what the `ui()` global serves
 /// and the model the prompt's roles bind to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HostSnapshot {
@@ -103,22 +102,32 @@ impl HostSnapshot {
 }
 
 /// Builds a registry holding the first-party capabilities for one gateway
-/// generation: today `promptforge/web`, built from the gateway's API root
-/// (`root`, the OpenAI-compatible `/v1` base) and bearer `token`. The
-/// registry is rebuilt when the gateway generation changes, so a
-/// replacement gateway's root and key reach the contributed tools.
-///
-/// # Errors
-/// Returns the web capability's own [`ToolError`] when `root` is not a
-/// valid gateway API root or `token` is empty.
-pub fn first_party_registry(root: &str, token: &str) -> Result<CapabilityRegistry, ToolError> {
-    let web = Web::new(root, token)?;
+/// generation: `promptforge/user-input` always, and `promptforge/web`,
+/// built from the gateway's API root (`root`, the OpenAI-compatible `/v1`
+/// base) and bearer `token`, when those build it. A web failure is logged
+/// and costs only web, so activation still finds user input and a prompt
+/// that needs only user input still prepares. A session launch also needs
+/// the model client, which [`gateway_client`] builds from the same root
+/// and token. The registry is rebuilt when the gateway generation changes,
+/// so a replacement gateway's root and key reach the contributed tools.
+#[must_use]
+pub fn first_party_registry(root: &str, token: &str) -> CapabilityRegistry {
     let mut registry = CapabilityRegistry::new();
-    // A single registration cannot collide; the registry's error is
-    // unreachable on this path, and dropping it keeps the signature to the
-    // one failure a caller can act on.
-    let _ = registry.register(Arc::new(web));
-    Ok(registry)
+    // The ids are distinct literals, so neither registration can collide;
+    // the registry's error is unreachable on this path.
+    let _ = registry.register(Arc::new(UserInput::new()));
+    match Web::new(root, token) {
+        Ok(web) => {
+            let _ = registry.register(Arc::new(web));
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "agent sessions degraded: the gateway cannot build promptforge/web"
+            );
+        }
+    }
+    registry
 }
 
 /// Builds the model client for one gateway binding, or `None` - reported
@@ -143,13 +152,13 @@ pub fn gateway_client(binding: &GatewayBinding) -> Option<GatewayClient> {
     Some(GatewayClient::new(endpoint, key))
 }
 
-/// What the harness builds from one gateway generation and shares across
+/// What the Harness builds from one gateway generation and shares across
 /// every run launched under it: the registry of first-party capabilities
 /// and the model client. Rebuilt whole when the generation changes.
 #[derive(Clone)]
 pub struct GatewayResources {
     binding: GatewayBinding,
-    registry: Option<Arc<CapabilityRegistry>>,
+    registry: Arc<CapabilityRegistry>,
     client: Option<GatewayClient>,
 }
 
@@ -158,28 +167,21 @@ impl fmt::Debug for GatewayResources {
         formatter
             .debug_struct("GatewayResources")
             .field("binding", &self.binding)
-            .field("registry", &self.registry.is_some())
+            .field("registry", &self.registry)
             .field("client", &self.client.is_some())
             .finish()
     }
 }
 
 impl GatewayResources {
-    /// Builds the resources for `binding`. A binding whose root or key
-    /// cannot build a capability or a client leaves that resource `None`;
-    /// a launch under it is refused with the reason.
+    /// Builds the resources for `binding`. The registry always holds the
+    /// capabilities that need no gateway; a binding whose root or key
+    /// cannot build web leaves web out of it, and one that cannot build a
+    /// client leaves the client `None`, so a launch under it is refused
+    /// with the reason.
     #[must_use]
     pub fn build(binding: GatewayBinding) -> Self {
-        let registry = match first_party_registry(&binding.api_root(), &binding.key) {
-            Ok(registry) => Some(Arc::new(registry)),
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "agent sessions degraded: the gateway cannot build promptforge/web"
-                );
-                None
-            }
-        };
+        let registry = Arc::new(first_party_registry(&binding.api_root(), &binding.key));
         let client = gateway_client(&binding);
         Self {
             binding,
@@ -200,11 +202,10 @@ impl GatewayResources {
         self.binding.generation
     }
 
-    /// The registry of first-party capabilities, when the binding could
-    /// build it.
+    /// The registry of first-party capabilities this binding could build.
     #[must_use]
-    pub fn registry(&self) -> Option<&Arc<CapabilityRegistry>> {
-        self.registry.as_ref()
+    pub fn registry(&self) -> &Arc<CapabilityRegistry> {
+        &self.registry
     }
 
     /// The model client, when the binding could build it.
@@ -214,7 +215,7 @@ impl GatewayResources {
     }
 }
 
-/// The bindings one harness holds for every session it serves, each
+/// The bindings one Harness holds for every session it serves, each
 /// replaceable by the client and each watched by the sessions.
 ///
 /// A generation watch holds the latest generation (`None` before the
@@ -323,12 +324,12 @@ impl Bindings {
         self.catalog_generation.subscribe()
     }
 
-    /// Replaces the host snapshot; the next launch reads it.
+    /// Replaces the Host snapshot; the next launch reads it.
     pub fn set_host(&self, host: HostSnapshot) {
         *self.host.write().unwrap_or_else(PoisonError::into_inner) = host;
     }
 
-    /// The current host snapshot.
+    /// The current Host snapshot.
     #[must_use]
     pub fn host(&self) -> HostSnapshot {
         self.host

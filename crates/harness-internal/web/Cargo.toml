@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge promptforge/web capability: web fetch and search tools in one pack, registered by the harness"
+description = "PromptForge promptforge/web capability: web fetch and search tools in one pack, registered by the Harness"
 readme = "README.md"
 keywords = ["promptforge", "llm", "tools", "web", "ai"]
 categories = ["web-programming::http-client", "api-bindings"]
@@ -16,7 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 harness-capabilities.workspace = true
 harness-webfetch.workspace = true
 harness-web-search.workspace = true
-# The engine's public API: the tool error activation reports, and (in
+# The Engine's public API: the tool error activation reports, and (in
 # tests) the VFS handle the run services are built over.
 promptforge.workspace = true
 workspace-hack.workspace = true

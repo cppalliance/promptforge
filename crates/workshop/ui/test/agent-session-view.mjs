@@ -43,7 +43,7 @@ const bundle = await esbuild.build({
 });
 
 // pretendToBeVisual supplies the requestAnimationFrame ProseMirror
-// schedules with; the prompt input's editor mounts in every harness.
+// schedules with; the prompt input's editor mounts in every setup.
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
   pretendToBeVisual: true,
@@ -136,7 +136,7 @@ function makeWire() {
 // Dictation's status sink: this suite never records, so nothing lands here.
 const silentStatus = { showLocal() {}, setRecording() {} };
 
-function harness() {
+function setup() {
   const wire = makeWire();
   const service = new AgentSessionService(wire);
   const view = new AgentSessionView(service, silentStatus);
@@ -161,7 +161,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- Durable events paint semantic rows ----------------------------------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.event("user_message", "hi <b>there</b>");
     wire.fire.event("agent_message", "hello back", { model: "llama-3", reply: 0 });
     wire.fire.event("agent_thought", "step one", { model: "llama-3", reply: 1 });
@@ -236,7 +236,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- Streaming: pending rows settle in place, history stands --------------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.event("user_message", "question");
     const userRow = rows()[0];
     wire.fire.delta("reasoning", "let me ", 0);
@@ -275,7 +275,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- Tool cards open while running and collapse when the result lands ------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.event("tool_call", '[{"id":"call_9","name":"read","arguments":{"path":"a"}}]', {
       model: "m",
       reply: 0,
@@ -304,7 +304,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- An unparsed tool-call batch paints its raw text in a card -------------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.event("tool_call", "not json at all", { model: "m", reply: 0 });
     const card = rows()[0]?.querySelector("details.ws-tool-call-card");
     check(
@@ -320,7 +320,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- Error frames paint labelled error rows --------------------------------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.error("the model call failed");
     const row = rows()[0];
     check(
@@ -335,7 +335,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- The input pins to the pending wait ------------------------------------
 
   {
-    const { wire, input, editorEl, editable, send, dispose } = harness();
+    const { wire, input, editorEl, editable, send, dispose } = setup();
     check(
       "the input starts disabled with no wait open",
       !editable() && send.disabled === true,
@@ -467,7 +467,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- The placeholder matches Cursor's agent input ---------------------------
 
   {
-    const { wire, editorEl, dispose } = harness();
+    const { wire, editorEl, dispose } = setup();
     const placeholder = () => editorEl.querySelector("p")?.getAttribute("data-placeholder");
     check(
       "the input shows Cursor's agent placeholder",
@@ -489,7 +489,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- The toolbar mounts between the feed and the input bar ---------------
 
   {
-    const { view, dispose } = harness();
+    const { view, dispose } = setup();
     check(
       "a view built without a model service mounts no toolbar",
       view.element.querySelector(".ws-agent-toolbar") === null,
@@ -575,7 +575,7 @@ await assertNoLeaks(lifecycle, () => {
   // --- A new session clears the feed -----------------------------------------
 
   {
-    const { wire, rows, dispose } = harness();
+    const { wire, rows, dispose } = setup();
     wire.fire.session("s1");
     wire.fire.event("user_message", "old");
     check("the first session's events paint", rows().length === 1);

@@ -207,7 +207,7 @@ disposables.add(getService(EDITOR_SETTINGS_SERVICE));
 const quickInput = disposables.add(new QuickInputService());
 registerService(QUICK_INPUT_SERVICE, () => quickInput);
 
-// The command center: the title bar's center drag region hosts the pill
+// The command center: the title bar's center drag region holds the pill
 // (search icon, window title, quick-access chevron) as a no-drag child.
 const titleCenter = document.querySelector<HTMLElement>(".ws-window-titlebar__center");
 if (!titleCenter) {
@@ -219,7 +219,7 @@ disposables.add(new CommandCenter(titleCenter));
 // chunks load; every action, menu row, and keybinding registers eagerly
 // from the contribution surface the menu bootstrap imports.
 // The activity LED is the product's indicator: the status frame type is
-// product protocol, so the bar hosts the slot and this part fills it.
+// product protocol, so the bar holds the slot and this part fills it.
 const activityIndicator = disposables.add(new ActivityIndicator(statusBar));
 disposables.add(
   workshopSocket.onStatus((frame) => {

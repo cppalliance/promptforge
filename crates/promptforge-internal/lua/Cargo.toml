@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge sandboxed Lua runtime: the section VM, coroutine protocol, and host surface"
+description = "PromptForge sandboxed Lua runtime: the section VM, coroutine protocol, and Engine globals"
 readme = "README.md"
 keywords = ["prompt", "llm", "lua", "sandbox", "scripting"]
 categories = ["text-processing", "api-bindings"]

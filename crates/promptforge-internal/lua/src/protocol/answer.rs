@@ -8,22 +8,21 @@
 //! request's answer is an ordinary [`Answer::ToolCallResult`]: the text
 //! on success, the error for a rejected return.
 
-use promptforge_types::event::Event;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use crate::compactors::OverflowReason;
 use crate::{Error, Result, ToolOutputKind};
 
-/// The outcome of one dispatched store operation: the value the shim
-/// returns to its caller. Mutating ops produce `Unit` (the shim returns
-/// nil), as the legacy closures returned nil.
+/// The outcome of one dispatched [`VfsOp`](super::VfsOp) on the run's store
+/// view: the value the shim returns to its caller. Mutating ops produce `Unit` (the shim returns
+/// nil).
 ///
 /// Serde's externally tagged form makes the outcome itself the log's
-/// success payload: an answer record built from it serializes
-/// byte-identically to the record type it replaced.
+/// success payload, so an answer record built from it serializes to the
+/// run log's fixed store-answer JSON.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum StoreOutcome {
+pub enum VfsOutcome {
     /// The operation succeeded with no return value.
     Unit,
     /// `read`/`read_numbered`: the (possibly bounded) file text.
@@ -38,7 +37,7 @@ pub enum StoreOutcome {
 /// binding's declared [`ToolOutputKind`] so the envelope resumes the right
 /// Lua shape: a plain binding's text resumes as a Lua string, a structured
 /// binding's parsed JSON resumes as a Lua table through the serde boundary.
-/// The host performs the one conversion.
+/// The Engine performs the one conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallOutcome {
     /// A plain binding's output text, resumed as a Lua string - every
@@ -133,23 +132,6 @@ pub struct ChatResult {
     pub turn: u32,
 }
 
-/// The successful answer to a `user_input` request: the resumed text and
-/// its availability flag.
-///
-/// `available` is `true` when `text` is the operator's own input and
-/// `false` when the host had no input to give and `text` is the broker's
-/// fixed fallback sentence. The flag sits beside the text - never encoded
-/// into it - so a human typing exactly the fallback sentence cannot spoof
-/// the unavailable state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserInputOutcome {
-    /// The operator's text, or the fixed fallback sentence when
-    /// `available` is `false`.
-    pub text: String,
-    /// Whether `text` is real operator input.
-    pub available: bool,
-}
-
 /// One task's delivery to a `join_any` waiter: which member ended and how.
 ///
 /// `outcome` is the task's final text, or its failure as the error value
@@ -187,8 +169,8 @@ pub struct TaskStatus {
     /// The section the backing chain is currently in, while it is live and
     /// inside one.
     pub section: Option<String>,
-    /// What the backing chain is parked on (`chat`, `tool_call`,
-    /// `user_input`, `store`, `timer`, `tasks`, `call`), or `queued`
+    /// What the backing chain is parked on (`chat`, `tool_call`, `store`,
+    /// `timer`, `tasks`, `call`), or `queued`
     /// while it waits for a concurrency slot, while it is.
     pub blocked: Option<&'static str>,
     /// The task's model-turn count so far.
@@ -247,11 +229,6 @@ pub enum Answer<E> {
     Note(std::result::Result<(), E>),
     /// The unit outcome of a `cancel` request.
     Cancel(std::result::Result<(), E>),
-    /// The task's reported events for a `task_events` request, in task
-    /// sequence order; the shim resumes each as a plain table in the
-    /// event's serialized shape. Empty when nothing has been reported
-    /// after the caller's `last`.
-    TaskEvents(std::result::Result<Vec<Event>, E>),
     /// The chain's undelivered model-task notices in arrival order, for a
     /// `drain_task_notices` request; the shim appends each as a message
     /// record. Empty when nothing ended since the last drain.
@@ -261,11 +238,8 @@ pub enum Answer<E> {
     Chat(std::result::Result<Box<ChatResult>, E>),
     /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
-    /// The outcome of a `user_input` request: the resumed text and its
-    /// availability flag.
-    UserInput(std::result::Result<UserInputOutcome, E>),
     /// The outcome of a `store` request: the operation's return value.
-    Store(std::result::Result<StoreOutcome, E>),
+    Store(std::result::Result<VfsOutcome, E>),
 }
 
 impl<E> Answer<E> {
@@ -289,11 +263,9 @@ impl<E> Answer<E> {
             Answer::Concurrency(result) => Answer::Concurrency(result.map_err(map)),
             Answer::Note(result) => Answer::Note(result.map_err(map)),
             Answer::Cancel(result) => Answer::Cancel(result.map_err(map)),
-            Answer::TaskEvents(result) => Answer::TaskEvents(result.map_err(map)),
             Answer::DrainTaskNotices(result) => Answer::DrainTaskNotices(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
-            Answer::UserInput(result) => Answer::UserInput(result.map_err(map)),
             Answer::Store(result) => Answer::Store(result.map_err(map)),
         }
     }

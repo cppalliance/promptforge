@@ -1,11 +1,12 @@
 //! The sealed `sys` table and the guarded `var` proxy that sandboxed author code reads and writes.
 
 use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
+use crate::proxy::read_only_proxy;
 
 /// The registry key holding the `var` proxy's hidden data table.
 ///
 /// The registry is unreachable from sandboxed author code (no `debug`
-/// library), so only host code holding a `&Lua` can read or replace the data
+/// library), so only Engine code holding a `&Lua` can read or replace the data
 /// table behind the guarded global.
 const VAR_DATA_REGISTRY: &str = "promptforge.var_data";
 
@@ -76,6 +77,11 @@ fn guarded_table(
     let table_path = path.to_owned();
     let newindex = lua.create_function(
         move |lua, (_proxy, key, value): (Value, Value, Value)| -> mlua::Result<()> {
+            // The serde bridge turns nil into mlua's null sentinel, which
+            // would keep the key instead of removing it.
+            if value.is_nil() {
+                return write_data.raw_set(key, value);
+            }
             let target = field_path(&table_path, &key);
             if let Value::Function(_) | Value::UserData(_) | Value::Thread(_) = value {
                 return Err(mlua::Error::runtime(format!(
@@ -148,9 +154,6 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
         }
     };
 
-    let proxy = lua.create_table().map_err(Error::lua)?;
-    let metatable = lua.create_table().map_err(Error::lua)?;
-
     let index = lua
         .create_function(move |lua, (_table, key): (Value, Value)| {
             let Value::String(name) = key else {
@@ -166,28 +169,20 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
             }
         })
         .map_err(Error::lua)?;
-    metatable.set("__index", index).map_err(Error::lua)?;
 
-    let newindex = lua
-        .create_function(
-            move |_lua, (_table, key, _value): (Value, Value, Value)| -> mlua::Result<()> {
-                let field = match key {
-                    Value::String(name) => name.to_string_lossy(),
-                    other => format!("{other:?}"),
-                };
-                Err(mlua::Error::runtime(format!(
-                    "sys is read-only; cannot set '{field}'"
-                )))
-            },
-        )
-        .map_err(Error::lua)?;
-    metatable.set("__newindex", newindex).map_err(Error::lua)?;
-    metatable
-        .set("__metatable", "sys is sealed")
-        .map_err(Error::lua)?;
-
-    proxy.set_metatable(Some(metatable)).map_err(Error::lua)?;
-    Ok(proxy)
+    read_only_proxy(
+        lua,
+        Value::Function(index),
+        |key| {
+            let field = match key {
+                Value::String(name) => name.to_string_lossy(),
+                other => format!("{other:?}"),
+            };
+            format!("sys is read-only; cannot set '{field}'")
+        },
+        "sys is sealed",
+    )
+    .map_err(Error::lua)
 }
 
 /// Builds the guarded `var` global: an empty proxy table over a hidden data
@@ -198,16 +193,16 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
 /// `__newindex` validates the assigned value for JSON-representability
 /// through the serde bridge - a function, userdata, or thread is rejected at
 /// the assigning line, and nested tables are deep-checked by the bridge -
-/// then rebuilds it as fresh guarded data before writing through. Every nested
-/// table is itself an empty proxy over hidden data, so later incremental writes
-/// cross the same validation boundary instead of mutating a stored table
-/// directly. `__metatable` is set so author code cannot replace the guard.
-/// The root data table is stashed in the Lua
-/// registry (unreachable from sandboxed author code) and is the read-back
-/// source for [`var_to_json`], which materializes nested proxies before serde
-/// conversion; proxies never hold entries themselves. The root proxy is
-/// stashed alongside it so [`var_to_json`] can reject an author reassigning
-/// the `var` global instead of silently reading stale data.
+/// then rebuilds it as fresh guarded data before writing through. Assigning nil
+/// removes the key. Every nested table is itself an empty proxy over hidden
+/// data, so later incremental writes cross the same validation boundary instead
+/// of mutating a stored table directly. `__metatable` is set so author code
+/// cannot replace the guard. The root data table is stashed in the Lua registry
+/// (unreachable from sandboxed author code) and is the read-back source for
+/// [`var_to_json`], which materializes nested proxies before serde conversion;
+/// proxies never hold entries themselves. The root proxy is stashed alongside
+/// it so [`var_to_json`] can reject an author reassigning the `var` global
+/// instead of silently reading stale data.
 pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Table> {
     let initial = match initial {
         Some(Json::Object(values)) => Json::Object(values.clone()),
@@ -232,7 +227,7 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
         return Err(Error::Internal("guarded var data table was missing"));
     };
     // The named registry entries keep the data table alive and reachable for
-    // host read-back, and the proxy reachable for the reassignment check in
+    // Engine read-back, and the proxy reachable for the reassignment check in
     // `var_to_json`.
     lua.set_named_registry_value(VAR_DATA_REGISTRY, data)
         .map_err(Error::lua)?;
@@ -281,7 +276,7 @@ pub(crate) fn var_snapshot_table(lua: &Lua) -> Result<mlua::Table> {
 /// Reads the hidden `var` data table back as JSON.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the data table is absent (host values were
+/// Returns [`Error::Lua`] if the data table is absent (Engine values were
 /// never injected), if the author reassigned the `var` global (the proxy is
 /// no longer reachable, so the hidden table no longer reflects it), or if
 /// the data cannot be represented as JSON.

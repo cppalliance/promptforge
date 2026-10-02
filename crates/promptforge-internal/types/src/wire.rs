@@ -1,4 +1,4 @@
-//! Wire-adjacent vocabulary a host names in streaming callbacks.
+//! Wire-adjacent vocabulary the Harness names in streaming callbacks.
 
 /// One live increment from a streaming completion.
 ///

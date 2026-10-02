@@ -1,6 +1,5 @@
 //! Yield-to-request parsing for the leaf and structural requests (`infer`,
-//! `call`, `tool_call`, `local_tool_done`, `user_input`, the reserved
-//! `mcp`), and the
+//! `call`, `tool_call`, `local_tool_done`, the reserved `mcp`), and the
 //! malformed-yield rejections shared by every op. The task-operation
 //! requests (`spawn`, `timer`, `drain_task_notices`) are in `parse_tasks`.
 
@@ -76,7 +75,7 @@ fn call_without_input_yields_none() {
 #[test]
 fn a_fanout_op_is_no_longer_a_request() {
     // The fanout shim is Lua over `spawn` and `join_any`; a yield naming
-    // the retired op is a hand-built yield and fails as one.
+    // a `fanout` op is a hand-built yield and fails as one.
     let lua = Lua::new();
     let table = request_table(&lua, "fanout");
     table.raw_set("worker", "### Worker").expect("raw_set");
@@ -346,17 +345,6 @@ fn a_local_tool_done_without_a_boolean_ok_is_a_malformed_yield() {
 }
 
 #[test]
-fn a_user_input_yield_parses_to_the_request() {
-    let lua = Lua::new();
-    let table = request_table(&lua, "user_input");
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
-    assert!(
-        matches!(request, Request::UserInput),
-        "a user_input yield is the unit request, got {request:?}"
-    );
-}
-
-#[test]
 fn mcp_reserved_fields_parse() {
     let lua = Lua::new();
     let table = request_table(&lua, "mcp");
@@ -408,8 +396,8 @@ fn an_unknown_op_is_rejected() {
 #[test]
 fn an_infer_with_a_missing_or_non_string_prompt_is_the_calls_error() {
     // The author-facing argument error returns as the call's answer,
-    // so the shim raises it at the call site (pcall-able), exactly as
-    // the legacy callback's conversion error surfaced.
+    // so the shim raises it at the call site, where an author `pcall`
+    // catches it.
     let lua = Lua::new();
     let missing = request_table(&lua, "infer");
     match Request::from_yield(&lua, &Value::Table(missing)) {

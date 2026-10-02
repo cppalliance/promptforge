@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../harness.mjs";
+import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../test-support.mjs";
 
 async function openProfiles(config = modelsFixture(), extra = {}) {
   const stub = gatewayStub({

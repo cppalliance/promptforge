@@ -12,7 +12,7 @@ import {
   modelsFixture,
   navigate,
   settle,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 /** A stub whose pending view already differs (a previous session's save). */
 function dirtyStub() {

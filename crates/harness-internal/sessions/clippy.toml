@@ -3,9 +3,9 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
-# The harness spawns only through the instrumented wrapper in
+# The Harness spawns only through the instrumented wrapper in
 # harness-runner, which tags each task with its EffectId and Provenance.
-# `cargo test -p build-xtask` checks that every harness crate names both
+# `cargo test -p build-xtask` checks that every Harness crate names both
 # methods.
 disallowed-methods = [
     { path = "tokio::spawn", reason = "spawn through harness-runner's instrumented wrapper" },

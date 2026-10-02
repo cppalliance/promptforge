@@ -1,6 +1,6 @@
 ---
 name: PromptForge Orchestrator Design
-overview: Markdown-driven pipeline runtime (Rust + mlua). A prompt is a function (parameters in, a string out, side effects possible) shaped as a bounded linear pipeline - H2 steps run top to bottom, `---`-marked H2s are subroutines, forks/cycles/fanouts allowed; H3-H6 are document structure, not steps; larger programs compose from multiple prompt files. A file is a promptforge prompt only if its YAML frontmatter declares a `promptforge:` version; promptforge offers a detection function and runs only its own prompts (plain prompts without that version are the caller's concern, not promptforge's). Control flow is deterministic and declared in Lua (cycles legal, bounded by budgets); state lives in a run-scoped store/VFS shared by Lua and the model; capabilities (files, shell, network) are injected by the host (sandbox or real). Design docs in promptforge-design are provisional; this plan and the conversation override them.
+overview: Markdown-driven pipeline runtime (Rust + mlua). A prompt is a function (parameters in, a string out, side effects possible) shaped as a bounded linear pipeline - H2 steps run top to bottom, `---`-marked H2s are subroutines, forks/cycles/fanouts allowed; H3-H6 are document structure, not steps; larger programs compose from multiple prompt files. A file is a promptforge prompt only if its YAML frontmatter declares a `promptforge:` version; promptforge offers a detection function and runs only its own prompts (plain prompts without that version are the caller's concern, not promptforge's). Control flow is deterministic and declared in Lua (cycles legal, bounded by budgets); state lives in a run-scoped store/VFS shared by Lua and the model; capabilities (files, shell, network) are injected by the Harness (sandbox or real). Design docs in promptforge-design are provisional; this plan and the conversation override them.
 todos:
   - id: mark-docs-provisional
     content: Add provisional status to design document headers. This plan overrides them.
@@ -51,7 +51,7 @@ A **promptforge prompt** is identified by a `promptforge:` version in its YAML f
 - **`promptforge:` present** -> a promptforge prompt. Run it under that major's rules (sections, Lua, transfers, store, budgets); everything below describes major **1**. An unsupported major is **refused, never silently degraded**.
 - **`promptforge:` absent** (no key, or no frontmatter at all) -> **not** a promptforge prompt. Detection reports nothing and promptforge declines to run it; what to do with a plain prompt (hand it to an ordinary harness, etc.) is the **caller's** concern. promptforge does not execute plain prompts.
 
-The engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a promptforge prompt", never an error.
+The Engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a promptforge prompt", never an error.
 
 ## Control flow, blocks, and state (consolidated)
 
@@ -130,7 +130,7 @@ Two accessors:
 
 - **Virtual files are the primary bulk-state mechanism**, run-scoped, and **shared by both the model's file tools and Lua** (equal access). Ops: `write`/`append`/`read` (numbered lines) / `str_replace` (anchor-based unique-or-error edit) / `delete` / `glob`. Edit-in-place is anchor `str_replace`, not line/char offsets (the pattern that actually works for models); numbered reads are for navigation and error messages only.
 - **Structured store** exists for one operation: group-by on a typed field across ~30-45 records (Diligence/Briefer/Assay). Files suffice below that.
-- **Capabilities are injected by the host.** A `FileStore` trait has two backends: `MemVfs` (sandbox) and `RealFs` (rooted at a workspace, optionally read-only). The CLI/embedder chooses - sandbox for untrusted-content pipelines, real for IDE/agent use. Shell and network are the same shape (off / allowlisted / open). The model never names a real path; "disable the sandbox" = the host wires in the real backend. Presets: `sandboxed` (default) and `trusted`.
+- **Capabilities are injected by the Harness.** A `FileStore` trait has two backends: `MemVfs` (sandbox) and `RealFs` (rooted at a workspace, optionally read-only). The CLI/embedder chooses - sandbox for untrusted-content pipelines, real for IDE/agent use. Shell and network are the same shape (off / allowlisted / open). The model never names a real path; "disable the sandbox" = the Harness wires in the real backend. Presets: `sandboxed` (default) and `trusted`.
 - **Real-file input** is mounted by the trusted launcher at the boundary: the CLI reads the file (eagerly, by content) and seeds the store at a logical path; the model reads it via `read_file`. Output promotion to real disk is an audited caller step, never a model tool.
 - **Guard-wrap (built)**: a tool whose `untrusted_output()` is true (`web_fetch`) has its result wrapped in `<untrusted_input_{nonce}>...</untrusted_input_{nonce}>` with a data-not-commands rule before it reaches the model. Reduces injection; does not remove the `web_fetch` URL exfiltration channel - isolation (scoped, data-free web-reading sections) is the hard control.
 
@@ -144,7 +144,7 @@ Backstops, not the termination mechanism - primary termination is the explicit L
 | **Step budget** | total transitions (`goto`+`task`) | non-terminating `goto` cycles | per run, cumulative; nested `task` steps decrement the *global* budget |
 | **Tool budget** | tool calls | a section/run hammering tools | per section (`max_tool_iterations`, built) + per run |
 
-## Host objects and functions
+## Engine objects and functions
 
 | Name | Access | What it is |
 |---|---|---|
@@ -165,7 +165,7 @@ Backstops, not the termination mechanism - primary termination is the explicit L
 
 1. Version gate: detection function for the `promptforge:` version; run only promptforge prompts (absent = not ours, declined for the caller), refuse an unsupported major.
 2. Run-scoped store/VFS in core (files-first, Lua + model equal access, capability injection).
-3. Substitution engine + params: the one-pass `{{ }}` resolver over `args`, `sys` (now/date/elapsed/id), `var`, `reply`, `result` - scalars stringify, tables -> JSON, nil is a hard error, no formulas. Delivers parameterized single-step prompts.
+3. Substitution resolver + params: the one-pass `{{ }}` resolver over `args`, `sys` (now/date/elapsed/id), `var`, `reply`, `result` - scalars stringify, tables -> JSON, nil is a hard error, no formulas. Delivers parameterized single-step prompts.
 4. Fall-through + `goto`/`pass`/`task` + reference blocks (`sect.block`/`sect.list`) + `result`/injection + the three budgets.
 5. `fanout` (homogeneous list + heterogeneous tasks) + keyed-store reduce + structured store. Runs Diligence/Briefer.
 6. Cyclic state-machine pipelines (mentograph-shaped), Lua-conditional transitions.
@@ -187,9 +187,9 @@ Read after the general code-review block; applied to the commit's diff.
 1. Rust follows `tools-public/how-to/rust-how-to.md` (layout, ownership, errors, API/semver, docs, testing, lints): public error enums and their data-carrying variants are `#[non_exhaustive]`; errors are typed via `thiserror` with lowercase no-period `Display`; no `unwrap`/`expect` outside tests; `?` with `From` over manual matches; lints live in `[lints]`/`[workspace.lints]`, not crate-root `#![deny]`; every public item documented with `# Errors`/`# Panics`/`# Safety` and doctest examples.
 2. Public items are documented and rustdoc runs clean under `-D warnings` (no intra-doc links to private items).
 3. Any tool returning model-visible content from an untrusted source overrides `untrusted_output()` and its result is guard-wrapped with the per-section nonce.
-4. Capabilities (files/shell/network) are host-injected; the model never names a real path; the sandbox backend is the default.
+4. Capabilities (files/shell/network) are Harness-injected; the model never names a real path; the sandbox backend is the default.
 5. The mlua sandbox keeps its instruction budget and restricted library set; no new global escapes it.
-6. No secrets, keys, or vendor URLs in code or prompts; they resolve through gateway/host config.
+6. No secrets, keys, or vendor URLs in code or prompts; they resolve through gateway/Host config.
 7. Versioning: a file under an unsupported `promptforge:` major is refused, never silently degraded.
 </review>
 
@@ -203,7 +203,7 @@ promptforge detects its own prompts and runs only those; a plain prompt (no `pro
 
 ## Rung 2 steps (store/VFS)
 
-Logged decisions (reversible): the store is a run-scoped, cheaply cloneable `Store` handle wrapping `Arc<Mutex<dyn FileStore>>`, because async `Tool::call` (`&self`, crosses `.await`) and the sync Lua VM both touch it - `RefCell` is insufficient. Lua gets an **always-on `store` table** (a deterministic host capability, like `sect`/`var`); the **model** gets file access only through normal per-section scoping (`tools.add`). Paths are logical strings; `read` returns numbered lines (navigation/error messages only); `str_replace` is anchor-based, unique-or-typed-error. Falsifier: if lock contention or ergonomics bite, revisit the handle type. Each step is one commit (code + test + docs), written/reviewed/fixed in subagents.
+Logged decisions (reversible): the store is a run-scoped, cheaply cloneable `Store` handle wrapping `Arc<Mutex<dyn FileStore>>`, because async `Tool::call` (`&self`, crosses `.await`) and the sync Lua VM both touch it - `RefCell` is insufficient. Lua gets an **always-on `store` table** (a deterministic Engine global, like `sect`/`var`); the **model** gets file access only through normal per-section scoping (`tools.add`). Paths are logical strings; `read` returns numbered lines (navigation/error messages only); `str_replace` is anchor-based, unique-or-typed-error. Falsifier: if lock contention or ergonomics bite, revisit the handle type. Each step is one commit (code + test + docs), written/reviewed/fixed in subagents.
 
 1. **FileStore trait + MemVfs (core `store` module).** Define `FileStore` with `write`/`append`/`read` (numbered lines)/`str_replace` (unique anchor or typed error)/`delete`/`glob`, each returning typed results; an in-memory `MemVfs` backend; and a cloneable `Store` handle over `Arc<Mutex<dyn FileStore>>`. No execution wiring yet. Tests: each op, plus `str_replace` not-found/ambiguous, `read` numbering format, `glob` matching, delete-missing.
 2. **Thread the store + Lua `store` API.** Add a `Store` to `execute::run` (created once per run) and to `lua::run_chunk`; expose a Lua `store` table (the six ops) over the shared handle. Update the CLI to build a `MemVfs`-backed `Store`; update execute/lua test helpers. Test: cross-section persistence (section A's Lua writes, section B's Lua reads it); each op via Lua.
@@ -218,7 +218,7 @@ Logged decisions (reversible): the store is a run-scoped, cheaply cloneable `Sto
 - **A prompt is a bounded linear pipeline, not a general program.** Parameters in, a string out, side effects possible; forks/cycles/fanouts allowed. When a program outgrows one file, split it into multiple prompt files called as functions - don't nest.
 - **Single scoped section is the default**; `task`/`fanout` are opt-in for loosely-coupled, read-heavy work ("read in parallel, write in sequence"). Strongest model at the reduce.
 - **5-10 tools per section**; scoping is load-bearing for mid-size models.
-- **Prompts are deployment-agnostic** - tool bindings, model slots, and capability backends resolve in host config.
+- **Prompts are deployment-agnostic** - tool bindings, model slots, and capability backends resolve in Host config.
 
 ## To explore later
 

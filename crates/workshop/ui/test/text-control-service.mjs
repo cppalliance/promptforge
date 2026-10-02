@@ -128,10 +128,10 @@ check("blurring to nothing clears every focus key", allClear());
 
 // --- Adapter registration and active tracking -----------------------------------------
 
-const host = addElement("div");
+const container = addElement("div");
 const inner = window.document.createElement("div");
 inner.tabIndex = 0;
-host.appendChild(inner);
+container.appendChild(inner);
 
 const calls = { undo: 0, redo: 0, selectAll: 0 };
 let undoDepth = 1;
@@ -154,7 +154,7 @@ const control = {
 inner.focus();
 check("no adapter is active before registration", service.active === null);
 
-const registration = service.register(host, control);
+const registration = service.register(container, control);
 check("the focused subtree's adapter is active", service.active === control);
 check("a codemirror adapter sets editorTextFocus", keys().editor === true);
 check("a codemirror adapter sets textInputFocus", keys().text === true);
@@ -210,7 +210,7 @@ const replacement = {
   selectAll: () => {},
 };
 const stale = registration;
-const current = service.register(host, replacement);
+const current = service.register(container, replacement);
 stale.dispose();
 inner.focus();
 check("disposing a stale registration keeps its replacement", service.active === replacement);
@@ -268,15 +268,15 @@ check(
 );
 
 // Command routing: a focused adapter takes undo/redo/select-all.
-const editHost = addElement("div");
+const editRoot = addElement("div");
 const editInner = window.document.createElement("div");
 editInner.tabIndex = 0;
-editHost.appendChild(editInner);
+editRoot.appendChild(editInner);
 
 const routed = { undo: 0, redo: 0, selectAll: 0 };
 let promptUndoDepth = 1;
 editInner.focus();
-const editAdapter = editService.register(editHost, {
+const editAdapter = editService.register(editRoot, {
   kind: "prosemirror",
   undo: () => {
     routed.undo += 1;

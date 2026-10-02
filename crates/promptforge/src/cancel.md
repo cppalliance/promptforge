@@ -1,205 +1,211 @@
-The cancel flag that stops a run, shared by cloning, arranged into parent and child handles, and set from any thread.
+[`CancelHandle`] lets your program stop a [run](crate) from any thread.
 
-A run is a pure state machine, so it never awaits a cancel. Instead it checks a synchronous flag between chain steps and from the Lua instruction hook, and your program sets that flag from whichever thread it likes. [`CancelHandle`] is that flag. With it you can stop a run from another thread, even a run stuck in a Lua loop that never yields, and you can wire one cancel to reach the run and every capability working for it. By the end of this page you can cancel a run from anywhere, give a run your own flag, build trees of handles, wait on a cancel as a future, and tell a cancelled run apart from a failed one.
+You need this when you stop runs on a user's request, on a timeout, or at shutdown.
 
 # Where this fits
 
-Every [`RunContext`](crate::RunContext) holds a flag. [`RunContext::new`](crate::RunContext::new) mints a fresh one, and the [`RunContext::cancel`](crate::RunContext::cancel) builder swaps in a handle that the host keeps. [`RunContext::cancel_handle`](crate::RunContext::cancel_handle) returns the context's flag so the host can hand it to its activated capabilities. [`Run::new`](crate::Run::new) keeps that same flag. Once the run exists, [`Run::cancel`](crate::Run::cancel) sets it, and [`Run::cancel_handle`](crate::Run::cancel_handle) returns a clone for another thread.
+You already know how to build a run from a [`RunContext`](crate::RunContext) and step it to its result, from [Run a prompt](crate#run-a-prompt). You give a run its handle through [`RunContext::cancel`](crate::RunContext::cancel), so this page picks up where running a prompt leaves off. It adds one handle per run, a parent that stops them all, and a future your async code can wait on.
 
-After a cancel, the next [`Run::step`](crate::Run::step) tears every chain down. The host answers each outstanding [`Effect`](crate::effect::Effect) with [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped), steps again, and gets [`Step::Done`](crate::Step::Done) with [`RunResult::Cancelled`](crate::RunResult::Cancelled). [The host loop](crate#the-host-loop) on the crate page walks through that shutdown with a worked example.
+# Stop many runs at once
 
-# Cancelling from another thread
+Your program runs several prompts. On shutdown or a user's request, you need to stop all of them with one call, or just one of them.
 
-This program runs a section that loops forever. The main thread steps the run, which blocks inside the Lua loop. A second thread cancels it through the run's handle.
+A handle feels like an `Arc<AtomicBool>`: clones share one flag, and any thread can set it.
 
-````
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-
-use promptforge::timestamp::Timestamp;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
-
-let source = concat!(
-    "---\n",
-    "name: spin\n",
-    "description: loops until cancelled\n",
-    "promptforge: 0\n",
-    "---\n",
-    "\n",
-    "# Spin\n",
-    "\n",
-    "## Loop\n",
-    "\n",
-    "```lua\n",
-    "local n = 0\n",
-    "while true do n = n + 1 end\n",
-    "```\n",
-);
-let (parsed, _parse_events) = Prompt::parse(source, "spin");
-let ctx = RunContext::new("spin", 7, Timestamp::UNIX_EPOCH);
-let mut run = Run::new(Arc::new(parsed?), "", ctx);
-
-let handle = run.cancel_handle();
-let canceller = thread::spawn(move || {
-    thread::sleep(Duration::from_millis(50));
-    handle.cancel();
-});
-
-let step = run.step();
-canceller.join().map_err(|_| "the cancelling thread panicked")?;
-assert!(matches!(step, Step::Done { result: RunResult::Cancelled, .. }));
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-Here is what each part does.
-
-1. **Take the handle.** [`Run::cancel_handle`](crate::Run::cancel_handle) returns a clone of the run's flag. [`CancelHandle`] is [`Send`], [`Sync`], and `'static`, so the clone moves into the other thread while the run stays with the thread that steps it. Calling [`CancelHandle::cancel`] on the clone has exactly the same effect as calling [`Run::cancel`](crate::Run::cancel) on the run, because both set one flag.
-2. **Step.** The section's Lua loop is legal. The Lua instruction hook's trip budget is effectively unlimited, so the run's cancel flag is the only thing that aborts such a loop. Every block coroutine gets the same hook, and once the flag is set the hook fails the running chunk with "lua execution cancelled".
-3. **Read the result.** This run had no effects outstanding, so the step that observes the cancel is already [`Step::Done`](crate::Step::Done) with [`RunResult::Cancelled`](crate::RunResult::Cancelled).
-
-Setting the flag is a request, not a synchronous stop. Running Lua aborts at its next hook firing, and then the shutdown in [Where this fits](#where-this-fits) follows. [`Step::Done`](crate::Step::Done) arrives only after every outstanding effect has been answered.
-
-A run holds its flag from the moment [`Run::new`](crate::Run::new) returns, even a run that cannot start. On a run whose first step will report a startup failure, [`Run::cancel`](crate::Run::cancel) and [`Run::cancel_handle`](crate::Run::cancel_handle) still work before that first step.
-
-# Giving a run your own flag
-
-Cloning a [`CancelHandle`] gives another handle over the same flag, and a cancel through any clone is seen by every clone. That is how one flag is shared across threads and components.
-
-A host that wants to own the flag builds one with [`CancelHandle::new`] and passes it to the [`RunContext::cancel`](crate::RunContext::cancel) builder, which replaces the flag that [`RunContext::new`](crate::RunContext::new) minted. Whether or not the host does this, [`RunContext::cancel_handle`](crate::RunContext::cancel_handle) returns the context's flag. It is named `cancel_handle` because the builder method already has the name [`RunContext::cancel`](crate::RunContext::cancel). Hand the flag to your activated capabilities, and one cancel reaches the run and everything working for it.
-
-````
-use std::sync::Arc;
-
-use promptforge::cancel::CancelHandle;
-use promptforge::timestamp::Timestamp;
-use promptforge::{Prompt, Run, RunContext};
-
-let source = concat!(
-    "---\n",
-    "name: greeter\n",
-    "description: says hi\n",
-    "promptforge: 0\n",
-    "---\n",
-    "\n",
-    "# Greeter\n",
-    "\n",
-    "## Say hi\n",
-    "\n",
-    "Say hello.\n",
-);
-let (parsed, _parse_events) = Prompt::parse(source, "greeter");
-
-let host = CancelHandle::new();
-let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).cancel(host.clone());
-let for_capabilities = ctx.cancel_handle();
-let mut run = Run::new(Arc::new(parsed?), "", ctx);
-assert!(!host.is_cancelled());
-
-run.cancel();
-assert!(host.is_cancelled());
-assert!(for_capabilities.is_cancelled());
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-The host's clone, the capabilities' handle, and the run all hold one flag, so [`Run::cancel`](crate::Run::cancel) is visible through each of them. The same works in the other direction: calling [`CancelHandle::cancel`] on `host` stops the run.
-
-**Bridging an async token.** A host whose async runtime cancels through an awaitable token bridges it to the run by setting this synchronous flag when the token fires. The capabilities that hold the same flag stop too.
-
-# Trees of handles
-
-[`CancelHandle::child`] mints a fresh handle with its own flag. The child reports cancelled when its own flag is set or when any ancestor's flag is set. Cancelling a parent cancels every descendant, and cancelling one child leaves its parent and its siblings running.
-
-The engine never builds a tree itself. Within a run it installs the one run flag on every section's Lua state and never calls [`CancelHandle::child`]. There are no per-task child handles inside a run. A script that cancels one of its own tasks with `task_cancel` goes through the engine's task table, not through a handle. So [`CancelHandle::child`] is a host-side tool, for arranging runs and capabilities into trees of your own.
-
-This host keeps one root and gives each of two runs a child:
+Unlike a plain flag, a handle can make children, and a cancel flows down to them but never up. So handles form a tree, and a handle reports cancelled when its own flag or any ancestor's flag is set. That shared flag in a tree is a [`CancelHandle`].
 
 ````
 use promptforge::cancel::CancelHandle;
+# use std::sync::Arc;
+# use promptforge::effect::EffectAnswer;
+# use promptforge::timestamp::Timestamp;
+# use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+# let source = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Writes a note to the store and reads it back.\n",
+#     "promptforge: 0\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+#     "store.write('note.md', 'hello')\n",
+#     "return store.read('note.md')\n",
+#     "```\n",
+# );
+# let (parsed, _parse_events) = Prompt::parse(source, "greeter");
+# let prompt = Arc::new(parsed?);
 
-let host = CancelHandle::new();
-let first_run = host.child();
-let second_run = host.child();
+// 1. Make one parent handle, and give each run its own child through `RunContext::cancel`.
+let parent = CancelHandle::new();
+let mut runs = Vec::new();
+for name in ["greeter-1", "greeter-2"] {
+    let ctx = RunContext::new(name, 7, Timestamp::UNIX_EPOCH).cancel(parent.child());
+    runs.push(Run::new(Arc::clone(&prompt), "", ctx));
+}
 
-first_run.cancel();
-assert!(first_run.is_cancelled());
-assert!(!host.is_cancelled() && !second_run.is_cancelled());
+// 2. Step each run once, and hold the store effect it now waits on.
+let mut held = Vec::new();
+for run in &mut runs {
+    let Step::Pending { effects, .. } = run.step() else {
+        panic!("the greeter waits on the store before it can finish");
+    };
+    held.push(effects.into_iter().map(|(id, _provenance, _effect)| id).collect::<Vec<_>>());
+}
 
-host.cancel();
-assert!(second_run.is_cancelled());
-assert!(host.child().child().is_cancelled());
+// 3. Cancel the parent once.
+parent.cancel();
+
+// 4. Drop what each run still holds, and step it to `Step::Done`: both runs end cancelled.
+# let mut results = Vec::new();
+# for (mut run, mut ids) in runs.into_iter().zip(held) {
+#     let result = loop {
+#         match run.step() {
+#             Step::Pending { effects, .. } => {
+#                 ids.extend(effects.into_iter().map(|(id, _provenance, _effect)| id));
+#                 for id in ids.drain(..) {
+#                     run.resume(id, EffectAnswer::Dropped);
+#                 }
+#             }
+#             Step::Done { result, .. } => break result,
+#         }
+#     };
+#     results.push(result);
+# }
+assert!(results.len() == 2 && results.iter().all(|result| matches!(result, RunResult::Cancelled)));
+# Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-Pass a child to [`RunContext::cancel`](crate::RunContext::cancel), and the run becomes one node in the tree. Cancelling the parent from another thread then stops the run, including a Lua loop that never yields. That is the program from [Cancelling from another thread](#cancelling-from-another-thread) with two changes: the context gets a child of a host-held parent through [`RunContext::cancel`](crate::RunContext::cancel), and the other thread calls [`CancelHandle::cancel`] on the parent.
+1. [`CancelHandle::new`] makes an uncancelled root. [`CancelHandle::child`] makes a new handle under it, and [`RunContext::cancel`](crate::RunContext::cancel) installs that child on one run's context. Both runs share the greeter, parsed once and cloned with [`Arc::clone`](std::sync::Arc::clone).
+2. Each run takes one step and stops at its first request for outside work, a store *effect*, so [`Run::step`](crate::Run::step) returns [`Step::Pending`](crate::Step::Pending). Each pending effect arrives as three parts: the id you pass back to [`Run::resume`](crate::Run::resume), its [provenance](crate::ids), and the effect itself. This example keeps only the id and leaves the effect unanswered, so both runs are still waiting when the cancel lands.
+3. The example calls [`CancelHandle::cancel`] on the parent alone, never on a child. That one call makes every child and grandchild report cancelled, so it stops every run below the parent. In your own code, confirm it landed by calling [`Run::cancel_handle`](crate::Run::cancel_handle) on each run: it returns a clone of the flag the run holds, and `is_cancelled` on that clone returns `true`.
+4. A run still needs an answer for each effect it holds before it reaches [`Step::Done`](crate::Step::Done). After a cancel, the next `Run::step` resumes no chain. It tears every chain down, and any answer you then give, dropped or real, is discarded. You still owe one answer per held effect, and the run then ends as [`RunResult::Cancelled`](crate::RunResult::Cancelled). The hidden loop calls `Run::step` on each run. While it returns `Step::Pending`, it passes every held id, plus any new one, to `run.resume(id, EffectAnswer::Dropped)`. When `Run::step` returns `Step::Done`, it keeps the result. [Stop a run](crate#stop-a-run) finishes a run the same way. A dropped answer resumes the waiting Lua with the cancelled error, and the greeter does not catch that error. So the final assert would pass even without the cancel. The cancel is proved by the flag check from step 3, which this example does not make.
 
-Trees nest to any depth. A child minted from a parent that is already cancelled starts out cancelled, which is why the grandchild on the example's last line reports cancelled. A child holds its parent and never the reverse, so a tree has no reference cycles and nothing needs to unregister when a handle drops. Cloning a child shares the child's flag, not the parent's.
+The tree has one parent and one child per run, and a cancel moves in one direction only.
 
-# Waiting for a cancel
+````text
+              ┌────────────────────┐
+              │       parent       │   parent.cancel() reaches every child
+              └─────────┬──────────┘
+             ┌──────────┴──────────┐
+             │ child()             │ child()
+             v                     v
+    ┌─────────────────┐   ┌─────────────────┐
+    │  run greeter-1  │   │  run greeter-2  │   a child's cancel stops its own
+    └─────────────────┘   └─────────────────┘   run and never travels up
 
-Checking [`CancelHandle::is_cancelled`] is enough for a host that polls. A host that waits calls [`CancelHandle::cancelled`], which returns a [`Cancelled`] future that completes with `()` once the handle reports cancelled. It works without an async runtime or a timer. The cancel that sets the flag wakes it, so it never spins.
+    a cancel travels down the tree (v), never up
+````
+
+Calling `cancel` on one child leaves its parent and its siblings uncancelled. That lets you stop one run on a user's request without touching the others.
+
+Cloning a handle shares its flag, so cancelling any clone cancels every clone. Keep a clone for yourself before you hand the handle to a run, and cancel through that clone.
+
+A child made from a parent that is already cancelled reports cancelled at once. So a run started after shutdown began stops right away instead of slipping through.
+
+`cancel` takes `&self` and works from any thread. Calling it twice is harmless, and nothing ever clears the flag. So give each new run a fresh handle, never one a past cancel already set. A timeout thread and a shutdown path can both call it without coordinating.
+
+You might expect `child()` to behave like `clone()` and share the parent's flag. Instead, a child gets a new flag of its own: cancelling it stops only that run, while cancelling the parent still reaches it.
+
+A cancel travels down the tree, never up. Next, [Wait for a cancel](#wait-for-a-cancel) shows how your own async code waits for one.
+
+# Wait for a cancel
+
+Your program's async code waits on models, tools, and timers. It must stop waiting the moment a handle is cancelled.
+
+Awaiting a cancel feels like awaiting a oneshot receiver: the future finishes when the other side fires. Unlike a channel, there is no sender to hold; a cancel on the handle or any ancestor fires it. [`CancelHandle::cancelled`] turns the flag into a future that the cancel itself wakes, so your code never checks the flag on a timer. That future is a [`Cancelled`].
 
 ````
+# use std::sync::Arc;
+# use promptforge::timestamp::Timestamp;
+# use promptforge::{Prompt, Run, RunContext};
 use std::future::Future;
-use std::pin::pin;
-use std::task::{Context, Poll, Waker};
+use std::pin::Pin;
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{self, Thread};
 
-use promptforge::cancel::CancelHandle;
+// 1. A small std-only executor: the waker unparks the waiting thread.
+struct Unpark(Thread);
 
-let host = CancelHandle::new();
-let mut waiting = pin!(host.child().cancelled());
-let mut cx = Context::from_waker(Waker::noop());
-assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Pending);
+impl Wake for Unpark {
+    fn wake(self: Arc<Self>) {
+        self.0.unpark();
+    }
+}
 
-host.cancel();
-assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
+fn block_on<F: Future + Unpin>(mut future: F) -> F::Output {
+    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        if let Poll::Ready(output) = Pin::new(&mut future).poll(&mut cx) {
+            return output;
+        }
+        thread::park();
+    }
+}
 
-let mut late = pin!(host.cancelled());
-assert_eq!(late.as_mut().poll(&mut cx), Poll::Ready(()));
+# let source = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Writes a note to the store and reads it back.\n",
+#     "promptforge: 0\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+#     "store.write('note.md', 'hello')\n",
+#     "return store.read('note.md')\n",
+#     "```\n",
+# );
+# let (parsed, _parse_events) = Prompt::parse(source, "greeter");
+# let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH);
+# let run = Run::new(Arc::new(parsed?), "", ctx);
+// 2. Take the greeter run's handle, and draw a `Cancelled` future from it.
+let handle = run.cancel_handle();
+let waiting = handle.cancelled();
+
+// 3. A second thread cancels the run through a clone of the handle.
+let remote = handle.clone();
+let canceller = thread::spawn(move || remote.cancel());
+
+// 4. Block on the future until the cancel wakes it, then read the flag.
+block_on(waiting);
+canceller.join().map_err(|_| "the cancelling thread panicked")?;
+assert!(handle.is_cancelled());
+# Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-A waiter on a child is woken by a cancel anywhere up its ancestor chain, exactly once. A descendant's cancel never wakes a waiter on its parent. A future drawn from a handle that is already cancelled is ready at its first poll, as the last two lines show.
+1. `Unpark` and `block_on` build an executor from std alone. The waker unparks the waiting thread, and `block_on` polls through [`Pin::new`](std::pin::Pin::new) and parks between polls. `Cancelled` uses only std, so any executor can drive it: this one, tokio, another runtime, or none. `block_on` requires `Unpin`, and `Cancelled` is `Unpin`, so you can poll it through `&mut` without pinning it first. That lets you reuse one future across the iterations of a select loop.
+2. Every [`RunContext`](crate::RunContext) starts with its own root handle, so a run built without [`RunContext::cancel`](crate::RunContext::cancel) still has one; `RunContext::cancel` replaces it. [`Run::cancel_handle`](crate::Run::cancel_handle) returns the greeter run's handle, and the next line draws a `Cancelled` future from it, with output `()`. The future owns its own clone of the handle, so it does not borrow `handle`.
+3. A second thread calls `cancel` on a clone of the handle. `cancel` takes `&self`, so any thread can set the flag. The cancel may land before the first poll or while the executor is parked.
+4. `block_on` returns when the cancel itself wakes the waiting thread, with no timer or polling loop. When the cancel already landed, it returns on its first poll without parking. [`CancelHandle::is_cancelled`] then reads `true`.
 
-**Selecting beside effect answers.** A tokio host can drive a run from one task that waits on either the next effect answer from its workers or the flag's [`CancelHandle::cancelled`] future. When the flag fires, the task calls [`Run::cancel`](crate::Run::cancel), so the next [`Run::step`](crate::Run::step) observes it at once. Both arms are event-driven, so a fully suspended run costs no wakeups while it waits.
+`is_cancelled` returns whether this handle, a clone, or an ancestor was cancelled. Once it returns `true`, it never returns `false` again. It is the check for code that cannot await.
 
-# Cancelled versus failed runs
+If the handle is already cancelled, the future completes on its first poll. A cancel that lands while you start waiting is never missed, so you need no extra check before you wait.
 
-A run cancelled through its flag ends with [`RunResult::Cancelled`](crate::RunResult::Cancelled). The flag is not the only way to get there. Answering an effect with [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) resumes the waiting chain with a cancelled error, and if nothing handles that error, the run also ends with [`RunResult::Cancelled`](crate::RunResult::Cancelled), without any call to [`Run::cancel`](crate::Run::cancel).
+Dropping the future before the cancel only stops the wait; it changes no flag. So a select that drops the losing branch is safe.
 
-A failure that the host's cancel caused carries [`RunErrorKind::Cancelled`](crate::RunErrorKind::Cancelled), and [`RunError::is_cancelled`](crate::RunError::is_cancelled) returns `true` for it. The [`Run`](crate::Run) interface reports cancellation as [`RunResult::Cancelled`](crate::RunResult::Cancelled), so a host driving a [`Run`](crate::Run) normally sees that variant, and treats it as a clean stop rather than a failure.
+A run itself never awaits its handle. Instead, it reads the flag at two points. A run is a state machine your program steps with [`Run::step`](crate::Run::step), a plain function with no executor behind it, so it has nothing to await with and reads the flag instead.
+
+So the run checks the flag in two places. The first is inside each call to `Run::step`, before it runs each ready [chain](crate::ids), where a chain is one walk over sibling sections, so a cancel that lands while every chain waits is seen on the next `Run::step`. The second is inside running Lua, through a hook that the Lua VM calls on its own every so many instructions. That is why a cancel stops even Lua that never yields. Calling `cancel` is all a run needs, and async waiting is only for your own code.
+
+You might expect `cancelled()` to wait for the next cancel, the way a notify waits for the next signal. Instead, it completes at once when the handle is already cancelled, so a cancel that came first is never lost.
+
+Await `cancelled()` in your code; the run checks the flag on its own. Next, go back to the [crate page](crate) for the rest of what a run does.
 
 # Reference
 
 ## CancelHandle
 
-[`CancelHandle`] is a cloneable, thread-safe cancel flag that can have a parent. The engine checks it before each chain step and from the Lua instruction hook, and the host sets it from any thread to stop a run or one branch of a tree of handles.
+[`CancelHandle`] stops a run from any thread. Install it with [`RunContext::cancel`](crate::RunContext::cancel), and keep a clone to call `cancel` on. A cancel on a parent stops every run whose handle descends from it, as [Stop many runs at once](#stop-many-runs-at-once) shows. Nothing on it returns an error or panics. When your Harness runs on tokio with its own cancellation token, your code waits on that token and calls `cancel` on this flag when that token fires.
 
-The host gets one in four ways: [`CancelHandle::new`] or [`CancelHandle::default`] for a root, [`CancelHandle::child`] for a descendant, [`Clone`] for another handle over the same flag, or a run's flag from [`Run::cancel_handle`](crate::Run::cancel_handle) or [`RunContext::cancel_handle`](crate::RunContext::cancel_handle). It is [`Send`], [`Sync`], [`Unpin`], and `'static`.
-
-- [`CancelHandle::new`] takes no arguments and returns a root handle with no parent, not cancelled to start. It stays independent of every other handle until it is cloned or given children. [`RunContext::new`](crate::RunContext::new) mints its own flag this way. The result is `#[must_use]`. [`CancelHandle::default`] returns the same thing.
-- [`CancelHandle::child`] takes `&self`, the parent, which may be any handle, cancelled or not. It returns a fresh handle with its own flag that reports cancelled when its own flag or any ancestor's flag is set. A child of a cancelled parent is cancelled from the start. Cancelling the child never affects the parent or siblings. The result is `#[must_use]`. It cannot fail.
-- [`CancelHandle::cancel`] takes `&self`, so it works through a shared reference from any thread, and returns nothing. Afterwards this handle, every clone, and every descendant report cancelled. The parent and siblings are untouched. It is idempotent and irreversible: calls after the first do nothing, and the flag never clears. A host that needs a fresh flag builds a new handle. The call also wakes every [`Cancelled`] future waiting on this handle or on a descendant. It cannot fail.
-- [`CancelHandle::cancelled`] takes `&self`, the handle to wait on, and returns a [`Cancelled`] future over a clone of that handle. The future completes at once if the handle already reports cancelled, and otherwise when a cancel lands on the handle or on any ancestor. Await it, pin and poll it, or select over it beside other event sources. It cannot fail.
-- [`CancelHandle::is_cancelled`] takes `&self` and returns a [`bool`]: `true` if [`CancelHandle::cancel`] has been called on this handle, any clone, or any ancestor, and `false` otherwise. It is monotonic, so once it returns `true` it never returns `false` again. It walks the ancestor chain with one atomic load per level, so its cost grows with nesting depth. The result is `#[must_use]`. It cannot fail.
-
-[`CancelHandle`] implements [`Debug`](std::fmt::Debug) as `CancelHandle { cancelled: <bool>, depth: <usize> }`, where `depth` is the number of ancestors, `0` for a root. Use it to inspect a handle's state and nesting while debugging.
-
-````
-use promptforge::cancel::CancelHandle;
-
-let root = CancelHandle::new();
-assert_eq!(format!("{root:?}"), "CancelHandle { cancelled: false, depth: 0 }");
-assert_eq!(format!("{:?}", root.child()), "CancelHandle { cancelled: false, depth: 1 }");
-
-root.cancel();
-root.cancel();
-assert!(root.is_cancelled());
-assert_eq!(format!("{root:?}"), "CancelHandle { cancelled: true, depth: 0 }");
-````
+- [`CancelHandle::new`]: makes an uncancelled root, the same as [`CancelHandle::default`], independent of every other handle until cloned or given children.
+- [`CancelHandle::child`]: returns a new node whose own flag starts unset; it reports cancelled when its flag or any ancestor's flag is set.
+- [`CancelHandle::cancel`]: marks this handle, every clone, and every descendant cancelled, and wakes every [`Cancelled`] future drawn from it or a descendant.
+- [`CancelHandle::cancelled`]: returns a future that owns a clone of the handle, so it does not borrow the handle it came from.
+- [`CancelHandle::is_cancelled`]: never turns `true` from a cancel on a child or sibling. Once `true`, it stays `true`, so make a fresh handle for each run.
 
 ## Cancelled
 
-[`Cancelled`] is the future that [`CancelHandle::cancelled`] returns. It lets a host wait on a cancel instead of checking the flag on a timer. Hosts only receive it from [`CancelHandle::cancelled`]. It has no public constructor, fields, or methods.
-
-It implements [`Future`](std::future::Future) with an output of `()`. A poll returns [`Poll::Ready`](std::task::Poll::Ready) once the handle, a clone, or an ancestor is cancelled, and [`Poll::Pending`](std::task::Poll::Pending) otherwise. Each poll registers the task's [`Waker`](std::task::Waker) on every handle up the ancestor chain before it reads the flag, so a cancel that lands between the two is not lost. The cancel itself wakes the task, and the future never times out or spins.
-
-It owns a clone of its handle, so it can be held across awaits. It is [`Send`], [`Sync`], and [`Unpin`]. It is `#[must_use]`, because a future does nothing unless polled.
+[`Cancelled`] is a future, with output `()`, that completes when its handle or any ancestor is cancelled. Await it or select over it beside your other sources instead of polling [`CancelHandle::is_cancelled`] on a timer, as [Wait for a cancel](#wait-for-a-cancel) shows. It completes at once when the cancel already landed, and it never misses one that lands while it is polled. Dropping it changes no flag, so a select can drop it safely. It never times out, and any executor can drive it.

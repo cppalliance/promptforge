@@ -56,7 +56,7 @@ pub struct BuildOutcome {
 /// Runs the full release build against the real environment and toolchain.
 ///
 /// # Errors
-/// Returns an error when the host is not Windows x86-64, the checkout is
+/// Returns an error when the machine is not Windows x86-64, the checkout is
 /// absent or unrecognized, the CUDA Toolkit is missing or too old, any
 /// build command fails, the dependency closure is incomplete, a CUDA
 /// runtime DLL cannot be found in the toolkit, or the smoke check finds no
@@ -390,7 +390,7 @@ fn pack(
     Ok((zip_path, checksum_path))
 }
 
-/// Full pipeline, with the command seam, environment, and host identity
+/// Full pipeline, with the command seam, environment, and machine identity
 /// injected for tests.
 pub(crate) fn build_with(
     probe: &impl Probe,
@@ -516,11 +516,11 @@ mod tests {
                                   \n\
                                   \x20 Summary\n";
 
-    /// A synthetic Windows host: a llama.cpp checkout, an output directory
+    /// A synthetic Windows machine: a llama.cpp checkout, an output directory
     /// pre-seeded with the tree a real cmake build would emit, and a tool
     /// directory holding fake `nvcc.exe`/`cmake.exe` plus the CUDA runtime
     /// DLL the closure names.
-    struct SyntheticHost {
+    struct SyntheticMachine {
         _temp: tempfile::TempDir,
         source: PathBuf,
         out: PathBuf,
@@ -529,7 +529,7 @@ mod tests {
         program_files_x86: PathBuf,
     }
 
-    impl SyntheticHost {
+    impl SyntheticMachine {
         fn new() -> Self {
             let temp = tempfile::TempDir::new().unwrap();
             let root = temp.path();
@@ -629,14 +629,14 @@ mod tests {
     }
 
     #[test]
-    fn non_windows_host_is_rejected() {
-        let host = SyntheticHost::new();
+    fn non_windows_machine_is_rejected() {
+        let machine = SyntheticMachine::new();
         let err = build_with(
-            &host.probe(),
-            &host.env(),
+            &machine.probe(),
+            &machine.env(),
             "linux",
             "x86_64",
-            &host.request(),
+            &machine.request(),
         )
         .unwrap_err();
         assert!(format!("{err:#}").contains("Windows x86-64 only"));
@@ -644,60 +644,90 @@ mod tests {
 
     #[test]
     fn missing_source_is_an_error() {
-        let host = SyntheticHost::new();
-        let mut request = host.request();
-        request.source = host.source.join("absent");
-        let err =
-            build_with(&host.probe(), &host.env(), "windows", "x86_64", &request).unwrap_err();
+        let machine = SyntheticMachine::new();
+        let mut request = machine.request();
+        request.source = machine.source.join("absent");
+        let err = build_with(
+            &machine.probe(),
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &request,
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("is missing"));
     }
 
     #[test]
     fn unrecognized_source_is_an_error() {
         let temp = tempfile::TempDir::new().unwrap();
-        let host = SyntheticHost::new();
-        let mut request = host.request();
+        let machine = SyntheticMachine::new();
+        let mut request = machine.request();
         request.source = temp.path().to_path_buf();
-        let err =
-            build_with(&host.probe(), &host.env(), "windows", "x86_64", &request).unwrap_err();
+        let err = build_with(
+            &machine.probe(),
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &request,
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("does not look like llama.cpp"));
     }
 
     #[test]
     fn non_checkout_source_is_an_error() {
-        let host = SyntheticHost::new();
+        let machine = SyntheticMachine::new();
         let probe = FakeProbe::default().on("rev-parse", fail(128, "not a git repository"));
-        let err =
-            build_with(&probe, &host.env(), "windows", "x86_64", &host.request()).unwrap_err();
+        let err = build_with(
+            &probe,
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &machine.request(),
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("must be a git checkout"));
     }
 
     #[test]
     fn missing_cuda_toolkit_fails_the_build() {
         let temp = tempfile::TempDir::new().unwrap();
-        let host = SyntheticHost::new();
+        let machine = SyntheticMachine::new();
         let empty = temp.path().join("empty");
         std::fs::create_dir_all(&empty).unwrap();
         let env = |name: &str| match name {
             "PATH" => Some(empty.display().to_string()),
-            _ => host.env()(name),
+            _ => machine.env()(name),
         };
-        let err =
-            build_with(&host.probe(), &env, "windows", "x86_64", &host.request()).unwrap_err();
+        let err = build_with(
+            &machine.probe(),
+            &env,
+            "windows",
+            "x86_64",
+            &machine.request(),
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("CUDA Toolkit not found"));
     }
 
     #[test]
     fn cmake_failure_reports_bounded_stderr() {
-        let host = SyntheticHost::new();
+        let machine = SyntheticMachine::new();
         let probe = FakeProbe::default()
             .on("nvcc.exe --version", ok(NVCC_OUTPUT))
             .on("cmake.exe --version", ok("cmake version 4.4.2\n"))
             .on("rev-parse", ok(&format!("{COMMIT}\n")))
             .on("nvidia-smi", ok("12.0\n"))
             .on("-S", fail(1, &"ninja: error\n".repeat(10_000)));
-        let err =
-            build_with(&probe, &host.env(), "windows", "x86_64", &host.request()).unwrap_err();
+        let err = build_with(
+            &probe,
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &machine.request(),
+        )
+        .unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("cmake configure failed (exit 1)"));
         assert!(message.len() < crate::probe::OUTPUT_LIMIT + 4096);
@@ -705,19 +735,20 @@ mod tests {
 
     #[test]
     fn missing_compiler_identity_fails_the_build() {
-        let host = SyntheticHost::new();
+        let machine = SyntheticMachine::new();
         std::fs::remove_file(
-            host.out
+            machine
+                .out
                 .join("work/llama-build/CMakeFiles/4.4.2/CMakeCXXCompiler.cmake"),
         )
         .unwrap();
-        let err = host.build().unwrap_err();
+        let err = machine.build().unwrap_err();
         assert!(format!("{err:#}").contains("CMakeCXXCompiler.cmake"));
     }
 
     #[test]
     fn smoke_check_requires_a_cuda_device() {
-        let host = SyntheticHost::new();
+        let machine = SyntheticMachine::new();
         let probe = FakeProbe::default()
             .on("nvcc.exe --version", ok(NVCC_OUTPUT))
             .on("cmake.exe --version", ok("cmake version 4.4.2\n"))
@@ -728,16 +759,22 @@ mod tests {
             .on("vswhere", ok("C:/VS/dumpbin.exe\n"))
             .on("dumpbin", ok(DUMPBIN_OUTPUT))
             .on("llama-server.exe", ok("no devices found\n"));
-        let err =
-            build_with(&probe, &host.env(), "windows", "x86_64", &host.request()).unwrap_err();
+        let err = build_with(
+            &probe,
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &machine.request(),
+        )
+        .unwrap_err();
         assert!(format!("{err:#}").contains("no CUDA device"));
     }
 
     #[test]
     fn missing_cuda_runtime_dll_fails_the_build() {
-        let host = SyntheticHost::new();
-        std::fs::remove_file(host.tools.join("bin/x64/cublas64_13.dll")).unwrap();
-        let err = host.build().unwrap_err();
+        let machine = SyntheticMachine::new();
+        std::fs::remove_file(machine.tools.join("bin/x64/cublas64_13.dll")).unwrap();
+        let err = machine.build().unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("cublas64_13.dll"), "{message}");
         assert!(message.contains("the zip must ship it"), "{message}");
@@ -745,11 +782,11 @@ mod tests {
 
     #[test]
     fn no_smoke_never_runs_the_server() {
-        let host = SyntheticHost::new();
-        let mut request = host.request();
+        let machine = SyntheticMachine::new();
+        let mut request = machine.request();
         request.smoke = false;
-        let probe = host.probe();
-        build_with(&probe, &host.env(), "windows", "x86_64", &request).unwrap();
+        let probe = machine.probe();
+        build_with(&probe, &machine.env(), "windows", "x86_64", &request).unwrap();
         assert!(
             !probe
                 .invocations()
@@ -760,15 +797,15 @@ mod tests {
 
     #[test]
     fn explicit_archs_skip_nvidia_smi() {
-        let host = SyntheticHost::new();
-        let mut request = host.request();
+        let machine = SyntheticMachine::new();
+        let mut request = machine.request();
         request.archs = vec![
             "89-real".to_string(),
             "120a-real".to_string(),
             "89-real".to_string(),
         ];
-        let probe = host.probe();
-        let outcome = build_with(&probe, &host.env(), "windows", "x86_64", &request).unwrap();
+        let probe = machine.probe();
+        let outcome = build_with(&probe, &machine.env(), "windows", "x86_64", &request).unwrap();
         assert_eq!(outcome.archs, vec!["120a-real", "89-real"]);
         assert!(
             !probe
@@ -780,10 +817,16 @@ mod tests {
 
     #[test]
     fn full_synthetic_build_produces_manifest_zip_and_checksum() {
-        let host = SyntheticHost::new();
-        let probe = host.probe();
-        let outcome =
-            build_with(&probe, &host.env(), "windows", "x86_64", &host.request()).unwrap();
+        let machine = SyntheticMachine::new();
+        let probe = machine.probe();
+        let outcome = build_with(
+            &probe,
+            &machine.env(),
+            "windows",
+            "x86_64",
+            &machine.request(),
+        )
+        .unwrap();
         assert_eq!(outcome.archs, vec!["120a-real"]);
 
         let manifest_text = std::fs::read_to_string(&outcome.manifest).unwrap();

@@ -3,6 +3,7 @@
 //! `Closed`; and a requested close reports its synthetic terminal to
 //! `subscribe_errors` as one `Interrupted` failure with the frame's wording.
 
+use harness_capabilities::USER_INPUT_ASK_TOOL;
 use harness_log::{RecordKind, RunOutcome};
 use harness_sessions::input::WaitFrame;
 use harness_sessions::session::{FailureKind, SessionFailure};
@@ -58,6 +59,12 @@ async fn closing_answers_outstanding_effects_dropped_before_closed() {
         .filter(|stored| stored.record.kind == RecordKind::Effect)
         .collect();
     assert_eq!(effects.len(), 1, "one effect was out: the input wait");
+    assert_eq!(
+        effects[0].record.payload["ToolCall"]["tool"],
+        serde_json::json!(USER_INPUT_ASK_TOOL),
+        "the input wait is the ask tool's call: {}",
+        effects[0].record.payload
+    );
     let answers: Vec<_> = records
         .iter()
         .filter(|stored| stored.record.kind == RecordKind::Answer)

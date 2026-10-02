@@ -92,7 +92,7 @@ impl WorkshopSocketState {
     }
 
     /// Replaces the bound a profile switch waits for a relaunched sidecar
-    /// (see [`DEFAULT_RESTART_BOUND`]); a host embedding a slower
+    /// (see [`DEFAULT_RESTART_BOUND`]); an embedding binary with a slower
     /// supervisor, or a test that must trip the bound, sets it here.
     #[must_use]
     pub(crate) fn with_restart_bound(mut self, bound: Duration) -> Self {

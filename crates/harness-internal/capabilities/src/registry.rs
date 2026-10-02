@@ -1,6 +1,6 @@
-//! The explicit host-built capability registry: [`CapabilityRegistry`].
+//! The explicit Harness-built capability registry: [`CapabilityRegistry`].
 //!
-//! Linking a capability crate alone registers nothing: a host constructs one
+//! Linking a capability crate alone registers nothing: the Harness builds one
 //! registry, registers each installed capability by hand, and hands the
 //! registry to [`activate`](crate::activate) for each run. v1 is
 //! unversioned - one capability per id - so a duplicate registration is
@@ -65,9 +65,9 @@ use crate::capability::Capability;
 #[path = "registry-tests.rs"]
 mod tests;
 
-/// An explicit host-built registry of installed capabilities.
+/// An explicit Harness-built registry of installed capabilities.
 ///
-/// Linking a capability crate alone registers nothing: the host registers
+/// Linking a capability crate alone registers nothing: the Harness registers
 /// each installed capability by hand and hands the registry to
 /// [`activate`](crate::activate) for each run. v1 is unversioned - one
 /// capability per id - so a duplicate registration is rejected rather than

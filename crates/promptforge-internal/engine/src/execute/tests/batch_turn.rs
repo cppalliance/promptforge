@@ -4,8 +4,8 @@
 //! own - through `models.infer`, its own `models.loop`, or a `call` into a
 //! section that runs one - and advances the chain's turn counter before
 //! the later calls dispatch. Bound tools, local tools, and the task
-//! built-ins (answered at once, parked in `await_tasks`, or issued as a
-//! `task_events` read) all report the requesting round's turn.
+//! built-ins (answered at once or parked in `await_tasks`) all report the
+//! requesting round's turn.
 
 use super::models_loop::{echo_tools, loop_context_observed, loop_prompt};
 use super::*;
@@ -188,9 +188,9 @@ async fn drive(
     let gateway = ScriptedGateway::start(replies).await;
     let prompt = parse(md);
     let recorder = Arc::new(TurnRecorder::default());
-    let (ctx, host) =
+    let (ctx, harness) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the batch runs to the final reply");
@@ -355,38 +355,6 @@ async fn a_parked_await_tasks_answer_reports_the_turn_it_was_dispatched_under() 
         recorder.result_turn("c2"),
         batch,
         "the wake reports the turn stored at dispatch: {:?}",
-        recorder.reports()
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_task_events_answer_reports_the_turn_it_was_dispatched_under() {
-    let md = format!(
-        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{}\n```\n\n\
-         ## Child\n\n```lua\nreturn 'child result'\n```\n",
-        grab_block("tools.allow_tasks()\n", INFER_HANDLER)
-    );
-    let (out, recorder) = drive(
-        &md,
-        ToolSet::default(),
-        vec![
-            resp_tool_call("c0", "task", "{\"target\":\"## Child\"}"),
-            resp_batch(&[
-                ("c1", "grab", "{\"value\":\"a\"}"),
-                ("c2", "task_events", "{\"id\":\"0.0\"}"),
-            ]),
-            resp_text("inner reply"),
-            resp_text("final answer"),
-        ],
-    )
-    .await;
-    assert_eq!(out, "final answer");
-    let batch = recorder.batch_turn("c1,c2");
-    assert_eq!(recorder.reply_turn("inner reply"), batch + 1);
-    assert_eq!(
-        recorder.result_turn("c2"),
-        batch,
-        "the history read's answer reports the turn stored at dispatch: {:?}",
         recorder.reports()
     );
 }

@@ -1,11 +1,12 @@
-//! The Lua `models` host table: `use` / `default` / `get` / `infer`.
+//! The Lua `models` Engine global: `use` / `default` / `get`.
 //!
 //! Binding is frontmatter: the run's roles arrive pre-filled from prepare in
 //! the shared [`ModelSet`], and the table selects among them by label.
 //! `models.use` records the section's selection with its optional sampling
-//! options, `models.default` parks the prompt-wide default, `models.get`
-//! inspects a bound role without selecting it, and `models.infer` runs the
-//! one tool-free round through the executor-installed hook.
+//! options, `models.default` parks the prompt-wide default, and `models.get`
+//! inspects a bound role without selecting it. The suspending
+//! `models.infer` and `models.loop` are coroutine shims added to this table
+//! afterward.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ use crate::{Error, Result};
 #[path = "models-userdata.rs"]
 mod userdata;
 
-pub(crate) use userdata::{LuaModelHandle, ModelsInferHook};
+pub(crate) use userdata::LuaModelHandle;
 
 /// The context window a raw gateway-id binding records: catalog metadata
 /// the hack never sees, so a conservative default keeps the compactor
@@ -54,25 +55,8 @@ fn raw_gateway_binding(alias: &str) -> mlua::Result<ModelBinding> {
     ))
 }
 
-/// Dispatches a `models.infer(prompt)` call through the executor-installed
-/// [`ModelsInferHook`] app data.
-///
-/// The hook owns everything else (current-model resolution, gateway
-/// client, section identity). The call runs the one infer shape: a single
-/// tool-free round on a fresh conversation that never sets `reply` or
-/// touches `sys`.
-fn call_models_infer_hook(lua: &Lua, prompt: &str) -> mlua::Result<String> {
-    let hook = lua
-        .app_data_ref::<ModelsInferHook>()
-        .ok_or_else(|| {
-            mlua::Error::external("models.infer is not available outside section execution")
-        })?
-        .clone();
-    hook(lua, prompt)
-}
-
 /// Locks the run's shared model set, mapping a poisoned lock to the Lua
-/// boundary error every host callback uses.
+/// boundary error every Engine function uses.
 fn lock_models(set: &Mutex<ModelSet>) -> mlua::Result<std::sync::MutexGuard<'_, ModelSet>> {
     set.lock()
         .map_err(|_| mlua::Error::external("model set mutex was poisoned"))
@@ -247,14 +231,14 @@ impl ModelRuntime {
 /// different label errors. There is no `models.bind`: binding is the
 /// frontmatter's, and an unknown label is a hard error.
 ///
-/// `raw_ids` is the raw-model-id fallback, on whenever the host passes a
-/// host-state snapshot (`RunContext::ui`): when set, `models.get` resolves
+/// `raw_ids` is the raw-model-id fallback, on whenever the Host passes a
+/// Host-state snapshot (`RunContext::ui`): when set, `models.get` resolves
 /// an undeclared alias as a raw gateway catalog model id, so the built-in
 /// chat prompt can run `models.get(ui().selected_model)` without declaring
 /// its model. Unset, an undeclared alias is the usual error.
 ///
-/// The coroutine shim layer installs the suspending `models.loop`, because
-/// yield cannot cross the Rust callback boundary.
+/// The coroutine shim layer installs the suspending `models.infer` and
+/// `models.loop`, because yield cannot cross the Rust callback boundary.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if a Lua table or callback cannot be created or
@@ -331,7 +315,7 @@ pub(crate) fn install_models(
             if let Some(binding) = lock_models(&frozen)?.binding(&alias).cloned() {
                 return Ok(LuaModelHandle::from_binding(&binding));
             }
-            // The raw-model-id fallback: with the host's raw-id opt-in, an
+            // The raw-model-id fallback: with the Host's raw-id opt-in, an
             // undeclared alias resolves as a raw gateway catalog model id
             // under the fallback context window. The alias grammar does not
             // apply - gateway ids include `/`, `.`, and `:` - so the id's own
@@ -347,11 +331,6 @@ pub(crate) fn install_models(
         })
         .map_err(Error::lua)?;
     models.set("get", get_fn).map_err(Error::lua)?;
-
-    let infer = lua
-        .create_function(|lua, prompt: String| call_models_infer_hook(lua, &prompt))
-        .map_err(Error::lua)?;
-    models.set("infer", infer).map_err(Error::lua)?;
 
     globals.raw_set("models", models).map_err(Error::lua)
 }

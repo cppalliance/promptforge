@@ -19,7 +19,7 @@ import {
   readmeFixture,
   settle,
   systemFixture,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 const REPO = "unsloth/Qwen3-Test-8B-GGUF";
 

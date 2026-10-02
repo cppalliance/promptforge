@@ -224,7 +224,7 @@ pub(crate) fn echo_stream(model: &str, text: &str) -> Response {
 /// The typed `/v1/models` route a launch resolves the menu selection
 /// through, listing `ids` in order. Every entry is a chat model whose
 /// window clears the built-in chat's declared minimum, so a test pins
-/// the host wiring rather than a refused binding.
+/// the Host's wiring rather than a refused binding.
 pub(crate) fn typed_catalog(ids: &'static [&'static str]) -> MethodRouter {
     get(move || async move {
         let data: Vec<serde_json::Value> = ids

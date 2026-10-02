@@ -7,7 +7,7 @@ import type { SttInsertionContext } from "../take/take-registry-types";
 export { setupStt } from "./realtime-stt";
 
 /**
- * What dictation needs from its host input: a text target the take can
+ * What dictation needs from its input: a text target the take can
  * splice the transcript into. Offsets are the target's own text
  * coordinates - a textarea's string offsets, the prompt editor's
  * ProseMirror positions. A take preserves both captured endpoints for
@@ -26,9 +26,9 @@ export interface SttInputTarget {
 }
 
 /**
- * What dictation is wired to. The mic control is the host's: it calls
- * `SttHandle.press()` and paints `SttHandle.state`, so dictation touches
- * no button element of its own.
+ * What dictation is wired to. The mic control is the owning part's: it
+ * calls `SttHandle.press()` and paints `SttHandle.state`, so dictation
+ * touches no button element of its own.
  */
 export interface SttElements {
   input: SttInputTarget;
@@ -77,10 +77,10 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
 export type SttBlocker = () => string | null;
 
 /**
- * The mic's state as the host paints it. `recording` is this surface's
- * live take; `blocked` means another surface over the same capture
- * service holds the microphone; `idle` otherwise. Local recording wins
- * when both would hold.
+ * The mic's state as the owning part paints it. `recording` is this
+ * surface's live take; `blocked` means another surface over the same
+ * capture service holds the microphone; `idle` otherwise. Local recording
+ * wins when both would hold.
  */
 export type SttMicState = "idle" | "recording" | "blocked";
 
@@ -91,7 +91,7 @@ export interface SttHandle extends IDisposable {
    * recording, and names the blocker on the status bar when refused.
    */
   press(): void;
-  /** The current mic state, for seeding the host's control. */
+  /** The current mic state, for seeding the owning part's control. */
   readonly state: SttMicState;
   /** Fires on each change of `state`, never on a repeat. */
   onState(listener: (state: SttMicState) => void): IDisposable;

@@ -64,7 +64,7 @@ async fn admin_system_reports_plausible_cpu_ram_and_disk() {
     assert!(total_disk > 0, "the cache drive has a capacity");
     assert!(used_disk <= total_disk, "usage cannot exceed capacity");
 
-    // GPU is genuinely optional: absent on hosts without an NVIDIA
+    // GPU is genuinely optional: absent on machines without an NVIDIA
     // driver (CI), present with a name and a nonzero VRAM total where
     // NVML loads. The endpoint must succeed either way.
     if let Some(gpu) = body.get("gpu") {

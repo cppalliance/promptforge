@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 /// The seven POSIX kinds, named rather than lumped: a virtual `/dev/null`
 /// (char device) is a plausible backend, and an `Other` kind would hide it.
-/// The engine adapter maps the first four directly and the three specials
+/// The Engine adapter maps the first four directly and the three specials
 /// to `File` with a trace.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,7 +49,7 @@ pub struct Stat {
 /// One directory entry.
 ///
 /// `description` is the annotation column; backends leave it `None` and
-/// the engine adapter drops it. `Entry` is designed to grow: annotations
+/// the Engine adapter drops it. `Entry` is designed to grow: annotations
 /// live here.
 #[non_exhaustive]
 #[derive(Debug, Clone)]

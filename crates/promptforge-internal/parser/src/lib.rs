@@ -15,6 +15,13 @@
 //! commentary, never an error.
 //!
 //! The parser turns bytes into a [`Prompt`] tree without executing any of it.
+//!
+//! ## Invariants
+//!
+//! - May depend on: `promptforge-types` and `promptforge-lua`. Read the
+//!   repository-root `AGENTS.md` before adding an import.
+//! - Every file in this crate stays under 500 lines; split first, then
+//!   edit.
 
 pub use promptforge_lua::LuaProgram;
 

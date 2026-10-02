@@ -8,7 +8,7 @@
 // renderMarkdown, whose DOMPurify pass is the last step before the DOM;
 // user text, tool output, and errors land through textContent.
 //
-// The composer is the ChatBox component: this view is its host. It maps
+// The composer is the ChatBox component, which this view embeds. It maps
 // service state to the box's props (editable follows the pinned wait,
 // the send action follows the wait and the model selection, the mic
 // follows dictation's state) and routes the box's events back - `send`
@@ -211,7 +211,7 @@ export class AgentSessionView extends Disposable {
     this.feed.setAttribute("aria-live", "polite");
     this.feed.setAttribute("aria-atomic", "false");
 
-    // The box is composed from what the host resolves: the toolbar for
+    // The box is composed from what this view resolves: the toolbar for
     // its controls slot and the text-control registrar; the box itself
     // touches no registry.
     const boxProps: {

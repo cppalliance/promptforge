@@ -14,8 +14,8 @@ use crate::schema;
 ///
 /// Every method takes `&mut self`: the effect loop is the log's one
 /// writer, and exclusive access is what lets `append` read the next `seq`
-/// and insert under it without a transaction. A host that needs the log
-/// from several tasks wraps it in its own serialization.
+/// and insert under it without a transaction. The Harness uses the log
+/// from several tasks and wraps it in its own serialization.
 pub struct RunLog {
     conn: turso::Connection,
 }
@@ -33,7 +33,7 @@ impl RunLog {
     ///
     /// # Errors
     /// Returns [`LogError::Io`] when `path` is not UTF-8 (Turso addresses
-    /// databases by string) and [`LogError::Database`] when the engine
+    /// databases by string) and [`LogError::Database`] when the database
     /// cannot open the file or apply the schema.
     pub async fn open(path: &Path) -> Result<Self, LogError> {
         let path = path.to_str().ok_or_else(|| {
@@ -43,10 +43,10 @@ impl RunLog {
     }
 
     /// Opens a log that lives only as long as this value: for tests and
-    /// for hosts that keep no history.
+    /// for Hosts that keep no history.
     ///
     /// # Errors
-    /// Returns [`LogError::Database`] when the engine cannot build the
+    /// Returns [`LogError::Database`] when the database cannot build the
     /// database or apply the schema.
     pub async fn in_memory() -> Result<Self, LogError> {
         Self::open_str(":memory:").await
@@ -89,7 +89,7 @@ impl RunLog {
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::RunEnded`] when it has ended, [`LogError::Payload`]
     /// when the payload does not serialize, and [`LogError::Database`]
-    /// when the engine refuses the write.
+    /// when the database refuses the write.
     pub async fn append(&mut self, run: RunId, record: Record) -> Result<Seq, LogError> {
         self.require_open(run).await?;
         let seq = self.next_seq(run).await?;
@@ -118,7 +118,7 @@ impl RunLog {
     /// # Errors
     /// Returns [`LogError::UnknownRun`] when `run` was never begun here,
     /// [`LogError::RunEnded`] when it has already closed, and
-    /// [`LogError::Database`] when the engine refuses the write.
+    /// [`LogError::Database`] when the database refuses the write.
     pub async fn end_run(&mut self, run: RunId, outcome: RunOutcome) -> Result<(), LogError> {
         self.require_open(run).await?;
         let kind = outcome.as_str();

@@ -20,8 +20,8 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("an over-window request must exhaust the context");
@@ -53,8 +53,8 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
          return tostring(err)",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -78,8 +78,8 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("a provider context rejection must exhaust the context");
@@ -96,7 +96,7 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_non_function_compactor_is_the_calls_error_in_the_hosts_type_names() {
+async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names() {
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.
@@ -115,8 +115,8 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_hosts_type_names() {
          return table.concat(out, '|')",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -158,8 +158,8 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
          return err.kind .. '|' .. tostring(err)",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -174,8 +174,43 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_during_a_looping_compactor_returns_promptly() {
+    use std::time::{Duration, Instant};
+
+    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user(string.rep('x', 100000))\n\
+         models.loop(msgs, function() while true do end end)\n\
+         return 'unreachable'",
+    );
+    let prompt = parse(&md);
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let canceller = driver.cancel_handle();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+
+    let start = Instant::now();
+    let result = driver.drive().await;
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "cancel during a looping compactor must return promptly, took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        matches!(result, Err(crate::Error::Interrupted)),
+        "expected Interrupted, got {result:?}"
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
+async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag() {
     // An author compactor's own untyped raise is re-raised as the value it
     // raised: a bare string passes through the normalizer untouched and
     // fails the section as the ordinary Lua runtime error holding the
@@ -192,8 +227,8 @@ async fn a_compactors_own_string_raise_reaches_the_host_with_the_reason_tag() {
          return 'unreachable'",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect_err("the compactor's own raise fails the section");

@@ -13,7 +13,7 @@ use promptforge_types::emitter::Emitter;
 use promptforge_vfs::Access;
 use serde_json::json;
 
-/// A fresh default handle's access capability, for tests that inject host
+/// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
 fn fresh_access() -> Arc<Access> {
     Arc::new(
@@ -83,7 +83,7 @@ fn section_vm_with_models(
 }
 
 /// Reads the section's effective model binding through a view over the VM's
-/// shared set, mirroring the engine's read path.
+/// shared set, mirroring the Engine's read path.
 fn resolve_section_model(vm: &SectionVm) -> Result<Option<ModelBinding>> {
     let (models, runtime) = vm.model_bag_handles()?;
     resolve_model_binding(&Mutex::new(models), &runtime).map_err(Error::from)

@@ -66,8 +66,8 @@ const byId = (id) => window.document.querySelector(`.status-bar__led[data-indica
 check("the platform exports the STATUS_INDICATORS token", typeof STATUS_INDICATORS?.id === "string");
 
 const bar = new StatusBar();
-check(`the host registers no indicator of its own (got ${ids().join(",")})`, ids().length === 0);
-check("the host exposes no recording port", !("setRecording" in bar));
+check(`the status bar registers no indicator of its own (got ${ids().join(",")})`, ids().length === 0);
+check("the status bar exposes no recording port", !("setRecording" in bar));
 
 // Ordering: registration order differs from `order`; the DOM follows `order`.
 const late = bar.register({ id: "late", name: "Late indicator", order: 5 });

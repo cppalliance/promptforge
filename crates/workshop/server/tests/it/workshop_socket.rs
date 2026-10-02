@@ -2,9 +2,9 @@
 //! snapshots (status, catalog, workbench), the unsolicited status frames
 //! sent on the socket, and the Model-menu events, pinned end to end.
 //!
-//! The root holds the shared harness - mock gateways, the server fixture,
-//! frame readers - and each child module pins one behavior area of the
-//! socket.
+//! The root holds the shared test fixtures - mock gateways, the server
+//! fixture, frame readers - and each child module pins one behavior area
+//! of the socket.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant

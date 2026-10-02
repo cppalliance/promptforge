@@ -119,13 +119,13 @@ isProject: false
 **Rejected candidates: 67 across three partitions, each challenged by a fresh reviewer**
 - 22 residual-but-acceptable: real, but with no reachable consequence or already protected. Examples:
   - Service tokens split from their default registration: production's single `main.ts` entry registers both.
-  - The engine's mock transport still applies a whole-request timeout: it is test-only, no present run reaches it, and harness behavior tests protect the contract.
+  - The Engine's mock transport still applies a whole-request timeout: it is test-only, no present run reaches it, and Harness behavior tests protect the contract.
   - The chat-gate zero-deadline quiet check: later assertions in the same test still catch the regression.
   - The relay's copy of the error renderer.
   - The gateway icon copies, which sit under an existing sync rule.
 - 19 weak/speculative: structural leads with no demonstrated consequence, such as parameter clusters, visibility widening and module size.
 - 19 false: the refactors (compose split, supervisor split, socket framing split, run-loop phases, `/prompts/contract` move, renames) change no behavior, wire string or persisted key. The `saveAs()` half of DEBT-02 is also false: a 408 there leaves `this.path`'s token valid.
-- 7 unrelated pre-existing, for example the harness writing a literal `flags: 0`.
+- 7 unrelated pre-existing, for example the Harness writing a literal `flags: 0`.
 
 </product-contract>
 <implementation-contract>
@@ -263,7 +263,7 @@ use super::*;
 
 - DEBT-X1 and its statements: the server write race, the cleanup plan's lines 164, 488 and 504, and the mislabeled fourth case in `editor-save-timeout.mjs`. The conflict-dialog wording ("modified outside the editor") also belongs with X1. Revisit as its own data-integrity item; a real fix changes the workspace crate's write semantics.
 - Extending the private-items docs step to `workshop` and `workshop-server-api`. Revisit once their rustdoc warning volume is known.
-- The chat-gate quiet-check comment in `crates/workshop/server/tests/it/chat_gate.rs`, and all other residual candidates. Revisit a residual when its consequence becomes reachable, for example a second production UI entry bundle (the service-token split) or an engine test that streams past its `request_timeout` (the mock transport).
+- The chat-gate quiet-check comment in `crates/workshop/server/tests/it/chat_gate.rs`, and all other residual candidates. Revisit a residual when its consequence becomes reachable, for example a second production UI entry bundle (the service-token split) or an Engine test that streams past its `request_timeout` (the mock transport).
 - The untracked `crates/workshop/shell/` artifacts. They are clone-local; delete them by hand if wanted.
 - Any edit to `vibe/archdoc.md` or the `vibe/` plan files.
 
@@ -276,7 +276,7 @@ use super::*;
 - Build command: `cargo build --locked -p <crate>`. Plain `cargo build` builds only the default member `crates/gateway/app` (binary `promptforge-gateway`). Desktop app: `cargo build --locked -p workshop`; desktop release orchestration: `cargo workshop` (alias for `run -p build-workshop --`). The UI bundles are built by crate build scripts through `build-ui`, which needs `npm ci --prefix crates/workshop/ui` and `npm ci --prefix crates/gateway/config-ui/ui` first. Windows links with `rust-lld` and the static CRT per `.cargo/config.toml`.
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; for `workshop`, `workshop-server`, and `workshop-server-api` drop `--all-features`. Integration tests in one binary: add `--test it` (or `--test suite` for `promptforge`). UI tests: `node --test <file>.mjs` from the UI directory.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, then `cargo test -p <crate> --all-features --doc` (workshop crates without `--all-features`; `workshop-server` also has `cargo nextest run --locked -p workshop-server --features headless`). UI components: `npm test` in `crates/workshop/ui` or `crates/gateway/config-ui/ui`.
-- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The workspace run includes `build-xtask`, the structural harness (`cargo test -p build-xtask`). UI suites: `npm test` in both UI directories.
+- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The workspace run includes `build-xtask`, the structural checks (`cargo test -p build-xtask`). UI suites: `npm test` in both UI directories.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features`. Never run a standalone `cargo check --workspace`. UI type checks: `npm run typecheck` in both UI directories. Supply chain: `cargo deny check` (pre-push runs it when installed).
 - Formatter check command: `cargo fmt --all --check` (rustfmt `style_edition = "2024"`; the pre-commit hook runs it).
 - Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps` (default features), both with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`); user guide: `mdbook build guide`. Facade surface: `cargo +<pinned nightly> xtask api --check`, nightly named in `crates/build-xtask/src/api/toolchain.rs`, checked against `crates/promptforge/public-api.txt`.
@@ -288,16 +288,16 @@ use super::*;
   - Behavior changes ship with tests in the same change; nextest caps the whisper-backed STT packages in a `heavy` test group.
 - Directory map:
   - `crates/` - the public and shared layer: root crates `promptforge` (facade), `gateway-api-types`, `gateway-api-discovery`, `harness-api`, `shared-error-source`, `shared-loopback`, `workspace-hack`, and `build-*` tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), plus `shared-ui` (TypeScript and CSS package, not a Rust crate).
-  - `crates/promptforge-internal/` - private engine family: `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
+  - `crates/promptforge-internal/` - private Engine family: `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
   - `crates/gateway/` - private gateway family: `app`, `cloud-providers`, `config`, `config-ui` (with its `ui/` SPA), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
-  - `crates/harness/` - private harness family: `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`.
+  - `crates/harness/` - private Harness family: `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`.
   - `crates/workshop/` - private Workshop family: `desktop` (Tauri app, package `workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and `ui/` (the SPA).
   - `guide/` - mdBook user guide and contributor docs. `prompts/` - sample Markdown prompts. `tools/` - Node release scripts with tests. `vibe/` - plans, archdoc, and design notes. `images/` - banners. `.github/` - CI workflows and fixtures. `.config/` - nextest and hakari. `.githooks/` - pre-commit and pre-push.
   - Root config: `Cargo.toml` (explicit member list, lints, workspace deps), `rust-toolchain.toml` (stable), `rustfmt.toml`, `clippy.toml`, `deny.toml`, `dist-workspace.toml` (cargo-dist), `AGENTS.md` (repository rules).
 - Component boundaries:
-  - `promptforge` is the only crate outside its family that may reach `promptforge-internal/*`; promptforge crates never depend on gateway, workshop, or harness crates. The engine is a sans-I/O state machine exchanging effects and events.
-  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; nothing outside may depend into `crates/gateway/`, and gateway crates never depend on promptforge, workshop, or harness. `gateway-stt` is the only family-visible STT crate. It runs as a separate process reached over HTTP and WebSocket plus the discovery file.
-  - Harness exposes only `harness-api`; harness crates may depend on `promptforge`, the gateway public pair, and `shared-*`, never on workshop or private gateway crates. It is the engine's only production host.
+  - `promptforge` is the only crate outside its family that may reach `promptforge-internal/*`; promptforge crates never depend on gateway, workshop, or Harness crates. The Engine is a sans-I/O state machine exchanging effects and events.
+  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; nothing outside may depend into `crates/gateway/`, and gateway crates never depend on promptforge, workshop, or Harness. `gateway-stt` is the only family-visible STT crate. It runs as a separate process reached over HTTP and WebSocket plus the discovery file.
+  - Harness exposes only `harness-api`; Harness crates may depend on `promptforge`, the gateway public pair, and `shared-*`, never on workshop or private gateway crates. It steps the Engine as its only production caller and performs its effects.
   - Workshop crates may depend on `harness-api`, `promptforge`, the gateway public pair, and `shared-*` only. The desktop app depends on `workshop-server-api`, never `workshop-server`. Inside the family, tiers flow one way: server, then features, then services, then vocabulary.
   - `shared-*` depend on no product crates. `build-*` crates are meta tooling exempt from container privacy; only `build-ui` is depended on, as a build dependency. Every member depends on `workspace-hack`.
   - Family container crates may depend only on `crates/` root crates and their own siblings. Rules bind normal, dev, build, and target-specific dependencies, and `cargo test -p build-xtask` enforces them. The archdoc names a CLI component, but no dedicated CLI crate exists in the tree.

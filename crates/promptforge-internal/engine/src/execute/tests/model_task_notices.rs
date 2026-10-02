@@ -5,40 +5,65 @@
 //! ends, with the still-running list when its timeout fires, with
 //! `nothing to wait for` when it has no task and no timeout, and as a
 //! plain sleep when only a timeout is given; a sibling chain keeps
-//! stepping while the model is parked; and the notice text names how a
-//! task ended (cancelled by the author, abandoned, failed). A scripted
-//! mock gateway plays the model. The `await_tasks` timer cases (a pending
-//! notice answers without a wait; a member's end cancels the unfired
-//! timer) are in `model_task_awaits`, which shares the helpers here.
+//! stepping while the model is parked; the notice text names how a
+//! task ended (cancelled by the author, abandoned, failed); and a notice
+//! queued after the owner left its section - at the walk's end, or between
+//! two sections - reports under the section the owner last entered. A
+//! scripted mock gateway plays the model, except in the between-sections
+//! case, which needs the serial driver's fixed answer order. The
+//! `await_tasks` timer cases (a pending notice answers without a wait; a
+//! member's end cancels the unfired timer) are in `model_task_awaits`,
+//! which shares the helpers here.
+//! The notice texts, the late-notice sections, and the model-issued
+//! cancel sit in `endings`.
 
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use promptforge_types::ids::TaskId;
 
-use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
+use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
-use crate::input::{InputError, InputOutcome};
-use crate::test_support::TestBroker;
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// A broker that answers each `user_input` in call order after the next
-/// scripted delay, so a parked child's release is timed by the test.
-pub(super) struct DelayedBroker(Mutex<VecDeque<Duration>>);
+/// A tool that answers each call in call order after the next scripted
+/// delay, so the release of a child parked on it is timed by the test. A
+/// child calls it by its full id, `tests/tools/delayed`.
+pub(super) struct DelayedTool(Mutex<VecDeque<Duration>>);
 
-impl DelayedBroker {
+impl DelayedTool {
     pub(super) fn new(delays: &[Duration]) -> Arc<Self> {
         Arc::new(Self(Mutex::new(delays.iter().copied().collect())))
     }
 }
 
 #[async_trait::async_trait]
-impl TestBroker for DelayedBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
+impl TestTool for DelayedTool {
+    fn id(&self) -> ToolId {
+        ToolId::parse("tests/tools/delayed").expect("valid delayed tool id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn wire_name(&self) -> &str {
+        "delayed"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "Answer after the test's next scripted delay."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
         let delay = self
             .0
             .lock()
@@ -46,7 +71,7 @@ impl TestBroker for DelayedBroker {
             .pop_front()
             .unwrap_or_default();
         tokio::time::sleep(delay).await;
-        Ok(InputOutcome::Text("typed".to_owned()))
+        Ok(ToolOutput::trusted("typed"))
     }
 }
 
@@ -145,12 +170,12 @@ async fn a_notice_arrives_in_the_round_after_the_task_ends() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the notice is a message, not a raise");
@@ -197,16 +222,16 @@ async fn await_tasks_returns_the_drained_notice_when_the_task_ends() {
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content"),
-        "user_input()\nreturn 'child result'",
+        "tools.call('tests/tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[Duration::from_millis(300)]),
+        DelayedTool::new(&[Duration::from_millis(300)]),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the wait resumes with content");
@@ -245,12 +270,12 @@ async fn await_tasks_times_out_naming_the_tasks_still_running() {
     let md = owner_prompt("", &loop_owner("return msgs[7].content"), PARKED_CHILD);
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the timeout resumes with content and the owner's end abandons both");
@@ -273,12 +298,12 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("every answer is content");
@@ -291,8 +316,8 @@ async fn await_tasks_with_nothing_live_answers_at_once_or_sleeps() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
-    // The author's `Sibling` task parks on input answered at 300ms; the
-    // model's `Child` on input answered at 900ms. The model parks in
+    // The author's `Sibling` task parks on a tool call answered at 300ms;
+    // the model's `Child` on one answered at 900ms. The model parks in
     // `await_tasks` within a few ms, so the sibling's log lands after the
     // round that answered `await_tasks` and before the child's end.
     let gateway = ScriptedGateway::start(vec![
@@ -314,17 +339,17 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
               return results[1].result .. '|' .. msgs[5].content\n\
               ```\n\n\
               ## Child\n\n\
-              ```lua\nuser_input()\nreturn 'child result'\n```\n\n\
+              ```lua\ntools.call('tests/tools/delayed')\nreturn 'child result'\n```\n\n\
               ## Sibling\n\n\
-              ```lua\nuser_input()\nlog('sibling ran')\nreturn 'sib'\n```\n";
+              ```lua\ntools.call('tests/tools/delayed')\nlog('sibling ran')\nreturn 'sib'\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
+        DelayedTool::new(&[Duration::from_millis(300), Duration::from_millis(900)]),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end and the owner collects them");
@@ -347,91 +372,5 @@ async fn a_sibling_chain_steps_while_the_model_is_parked_in_await_tasks() {
     );
 }
 
-/// Runs the two-section prompt with the model starting `Child` in round 1
-/// and replying in round 2, then returns every notice reported.
-async fn notices_for(owner_tail: &str, child_body: &str) -> Vec<(String, TaskId, String)> {
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_text("bye"),
-    ])
-    .await;
-    let md = owner_prompt("", &loop_owner(owner_tail), child_body);
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
-    );
-    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the owner ends clean");
-    recorder.notices()
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn notice_texts_name_how_a_task_ended() {
-    let cancelled = notices_for(
-        "local mine = tasks.pending({ origin = 'model' })\n\
-         tasks.cancel(mine[1])\n\
-         return 'ok'",
-        PARKED_CHILD,
-    )
-    .await;
-    assert_eq!(
-        cancelled,
-        vec![(
-            "Only".to_owned(),
-            task("0.0"),
-            "Task id=0.0 (## Child) was canceled: the author cancelled it".to_owned()
-        )],
-        "an author cancel of a model task is one notice"
-    );
-
-    let abandoned = notices_for("return 'ok'", PARKED_CHILD).await;
-    assert_eq!(
-        abandoned,
-        vec![(
-            "Only".to_owned(),
-            task("0.0"),
-            "Task id=0.0 (## Child) was abandoned: the section ended".to_owned()
-        )],
-        "an owner ending first is one abandonment notice"
-    );
-
-    let failed = notices_for("return 'ok'", "error('boom')").await;
-    assert_eq!(failed.len(), 1, "a failed task is one notice: {failed:?}");
-    assert!(
-        failed[0].2.starts_with("Task id=0.0 (## Child) failed: ") && failed[0].2.contains("boom"),
-        "the failure notice reports the task's error: {}",
-        failed[0].2
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_model_issued_cancel_queues_no_notice() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
-        resp_tool_call("call_2", "task_cancel", "{\"id\":\"0.0\"}"),
-        resp_text("bye"),
-    ])
-    .await;
-    let md = owner_prompt("", &loop_owner("return 'ok'"), PARKED_CHILD);
-    let prompt = parse(&md);
-    let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
-        &prompt,
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
-    );
-    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("the cancel leaves nothing live");
-    assert!(
-        recorder.notices().is_empty(),
-        "the model already read `Task id=0.0 cancelled`; no notice repeats it: {:?}",
-        recorder.notices()
-    );
-}
+#[path = "model_task_notices-endings.rs"]
+mod endings;

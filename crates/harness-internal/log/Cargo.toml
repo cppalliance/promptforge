@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge harness run log: the append-only Turso record of every run's effects, answers, and events"
+description = "PromptForge Harness run log: the append-only Turso record of every run's effects, answers, and events"
 readme = "README.md"
 keywords = ["promptforge", "llm", "agent", "harness", "log"]
 categories = ["development-tools", "database"]
@@ -19,7 +19,7 @@ turso.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The fidelity suite round-trips the engine's events through the log.
+# The fidelity suite round-trips the Engine's events through the log.
 promptforge.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

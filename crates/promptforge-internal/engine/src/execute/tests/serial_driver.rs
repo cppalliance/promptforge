@@ -6,39 +6,36 @@
 //! delivered one per step, all at once, and shuffled within a batch
 //! produce identical per-task effects and events), and a model task whose
 //! owner ends first reporting `abandoned` in both its event and its
-//! notice. The helpers here - the canned completions and the local
-//! performer - are shared with the `task_events` suite.
+//! notice. The helpers here - the canned completions, the local
+//! performer, and the scripted driver - are shared with the other suites.
 
 use std::collections::BTreeMap;
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, Provenance, TaskId};
 
-use super::model_tasks::{NeverBroker, model_task_context_with};
+use super::model_tasks::model_task_context_with;
 use super::scheduler::scheduler_context_from;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, EffectRecord, Run, Step};
-use crate::execute::task_history;
-use crate::input::InputOutcome;
 use crate::lua::run_store_op;
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
 
 /// A canned text reply from the test model.
 pub(super) fn text_reply(text: &str) -> EffectAnswer {
-    EffectAnswer::Chat(Ok(Box::new(Completion::from_result(
-        CompletionResult::Text(text.to_owned()),
-        "test-model",
-    ))))
+    let completion = Completion::from_result(CompletionResult::Text(text.to_owned()), "test-model")
+        .expect("a text result is accepted");
+    EffectAnswer::Chat(Ok(Box::new(completion)))
 }
 
 /// A canned tool-call round from the test model: one call, `name` with
 /// `arguments`, under `call_id`.
 pub(super) fn tool_call_reply(call_id: &str, name: &str, arguments: Value) -> EffectAnswer {
-    EffectAnswer::Chat(Ok(Box::new(Completion::from_result(
-        CompletionResult::ToolCalls(vec![ToolCall::from_parts(call_id, name, arguments)]),
-        "test-model",
-    ))))
+    let call = ToolCall::from_parts(call_id, name, arguments).expect("a scripted call is whole");
+    let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "test-model")
+        .expect("a one-call batch is accepted");
+    EffectAnswer::Chat(Ok(Box::new(completion)))
 }
 
 /// The first user message of a `Chat` effect, read off its record: the
@@ -54,8 +51,8 @@ pub(super) fn infer_prompt(effect: &Effect) -> String {
 }
 
 /// Performs one effect locally, with no I/O: a store operation runs on the
-/// effect's own access handle, a timer fires at once, an input wait is
-/// unavailable, a bound tool is unbound, and a model round is answered by
+/// effect's own access handle, a timer fires at once, a bound tool is
+/// unbound, and a model round is answered by
 /// `chat`, a function of the effect alone so the answer never depends on
 /// arrival order.
 pub(super) fn perform_locally(
@@ -67,11 +64,34 @@ pub(super) fn perform_locally(
         Effect::ToolCall { alias, .. } => EffectAnswer::ToolCall(Err(ToolError::message(format!(
             "no tool is bound as {alias} in this test"
         )))),
-        Effect::UserInput { .. } => EffectAnswer::UserInput(Ok(InputOutcome::Unavailable)),
-        Effect::Store { access, op } => EffectAnswer::Store(run_store_op(access, op.clone())),
+        Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
         Effect::Timer { .. } => EffectAnswer::Timer,
-        Effect::TaskEvents { .. } => panic!("the driver answers a history read itself"),
     }
+}
+
+/// The text of a run that succeeded; panics on any other outcome.
+pub(super) fn text_of(result: RunResult) -> String {
+    match result {
+        RunResult::Ok(text) => text,
+        other => panic!("the run succeeds: {other:?}"),
+    }
+}
+
+/// Drives `md` with the model played by `rounds`, one canned answer per
+/// `chat` round in order.
+pub(super) fn drive_scripted(md: &str, rounds: Vec<EffectAnswer>) -> (RunResult, Vec<Event>) {
+    let prompt = parse(md);
+    let (state, _harness) = model_task_context_with(
+        &prompt,
+        Arc::new(NullObserver::default()),
+        Arc::new(SlowTool),
+    );
+    let mut rounds = rounds.into_iter();
+    drive(Run::from_state(state), |_, effect| {
+        perform_locally(effect, &mut |_| {
+            rounds.next().expect("the script covers every round")
+        })
+    })
 }
 
 /// A chat performer that echoes the infer prompt back as `r(<prompt>)`.
@@ -83,11 +103,11 @@ fn echo_chat(effect: &Effect) -> EffectAnswer {
 /// suites build one.
 fn model_run(md: &str) -> Run {
     let prompt = parse(md);
-    let (state, _host) = scheduler_context_from(
+    let (state, _harness) = scheduler_context_from(
         &prompt,
         &TestStore::new(),
         &test_context(EXECUTION),
-        RunHost::new(),
+        RunHarness::new(),
     );
     Run::from_state(state)
 }
@@ -188,25 +208,20 @@ pub(super) fn drive_batched(mut run: Run, batching: Batching) -> Outcome {
                     !outstanding.is_empty(),
                     "a pending run has an effect to answer"
                 );
-                let answer = |effect: &Effect, events: &[Event]| match effect {
-                    Effect::TaskEvents { task, last } => {
-                        EffectAnswer::TaskEvents(task_history(events, task, *last))
-                    }
-                    other => perform_locally(other, &mut echo_chat),
-                };
+                let answer = |effect: &Effect| perform_locally(effect, &mut echo_chat);
                 match batching {
                     Batching::OnePerStep => {
                         let (id, effect) = outstanding.remove(0);
-                        run.resume(id, answer(&effect, &events));
+                        run.resume(id, answer(&effect));
                     }
                     Batching::AllAtOnce => {
                         for (id, effect) in std::mem::take(&mut outstanding) {
-                            run.resume(id, answer(&effect, &events));
+                            run.resume(id, answer(&effect));
                         }
                     }
                     Batching::Reversed => {
                         for (id, effect) in std::mem::take(&mut outstanding).into_iter().rev() {
-                            run.resume(id, answer(&effect, &events));
+                            run.resume(id, answer(&effect));
                         }
                     }
                 }
@@ -261,8 +276,8 @@ fn the_driver_performs_store_and_model_effects_and_keeps_the_events_in_order() {
     let order: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
-            Event::StoreWriteSucceeded { .. } => Some("write"),
-            Event::StoreReadSucceeded { .. } => Some("read"),
+            Event::VfsWriteSucceeded { .. } => Some("write"),
+            Event::VfsReadSucceeded { .. } => Some("read"),
             Event::ModelTurnCompleted { .. } => Some("turn"),
             _ => None,
         })
@@ -281,7 +296,7 @@ fn a_three_arm_fanout_fed_its_answers_in_reverse_order_packs_results_in_collecti
         panic!("the fanout parks on its arms' rounds");
     };
     let mut effects = effects;
-    let Effect::Store { .. } = &effects[0].2 else {
+    let Effect::Vfs { .. } = &effects[0].2 else {
         panic!("the parent's store write is issued first: {effects:?}");
     };
     let (id, _, store) = effects.remove(0);
@@ -334,7 +349,7 @@ fn two_runs_under_the_same_context_and_answers_are_identical() {
 
 #[test]
 fn answers_one_per_step_all_at_once_and_reversed_produce_the_same_per_task_record() {
-    // The batching-pairing property: however the host paces and orders
+    // The batching-pairing property: however the Harness paces and orders
     // its answers, each task's effects and events - and the text with its
     // `sys.id`s - are the same. Only the interleaving across tasks may
     // differ, so the comparison is per task.
@@ -375,10 +390,10 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
         return models.infer('child work')\n\
         ```\n";
     let prompt = parse(md);
-    let (state, _host) = model_task_context_with(
+    let (state, _harness) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
     let mut rounds = 0;
     let (result, events) = drive(Run::from_state(state), |_, effect| {

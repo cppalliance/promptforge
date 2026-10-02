@@ -1,10 +1,10 @@
 # What a Prompt Is
 
-A PromptForge prompt is a single Markdown file that is also a program: the prose you want a model to see sits right next to the Lua that decides what happens to it, and a host runs the whole file for you. This chapter shows you the shape of that file, the smallest prompt that runs, how prose and Lua meet, how sections work together, and what the host does before and during a run, so you can write and run a first prompt today and know which chapter to open next for each part.
+A PromptForge prompt is a single Markdown file that is also a program: the prose you want a model to see sits right next to the Lua that decides what happens to it, and the Harness runs the whole file for you. This chapter shows you the shape of that file, the smallest prompt that runs, how prose and Lua meet, how sections work together, and what the Harness does before and during a run, so you can write and run a first prompt today and know which chapter to open next for each part.
 
 ## What a prompt file is
 
-A prompt file is one Markdown file (`.md`) that a host parses and runs. The host is the program that runs your prompt and does its outside work for it. You never call the host directly: you write the file, and the host runs it. The prompt is the program, with Lua holding the logic and prose holding text that Lua can read and send to a model.
+A prompt file is one Markdown file (`.md`) that the Engine parses and the Harness runs. The Harness is the program that runs your prompt and does its outside work for it, and the Host is the application, such as Workshop, that starts the run. You write the file, and the Harness runs it. The prompt is the program, with Lua holding the logic and prose holding text that Lua can read and send to a model.
 
 A prompt file has three parts, in this order:
 
@@ -30,7 +30,7 @@ Say hello.
 
 Its frontmatter is the three lines between the `---` delimiters, its H1 title is `Greeter`, and it has one section, `## Say hi`, holding one line of prose. The delimiters and keys are covered in [the frontmatter header](02-file-structure.md#the-frontmatter-header), and the two required strings in [name and description](02-file-structure.md#name-and-description).
 
-A file with no `---` delimiters at the top, or with YAML between them that does not parse, fails with the parse error kind `Frontmatter` ([parse error kinds](17-limits-and-errors.md#parse-error-kinds)).
+A file with no `---` delimiters at the top, or with YAML between them that does not parse, fails with the parse error kind `Frontmatter` ([parse error kinds](16-limits-and-errors.md#parse-error-kinds)).
 
 The title is exactly one H1 with non-empty text: a file with no H1 fails with the parse error kind `Structure` and `prompt requires an H1 title`, a file with several gives `prompt must contain exactly one H1 title`, and a blank title gives `prompt H1 title must not be empty` ([the one-H1 rule](02-file-structure.md#what-a-prompt-file-looks-like)).
 
@@ -41,7 +41,7 @@ The `promptforge: 0` line is what marks a Markdown file as a PromptForge prompt.
 - Any other version number fails the run with the run error kind `Version` and `unsupported promptforge version: {n} (this build supports major 0)`, where `{n}` is the declared number.
 - A file with no `promptforge:` key still parses, but the run declines it with the parse error kind `Structure` and `not a promptforge prompt: no promptforge version`, an error that names the prompt's `name`.
 
-So a file with the right layout but no `promptforge: 0` parses and never runs, and every prompt that runs declares `promptforge: 0`. [The promptforge version](02-file-structure.md#the-promptforge-version) covers the key in full, [parse error kinds](17-limits-and-errors.md#parse-error-kinds) lists `Structure`, and [how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists `Version` with the other run error kinds.
+So a file with the right layout but no `promptforge: 0` parses and never runs, and every prompt that runs declares `promptforge: 0`. [The promptforge version](02-file-structure.md#the-promptforge-version) covers the key in full, [parse error kinds](16-limits-and-errors.md#parse-error-kinds) lists `Structure`, and [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists `Version` with the other run error kinds.
 
 The part between the H1 title and the first section is the H1 body, and it can hold prose and `lua` fences too ([the H1 title and its content](02-file-structure.md#the-h1-title-and-its-content)). Because the H1 body can do all the work, a prompt needs no minimum number of sections. This prompt has none, and its run ends with the result `hello`:
 
@@ -67,7 +67,7 @@ With `local x = 1` in place of the `return`, the same prompt ends with `done`. B
 
 ## The smallest complete prompt
 
-The greeter above is already a complete prompt. It has one section, no Lua anywhere, and nothing in its H1 body, and it declares nothing the host has to provide. Run it, and it ends like this:
+The greeter above is already a complete prompt. It has one section, no Lua anywhere, and nothing in its H1 body, and it declares nothing the Harness has to provide. Run it, and it ends like this:
 
 ````text
 done
@@ -97,7 +97,7 @@ return 'hello'
 hello
 ````
 
-The fence's `return` value becomes the section's result, and because this section's return ends the run, it is also the run's result text. The prompt declares no model, no tools, and no capabilities, and needs none: a Lua block that returns a string does all the work itself. A literal `return` asks the host for no work at all, so the run never waits on anything outside the prompt. Tools that Lua never calls change nothing either: with [tool slots](#the-prompt-and-its-host) filled but never called, a block of `return 'plain'` still ends the run with `plain`.
+The fence's `return` value becomes the section's result, and because this section's return ends the run, it is also the run's result text. The prompt declares no model, no tools, and no capabilities, and needs none: a Lua block that returns a string does all the work itself. A literal `return` asks the Harness for no work at all, so the run never waits on anything outside the prompt. Tools that Lua never calls change nothing either: with [tool slots](#the-prompt-the-host-and-the-harness) filled but never called, a block of `return 'plain'` still ends the run with `plain`.
 
 A prompt can also return the argument string the run received, which Lua reads as `args` ([input basics](06-arguments.md#input-basics)). This prompt ends with whatever text it was given:
 
@@ -250,7 +250,7 @@ return models.infer(prose)
 ```
 ````
 
-It fails with the run error kind `Binding` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)) and the message `model binding required for section {name}`, where `{name}` is the section's heading text:
+It fails with the run error kind `Binding` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)) and the message `model binding required for section {name}`, where `{name}` is the section's heading text:
 
 ````text
 model binding required for section Only
@@ -481,18 +481,20 @@ hello world
 
 This file has a shared library, two sections, and one child section. The `lua shared` fence in the H1 body holds the shared library, code that loads in every section so each one can call its helpers ([the shared library](03-blocks-and-prose.md#the-shared-library)), which is why `## Prepare` can call `normalize`. No block reads the line of prose in the H1 body, so it is discarded. `var` passes the tidied subject from `## Prepare` to `## Finish`, and the walk never enters `### Author note`.
 
-## The prompt and its host
+## The prompt, the Host, and the Harness
 
-Four optional frontmatter keys are the contract keys, the prompt's contract with the host:
+Three layers take part in every run. The Engine parses the prompt, steps the run, and emits an effect whenever the run needs something from outside, such as a model reply or a tool result. The Harness performs each effect, hands the answer back to the Engine, and keeps the run log. The Host is the application you run prompts in, such as Workshop: it launches runs, chooses policy such as the selected model and whether someone can answer `input.ask()`, and can cancel a run.
 
-- `capabilities:` names the capabilities the prompt needs from the host ([declaring capabilities](12-tools.md#declaring-capabilities)).
+Four optional frontmatter keys are the contract keys, the prompt's contract with the Harness and the Host:
+
+- `capabilities:` names the capabilities the prompt needs from the Harness ([declaring capabilities](12-tools.md#declaring-capabilities)).
 - `tools:` binds tool slots, each an alias mapped to a tool path ([tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)).
 - `models:` declares model roles ([declaring roles](10-models.md#declaring-roles)).
 - `args:` types the prompt's arguments ([arg declarations](06-arguments.md#arg-declarations)).
 
-The parser checks only the shape of these keys. The host satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the host cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
+The parser checks only the shape of these keys. The Harness satisfies them at prepare, the step before the run starts ([what a run does](04-how-a-prompt-runs.md#what-a-run-does)). A declaration the Harness cannot satisfy fails the run with the run error kind `RequirementsUnmet` before any section runs ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and prepare's refusal text is the requirements notice ([when a run cannot start](04-how-a-prompt-runs.md#when-a-run-cannot-start)).
 
-A prompt that declares no capabilities, tools, or model roles has no requirements for the host to meet before the run. It runs on its Lua sections alone, with no model, no tools, and no host files behind it:
+A prompt that declares no capabilities, tools, or model roles has no requirements for the Harness to meet before the run. It runs on its Lua sections alone, with no model, no tools, and no real files behind it:
 
 ````markdown
 ---
@@ -514,25 +516,23 @@ return 'no capabilities'
 no capabilities
 ````
 
-When a prompt does declare model roles and tool slots, the frontmatter decides what is bound. Before the run begins, the host fills every declared model role with a concrete model and every tool slot with the tool at its declared tool path ([filling tool slots and model roles](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles)). For the `writer: {}` role in the prompts above, prepare fills `writer` with the host's current model and reports the declaration satisfied, and a section's `models.use('writer')` then runs its rounds under that model.
+When a prompt does declare model roles and tool slots, the frontmatter decides what is bound. Before the run begins, the Harness fills every declared model role with a concrete model and every tool slot with the tool at its declared tool path ([filling tool slots and model roles](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles)). For the `writer: {}` role in the prompts above, prepare fills `writer` with the Host's current model and reports the declaration satisfied, and a section's `models.use('writer')` then runs its rounds under that model.
 
 Lua only ever selects labels that are already bound:
 
-- `models.use` selects only a role label that the frontmatter declared and the host filled, and raises `models.use label "{label}" is not a bound model role` for any other label.
+- `models.use` selects only a role label that the frontmatter declared and the Harness filled, and raises `models.use label "{label}" is not a bound model role` for any other label.
 - `tools.add` puts a slot's tool in scope for the model in the current section ([advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), accepts only an alias whose slot is filled, and fails with `tools.add alias "{alias}" is not a bound tool slot` for any other alias.
 
 The model calls a bound tool by its alias from `tools:`, such as `search`, never by its tool path, such as `promptforge/web/search`.
 
-The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through host work: requests the host performs for the run and answers. There are exactly six kinds of host work:
+The language itself performs no I/O and reads no clock. A prompt reaches the outside world only through Harness work: requests the Harness performs for the run and answers. There are exactly four kinds of Harness work:
 
 - A model round: `models.infer` sends one round with its prompt text and no tools, and `models.loop` runs rounds ([running a round with models.infer](10-models.md#running-a-round-with-modelsinfer)).
-- A bound tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)).
-- A wait for operator input ([asking the operator with user_input](05-lua-environment.md#asking-the-operator-with-user_input)).
+- A tool call ([calling tools from Lua](12-tools.md#calling-tools-from-lua)), a wait for operator input included, because `input.ask()` calls a tool ([asking the operator with input.ask](05-lua-environment.md#asking-the-operator-with-inputask)).
 - A store operation, one for each store call ([what the store is](09-the-store.md#what-the-store-is)).
 - The timer behind a timed wait on tasks ([time limits on waits](15-tasks.md#time-limits-on-waits)).
-- A read of a task's event history ([reading a task's history](16-task-events.md#reading-a-tasks-history)).
 
-Everything else a block does, such as computing and returning a value, is plain Lua that needs no host work, which is why a literal `return` asks the host for nothing. While the host performs host work, only the chain that asked for it waits ([waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
+Everything else a block does, such as computing and returning a value, is plain Lua that needs no Harness work, which is why a literal `return` asks the Harness for nothing. While the Harness performs Harness work, only the chain that asked for it waits ([waiting and reproducibility](04-how-a-prompt-runs.md#waiting-and-reproducibility)).
 
 This section asks for two store operations, a write and then a read:
 
@@ -585,4 +585,4 @@ models:
 - `args:` declares `use_mcp`, a `boolean` argument with a default of `true` and a description.
 - `models:` declares two roles, `analyst` and `triage`, each with `keywords` and a `description`, and `analyst` also sets `min_context`.
 
-A prompt with this frontmatter still needs its H1 title and the H1 body blocks or sections that do its work, and prepare checks each declaration against the host before the run starts.
+A prompt with this frontmatter still needs its H1 title and the H1 body blocks or sections that do its work, and prepare checks each declaration against the Harness before the run starts.

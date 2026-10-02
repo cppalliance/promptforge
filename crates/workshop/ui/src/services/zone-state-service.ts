@@ -1,5 +1,5 @@
 // The zone-state service: the workbench's zone group map (which Dockview
-// group currently hosts each named zone) and the per-panel placement
+// group currently holds each named zone) and the per-panel placement
 // overrides recorded when the user drags a panel to another zone. This
 // state used to sit at module scope in zones.ts; as a registry-held
 // service it is named, observable through onDidChange, and shared by
@@ -51,7 +51,7 @@ export class ZoneStateService implements IDisposable {
     return this.groups.get(zone);
   }
 
-  /** Records which group currently hosts a zone. */
+  /** Records which group currently holds a zone. */
   setGroup(zone: ZoneName, groupId: string): void {
     this.groups.set(zone, groupId);
   }

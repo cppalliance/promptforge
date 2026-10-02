@@ -185,7 +185,7 @@ impl WhisperBackend {
     }
 }
 
-/// The engine slot a speech-to-text model fills.
+/// The speech engine slot a speech-to-text model fills.
 ///
 /// # Examples
 /// ```
@@ -222,7 +222,7 @@ pub enum SttRole {
 pub struct SttModelConfig {
     /// Catalog name referenced by `[[profile]].models`.
     pub(super) name: String,
-    /// Engine slot this model fills.
+    /// Speech engine slot this model fills.
     pub(super) role: SttRole,
     /// HTTPS download URL or operator-controlled local path.
     pub(super) source: String,
@@ -254,7 +254,7 @@ impl SttModelConfig {
         &self.name
     }
 
-    /// Returns the engine slot this model fills.
+    /// Returns the speech engine slot this model fills.
     ///
     /// # Examples
     /// ```
@@ -377,7 +377,7 @@ impl RecommendedSttModel {
         self.name
     }
 
-    /// Returns the recommended engine role.
+    /// Returns the recommended speech engine role.
     ///
     /// # Examples
     /// ```

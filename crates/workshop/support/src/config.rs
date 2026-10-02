@@ -107,8 +107,8 @@ impl Config {
     /// `anchor`: an empty `server.state_dir` becomes `anchor` itself, and
     /// an empty `agents.path` becomes `agents/` under it. Explicit
     /// (non-empty) values are kept verbatim. Parsing applies this with the
-    /// config file's directory; a host that builds a [`Config`] in code
-    /// applies it with its own anchor to get the same defaults.
+    /// config file's directory; an embedding binary that builds a [`Config`]
+    /// in code applies it with its own anchor to get the same defaults.
     pub fn anchor_path_defaults(&mut self, anchor: &Path) {
         if self.server.state_dir.as_os_str().is_empty() {
             self.server.state_dir = anchor.to_path_buf();

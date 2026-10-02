@@ -4,7 +4,7 @@ Tools let a prompt reach past the model's own text: in the middle of a conversat
 
 ## Tools at a glance
 
-Every tool comes from the host. The host registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
+Every tool comes from the Harness. The Harness registers capabilities, each supplying a set of tools under an id such as `promptforge/web`, and a prompt declares the capabilities it uses and binds the tools it wants from them. The smallest tool prompt declares one capability, binds one tool, and calls it from Lua:
 
 ````markdown
 ---
@@ -26,7 +26,7 @@ return tools.call('fetch', { url = args })
 ```
 ````
 
-`capabilities:` lists the capabilities the prompt uses, here `promptforge/web`, the first-party capability that supplies the tools `promptforge/web/fetch` and `promptforge/web/search`. Each declared capability is activated at [prepare](04-how-a-prompt-runs.md#capability-activation), before any Lua runs, and the run's tool catalog, the set of tools the prompt can bind, is built from exactly the declared capabilities. A host tool reaches a run no other way.
+`capabilities:` lists the capabilities the prompt uses, here `promptforge/web`, the first-party capability that supplies the tools `promptforge/web/fetch` and `promptforge/web/search`. Each declared capability is activated at [prepare](04-how-a-prompt-runs.md#capability-activation), before any Lua runs, and the run's tool catalog, the set of tools the prompt can bind, is built from exactly the declared capabilities. A Harness tool reaches a run only this way.
 
 `tools:` binds tool slots. Each entry is written `alias: namespace/pack/name`, a prompt-local alias mapped to one exact tool path, so `fetch` here is an alias for `promptforge/web/fetch`. Each alias then exists as a Lua global and as a name `tools.call` accepts. A prompt without a `tools:` key has no tool slots.
 
@@ -61,13 +61,13 @@ return msgs[#msgs].content
 ```
 ````
 
-`models.use` selects the section's [model role](10-models.md#choosing-a-sections-model), and `models.loop` runs rounds on a message list until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.add` puts `search` and `fetch` in this section's scope, and on every round `models.loop` offers the model every tool in scope. The host supplies each tool, the prompt only names it by path, and the model receives it as plain data: a name, a description, and a JSON Schema for its arguments.
+`models.use` selects the section's [model role](10-models.md#choosing-a-sections-model), and `models.loop` runs rounds on a message list until the model replies with text, as [Conversations](11-conversations.md#a-first-conversation) shows. `tools.add` puts `search` and `fetch` in this section's scope, and on every round `models.loop` offers the model every tool in scope. The Harness supplies each tool, the prompt only names it by path, and the model receives it as plain data: a name, a description, and a JSON Schema for its arguments.
 
 That name is the alias. The alias is the only name the model sees or uses for a tool: the model never sees the tool path, and every call still runs the exact tool the path names.
 
 When the model calls a tool it was offered, the loop runs the call under the model's call id, appends the assistant record holding the call and one tool record per result, linked by `tool_call_id` as [Conversations](11-conversations.md#what-the-loop-appends) describes, and asks the model again until it answers with text.
 
-You can also make a tool out of a Lua function. `tools.add_local(alias, description, params, handler)` in a section's `lua` block registers a local tool that the model can call in that section beside the bound tools, and that your Lua code can call with `tools.call`. The engine answers these calls itself, without the host:
+You can also make a tool out of a Lua function. `tools.add_local(alias, description, params, handler)` in a section's `lua` block registers a local tool that the model can call in that section beside the bound tools, and that your Lua code can call with `tools.call`. The Engine answers these calls itself, inside the calling chain:
 
 ````lua
 tools.add_local('grab', 'Grab a value', { value = 'string' }, function(a)
@@ -80,7 +80,7 @@ local out = tools.call('grab', { value = 'hi' })
 
 Every tool operation lives in one Lua table, `tools`, the way model operations live in `models`. Besides `tools.add`, `tools.call`, and `tools.add_local`, the table holds `tools.always`, one member for letting the model start tasks, named under [Advertising tools to the model](#advertising-tools-to-the-model), and `tools.calls` once the section has made its first tool call.
 
-Everything about tools lives in the prompt file. There are no command-line flags or config files for them, and credentials and server settings come from the host. Without a `capabilities:` key a prompt has no capabilities, without a `tools:` key it has no tool slots, and a section offers the model no tools until the prompt puts some in scope.
+Everything about tools lives in the prompt file. There are no command-line flags or config files for them, and credentials and server settings come from the Host. Without a `capabilities:` key a prompt has no capabilities, without a `tools:` key it has no tool slots, and a section offers the model no tools until the prompt puts some in scope.
 
 ## Declaring capabilities
 
@@ -93,7 +93,7 @@ capabilities:
     optional: true
 ````
 
-A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the host does not have a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
+A plain string entry, such as `- promptforge/web`, declares a required capability with no config. When the Harness lacks a required capability, or the capability fails to activate, prepare refuses the run before it starts with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified), and the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start) names each missing capability:
 
 ````text
 the environment cannot satisfy this prompt:
@@ -108,15 +108,21 @@ The map form has three keys, and plain and map entries mix freely in one list:
 | `optional` | a boolean | `false` |
 | `config` | any YAML value | no config |
 
-With `optional: true`, a capability the host lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a host without `io.github.corp/mcp` still runs the prompt.
+With `optional: true`, a capability the Harness lacks, or one that fails to activate, is skipped at prepare with a log line naming it, and the run goes ahead. The second entry above is optional, so a Harness without `io.github.corp/mcp` still runs the prompt. A tool slot requires its capability, so an optional capability cannot back one: a slot that names a tool of a capability declared `optional: true` fails the parse, as [Tool slots and Tool objects](#tool-slots-and-tool-objects) shows.
 
-`config` accepts any YAML value without a shape check. A capability receives only the run's filesystem and cancel signal when it activates, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the host, never from the prompt.
+`config` accepts any YAML value without a shape check. When it activates, a capability receives only the run's filesystem, its cancel signal, and, on a Host with someone to ask, an input broker that waits for the operator's next message, so no shipped capability reads `config`. Credentials, server lists, and similar settings always come from the Host, never from the prompt.
+
+Each capability is declared once. A list that names one capability id twice fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), whatever form each entry takes, and even when the two entries differ only in `optional` or `config`. The message names the id and reports no line or column:
+
+````text
+invalid frontmatter: capability {id} is declared more than once under capabilities
+````
 
 ### How declarations are matched
 
 Prepare activates capabilities in the order declared, and their tools join the run's tool catalog in that order: by declaration first, then in each capability's own order.
 
-A declared id matches the one capability the host installed under exactly that id. The capabilities a prompt can use are exactly the ones the host has registered, so an id the host never registered matches nothing: a required entry is reported missing, and an optional one is skipped.
+A declared id matches the one capability the Harness installed under exactly that id. The capabilities a prompt can use are exactly the ones the Harness has registered, so an id the Harness never registered matches nothing: a required entry is reported missing, and an optional one is skipped.
 
 A capability works against the run's own filesystem, so the files its tools read and write are the same files [the store](09-the-store.md#what-the-store-is) sees.
 
@@ -128,7 +134,7 @@ A capability can name another capability as a conflict, for example when each pr
 
 ### Entry errors
 
-A malformed entry fails the parse with parse error kind [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
+A malformed entry fails the parse with parse error kind [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds), located at the entry's line and column:
 
 - A map without `ref` fails with `` missing field `ref` ``.
 - A key written twice fails with `` duplicate field `{key}` ``, where `{key}` is `ref`, `optional`, or `config`.
@@ -156,15 +162,15 @@ A tool path is written `namespace/pack/name`, such as `promptforge/web/fetch`, a
 | `org.rustalliance/core/search` | `search` | `org.rustalliance/core` |
 | `org.rustalliance/my-pack/v1_2.tool` | `v1_2.tool` | `org.rustalliance/my-pack` |
 
-A capability supplies only tools whose path is its own id plus one name segment, compared by whole segments: `promptforge/web` supplies `promptforge/web/fetch` but never `promptforge/other/fetch`, and `promptforge/web2/fetch` belongs to `promptforge/web2`, not to `promptforge/web`. The host admits a contributed tool only when its path sits under the contributing capability's id, so every tool a prompt can bind has this shape.
+A capability supplies only tools whose path is its own id plus one name segment, compared by whole segments: `promptforge/web` supplies `promptforge/web/fetch` but never `promptforge/other/fetch`, and `promptforge/web2/fetch` belongs to `promptforge/web2`, not to `promptforge/web`. The Harness admits a contributed tool only when its path sits under the contributing capability's id, so every tool a prompt can bind has this shape.
 
 ### Segment rules
 
 - Every segment has at least one character, and each character is a lowercase ASCII letter `a` to `z`, a digit `0` to `9`, `-`, `_`, or `.`. Tool path segments follow the same rules as capability id segments.
 - A segment or a whole name has no length limit and no rule about its first or last character, so a segment may start or end with `-`, `_`, `.`, or a digit.
 - Names are kept exactly as written, with no case folding, trimming, or other normalizing, and compare byte for byte. Write every id and path in lowercase; `promptforge/web` is the only spelling of that capability.
-- `-`, `_`, and `.` are not interchangeable. The host looks ids up exactly, so `acme/web-search`, `acme/web_search`, and `acme/web.search` are three different capabilities.
-- A capability id has no version part. It names the one capability the host installed under that id.
+- `-`, `_`, and `.` are not interchangeable. The Harness looks ids up exactly, so `acme/web-search`, `acme/web_search`, and `acme/web.search` are three different capabilities.
+- A capability id has no version part. It names the one capability the Harness installed under that id.
 - By convention an organization's own capabilities live under a reverse-DNS namespace such as `org.rustalliance` or `io.github.corp`, and `promptforge` is the first-party namespace. The parser checks neither convention.
 
 A capability id or tool path prints as its segments joined with `/`, and that text reads back as the same name, so run reports and error messages show it exactly as written, the missing-capability line of the requirements notice included.
@@ -201,15 +207,21 @@ Each bad name produces one message, for the first check it fails. The overall se
 
 ## Tool slots and Tool objects
 
-Each `tools:` entry declares a tool slot: an alias, which follows the prompt's [name grammar for aliases](02-file-structure.md#names-for-aliases-roles-and-args), bound to one tool path. The first two segments of the path name the declared capability that supplies the tool.
+Each `tools:` entry declares a tool slot: an alias, which follows the prompt's [name grammar for aliases](02-file-structure.md#names-for-aliases-roles-and-args), bound to one tool path. The first two segments of the path name the declared capability that supplies the tool. Because each alias becomes a Lua global of its own name, an alias may not be one of the [reserved names](02-file-structure.md#reserved-names-for-aliases-and-role-labels), such as `store` or `pairs`, nor a label under `models:`.
 
 Prepare [fills each slot](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles) by exact match of its tool path against the run's tool catalog, which holds the activated capabilities' tools in declaration order. A slot whose path matches becomes a bound tool slot, and it stays bound to that same tool for the whole run. Slots are bound before any Lua runs, so Lua only chooses which bound slots the model sees, and scoping an alias that is not bound is an error.
 
-Every capability named by a slot's first two segments belongs in `capabilities:`. If that capability contributed no tools to the catalog, prepare refuses the run with `RequirementsUnmet` and the line `- missing required capability: {id}`, listed once however many slots name it. This holds even for a capability declared `optional: true`. So `fetch: promptforge/web/fetch` needs `promptforge/web` to have contributed tools, and when it contributed none, the slot is reported under `promptforge/web`.
+Every capability named by a slot's first two segments belongs in `capabilities:`. If that capability contributed no tools to the catalog, prepare refuses the run with `RequirementsUnmet` and the line `- missing required capability: {id}`, listed once however many slots name it. So `fetch: promptforge/web/fetch` needs `promptforge/web` to have contributed tools, and when it contributed none, the slot is reported under `promptforge/web`.
 
-In all, a required capability is reported missing, and the run refused before it starts, in three cases: the host does not have it, it fails to activate, or a slot names it but it contributed no tools. Capability and slot problems at prepare are always reported as `RequirementsUnmet`.
+A tool slot requires its capability, so an optional capability cannot back one. A slot whose capability is declared `optional: true` fails the parse with parse error kind `Frontmatter` and this message, which reports no line or column. When several slots do, the one whose alias sorts first is named:
 
-Each bound slot records its alias, the tool's description, and the tool path, whose last segment is the tool's short name. The catalog finds a tool only by its full tool path, and only aliases declared under `tools:` are bound. Every tool in the catalog has a short name, a description, and a JSON Schema for its arguments. The description comes from the host, the model reads it when deciding whether to call the tool, and the engine sets no length or sentence rule on it.
+````text
+invalid frontmatter: tool alias '{alias}' names {path}, whose capability {id} is declared optional; a tool slot requires its capability
+````
+
+In all, a required capability is reported missing, and the run refused before it starts, in three cases: the Harness lacks it, it fails to activate, or a slot names it but it contributed no tools. Capability and slot problems at prepare are always reported as `RequirementsUnmet`.
+
+Each bound slot records its alias, the tool's description, and the tool path, whose last segment is the tool's short name. The catalog finds a tool only by its full tool path, and only aliases declared under `tools:` are bound. Every tool in the catalog has a short name, a description, and a JSON Schema for its arguments. The description comes from the Harness, the model reads it when deciding whether to call the tool, and the Engine sets no length or sentence rule on it.
 
 Two aliases can name the same tool path, and both call that one tool:
 
@@ -366,7 +378,7 @@ Calling `tools.always` again for the same alias is harmless and records it once,
 
 ### Description overrides
 
-The model sees each bound tool with its catalog description and parameter JSON Schema, exactly as the host declared them, since the `tools:` entry is only a path. You can replace the description the model sees with your own text:
+The model sees each bound tool with its catalog description and parameter JSON Schema, exactly as the Harness declared them, since the `tools:` entry is only a path. You can replace the description the model sees with your own text:
 
 ````lua
 tools.always('search', 'Search the web for recent, reputable sources.')
@@ -425,7 +437,7 @@ Uncaught, these fail the run wherever the call is made. A slot can stay unbound 
 - `tools.add expects strings, Tool objects, or arrays of either, got {type}` for an alias or array element that is neither a string nor a Tool object.
 - `tools.add array form takes no override` for a description passed with the array form.
 
-Every tool schema is checked before it reaches the model. A host tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
+Every tool schema is checked before it reaches the model. A Harness tool whose parameter schema is not a JSON object fails the run when a section offers it, with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified) and a message naming the alias:
 
 ````text
 model-facing schema build failure for tool alias "{alias}"
@@ -442,11 +454,11 @@ local b = tools.call(fetch, { url = 'https://example.com' })
 
 Both lines call the same tool. A call your Lua code makes this way is a script call, and a call the model makes inside `models.loop` is a model tool call. Both reach the tool the same way; a model tool call also includes the model's call id, which a script call lacks.
 
-`tools.call` is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise): the block pauses while the host runs the tool and resumes with the result. Only the calling [chain](04-how-a-prompt-runs.md#the-section-walk) waits, and the rest of the run goes on. A bound tool is called the same way whatever the host runs behind it, its own code or a gateway: each call reaches the host as host work naming the tool path.
+`tools.call` is a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise): the block pauses while the Harness runs the tool and resumes with the result. Only the calling [chain](04-how-a-prompt-runs.md#the-section-walk) waits, and the rest of the run goes on. A bound tool is called the same way whatever the Harness runs behind it, its own code or a gateway: each call reaches the Harness as Harness work naming the tool path.
 
 A script call can reach any tool bound in the run, even one outside the section's scope. The scope only limits what the model is offered.
 
-A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model. Each call is also recorded in the run's events with a succeeded or failed event, which [Task Events](16-task-events.md#tool-call-events) shows how to read.
+A section's first tool call, either a script call to a bound or local tool or a model tool call inside `models.loop`, is when `tools.calls` appears, and also when [`sys.model`](10-models.md#the-bound-model-in-sysmodel) becomes readable if the section has a model.
 
 ### Arguments
 
@@ -475,7 +487,7 @@ A `tools.call` that names neither a local tool nor a bound alias raises an error
 tool "{name}" is not bound in this run; bound aliases: [...]
 ````
 
-Five names belong to tools the engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, `task_events`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
+Four names belong to tools the Engine itself offers the model, the ones [Advertising tools to the model](#advertising-tools-to-the-model) points to: `task`, `task_cancel`, `task_status`, and `await_tasks`. They take precedence over any alias of the same name. A model call to one of them goes to the Engine's own tool, and a `tools.call` to one fails with `unbound_tool` even when a local tool is registered under that name, so give bound and local tools other aliases.
 
 These argument errors raise at the call, where `pcall` catches them:
 
@@ -567,12 +579,12 @@ A caught tool error is read through `err.kind`, through `err.name` on `unbound_t
 | Kind | Raised when | `name` field | Message |
 |---|---|---|---|
 | `tool` | a called tool fails on its own in a script call | none | `tool call failure: {message}` |
-| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the five engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
+| `unbound_tool` | a script call names neither a local tool nor an alias bound in the run, or uses one of the four Engine tool names | the name | `tool "{name}" is not bound in this run; bound aliases: [...]` |
 | `out_of_scope_tool` | the model calls a name outside the round's scope | the name | `tool "{name}" is not in this section's scope; in-scope aliases: [...]` |
 
-`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the five engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
+`pcall` around a script `tools.call` catches every failure at the call alike: an unbound alias, one of the four Engine tool names, a failure setting up the section's call counts, a local handler's error, or the tool's own failure.
 
-Uncaught, these failures end the run with run error kind [`Tool`](17-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
+Uncaught, these failures end the run with run error kind [`Tool`](16-limits-and-errors.md#how-a-failed-run-is-classified): a tool that failed, a model call outside the round's offered set, a script call to an alias not bound in the run, and a tool loop that reached its [round cap](11-conversations.md#the-round-cap) without a final reply. [The H1 pass](04-how-a-prompt-runs.md#the-h1-pass) has its own rule for uncaught failures.
 
 ## Counting calls
 
@@ -631,7 +643,7 @@ The end of the message tells a real tool from a typo:
 
 ## Local tools
 
-`tools.add_local` makes a tool out of a Lua function. A local tool needs nothing in the frontmatter, no `tools:` or `capabilities:` entry, and the engine answers its calls itself. This prompt gives the model a note-taking tool that writes to the store:
+`tools.add_local` makes a tool out of a Lua function. A local tool needs nothing in the frontmatter, no `tools:` or `capabilities:` entry, and the Engine answers its calls itself. This prompt gives the model a note-taking tool that writes to the store:
 
 ````markdown
 ---
@@ -662,11 +674,11 @@ return saved .. ' notes saved'
 
 The four arguments of `tools.add_local(alias, description, params, handler)` are the alias, the description, the parameter table, and the handler function. The model sees the local tool under exactly that alias and description, and the tool is offered on the next model call without a separate `tools.add`. A local tool belongs to the section that registers it.
 
-A local tool is called by alias, by the model or from Lua with `tools.call`. The handler runs as Lua inside the calling chain, in the section VM; the call itself involves no host work, and the handler's return value is the call's result. When the model makes the call, `models.loop` answers it itself: it runs the handler, appends the assistant record holding the call and a tool record with the handler's return, and continues until the model replies with text.
+A local tool is called by alias, by the model or from Lua with `tools.call`. The handler runs as Lua inside the calling chain, in the section VM; the call itself involves no Harness work, and the handler's return value is the call's result. When the model makes the call, `models.loop` answers it itself: it runs the handler, appends the assistant record holding the call and a tool record with the handler's return, and continues until the model replies with text.
 
 State across calls lives in ordinary Lua variables, like `saved` above, because the handler is a normal closure over the section's locals and runs in the same section VM as the rest of the section.
 
-Local and bound tools mix in one round: the model is offered both, and each call goes to the section's Lua handler or to the host tool behind the alias.
+Local and bound tools mix in one round: the model is offered both, and each call goes to the section's Lua handler or to the Harness tool behind the alias.
 
 ### Parameters
 
@@ -692,15 +704,15 @@ The caller, script or model, receives the handler's text exactly as returned, as
 
 ### What a handler can do
 
-Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `user_input`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
+Because the handler runs inside the calling chain, it can use [the store](09-the-store.md#what-the-store-is) and every other suspending call, such as `tools.call`, `models.infer`, `call`, and `input.ask`, whether the model or a script called the tool. A store call made there is an ordinary store operation, like the `store.append` in the note-taker.
 
 Inside a handler, `tools.call` is a script call. A failing bound tool raises there as kind `tool` instead of becoming text for the model, and a bound tool's untrusted output reaches the handler already wrapped and keeps its envelope if the handler returns it.
 
-A local tool call involves no host work of its own: the engine hands it to the handler inside the calling chain, and only the calls the handler makes, such as store operations or bound tool calls, go to the host. Calls to a local tool count in `tools.calls` like any other tool call.
+A local tool call involves no Harness work of its own: the Engine hands it to the handler inside the calling chain, and only the calls the handler makes, such as store operations or bound tool calls, go to the Harness. Calls to a local tool count in `tools.calls` like any other tool call.
 
 `jump` refuses while a handler runs, so a handler never [jumps](08-jump-and-call.md#sibling-jumps). Calling it there, even through a reference to `jump` saved before the handler ran, raises an ordinary error that `pcall` can catch, with the message `jump is unavailable inside a local tool handler: return a value from the handler and call jump from the block after the tool call returns`. The refusal lasts until the outermost handler returns or raises, including across nested local calls, and then `jump` works again in the block.
 
-A handler that never returns still stops when the run is cancelled, as [Limits and Errors](17-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
+A handler that never returns still stops when the run is cancelled, as [Limits and Errors](16-limits-and-errors.md#calls-waiting-during-a-cancel) describes.
 
 ### Handler errors
 

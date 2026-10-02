@@ -48,8 +48,8 @@ function pressKey(target, key, shiftKey = false) {
   );
 }
 
-const host = window.document.createElement("div");
-window.document.body.append(host);
+const container = window.document.createElement("div");
+window.document.body.append(container);
 const invoker = window.document.createElement("button");
 invoker.textContent = "open";
 window.document.body.append(invoker);
@@ -60,7 +60,7 @@ invoker.focus();
 let chosen = null;
 let dismissed = 0;
 const handle = openModal({
-  host,
+  container,
   classPrefix: "confirm",
   titleId: "confirm-title",
   title: "Delete the model?",
@@ -74,44 +74,44 @@ const handle = openModal({
   ],
 });
 
-const overlay = host.querySelector(".confirm-overlay");
-check("the overlay mounts into the host", overlay !== null);
+const overlay = container.querySelector(".confirm-overlay");
+check("the overlay mounts into the container", overlay !== null);
 check("the overlay has the shared base class", overlay?.classList.contains("modal-overlay"));
-const dialog = host.querySelector(".confirm");
+const dialog = container.querySelector(".confirm");
 check("the dialog has the shared base class", dialog?.classList.contains("modal-dialog"));
 check("the dialog is an alertdialog", dialog?.getAttribute("role") === "alertdialog");
 check("the dialog is modal", dialog?.getAttribute("aria-modal") === "true");
 check("the dialog labels by the title", dialog?.getAttribute("aria-labelledby") === "confirm-title");
 check(
   "the dialog describes by the message",
-  dialog?.getAttribute("aria-describedby") === host.querySelector(".confirm__line")?.id,
+  dialog?.getAttribute("aria-describedby") === container.querySelector(".confirm__line")?.id,
 );
-check("the title renders", host.querySelector(".confirm__title")?.textContent === "Delete the model?");
-check("the message renders", host.querySelector(".confirm__line")?.textContent === "This removes the model.");
-check("the actions have the prefix class", host.querySelector(".confirm__actions") !== null);
+check("the title renders", container.querySelector(".confirm__title")?.textContent === "Delete the model?");
+check("the message renders", container.querySelector(".confirm__line")?.textContent === "This removes the model.");
+check("the actions have the prefix class", container.querySelector(".confirm__actions") !== null);
 check("focus lands on the first button", window.document.activeElement?.textContent === "Cancel");
 
 // --- The duplicate guard ----------------------------------------------------------
 
 const second = openModal({
-  host,
+  container,
   classPrefix: "confirm",
   titleId: "confirm-title",
   title: "Again?",
   message: "no",
   buttons: [{ label: "OK", run: () => undefined }],
 });
-check("a second dialog of the same kind is a no-op", host.querySelectorAll(".confirm-overlay").length === 1);
+check("a second dialog of the same kind is a no-op", container.querySelectorAll(".confirm-overlay").length === 1);
 check("the duplicate handle reads closed", second.closed === true);
 
 // --- The Tab trap cycles both directions -------------------------------------------
 // jsdom has no default Tab navigation, so only the trap's boundary wraps
 // are observable: Tab on the last button, Shift+Tab on the first.
 
-const cancelButton = [...host.querySelectorAll(".confirm__actions button")].find(
+const cancelButton = [...container.querySelectorAll(".confirm__actions button")].find(
   (button) => button.textContent === "Cancel",
 );
-const deleteButton = [...host.querySelectorAll(".confirm__actions button")].find(
+const deleteButton = [...container.querySelectorAll(".confirm__actions button")].find(
   (button) => button.textContent === "Delete",
 );
 deleteButton.focus();
@@ -123,7 +123,7 @@ check("Shift+Tab on the first button wraps to the last", window.document.activeE
 // --- Escape dismisses with focus return ----------------------------------------------
 
 pressKey(window.document, "Escape");
-check("Escape dismisses the dialog", host.querySelector(".confirm-overlay") === null);
+check("Escape dismisses the dialog", container.querySelector(".confirm-overlay") === null);
 check("Escape fires onDismiss", dismissed === 1);
 check("Escape runs no button", chosen === null);
 check("Escape returns focus to the invoker", window.document.activeElement === invoker);
@@ -132,7 +132,7 @@ check("the handle reads closed after dismissal", handle.closed === true);
 // --- The backdrop dismisses; the card does not ---------------------------------------
 
 openModal({
-  host,
+  container,
   classPrefix: "confirm",
   titleId: "confirm-title",
   title: "t",
@@ -141,17 +141,17 @@ openModal({
   onDismiss: () => (dismissed += 1),
   buttons: [{ label: "OK", className: "button", run: () => (chosen = true) }],
 });
-host.querySelector(".confirm").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-check("a click on the card keeps the dialog open", host.querySelector(".confirm-overlay") !== null);
-host.querySelector(".confirm-overlay").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-check("a backdrop click dismisses", host.querySelector(".confirm-overlay") === null);
+container.querySelector(".confirm").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+check("a click on the card keeps the dialog open", container.querySelector(".confirm-overlay") !== null);
+container.querySelector(".confirm-overlay").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+check("a backdrop click dismisses", container.querySelector(".confirm-overlay") === null);
 check("the backdrop fires onDismiss", dismissed === 2);
 
 // --- The field: requiresValue gating and Enter submission -----------------------------
 
 let fieldValue = null;
 openModal({
-  host,
+  container,
   classPrefix: "ws-workspace-add",
   titleId: "workspace-add-title",
   title: "Add Folder",
@@ -162,11 +162,11 @@ openModal({
     { label: "Cancel", run: () => undefined },
   ],
 });
-const input = host.querySelector("#workspace-add-path");
-const addButton = [...host.querySelectorAll(".ws-workspace-add__button")].find(
+const input = container.querySelector("#workspace-add-path");
+const addButton = [...container.querySelectorAll(".ws-workspace-add__button")].find(
   (button) => button.textContent === "Add",
 );
-check("the field renders with its label", host.querySelector(".ws-workspace-add__label") !== null);
+check("the field renders with its label", container.querySelector(".ws-workspace-add__label") !== null);
 check("focus lands on the field", window.document.activeElement === input);
 check("the gated button starts disabled", addButton?.disabled === true);
 pressKey(input, "Enter");
@@ -176,7 +176,7 @@ input.dispatchEvent(new window.Event("input", { bubbles: true }));
 check("typing enables the gated button", addButton?.disabled === false);
 pressKey(input, "Enter");
 check("Enter submits the trimmed value", fieldValue === "C:\\models");
-check("the submission dismissed the dialog", host.querySelector(".ws-workspace-add-overlay") === null);
+check("the submission dismissed the dialog", container.querySelector(".ws-workspace-add-overlay") === null);
 
 if (failures.length > 0) {
   console.error(`shared-modal: ${failures.length} failure(s)`);

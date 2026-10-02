@@ -21,8 +21,11 @@
 //! read derives the same count from the event sequence through the one
 //! rule [`reply_stamp`], so live and replayed stamps agree.
 
+pub(crate) mod files;
 pub(crate) mod run;
 pub(crate) mod supervisor;
+
+pub use files::OutputError;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -35,6 +38,7 @@ use promptforge::event::Event;
 use promptforge::model::StreamDelta;
 use tokio::sync::{broadcast, mpsc, watch};
 
+use self::files::SessionFiles;
 use crate::discovery::AgentSource;
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use crate::lifecycle::RunLifecycle;
@@ -194,8 +198,7 @@ impl Session {
 
     /// Answers the wait holding `token` with the operator's `text`.
     /// `before_resume` runs after the answer is accepted and before the
-    /// suspended `user_input()` call resumes, for a client's own turn
-    /// bookkeeping.
+    /// suspended ask resumes, for a client's own turn bookkeeping.
     ///
     /// # Errors
     /// Returns [`WaitError::UnknownToken`] when no unresolved wait holds
@@ -224,7 +227,7 @@ impl Session {
 
     /// Ends the session: the run is cancelled for good, its outstanding
     /// effects are answered `Dropped`, and once it reports `Done` the
-    /// state is `Closed` and the session leaves its harness.
+    /// state is `Closed` and the session leaves its Harness.
     pub fn close(&self) {
         self.core.interrupted();
         self.core.lifecycle.close();
@@ -280,6 +283,8 @@ pub(crate) struct SessionCore {
     pub(crate) prompt_path: PathBuf,
     /// The run's argument text.
     pub(crate) args: String,
+    /// The filesystem, input text, and collected output of every run.
+    pub(crate) files: SessionFiles,
     /// Cancellation provenance and the accepted-turn exclusion boundary.
     pub(crate) lifecycle: Arc<RunLifecycle>,
     /// The session's unresolved user-input waits.
@@ -316,6 +321,7 @@ pub(crate) struct SessionSeed {
     pub(crate) source: AgentSource,
     pub(crate) prompt_path: PathBuf,
     pub(crate) args: String,
+    pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
     pub(crate) log: SharedLog,
 }
@@ -335,6 +341,7 @@ impl SessionCore {
             source: seed.source,
             prompt_path: seed.prompt_path,
             args: seed.args,
+            files: seed.files,
             lifecycle: seed.lifecycle,
             waits: Arc::new(WaitRegistry::new()),
             wait_frames,

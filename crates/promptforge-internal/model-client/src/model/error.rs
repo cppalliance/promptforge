@@ -29,20 +29,21 @@ pub enum CompletionErrorKind {
     MalformedResponse,
     /// The model returned neither non-empty tool calls nor non-empty text.
     EmptyReply,
-    /// Gateway access was explicitly disabled by the host.
+    /// Gateway access was explicitly disabled by the Host.
     Disabled,
     /// The client could not be configured (missing environment, bad endpoint).
     Config,
 }
 
 /// The error a model round or a catalog fetch fails with: what the
-/// transport that performed it (the harness's gateway client) reports, and
-/// what comes back into the engine in a `Chat` effect's answer.
+/// transport that performed it (the Harness's gateway client) reports, and
+/// what comes back into the Engine in a `Chat` effect's answer.
 ///
 /// Holds a stable [`kind`](CompletionError::kind) classifier plus the
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
-/// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
-/// and constructible outside the crate only from the hidden internal type.
+/// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`,
+/// so a transport builds one only by converting the crate's
+/// [`Error`](crate::Error) through `From`.
 ///
 /// # Examples
 ///
@@ -103,7 +104,7 @@ impl CompletionError {
     /// Returns the bounded, control-escaped backend error body, when the failure
     /// was a non-success backend status.
     ///
-    /// This is an explicit opt-in diagnostic channel (F5): the raw body never
+    /// This is an explicit opt-in diagnostic channel: the raw body never
     /// appears in the public [`Display`](std::fmt::Display), so a hostile or
     /// sensitive payload cannot forge log lines or leak into an error message.
     /// The returned text is bounded and has its control characters escaped.

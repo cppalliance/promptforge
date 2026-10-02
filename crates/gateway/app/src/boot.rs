@@ -35,7 +35,7 @@ pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
 /// The NSIS components page records the choice as the `InstallSTT` DWORD
 /// under `HKCU\Software\PromptForge\PromptForge`; a bare
 /// `promptforge-gateway` run outside the installer finds no value and ships
-/// STT, as does every non-Windows host.
+/// STT, as does every non-Windows machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstallerStt {
     /// The generated config includes the recommended STT pair.
@@ -53,7 +53,7 @@ impl InstallerStt {
     }
 
     /// Maps the installer's `InstallSTT` DWORD: zero omits STT; absent or
-    /// nonzero ships it. Compiled on every host - gating it to Windows
+    /// nonzero ships it. Compiled on every platform - gating it to Windows
     /// would leave `Omitted` with no construction site elsewhere, and
     /// `dead_code` fires under the Linux CI clippy run.
     #[must_use]
@@ -71,7 +71,7 @@ fn installer_stt() -> InstallerStt {
     InstallerStt::from_dword(registry::install_stt_dword())
 }
 
-/// Non-Windows hosts have no installer registry; the absent value ships STT.
+/// Non-Windows machines have no installer registry; the absent value ships STT.
 #[cfg(not(windows))]
 fn installer_stt() -> InstallerStt {
     InstallerStt::from_dword(None)
@@ -523,7 +523,7 @@ vram_gb = 2.0
 ///
 /// The gateway binds loopback on an OS-assigned port; the gateway
 /// discovery file written after the bind records the real port. There is
-/// no `[workshop]` section: the shell hosts the workshop UI itself.
+/// no `[workshop]` section: the shell serves the workshop UI itself.
 fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
     let (stt_models, profile_models) = match stt {
         InstallerStt::Included => (

@@ -137,7 +137,7 @@ fn a_symlink_escape_is_rejected() {
     #[cfg(windows)]
     let linked = std::os::windows::fs::symlink_dir(outside.path(), &link);
     let Ok(()) = linked else {
-        // Symlink creation needs a privilege some Windows hosts lack.
+        // Symlink creation needs a privilege some Windows machines lack.
         jail::symlink_unavailable(std::env::var_os("CI").is_some(), "symlink creation failed");
         return;
     };
@@ -161,7 +161,7 @@ fn a_dangling_symlink_write_is_rejected() {
     #[cfg(windows)]
     let linked = std::os::windows::fs::symlink_file(&target, &link);
     let Ok(()) = linked else {
-        // Symlink creation needs a privilege some Windows hosts lack.
+        // Symlink creation needs a privilege some Windows machines lack.
         jail::symlink_unavailable(std::env::var_os("CI").is_some(), "symlink creation failed");
         return;
     };

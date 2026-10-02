@@ -36,6 +36,7 @@
 //! SPA suite's `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift
 //! on either side fails that side's tests.
 
+use harness::USER_INPUT_ASK_TOOL;
 use promptforge::event::Event;
 use promptforge::metrics::{CallMetrics, ToolCallEvent};
 use serde::{Deserialize, Serialize};
@@ -162,7 +163,7 @@ impl AgentSessionFrame {
 /// | [`Thinking`](Self::Thinking) | `agent_thought` |
 /// | [`UserInput`](Self::UserInput) | `user_message` |
 ///
-/// Exactly the engine's content [`Event`] variants a transcript renders;
+/// Exactly the Engine's content [`Event`] variants a transcript renders;
 /// lifecycle, task, and debug events never frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
@@ -219,9 +220,11 @@ pub(crate) struct AgentEvent {
 }
 
 impl AgentEvent {
-    /// Projects one engine event onto the wire shape, or `None` for a
+    /// Projects one Engine event onto the wire shape, or `None` for a
     /// variant the transcript does not render (lifecycle, task, and debug
-    /// events).
+    /// events). A script's call to the ask tool, [`USER_INPUT_ASK_TOOL`],
+    /// frames as the operator's `user_message`, because its result is the
+    /// text the operator typed.
     #[must_use]
     pub(crate) fn from_event(event: &Event) -> Option<Self> {
         let base = |kind: AgentEventKind, turn: u32, content: String| AgentEvent {
@@ -235,7 +238,6 @@ impl AgentEvent {
             metrics: None,
         };
         Some(match event {
-            Event::UserInput { text, .. } => base(AgentEventKind::UserInput, 0, text.clone()),
             Event::Thinking {
                 turn, model, text, ..
             } => AgentEvent {
@@ -265,6 +267,16 @@ impl AgentEvent {
                     render_tool_calls(calls),
                 )
             },
+            // An empty call id marks a script's call; a model's ask
+            // answers its own tool call and stays a tool result.
+            Event::ToolResult {
+                tool_call_id,
+                alias,
+                content,
+                ..
+            } if tool_call_id.is_empty() && alias == USER_INPUT_ASK_TOOL => {
+                base(AgentEventKind::UserInput, 0, content.clone())
+            }
             Event::ToolResult {
                 turn,
                 tool_call_id,

@@ -1,5 +1,5 @@
 // The focus-trapped modal dialog shared by both UIs: an overlay inside a
-// host element, a role="dialog" (or "alertdialog") surface, an optional
+// container element, a role="dialog" (or "alertdialog") surface, an optional
 // labeled text field, a Tab focus trap, Escape dismissal, optional
 // backdrop dismissal, and focus return to the invoker. Merged from the
 // gateway's confirm-modal and the workshop's editor-dialog so the two
@@ -46,7 +46,7 @@ export interface ModalButton {
 /** Construction options for {@link openModal}. */
 export interface ModalOptions {
   /** The element the overlay mounts into. */
-  readonly host: HTMLElement;
+  readonly container: HTMLElement;
   /** BEM-style class prefix, e.g. "confirm" or "editor-close". */
   readonly classPrefix: string;
   /** The title element's id, unique per dialog kind for aria-labelledby. */
@@ -74,13 +74,13 @@ export interface ModalHandle {
 /**
  * Opens the dialog and focuses its field when it has one, its first
  * button otherwise. A second call while the same dialog kind is open in
- * the same host is a no-op and returns an already-closed handle. Escape
+ * the same container is a no-op and returns an already-closed handle. Escape
  * and backdrop dismissal return focus to the element that was focused
  * when the dialog opened.
  */
 export function openModal(options: ModalOptions): ModalHandle {
   const prefix = options.classPrefix;
-  if (options.host.querySelector(`.${prefix}-overlay`) !== null) {
+  if (options.container.querySelector(`.${prefix}-overlay`) !== null) {
     // The open dialog is owned by the call that created it.
     return { close: () => undefined, closed: true };
   }
@@ -227,7 +227,7 @@ export function openModal(options: ModalOptions): ModalHandle {
       }
     });
   }
-  options.host.appendChild(overlay);
+  options.container.appendChild(overlay);
   const firstFocus: HTMLElement | undefined = input ?? buttons[0];
   if (firstFocus) {
     firstFocus.focus();

@@ -944,7 +944,7 @@ await assertNoLeaks(lifecycle, async () => {
     assert.deepEqual(
       statusB.local,
       [{ label: "Dictation is active in another window", severity: "info" }],
-      "a press on the blocked surface names the other window, not the host blocker",
+      "a press on the blocked surface names the other window, not the owning part's blocker",
     );
     assert.equal(sttA.state, "recording", "the refused press does not steal the take");
     assert.equal(statusA.recording.at(-1), true);

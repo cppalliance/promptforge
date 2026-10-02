@@ -130,7 +130,7 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
 /// A stable, matchable classification of a [`GlobalNameError`].
 ///
 /// Every public error exposes a `kind()` classifier so callers can branch on
-/// the failure without matching a private representation (DESIGN-5).
+/// the failure without matching a private representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GlobalNameErrorKind {
@@ -154,7 +154,7 @@ pub struct GlobalNameError {
 }
 
 impl GlobalNameError {
-    /// Returns the stable classification of this error (DESIGN-5).
+    /// Returns the stable classification of this error.
     #[must_use]
     pub fn kind(&self) -> GlobalNameErrorKind {
         self.kind

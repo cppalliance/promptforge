@@ -36,11 +36,14 @@ impl Scheduler {
     /// `lineage` with its id `counters` and returns its arena index. A
     /// fresh chain starts its counters at zero and enters its first
     /// section on its first step, taking entry 0 of its own id; the root
-    /// walk continues the counters of the H1 pass it follows. The chain's
-    /// `var` slot seeds from `var` (a call chain's or task chain's caller
-    /// snapshot, discarded with the chain). The chain's task is its call
-    /// parent's when it has one, else task `0`; a spawned chain's dispatch
-    /// overwrites it with the chain's own id. `concurrency` is the
+    /// walk continues the counters of the H1 pass it follows. The live H1
+    /// pass starts here too, then takes its capability and its H1 mark.
+    /// Until its first entry the chain reports under the section at
+    /// `index`, or the prompt's title when `index` is past the slice. The
+    /// chain's `var` slot seeds from `var` (a call chain's or task chain's
+    /// caller snapshot, discarded with the chain). The chain's task is its
+    /// call parent's when it has one, else task `0`; a spawned chain's
+    /// dispatch overwrites it with the chain's own id. `concurrency` is the
     /// chain's effective admission limit for the tasks it spawns: the
     /// caller's own for a call child or a task, the run's ceiling for the
     /// root.
@@ -74,6 +77,7 @@ impl Scheduler {
             || TaskId::from(ChainId::root()),
             |parent| self.chains[parent.index()].task.clone(),
         );
+        let entered = slice.name_at(ctx.prompt(), index).to_owned();
         self.chains.push(Chain {
             lineage,
             counters,
@@ -90,6 +94,7 @@ impl Scheduler {
             frame: None,
             slice,
             index,
+            entered,
             positions: Vec::new(),
             block: 0,
             coroutine: None,
@@ -204,14 +209,7 @@ impl Scheduler {
         }
         match parent {
             None => *root_result = Some(outcome),
-            Some(parent_id) => {
-                debug_assert_eq!(
-                    self.stack.pop(),
-                    Some(id),
-                    "a finishing child chain is the call stack's top"
-                );
-                self.answer_inline(parent_id, Answer::Call(outcome));
-            }
+            Some(parent_id) => self.answer_inline(parent_id, Answer::Call(outcome)),
         }
     }
 
@@ -251,11 +249,6 @@ impl Scheduler {
         if let Some(effect) = effect {
             self.abort_effect(effect);
         }
-        // A chain on the call stack is the top here: only its own
-        // descendants sit above it, and the recursion already removed them.
-        if self.stack.last() == Some(&id) {
-            self.stack.pop();
-        }
         let access = {
             let chain = &mut self.chains[id.index()];
             chain.coroutine = None;
@@ -284,10 +277,10 @@ impl Scheduler {
     }
 
     /// Orphans one in-flight leaf effect whose chain is going away: the
-    /// pending entry leaves, and the id is recorded so the host's answer,
-    /// when it arrives, is discarded rather than failing the run. The host
+    /// pending entry leaves, and the id is recorded so the Harness's answer,
+    /// when it arrives, is discarded rather than failing the run. The Harness
     /// still owes the answer: `Done` waits for every issued effect, so the
-    /// run ends only once the host has answered all of them.
+    /// run ends only once the Harness has answered all of them.
     pub(super) fn abort_effect(&mut self, effect: EffectId) {
         self.pending.remove(&effect);
         self.orphaned.insert(effect);

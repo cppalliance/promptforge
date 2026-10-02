@@ -1,27 +1,28 @@
 //! Engine guards, live: the manifest guard and the retired-symbol scan run
-//! over the engine crates, and the `test-support` leak guard runs over the
+//! over the Engine crates, and the `test-support` leak guard runs over the
 //! whole workspace, as part of `cargo test -p build-xtask` and
 //! `cargo xtask tidy`.
 //!
-//! The engine is the `promptforge` facade and every crate under the
+//! The Engine is the `promptforge` facade and every crate under the
 //! `crates/promptforge-internal/` container. The root crate is named, so
 //! a missing manifest is reported rather than skipped; the container's
-//! members are discovered, so a new engine crate is covered the moment it
+//! members are discovered, so a new Engine crate is covered the moment it
 //! lands.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The engine crates that live directly under `crates/`.
+/// The Engine crates that live directly under `crates/`.
 const ENGINE_ROOT_CRATES: [&str; 1] = ["promptforge"];
 
-/// The private container whose every member is an engine crate.
+/// The private container whose every member is an Engine crate.
 pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
 
-/// The identifiers the sans-I/O engine plan retired. Live engine source
-/// (outside `#[cfg(test)]`, `tests/`, and test-support modules) may not
-/// name any of them again.
-pub(crate) const RETIRED_SEEDS: [&str; 8] = [
+/// The identifiers the sans-I/O Engine plan retired, and the names the
+/// terminology rename replaced. Live Engine source (outside
+/// `#[cfg(test)]`, `tests/`, and test-support modules) may not name any
+/// of them again.
+pub(crate) const RETIRED_SEEDS: [&str; 17] = [
     "install_agent_chat_shim",
     "EventsSnapshot",
     "install_runtime_events",
@@ -30,9 +31,18 @@ pub(crate) const RETIRED_SEEDS: [&str; 8] = [
     "LuaFanoutResult",
     "Observer",
     "DebugCapture",
+    "HostBackend",
+    "HostAccess",
+    "HostRoot",
+    "identity_to_host",
+    "inject_host",
+    "inject_host_with_var",
+    "install_host_apis",
+    "host_injected",
+    "HostGlobal",
 ];
 
-/// Every engine crate directory: the named root crates first, whether or
+/// Every Engine crate directory: the named root crates first, whether or
 /// not they exist, then every crate under the container in directory
 /// order.
 #[must_use]
@@ -66,7 +76,7 @@ pub(crate) fn collect_crates(dir: &Path, crates: &mut Vec<PathBuf>) {
     }
 }
 
-/// Runs the manifest guard over every engine crate.
+/// Runs the manifest guard over every Engine crate.
 #[must_use]
 pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
     engine_crates(root)
@@ -76,7 +86,7 @@ pub(crate) fn engine_manifest_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Runs the retired-symbol scan over every engine crate's live source. The
+/// Runs the retired-symbol scan over every Engine crate's live source. The
 /// scan takes the whole crate directory, so `build.rs`, `benches/`, and
 /// `examples/` are covered too; it skips `tests/` and test support itself.
 #[must_use]
@@ -88,7 +98,7 @@ pub(crate) fn retired_symbol_violations(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Every engine guard, in one list: the manifest guard, the retired-symbol
+/// Every Engine guard, in one list: the manifest guard, the retired-symbol
 /// scan, and the workspace-wide `test-support` leak guard.
 #[must_use]
 pub(crate) fn engine_guard_violations(root: &Path) -> Vec<String> {

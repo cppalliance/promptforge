@@ -158,7 +158,7 @@ libloading = "0.8"
 # WAV parsing for STT uploads and transcription test fixtures.
 hound = "3.5"
 socket2 = { version = "0.6", features = ["all"] }
-# Host metrics for `GET /admin/system`. default-features off keeps only the
+# Machine metrics for `GET /admin/system`. default-features off keeps only the
 # CPU/RAM (`system`) and disk probes; the component, network, and user
 # probes and the rayon-backed `multithread` refresh are never used.
 sysinfo = { version = "0.38", default-features = false, features = ["system", "disk"] }
@@ -218,7 +218,7 @@ libc = "0.2"
 windows-sys = { version = "0.61", default-features = false }
 # Cross-platform console interruption for the Workshop build orchestrator.
 ctrlc = "3.5"
-# Benchmark harness for the executor and Lua-boundary benches; dev-only.
+# Benchmark framework for the executor and Lua-boundary benches; dev-only.
 criterion = "0.5"
 # Compiles the gateway exe's Windows icon resource in its build script;
 # already in the tree through tauri-build (via tauri-winres).
@@ -278,6 +278,10 @@ dbg_macro = "warn"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"
+# Cherry-picked out of pedantic: its suggested rewrite for a collection is
+# `assert_eq!(x, [] as [T; 0])`, which has to spell out the element type and
+# needs `T: PartialEq + Debug`, so it cannot be applied to most call sites.
+assert_is_empty = "allow"
 
 # The profile that 'dist' will build with
 [profile.dist]

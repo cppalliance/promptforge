@@ -1,6 +1,6 @@
 # Serving and Observing
 
-This chapter teaches you the running gateway: the HTTP endpoints it serves, the tools it can host, and the health, logs, and observability surface you operate day to day. You already run a configured gateway with a profile and its models.
+This chapter teaches you the running gateway: the HTTP endpoints it serves, the tools it can run, and the health, logs, and observability surface you operate day to day. You already run a configured gateway with a profile and its models.
 
 ## Web search
 
@@ -26,25 +26,25 @@ When no `[tools.web_search]` section is configured, the route answers 404. The r
 
 ## The deprecated [workshop] section
 
-The gateway never hosts the workshop: the desktop application embeds the workshop server itself. A boot config left over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
+The gateway and the workshop run separately: the desktop application embeds the workshop server itself. A boot config left over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 ## Manage the cache
 
 Manage the blob cache through the gateway's cache routes. GET /v1/cache lists entries with source URL, path, SHA-256, and size. Only blobs with a `.meta.json` sidecar appear in the listing, and listing reads the sidecar metadata only; it never re-hashes the blobs. POST /v1/cache downloads a blob with an optional pin and streams progress events ending in a ready event. DELETE removes one blob by digest. Cache downloads validate the source URL and the pin before any network access. A cache download lands in the same slot layout that local model provisioning uses, so a cache download is a provisioning cache hit for the same URL, and vice versa.
 
-GET /admin/orphans lists cache files that no `[[local_model]]` or `[[stt_model]]` declared in the catalog references, so leftovers can be adopted or deleted. GET /admin/model-info reports a GGUF file's header summary (architecture, layer count, parameter count, and chat template) without loading the model; only files inside the artifact cache can be inspected, and escaping or missing paths are refused. POST /admin/reveal opens the host's file manager at a model or config file; reveal requests are confined three ways: loopback-only, bearer key required, and the path must canonicalize to strictly inside the artifact cache.
+GET /admin/orphans lists cache files that no `[[local_model]]` or `[[stt_model]]` declared in the catalog references, so leftovers can be adopted or deleted. GET /admin/model-info reports a GGUF file's header summary (architecture, layer count, parameter count, and chat template) without loading the model; only files inside the artifact cache can be inspected, and escaping or missing paths are refused. POST /admin/reveal opens the machine's file manager at a model or config file; reveal requests are confined three ways: loopback-only, bearer key required, and the path must canonicalize to strictly inside the artifact cache.
 
 The gateway restricts the cache root to your own account at startup and refuses to run when it cannot, failing with a cache-not-private error.
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the running profile (`null` when the gateway booted with no profile), the local and speech models that profile lists as `model_allowlist`, the models the gateway exposes, and a config generation that changes when the gateway restarts. It also reports the command queue: the active command's name, progress fraction, and start time, plus the pending commands, so the boot load and applies are visible while they run. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether the boot-time speech engine load has completed and speech is ready, and whether its backend reports GPU acceleration. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
 Download progress renders as tracing log lines on every stream.
 
-GET /admin/system reports host metrics: CPU, RAM, the cache drive, and the first NVIDIA GPU's VRAM. The GPU field is absent, never an error, when no capable driver is present. You can also pull bounded captured stdout and stderr tails for each running local model as diagnostics.
+GET /admin/system reports machine metrics: CPU, RAM, the cache drive, and the first NVIDIA GPU's VRAM. The GPU field is absent, never an error, when no capable driver is present. You can also pull bounded captured stdout and stderr tails for each running local model as diagnostics.
 
 GET /admin/chat-templates returns a bearer-authenticated catalog of chat template families, known model-to-family mappings, and each pending local model's effective template decision.
 

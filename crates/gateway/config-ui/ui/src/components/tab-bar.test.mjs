@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture } from "../harness.mjs";
+import { bootApp, gatewayStub, modelsFixture } from "../test-support.mjs";
 
 test("the tab bar shows the baked version in the actions cluster", async () => {
   const stub = gatewayStub({ key: "k", config: modelsFixture() });

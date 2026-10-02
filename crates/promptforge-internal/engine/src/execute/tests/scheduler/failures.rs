@@ -1,4 +1,5 @@
-//! Fanout failure, cancel, and script tool-arm cases for the scheduler.
+//! Fanout failure, cancel, and script tool-arm cases for the scheduler. The
+//! script `tools.call` dispatch cases sit in `script_tools`.
 
 use std::num::NonZeroUsize;
 
@@ -28,8 +29,8 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("concurrent appends to one path must boom");
@@ -51,9 +52,8 @@ async fn two_arms_appending_one_path_boom_without_any_other_suspension() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_arm_rewriting_its_own_path_succeeds() {
-    // Mirror of the legacy case of the same name: the registry records
-    // (fanout token, arm index), so the same arm writing the same path
-    // again is a rewrite, not a race.
+    // The registry records (fanout token, arm index), so the same arm
+    // writing the same path again is a rewrite, not a race.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -69,8 +69,8 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("an arm rewriting its own path must succeed");
@@ -81,9 +81,8 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sequential_fanouts_may_write_one_path() {
-    // Mirror of the legacy case of the same name: a later fanout takes a
-    // fresh write token, so its write overwrites the earlier fanout's
-    // registry record instead of racing against it.
+    // A later fanout takes a fresh write token, so its write overwrites the
+    // earlier fanout's registry record instead of racing against it.
     let store = TestStore::new();
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -99,8 +98,8 @@ async fn sequential_fanouts_may_write_one_path() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
-    let out = TokioDriver::new(&ctx, host, None)
+    let (ctx, harness) = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("a sequential fanout may write the same path");
@@ -111,8 +110,7 @@ async fn sequential_fanouts_may_write_one_path() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fatal_arm_aborts_queued_siblings() {
-    // Mirror of the legacy `fatal_arm_aborts_and_drops_blocked_siblings`:
-    // with the ceiling at 1 the siblings stay queued, and once the first
+    // With the ceiling at 1 the siblings stay queued, and once the first
     // arm fails fatally they are cancelled before admission - proven by
     // the store side-channel only the fatal arm ever wrote to, and by the
     // terminal observations: one FAILED, nothing else. The start event
@@ -130,14 +128,14 @@ async fn fatal_arm_aborts_queued_siblings() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_from(
+    let (ctx, harness) = scheduler_context_from(
         &prompt,
         &store,
         &test_context(EXECUTION)
             .limits(RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero"))),
-        RunHost::new().observer(recorder.clone()),
+        RunHarness::new().observer(recorder.clone()),
     );
-    let error = TokioDriver::new(&ctx, host, None)
+    let error = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect_err("a fatal arm must fail the whole fanout");
@@ -195,10 +193,10 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -250,10 +248,9 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_caught_fanout_failure_lets_the_caller_continue() {
     // The fanout error is the call's answer resumed through the envelope,
-    // so an author `pcall` catches it exactly as on the legacy callback
-    // path; the run then continues - including past a stale answer the
-    // aborted sibling's already-completed I/O task may have posted, which
-    // the driver must discard rather than fail on.
+    // so an author `pcall` catches it; the run then continues - including
+    // past a stale answer the aborted sibling's already-completed I/O task
+    // may have posted, which the driver must discard rather than fail on.
     let gateway = ScriptedGateway::start(vec![
         resp_text("boom-answer"),
         resp_text("slow-answer"),
@@ -276,8 +273,8 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = scheduler_context(&prompt);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the caught fanout failure lets the caller continue");
@@ -315,8 +312,8 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ### Worker\n\n\
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut driver = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -392,8 +389,8 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         ### Worker\n\n\
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
     scheduler.set_max_chains_for_test(2);
@@ -444,7 +441,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
 #[tokio::test(flavor = "current_thread")]
 async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // An answer arriving for an id the run never issued (and that is not an
-    // orphan) means the host lost track of its effects: the run must fail
+    // orphan) means the Harness lost track of its effects: the run must fail
     // with Error::Internal rather than silently discard the answer. Only an
     // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
@@ -455,8 +452,8 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
     let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = scheduler_context(&prompt);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     // Handed to the run before the drive: the phantom answer lands ahead
     // of the real infer's, on a run that has issued nothing.
     scheduler
@@ -473,408 +470,5 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     );
 }
 
-// --- Script-initiated tools.call dispatch ---
-
-/// Arms the run's shared tool set with `bindings`, every alias in the
-/// prompt-wide `always` scope, so a section's effective scope includes them
-/// without an H1 pass; the implementations go to the driver's host table.
-fn arm_tool_set(
-    ctx: &RunState,
-    host: RunHost,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> RunHost {
-    arm_tools(ctx, host, bindings)
-}
-
-/// Arms the run's shared tool set with `bindings` and exactly `always` as
-/// the prompt-wide scope, so a binding can sit in the document catalog
-/// without entering any section's effective scope.
-fn arm_tool_set_scoped(
-    ctx: &RunState,
-    host: RunHost,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-    always: Vec<String>,
-) -> RunHost {
-    arm_tools_scoped(ctx, host, bindings, always)
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
-    // The whole script path in one pass: the shim yields, the scheduler
-    // dispatches the bound tool, the plain binding resumes as a Lua
-    // string, and the counts land in the same `tools.calls` table the
-    // prose loop feeds.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\n\
-        local out = tools.call('echo', { value = 'hi' })\n\
-        return out .. '|' .. tostring(tools.calls.echo)\n\
-        ```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-    );
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("the script dispatch succeeds");
-    assert_eq!(out, "echoed: hi|1");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
-    // The handle form: the captured alias global is an inspectable Tool
-    // object, and passing it as the leading argument dispatches the binding
-    // it names, identically to the bare alias string.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\n\
-        assert(type(echo) == 'userdata', 'the captured alias is a Tool object')\n\
-        return tools.call(echo, { value = 'hi' })\n\
-        ```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-    );
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("the handle-form dispatch succeeds");
-    assert_eq!(out, "echoed: hi");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
-    // Script-initiated resolution runs against the run's full bound
-    // catalog, so the unknown-alias error names that whole set, not the
-    // section's effective scope.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('missing', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-    );
-    let error = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect_err("an unbound alias fails the block");
-    match &error {
-        Error::UnboundToolCall { name, bound } => {
-            assert_eq!(name, "missing");
-            assert_eq!(bound, &["echo".to_owned()]);
-        }
-        other => panic!("expected the typed unbound-tool error, got {other:?}"),
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
-    // A tool bound in the document catalog but never scoped into the
-    // section (no `always`, no `tools.add`) still dispatches for a script:
-    // the scope shapes what the model is offered, and the author's own
-    // code is not the model. The count lands in the same shared map
-    // `tools.calls` reads.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\n\
-        local out = tools.call('echo', { value = 'hi' })\n\
-        return out .. '|' .. tostring(tools.calls.echo)\n\
-        ```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set_scoped(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-        Vec::new(),
-    );
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("a bound but unscoped alias dispatches for a script");
-    assert_eq!(out, "echoed: hi|1");
-}
-
-/// A tool that signals its start and then never completes, so the
-/// cancellation test fires only once the dispatch is in flight.
-struct SignallingSlowTool {
-    started: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl TestTool for SignallingSlowTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tests/tools/slow").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "slow"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "a deliberately slow tool"
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    async fn call(
-        &self,
-        _args: serde_json::Value,
-    ) -> std::result::Result<crate::tools::ToolOutput, crate::tools::ToolError> {
-        self.started.fetch_add(1, Ordering::SeqCst);
-        std::future::pending().await
-    }
-}
-
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn cancellation_interrupts_a_slow_script_tools_call() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('slow', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let started = Arc::new(AtomicUsize::new(0));
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding(
-            "slow",
-            "slow tool",
-            Arc::new(SignallingSlowTool {
-                started: Arc::clone(&started),
-            }),
-        )],
-    );
-    let mut driver = TokioDriver::new(&ctx, host, None);
-    let canceller = driver.cancel_handle();
-    let observed = Arc::clone(&started);
-    tokio::spawn(async move {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while observed.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await;
-        canceller.cancel();
-    });
-
-    let start = std::time::Instant::now();
-    let result = driver.drive().await;
-
-    assert!(
-        matches!(result, Err(Error::Interrupted)),
-        "cancelling a suspended tools.call must interrupt the run, got {result:?}"
-    );
-    assert_eq!(
-        started.load(Ordering::SeqCst),
-        1,
-        "the cancellation must land after the tool call was in flight"
-    );
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(5),
-        "the slow tool must not hold the run, took {:?}",
-        start.elapsed()
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding(
-            "fetch",
-            "untrusted echo tool",
-            Arc::new(UntrustedEchoTool),
-        )],
-    );
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("the untrusted dispatch succeeds");
-    assert!(
-        out.contains("<untrusted_input_") && out.contains("</untrusted_input_"),
-        "the script must receive the nonce-wrapped envelope, got: {out}"
-    );
-    assert!(
-        out.contains("echoed: hi"),
-        "the wrapped block must still include the tool output, got: {out}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_structured_binding_resumes_as_a_lua_table() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\n\
-        local r = tools.call('form', {})\n\
-        return r.text .. '|' .. tostring(#r.images)\n\
-        ```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let mut binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(StructuredFixtureTool {
-            body: "{\"text\":\"typed\",\"images\":[]}",
-            trusted: true,
-        }),
-    );
-    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let host = arm_tool_set(&ctx, host, vec![binding]);
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("the structured dispatch succeeds");
-    assert_eq!(out, "typed|0");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('form', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let mut binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(StructuredFixtureTool {
-            body: "not json",
-            trusted: true,
-        }),
-    );
-    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let host = arm_tool_set(&ctx, host, vec![binding]);
-    let error = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect_err("invalid structured output fails the call");
-    match &error {
-        Error::Tool { message, .. } => {
-            assert!(
-                message.contains("returned invalid JSON"),
-                "the tool error names the invalid JSON, got: {message}"
-            );
-        }
-        other => panic!("expected the typed tool error, got {other:?}"),
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_untrusted_structured_output_is_wrapped_before_classification() {
-    // The untrusted nonce wrap precedes the structured JSON parse, so an
-    // untrusted binding's valid JSON still fails the call: this ordering is
-    // what restricts structured output to trusted tools. If classification
-    // ever ran on the raw output, this test would resume a table and fail.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn tools.call('form', {})\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let mut binding = fixture_binding(
-        "form",
-        "structured fixture",
-        Arc::new(StructuredFixtureTool {
-            body: "{\"text\":\"typed\"}",
-            trusted: false,
-        }),
-    );
-    binding.0.output_kind = promptforge_lua::ToolOutputKind::Structured;
-    let host = arm_tool_set(&ctx, host, vec![binding]);
-    let error = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect_err("untrusted structured output fails the call");
-    match &error {
-        Error::Tool { message, .. } => {
-            assert!(
-                message.contains("returned invalid JSON"),
-                "the wrap must precede the parse, got: {message}"
-            );
-        }
-        other => panic!("expected the typed tool error, got {other:?}"),
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_tools_call_before_infer_keeps_the_model_install() {
-    // The one-time section scope install is shared between the first script
-    // dispatch and the model resolution: a script `tools.call` that runs
-    // first must not swallow the install a later `models.infer` relies on.
-    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\ntools.call('echo', { value = 'x' })\n```\n\n\
-        Say something.\n\n\
-        ```lua\nreturn models.infer(prose)\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-    );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
-        .drive()
-        .await
-        .expect("infer after a script dispatch still resolves the model");
-    assert_eq!(out, "prose answer");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_document_prompt_without_tools_call_is_unaffected() {
-    // Bindings installed, shim present, `tools.call` never called: the
-    // section runs exactly as before the dispatch arm existed.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # ToolCall\n\n\
-        ## Only\n\n\
-        ```lua\nreturn 'plain'\n```\n";
-    let prompt = parse(md);
-    let (ctx, host) = scheduler_context(&prompt);
-    let host = arm_tool_set(
-        &ctx,
-        host,
-        vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
-    );
-    let out = TokioDriver::new(&ctx, host, None)
-        .drive()
-        .await
-        .expect("a prompt that never calls tools.call is unchanged");
-    assert_eq!(out, "plain");
-}
+#[path = "failures-script-tools.rs"]
+mod script_tools;

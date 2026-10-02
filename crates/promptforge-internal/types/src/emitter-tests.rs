@@ -75,10 +75,10 @@ fn a_seeded_sink_continues_the_root_sequence_and_leaves_other_tasks_at_zero() {
 fn a_lifecycle_report_becomes_the_matching_event_with_its_coordinates() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
-    walk.report("Gather", lifecycle::STORE_WRITE_SUCCEEDED);
+    walk.report("Gather", lifecycle::VFS_WRITE_SUCCEEDED);
     assert_eq!(
         sink.take(),
-        vec![Event::StoreWriteSucceeded {
+        vec![Event::VfsWriteSucceeded {
             execution: "run-1".to_owned(),
             section: "Gather".to_owned(),
             provenance: Provenance {
@@ -152,14 +152,14 @@ fn content_reports_land_in_the_buffer_in_order() {
     let sink = EventSink::default();
     let walk = emitter(&sink, root());
     walk.tool_result("Chat", 3, "call_1", "echo", "out", OutputTrust::Trusted);
-    walk.user_input("Chat", "typed");
+    walk.thinking("Chat", 3, "m", "hmm");
     let events = sink.take();
     assert!(matches!(
         &events[0],
         Event::ToolResult { turn: 3, tool_call_id, alias, content, trusted: true, .. }
             if tool_call_id == "call_1" && alias == "echo" && content == "out"
     ));
-    assert!(matches!(&events[1], Event::UserInput { text, .. } if text == "typed"));
+    assert!(matches!(&events[1], Event::Thinking { text, .. } if text == "hmm"));
     assert_eq!(events[1].provenance().seq, 1);
 }
 

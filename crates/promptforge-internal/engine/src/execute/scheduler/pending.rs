@@ -1,5 +1,5 @@
 //! The pending table's entry: what a parked chain asked for, in the terms
-//! `apply_answer` needs to turn the host's raw [`EffectAnswer`] into the
+//! `apply_answer` needs to turn the Harness's raw [`EffectAnswer`] into the
 //! chain's protocol [`Answer`] and emit the round's events. The effect
 //! itself holds none of this: it describes the work, the continuation
 //! describes what the work means to the chain.
@@ -7,12 +7,11 @@
 //! [`EffectAnswer`]: super::EffectAnswer
 //! [`Answer`]: super::Answer
 
-use crate::execute::protocol::StoreOp;
+use crate::execute::protocol::VfsOp;
 use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
 
 use super::ChainIndex;
-use super::task_events::TaskEventsReader;
 
 /// The driver-side half of one issued leaf effect: how its answer resumes
 /// the chain parked on it.
@@ -27,29 +26,23 @@ pub(super) enum Continuation {
     /// dispatch body (counts already taken at dispatch, then the
     /// succeeded/failed event, the trust rule, and the `ToolResult`).
     ToolCall(ToolCallContinuation),
-    /// A `user_input` wait: the broker's text is reported and resumes with
-    /// its availability flag.
-    UserInput,
-    /// A store operation: the operation itself (for the answer's rendered
-    /// message and conflict classification) and the succeeded/failed
-    /// observation pair its outcome reports; `None` for an op this crate
-    /// does not name.
-    Store(StoreContinuation),
+    /// A [`Vfs`](super::Effect::Vfs) effect: the operation itself (for the
+    /// answer's rendered message and conflict classification) and the
+    /// succeeded/failed observation pair its outcome reports; `None` for
+    /// an op this crate does not name.
+    Vfs(VfsContinuation),
     /// The internal timer behind a timed wait: the firing completes the
     /// slot backed by the effect and wakes its waiting owner; no chain
     /// resumes.
     Timer,
-    /// A task history read: the shim's event sequence, or the model's
-    /// untrusted text.
-    TaskEvents(TaskEventsReader),
 }
 
 /// What a store answer is applied with: the operation the chain yielded,
 /// so its failure's model-facing message and determinism classification
 /// render from the call surface the author used.
-pub(super) struct StoreContinuation {
+pub(super) struct VfsContinuation {
     /// The operation the effect performs.
-    pub(super) op: StoreOp,
+    pub(super) op: VfsOp,
     /// The succeeded/failed observation pair the outcome reports; `None`
     /// for an op this crate does not name.
     pub(super) observations: Option<(Lifecycle, Lifecycle)>,

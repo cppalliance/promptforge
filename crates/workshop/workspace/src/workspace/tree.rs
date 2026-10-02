@@ -61,7 +61,7 @@ impl Workspace {
     /// from a type-only stat (Unix), but listing never opens it and never
     /// reports its target's size or time; opening a link still confines.
     /// Opening a Windows link target can stall on, or authenticate to, the
-    /// remote host of a UNC link.
+    /// remote server of a UNC link.
     fn directory_listing(&self, path: &Path) -> Result<TreeListing, WorkspaceError> {
         let canonical = self.confine_existing(path)?;
         let metadata =

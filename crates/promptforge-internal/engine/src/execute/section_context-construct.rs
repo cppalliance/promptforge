@@ -3,9 +3,10 @@
 //! walked section (a spawned task's first entry included, seeded with its
 //! `item` and `sys.index`), the live H1 pass (section 0) - and hands back
 //! a live [`SectionContext`] whose `Drop` is the teardown boundary. The
-//! setup half (host injection, host APIs, the control surface, the shared
-//! replay, the captured alias bindings) is shared; only the seed, the `sys`
-//! extras, and the `list_from_section` visible set differ.
+//! setup half (Engine injection, Engine globals, the control surface, the
+//! capability preludes, the shared replay, the store yield shims, the
+//! captured alias bindings) is shared; only the seed, the `sys` extras,
+//! and the `list_from_section` visible set differ.
 
 use std::sync::Arc;
 
@@ -13,8 +14,8 @@ use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::execute::context::RunState;
-use crate::execute::engine::{list_items_from_visible, visible_sections};
 use crate::execute::section_vm::{VmSeed, setup_section_vm};
+use crate::execute::walk_target::{list_items_from_visible, visible_sections};
 use crate::lua::SectionVm;
 use crate::parser::Section;
 use promptforge_types::event::lifecycle;
@@ -27,8 +28,9 @@ impl SectionContext {
     /// preamble: the `sys` JSON, the section-started observation, VM
     /// construction and limits, the control surface (the `jump` and
     /// `list_from_section` callbacks resolved over the section's visible
-    /// set, plus the coroutine yield shims for the suspending calls), the
-    /// shared setup half (host injection, host APIs, the shared replay, the
+    /// set, plus the coroutine yield shims for the suspending calls), and
+    /// the rest of the shared setup half (Engine injection, Engine globals, the
+    /// capability preludes, the shared replay, the store yield shims, the
     /// captured alias bindings).
     ///
     /// `siblings` is the caller's own walk slice, from which the section's
@@ -63,7 +65,7 @@ impl SectionContext {
         let mut sys = ctx.sys_json(section_id, task_id, section.name());
         // A spawned chain's `sys.index` is the spawn's own value, verbatim;
         // absent otherwise, so a walked section reading `sys.index` raises
-        // the sealed-sys unknown-field error exactly as before.
+        // the sealed-sys unknown-field error.
         if let Some(index) = seed.index {
             sys["index"] = serde_json::Value::from(index);
         }
@@ -89,8 +91,8 @@ impl SectionContext {
         // `models.infer`) are the yield shims the setup half installs.
         let visible = visible_sections(siblings, section);
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
-        // The setup half of the section lifecycle - host injection, host
-        // APIs, the control surface, the shared replay, and the captured
+        // The setup half of the section lifecycle - Engine injection, Engine
+        // globals, the control surface, the shared replay, and the captured
         // alias bindings - is shared with the H1 pass; only the seed, the
         // `sys` extras, and the callback's visible set are the walk's own.
         let setup = ctx.vm_setup(
@@ -127,8 +129,9 @@ impl SectionContext {
     /// the root chain's entry 0, under the prompt's title, with the run's
     /// `when` like every section after it), VM construction over the
     /// run's shared sets, limits, and the shared
-    /// setup half (host injection, host APIs, the control surface, the
-    /// coroutine shims, the shared replay, the captured alias bindings).
+    /// setup half (Engine injection, Engine globals, the control surface, the
+    /// coroutine shims, the capability preludes, the shared replay, the
+    /// store yield shims, the captured alias bindings).
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed

@@ -44,7 +44,7 @@ The result is:
 helped:check
 ````
 
-`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the host. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
+`## Accept` never runs. `jump` checks that its argument is a string, records the target, and ends the block right there, so the line after it never runs either. It is not a [suspending call](05-lua-environment.md#calls-that-wait-and-errors-that-raise), and nothing waits on the Harness. The heading reference is looked up only after the block has ended, and the walk then continues at `## Help`, which reads the value `## Check` left in [`var`](05-lua-environment.md#keeping-values-in-var).
 
 Here a section calls another one and uses its result:
 
@@ -128,7 +128,7 @@ local ok, err = pcall(call, '## Missing')
 return 'caught: ' .. tostring(err)
 ````
 
-The run succeeds, and its result starts with `caught: ` and contains `not found`. Left uncaught in a walked section, the error ends the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). A `jump` reference is looked up only after its block has ended, so `pcall` in the jumping block never sees a lookup error from `jump`. The next section shows what happens instead.
+The run succeeds, and its result starts with `caught: ` and contains `not found`. Left uncaught in a walked section, the error ends the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). A `jump` reference is looked up only after its block has ended, so `pcall` in the jumping block never sees a lookup error from `jump`. The next section shows what happens instead.
 
 ## Sibling jumps
 
@@ -229,7 +229,7 @@ When this block ends, the walk moves to `## C`, and `'never the result'` is disc
 
 ### When a jump target is wrong
 
-A jump's heading reference is looked up after the jumping block has ended. If it is malformed or matches no section in the visible set, as in `jump('## Missing')`, the run fails with one of the [heading errors](#heading-addresses), such as a not-found message, and run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). By then the jumping section has already closed as completed, so the error is never raised inside the jumping block, and `pcall` there cannot catch it. Only the string check runs at the `jump` call itself.
+A jump's heading reference is looked up after the jumping block has ended. If it is malformed or matches no section in the visible set, as in `jump('## Missing')`, the run fails with one of the [heading errors](#heading-addresses), such as a not-found message, and run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). By then the jumping section has already closed as completed, so the error is never raised inside the jumping block, and `pcall` there cannot catch it. Only the string check runs at the `jump` call itself.
 
 ### Where jump works
 
@@ -629,7 +629,7 @@ return call('## Alpha')
 ```
 ````
 
-Left uncaught, the depth cap error passes up through every calling section unchanged and fails the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified).
+Left uncaught, the depth cap error passes up through every calling section unchanged and fails the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
 A jump never adds a level, so `jump` can descend into child sections without spending depth. If `## Main` does `jump('### X')`, and then `### X` and `### Y` ping-pong with `return call('### Y')` and `return call('### X')`, nine sections run before the cap trips: the one reached by the jump and eight reached by calls.
 
@@ -740,7 +740,7 @@ return tostring(ok) .. ':' .. tostring(err)
 
 The run result starts with `false:` and contains `## Nope`.
 
-Left uncaught, a heading error from `call`, `fanout`, or `list_from_section` is an error in the H1 block. The H1 pass is a hard gate, so the run ends with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified), whose notice is the Lua error text. A `jump` from the H1 is different: its heading is looked up after the H1 block has ended, so a bad `jump` target ends the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). In every case the message names the heading.
+Left uncaught, a heading error from `call`, `fanout`, or `list_from_section` is an error in the H1 block. The H1 pass is a hard gate, so the run ends with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified), whose notice is the Lua error text. A `jump` from the H1 is different: its heading is looked up after the H1 block has ended, so a bad `jump` target ends the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). In every case the message names the heading.
 
 ## Chain ids under call
 

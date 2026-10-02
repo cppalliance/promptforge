@@ -137,6 +137,8 @@ async fn a_terminal_agent_failure_reaches_the_socket_as_an_error_frame() {
 name: boom
 description: The terminally failing test agent.
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Boom
@@ -144,7 +146,7 @@ promptforge: 0
 ## Conversation
 
 ```lua
-user_input()
+input.ask()
 error('kaboom')
 ```
 ",

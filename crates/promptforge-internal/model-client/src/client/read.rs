@@ -4,7 +4,7 @@
 //!
 //! No HTTP happens here and no clock is read. The transport supplies the
 //! chunks and the clock; this module applies the one rule set every
-//! transport shares, so the harness's gateway client and the engine's
+//! transport shares, so the Harness's gateway client and the Engine's
 //! test client differ only in how they send. A transport that grew its own
 //! copy of this loop would be one more place the byte cap, the sentinel
 //! rule, and the timing arithmetic could drift.
@@ -13,9 +13,10 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 
 use promptforge_types::metrics::ClientTiming;
+use promptforge_types::wire::StreamDelta;
 use serde_json::Value;
 
-use super::{Applied, Completion, SseScanner, StreamAccumulator, StreamDelta};
+use super::{Applied, Completion, SseScanner, StreamAccumulator};
 use crate::Error;
 use crate::model::CompletionError;
 
@@ -97,7 +98,7 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// [`build_request_body`](super::build_request_body) returned it; the
 /// completion carries it back, so a run's debug capture records exactly
 /// what was sent. `on_delta` receives each
-/// [`StreamDelta`] as it is decoded, for a host that shows the reply as it
+/// [`StreamDelta`] as it is decoded, for a Host that shows the reply as it
 /// arrives; the completion holds the whole turn either way.
 ///
 /// `started` is the transport's clock reading from before it sent the

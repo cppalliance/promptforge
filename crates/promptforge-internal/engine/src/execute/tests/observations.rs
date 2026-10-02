@@ -54,7 +54,7 @@ fn event_trace(event: &Event) -> (String, String) {
 }
 
 /// An observer detail in the serialized `kind` spelling:
-/// `Store read_numbered succeeded` is `store_read_numbered_succeeded`.
+/// `Vfs read_numbered succeeded` is `vfs_read_numbered_succeeded`.
 fn observer_kind(detail: &str) -> String {
     detail.to_ascii_lowercase().replace(' ', "_")
 }
@@ -321,18 +321,18 @@ async fn an_erroring_section_tears_down_exactly_once_without_finishing() {
 }
 
 #[tokio::test]
-async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
-    // mlua accepts the one-byte ceiling itself, then the first host allocation
-    // fails. Host injection is inside the section's teardown boundary, unlike
-    // the preceding bare apply_lua_limits call.
+async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
+    // mlua accepts the one-byte ceiling itself, then the first Engine
+    // allocation fails. Engine injection is inside the section's teardown
+    // boundary, unlike the preceding bare apply_lua_limits call.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
     let sink = Arc::clone(&recorder) as Arc<dyn Observer>;
-    let result = run_with_context(&fixture(md), move |ctx, host| {
+    let result = run_with_context(&fixture(md), move |ctx, harness| {
         (
             ctx.limits(RunLimits::new().lua_memory_bytes(std::num::NonZeroUsize::MIN)),
-            host.observer(sink),
+            harness.observer(sink),
         )
     })
     .await;
@@ -349,7 +349,7 @@ async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
                 "Only".to_owned(),
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string()
             )),
-        "host injection failure must fire both teardown observations: {observed:?}"
+        "value injection failure must fire both teardown observations: {observed:?}"
     );
 }
 
@@ -420,11 +420,11 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         detail::RUN_STARTED,
         detail::SECTION_STARTED,
         detail::LUA_CHUNK_STARTED,
-        detail::STORE_WRITE_SUCCEEDED,
+        detail::VFS_WRITE_SUCCEEDED,
         detail::MODEL_TURN_COMPLETED,
         detail::TOOL_CALL_SUCCEEDED,
         detail::LUA_CHUNK_STARTED,
-        detail::STORE_APPEND_SUCCEEDED,
+        detail::VFS_APPEND_SUCCEEDED,
         detail::RUN_SUCCEEDED,
     ] {
         assert!(
@@ -448,12 +448,12 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(Recorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the loop converges");

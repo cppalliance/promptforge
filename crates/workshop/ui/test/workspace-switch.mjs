@@ -20,7 +20,7 @@
 // successful Save As exactly three workspace writes store the live
 // layout envelope, expanded set, and closed stack; a cancelled or
 // refused Save As writes nothing; and Duplicate writes nothing. The fake
-// dock hosts a real WorkshopTreePanel as its "tree" panel and a real
+// dock contains a real WorkshopTreePanel as its "tree" panel and a real
 // WindowTitle reads the roots beside it, so the switch's roots traffic
 // is the real thing (UM-001, OP-001): once /workspace/file/open has
 // resolved the tree never renders the previous workspace's roots, and

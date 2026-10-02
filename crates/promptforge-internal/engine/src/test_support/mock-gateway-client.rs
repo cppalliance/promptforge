@@ -1,7 +1,7 @@
-//! The suites' chat client: the one place the engine's own tests do HTTP.
+//! The suites' chat client: the one place the Engine's own tests do HTTP.
 //!
-//! The engine never performs a round; its production host, the harness,
-//! owns the gateway client, and this crate may not name a harness crate.
+//! The Engine emits each round as a `Chat` effect; the Harness performs it
+//! with its own gateway client, and this crate may not name a Harness crate.
 //! The suites still drive real rounds against their axum mock gateways,
 //! so this client speaks the same protocol over a dev-only `reqwest`:
 //! the wire vocabulary's request body goes out, the response is handed to
@@ -9,7 +9,7 @@
 //! [`Completion`] a production round yields. The run's request timeout is
 //! applied here; the response cap on both the error body and the stream,
 //! the `[DONE]` rule, and the timing arithmetic are the shared loop's, so
-//! this client and the harness's differ only in how they send.
+//! this client and the Harness's differ only in how they send.
 //!
 //! This file names only external crates so the bench target can include
 //! it by `#[path]` beside the in-crate suites; it is not part of the

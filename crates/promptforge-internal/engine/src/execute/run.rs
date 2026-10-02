@@ -1,5 +1,5 @@
-//! The run: the engine's host boundary, four methods exchanging effects and
-//! events as values. The host loop is documented on the `promptforge`
+//! The run: the Engine's Harness boundary, four methods exchanging effects and
+//! events as values. The Harness loop is documented on the `promptforge`
 //! facade's crate page and its `effect` and `cancel` modules.
 //!
 //! The effect vocabulary itself - [`Effect`], its serializable
@@ -11,12 +11,11 @@ use std::sync::Arc;
 use promptforge_types::event::Event;
 use promptforge_types::ids::Provenance;
 
-#[path = "run-effect.rs"]
 mod effect;
 
 pub use effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord,
-    InputAnswerRecord, ToolAnswerRecord,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, ToolAnswerRecord,
+    ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;
@@ -37,7 +36,7 @@ pub enum Step {
     /// built it; an empty list means every chain waits on an effect
     /// already issued. `events` are the reports the step made, in order.
     Pending {
-        /// The effects the host performs and answers through
+        /// The effects the Harness performs and answers through
         /// [`Run::resume`].
         effects: Vec<(EffectId, Provenance, Effect)>,
         /// The events the step reported.
@@ -54,16 +53,16 @@ pub enum Step {
     },
 }
 
-/// One run of one prompt, driven by a host through
+/// One run of one prompt, driven by the Harness through
 /// [`step`](Self::step) and [`resume`](Self::resume).
 ///
 /// `Run` is `Send`: one caller drives it at a time, and the thread may
-/// change between calls. It owns its prompt through an `Arc`, so the host
+/// change between calls. It owns its prompt through an `Arc`, so the Harness
 /// keeps parsing once and running many times.
 ///
 /// # Examples
-/// A prompt whose only section returns a literal issues no effect, so a
-/// host drives it to `Done` in one step:
+/// A prompt whose only section returns a literal issues no effect, so the
+/// Harness drives it to `Done` in one step:
 /// ```
 /// use std::sync::Arc;
 ///
@@ -110,7 +109,7 @@ impl Run {
     /// first `step` is `Done` with the failure.
     #[expect(
         clippy::needless_pass_by_value,
-        reason = "the host API takes the context by value: Run::new owns the run's inputs"
+        reason = "the public API takes the context by value: Run::new owns the run's inputs"
     )]
     #[must_use]
     pub fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
@@ -143,11 +142,11 @@ impl Run {
     /// Drains the ready queue and returns what the run issued and
     /// reported: [`Step::Pending`] while any chain waits on an answer,
     /// [`Step::Done`] once the run is over and every issued effect is
-    /// answered. A step after `Done` is a host error and reports an
+    /// answered. A step after `Done` is a Harness error and reports an
     /// internal failure.
     ///
     /// Infallible by design: a run's failures are values in
-    /// [`RunResult::Failure`], so the host drives the loop and owns the
+    /// [`RunResult::Failure`], so the Harness drives the loop and owns the
     /// retry policy without catching a panic.
     pub fn step(&mut self) -> Step {
         if let Some(error) = self.stillborn.take() {
@@ -189,14 +188,14 @@ impl Run {
     /// instruction hook; the next `step` tears every chain down and, once
     /// the outstanding effects are answered, reports the run as cancelled.
     ///
-    /// Cancellation is a request, not a synchronous stop: the host answers
+    /// Cancellation is a request that later steps finish: the Harness answers
     /// each effect it abandons with [`EffectAnswer::Dropped`]. Infallible by
     /// design, like `step` and `resume`.
     pub fn cancel(&mut self) {
         self.cancel.cancel();
     }
 
-    /// The run's cancel flag, for a host that cancels from another thread.
+    /// The run's cancel flag, for the Harness to cancel from another thread.
     #[must_use]
     pub fn cancel_handle(&self) -> CancelHandle {
         self.cancel.clone()
@@ -204,7 +203,7 @@ impl Run {
 
     /// Whether the run's outcome is decided: its end boundary has been
     /// reported (or it never started) and every effect still out is an
-    /// orphan whose answer only `Done` waits on. A host reads this after
+    /// orphan whose answer only `Done` waits on. The Harness reads this after
     /// a `Pending` step to learn it may drop what it holds, so control
     /// never depends on the events, which are a report and not a decision.
     #[must_use]
@@ -222,9 +221,8 @@ impl Run {
     }
 }
 
-/// Assembles the run state from the host's context: the version gate, the
-/// shared library, and the declared store, in the order the run has
-/// always checked them.
+/// Assembles the run state from the Harness's context, checking the version
+/// gate, the shared library, and the declared store in that order.
 ///
 /// # Errors
 /// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
@@ -263,5 +261,4 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
 }
 
 #[cfg(test)]
-#[path = "run-tests.rs"]
 mod tests;

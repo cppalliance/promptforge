@@ -72,7 +72,7 @@ todos:
     content: Workshop visual refresh to Unsloth-derived design tokens.
     status: completed
   - id: step-24
-    content: "Workshop panel integration: ?mode=panel + postMessage bridge, menu item, dockview iframe host."
+    content: "Workshop panel integration: ?mode=panel + postMessage bridge, menu item, dockview iframe container."
     status: completed
   - id: step-25
     content: "Workspace revoke endpoint: POST /workspace/revoke removes a granted root (exact match, nested grants independent)."
@@ -105,7 +105,7 @@ Everything an executor needs that does not live in the plan body:
 - **Brand assets:** the medallion icon is `promptforge/crates/promptforge-workshop-server/ui/icons/promptforge-icon-1.png` (cold state). Frames 2-5 of a cold-to-hot sequence exist in `promptforge/crates/promptforge-desktop-shell/assets/icons/` for a future activity animation - not in scope for this plan, but the config-ui should load the icon from a shared, copied asset in its own `ui/icons/`.
 - **Known AGENTS.md files** (gather the full manifest per vibe rule 3 before dispatching): `promptforge/crates/promptforge-workshop-server/AGENTS.md`, `promptforge/crates/promptforge-workshop/AGENTS.md`, `promptforge/crates/promptforge-desktop-shell/AGENTS.md`. Check for a root `promptforge/AGENTS.md` and any others.
 - **Run ledger:** main keeps `vibe-ledger.md` and the review subagent writes `vibe-review.md` in `c:\Users\Vinnie\cursor\cabinet\_scratch\gateway-config-spa\` (create the directory at run start).
-- **Toolchain:** Node >= 22 for the esbuild pipelines (`npm ci` once in each `ui/` directory), Rust 1.89+ (workspace MSRV), Windows host.
+- **Toolchain:** Node >= 22 for the esbuild pipelines (`npm ci` once in each `ui/` directory), Rust 1.89+ (workspace MSRV), Windows machine.
 
 ## Architecture
 
@@ -325,7 +325,7 @@ Every element below is tagged: **[Unsloth]** copied verbatim, **[Adapted: source
 The config UI runs in two modes, detected at load time:
 
 **1. Workshop panel mode** - loaded inside the workshop's webview as a panel. The workshop and the config UI are different origins (different ports), so the workshop cannot set `window` properties on the config UI directly. Instead:
-- The workshop hosts the config UI in an iframe inside a dockview panel, loading it with `?mode=panel` in the URL.
+- The workshop embeds the config UI in an iframe inside a dockview panel, loading it with `?mode=panel` in the URL.
 - The config UI detects `mode=panel` at boot and mounts panel-only content (no tab bar medallion, no key prompt - see auth note below).
 - The bridge is `postMessage`: the workshop listens for action messages (`apply`, `revert`, `download-started`) and owns all progress display; the config UI listens for context messages (theme, initial route).
 - Auth in panel mode: the workshop already holds the gateway bearer key server-side. The config UI in panel mode routes its API calls through `postMessage` to the workshop, which forwards them with the key attached - the key never enters the iframe. (Standalone mode uses the key prompt as before.)
@@ -337,7 +337,7 @@ The config UI runs in two modes, detected at load time:
 
 Detection: `new URLSearchParams(location.search).get("mode") === "panel"` at boot. The SPA's composition root either mounts the full shell or the panel-only content based on this check.
 
-**Hash routing (both modes):** `#/models`, `#/models/{name}`, `#/discover`, `#/downloads`, `#/profiles`, `#/secrets`, `#/settings/{section}` **[Adapted: llama.cpp]** `#/settings/<section>` routed pages. In panel mode, the workshop panel host may set the initial hash.
+**Hash routing (both modes):** `#/models`, `#/models/{name}`, `#/discover`, `#/downloads`, `#/profiles`, `#/secrets`, `#/settings/{section}` **[Adapted: llama.cpp]** `#/settings/<section>` routed pages. In panel mode, the workshop panel container may set the initial hash.
 
 ### Global shell - standalone mode elements
 
@@ -720,7 +720,7 @@ Fields: `bind` (socket address), `api_key` (secret).
 
 **UI behavior:** displayed in the Settings view's "Gateway" card, fully editable. `bind` is a text input. `api_key` is a password input with show/hide toggle - edits write to the `.env` file when using `${VAR}` interpolation, or directly to the TOML when literal. After saving, the "Restart required" banner appears. Changing `api_key` also means the SPA's stored session key will be invalid after restart - the banner notes this: "After restart, you will need to enter the new API key."
 
-#### `[workshop]` - hosted workshop UI
+#### `[workshop]` - workshop UI
 
 Fields: `bind` (socket address, default `127.0.0.1:7910`), `open_browser` (bool), plus optional `[workshop.voice]` sub-table (interim/final model paths and sources, window_seconds, interval_ms, vocabulary) and `[workshop.tape]` sub-table (path).
 
@@ -1038,7 +1038,7 @@ Steps are ordered by dependency. Backend steps come first because the SPA depend
 
 23. **Workshop visual refresh.** Align workshop chrome with Unsloth-derived design tokens. Scope bound: token-level replacement only - swap the workshop UI's color/surface/radius custom-property definitions to the plan's design-token table (molten lava accent, near-black backgrounds) in the workshop's existing CSS token files. Chrome only (sidebar, menus, status bar, tab strip); no layout changes, no chat-content restyling, no new components. Tests: visual review.
 
-24. **Workshop panel integration.** Config UI as workshop panel, `?mode=panel` + postMessage bridge, menu item, dockview iframe host. Tests: panel mode skips chrome, standalone mode shows full shell.
+24. **Workshop panel integration.** Config UI as workshop panel, `?mode=panel` + postMessage bridge, menu item, dockview iframe container. Tests: panel mode skips chrome, standalone mode shows full shell.
 
 **Component: Workshop workspace panel (add/remove folders)**
 
@@ -1112,7 +1112,7 @@ The user wanted the gateway's configuration to be fully operable from a UI so th
 ## Discarded alternatives
 
 - **Second listener port** for the config UI - rejected by the user in favor of one port plus a loopback guard (quote above).
-- **Workshop-hosted UI only** - rejected; the gateway must serve it independently because headless builds exclude the workshop.
+- **Workshop-embedded UI only** - rejected; the gateway must serve it independently because headless builds exclude the workshop.
 - **Comment-preserving TOML round-trip** - rejected; TOML and .env are app-owned, no hand-editing support.
 - **React / Tailwind / shadcn** - the user asked "are we losing anything by not using React and Tailwind and wtf is shadcn anyway?" and accepted (paraphrase) the answer that the existing esbuild + vanilla TypeScript pattern from the workshop UI loses nothing at this scale.
 - **Auto-apply on save or on close** - rejected in favor of the explicit Apply button with persistent shadow files, to "prevent an unexpected thud."

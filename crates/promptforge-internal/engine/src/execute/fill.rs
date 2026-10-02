@@ -1,5 +1,5 @@
 //! Prepare's fill functions: tool slot filling by identity against the
-//! host-supplied catalog, and the trivial model fill.
+//! Harness-supplied catalog, and the trivial model fill.
 
 use promptforge_parser::{ModelKeyword, ToolSlot};
 
@@ -10,7 +10,7 @@ use crate::tools::ToolCatalog;
 use super::bindings::{ModelBindings, ToolBindings};
 use super::requirements::{RequirementCheck, Requirements, UnmetRequirement};
 
-/// Fills the prompt's declared tool slots against the host-supplied
+/// Fills the prompt's declared tool slots against the Harness-supplied
 /// catalog, journaling every fill into the returned bindings.
 ///
 /// Exact slots fill by identity: an exact path's first two segments name
@@ -30,7 +30,7 @@ pub(super) fn fill_tool_bindings(
     let mut bindings = ToolBindings::default();
     let slots = prompt.frontmatter().tools();
     for (alias, slot) in slots.iter() {
-        // The open host-offered posture is deferred; a posture this fill
+        // The open Harness-offered posture is deferred; a posture this fill
         // does not model leaves its alias unbound.
         let ToolSlot::Exact(id) = slot else {
             continue;

@@ -339,7 +339,7 @@ mod tests {
         // the inference models, and those entries omit `context` and
         // `thinking` (they answer no completion request). The fetch must keep
         // the inference descriptors instead of rejecting the whole list,
-        // otherwise every host on such a gateway binds under a fallback
+        // otherwise the Harness binds each run on such a gateway to a fallback
         // descriptor and the context precheck refuses real conversations.
         async fn models() -> axum::Json<serde_json::Value> {
             axum::Json(serde_json::json!({

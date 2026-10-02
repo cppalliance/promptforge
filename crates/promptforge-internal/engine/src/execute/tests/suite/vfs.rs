@@ -1,17 +1,17 @@
-//! The executor's `VfsRef` host contract: an end-to-end run over the
-//! prepared handle, and the seed-run-extract round trip a production host
+//! The executor's `VfsRef` contract with the Harness: an end-to-end run
+//! over the prepared handle, and the seed-run-extract round trip a Host
 //! like papergate drives with no real files - prepare, seed the
 //! declared input through the run's handle, run, extract the declared
 //! output, and charge a missing output to the prompt's promise as an
 //! explicit contract error. Then the run-bounded scope: a run's `Done`,
-//! or its drop before `Done`, ends its scope however long the host holds
+//! or its drop before `Done`, ends its scope however long the Harness holds
 //! the store views it was handed.
 
 use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
 use crate::parser::Prompt;
 use promptforge_types::ids::Provenance;
-use promptforge_vfs::{Access, HostBackend, Origin, VfsError, VfsRef};
+use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
 
 use super::super::context::{EXECUTION, parse, test_context};
 use super::super::serial_driver::perform_locally;
@@ -61,7 +61,7 @@ const MISSING_OUTPUT: &str = concat!(
 );
 
 /// The store view derived from a fresh access on the run's handle: the
-/// host's seeding and extraction half of the seed-run-extract round trip.
+/// Harness's seeding and extraction half of the seed-run-extract round trip.
 fn fresh_store_view(vfs: &VfsRef, origin: &str) -> Access {
     let access = vfs
         .acquire(Origin::new(origin))
@@ -69,7 +69,7 @@ fn fresh_store_view(vfs: &VfsRef, origin: &str) -> Access {
     promptforge_vfs::detail::store_view(&access).expect("the handle declares a store")
 }
 
-/// The production host's extraction rule (pattern: papergate's app.rs): a
+/// The Host's extraction rule (pattern: papergate's app.rs): a
 /// declared output the run did not leave behind is an explicit contract
 /// error naming the prompt's promise, never a bare not-found.
 fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, String> {
@@ -91,7 +91,7 @@ fn extract_declared_output(store: &Access, prompt: &Prompt) -> Result<String, St
 
 /// Seeds the prompt's declared input through the run's prepared handle.
 /// The seeding access drops here - its scope ends - so the run's own
-/// scope never meets the host's.
+/// scope never meets the Harness's.
 fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
     let input = prompt
         .frontmatter()
@@ -103,7 +103,7 @@ fn seed_declared_input(vfs: &VfsRef, prompt: &Prompt, contents: &str) {
 }
 
 /// Prepares a fixture run and returns the run's handle (for seeding
-/// before and extraction after) plus the pending run: the host's
+/// before and extraction after) plus the pending run: the Harness's
 /// seed-run-extract sequence is prepare, seed through the handle, drive,
 /// extract through the handle.
 fn offline_run(
@@ -115,7 +115,7 @@ fn offline_run(
 ) {
     let recorder = Arc::new(Recorder::default());
     let prompt = prompt.clone();
-    let (ctx, host, vfs) = prepare_run(
+    let (ctx, harness, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -123,7 +123,7 @@ fn offline_run(
             observer: recorder,
         },
     );
-    let run = async move { drive(&prompt, "", ctx, host).await };
+    let run = async move { drive(&prompt, "", ctx, harness).await };
     (vfs, run)
 }
 
@@ -145,7 +145,7 @@ return store.read('handoff.txt')\n\
 ```\n";
     let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(source, "vfs-end-to-end", "vfs-e2e", recorder.as_ref());
-    let (ctx, host, vfs) = prepare_run(
+    let (ctx, harness, vfs) = prepare_run(
         &prompt,
         &[],
         RunOptions {
@@ -153,7 +153,7 @@ return store.read('handoff.txt')\n\
             observer: recorder,
         },
     );
-    let result = drive(&prompt, "", ctx, host)
+    let result = drive(&prompt, "", ctx, harness)
         .await
         .expect("the run threads the prepared handle through both sections");
     assert_eq!(result, "across the reset");
@@ -198,7 +198,7 @@ async fn a_missing_declared_output_is_a_contract_error_naming_the_prompts_promis
     let (vfs, run) = offline_run(&prompt, "vfs-missing-output");
     seed_declared_input(&vfs, &prompt, "the paper body");
     // The executor does not enforce the declaration; the run succeeds and
-    // the host's extraction is where the broken promise surfaces.
+    // the Harness's extraction is where the broken promise surfaces.
     let result = run.await.expect("the run itself succeeds");
     assert_eq!(result, "read: the paper body");
     let store = fresh_store_view(&vfs, "missing-output extraction");
@@ -225,7 +225,7 @@ impl TempDir {
             .expect("the clock is after the epoch")
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "promptforge-api-vfs-{}-{unique}-{name}",
+            "promptforge-engine-vfs-{}-{unique}-{name}",
             std::process::id(),
         ));
         std::fs::create_dir_all(&dir).expect("the temp dir creates");
@@ -240,18 +240,18 @@ impl Drop for TempDir {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
+async fn fanout_interleaving_is_invariant_across_memory_and_real_backends() {
     // The consistency rule: every store operation takes the leaf-yield path
     // uniformly, with no inline fast path, so a run's observable behavior
     // cannot depend on which backend serves the store mount. The same
     // fanout fixture (arm-scoped writes, a post-join glob, the ordered
-    // merge) runs over the stock memory mount and over a host backend
+    // merge) runs over the stock memory mount and over a `RealBackend`
     // rooted in a temp dir; the result and the stored contents must be
     // identical.
     const FANOUT_STORE_WRITES: &str =
         include_str!("../../../../tests/prompts/execution/fanout-store-writes.md");
-    // Both arms drive the raw host-handle contract (no prepare pass), so
-    // the caller's own backend serves the declared store in each.
+    // Both arms drive the raw Harness-supplied handle contract (no prepare
+    // pass), so the caller's own backend serves the declared store in each.
     let memory = run_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
@@ -264,41 +264,41 @@ async fn fanout_interleaving_is_invariant_across_memory_and_host_backends() {
         .result
         .expect("the memory-backed fanout must execute offline");
 
-    let temp = TempDir::new("host-backend");
-    let host_vfs = VfsRef::builder()
+    let temp = TempDir::new("real-backend");
+    let real_vfs = VfsRef::builder()
         .store(
             "/",
-            HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
+            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
         )
         .build();
-    let host = run_fixture(
+    let real = run_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
-        "vfs-invariance-host",
+        "vfs-invariance-real",
         "",
-        Some(host_vfs),
+        Some(real_vfs),
     )
     .await;
-    let host_result = host
+    let real_result = real
         .result
-        .expect("the host-backed fanout must execute offline");
+        .expect("the real-backed fanout must execute offline");
 
     assert_eq!(
-        memory_result, host_result,
+        memory_result, real_result,
         "the run's result must not depend on the backend"
     );
     for path in ["arm-1.md", "arm-2.md", "merged.md"] {
         assert_eq!(
             memory.store.read(path).ok(),
-            host.store.read(path).ok(),
+            real.store.read(path).ok(),
             "stored contents at {path} must not depend on the backend"
         );
     }
-    // The host backend really served the mount: the arm's write landed on
-    // the host filesystem under the root.
+    // The `RealBackend` really served the mount: the arm's write landed on
+    // the real filesystem under the root.
     assert!(
         temp.0.join("arm-1.md").is_file(),
-        "the host backend must persist the arm's write under its root"
+        "the real backend must persist the arm's write under its root"
     );
 }
 
@@ -348,8 +348,8 @@ fn drive_holding_effects(vfs: &VfsRef) -> (Run, RunResult, Vec<Effect>) {
 }
 
 #[test]
-fn a_run_ends_its_scope_at_done_while_the_host_still_holds_its_store_views() -> Result<(), VfsError>
-{
+fn a_run_ends_its_scope_at_done_while_the_harness_still_holds_its_store_views()
+-> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, result, held) = drive_holding_effects(&vfs);
     assert!(
@@ -358,11 +358,11 @@ fn a_run_ends_its_scope_at_done_while_the_host_still_holds_its_store_views() -> 
     );
     assert!(
         held.iter()
-            .any(|effect| matches!(effect, Effect::Store { .. })),
-        "the host holds the run's store views past Done: {held:?}"
+            .any(|effect| matches!(effect, Effect::Vfs { .. })),
+        "the Harness holds the run's store views past Done: {held:?}"
     );
     // A fresh scope reads the run's write without a conflict: the run's
-    // scope ended at Done, not when the run or the host's views dropped.
+    // scope ended at Done, not when the run or the Harness's views dropped.
     let fresh = vfs.acquire(Origin::new("after done"))?;
     assert_eq!(fresh.read("/kept.txt")?, b"from the run");
     drop(held);
@@ -375,7 +375,7 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, _, held) = drive_holding_effects(&vfs);
-    let Some(Effect::Store { access, .. }) = held.first() else {
+    let Some(Effect::Vfs { access, .. }) = held.first() else {
         panic!("the run's first effect is its store write: {held:?}");
     };
     match access.write("kept.txt", b"after the run") {
@@ -393,7 +393,7 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 }
 
 #[test]
-fn dropping_a_run_before_done_ends_its_scope_while_the_host_still_holds_its_store_views()
+fn dropping_a_run_before_done_ends_its_scope_while_the_harness_still_holds_its_store_views()
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let mut run = held_store_run(&vfs);
@@ -408,7 +408,7 @@ fn dropping_a_run_before_done_ends_its_scope_while_the_host_still_holds_its_stor
     held.extend(effects.into_iter().map(|(_, _, effect)| effect));
     drop(run);
     // A fresh scope reads the dropped run's write without a conflict,
-    // though the host still holds every store view the run handed out.
+    // though the Harness still holds every store view the run handed out.
     let fresh = vfs.acquire(Origin::new("after drop"))?;
     assert_eq!(fresh.read("/kept.txt")?, b"from the run");
     drop(held);

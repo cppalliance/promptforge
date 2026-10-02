@@ -1,10 +1,8 @@
-//! Tests for debug capture delivery and the `tools.calls` counters.
+//! Tests for debug capture delivery and the `tools.calls` counters. The
+//! infer-round reporting cases sit in `infer_rounds`.
 
 use super::run;
 use super::*;
-
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::metrics::CallMetrics;
 
 #[tokio::test]
 async fn debug_capture_receives_request_and_response_when_set() {
@@ -55,9 +53,8 @@ async fn debug_capture_receives_request_and_response_when_set() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
-    // F4: a nested infer called from Lua must route its request/response
-    // capture to the run's owned debug sink instead of dropping it (was
-    // hard-coded to `None`).
+    // A nested infer called from Lua must route its request/response
+    // capture to the run's owned debug sink instead of dropping it.
     let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
     let capture = Arc::new(RecordingCapture::default());
@@ -207,11 +204,10 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_calls_count_increments_even_when_tool_errors() {
-    // TESTS-002: drive a real `FailingTool` through a `models.loop` round
-    // and prove `tools.calls` records exactly one call even though the tool
-    // errors (the count is incremented before dispatch). The tool's own
-    // failure is the call's error result, so the loop continues to the
-    // terminal reply.
+    // Drive a real `FailingTool` through a `models.loop` round and prove
+    // `tools.calls` records exactly one call even though the tool errors
+    // (the count is incremented before dispatch). The tool's own failure is
+    // the call's error result, so the loop continues to the terminal reply.
     use super::models_loop::{always_tool, loop_context, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 
@@ -227,8 +223,8 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
          return msgs[#msgs].content .. '|' .. tostring(tools.calls.echo)",
     );
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, always_tool("echo", Arc::new(FailingTool)));
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool's own failure becomes the call's result, not the loop's");
@@ -339,187 +335,5 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     );
 }
 
-// --- Infer-round reporting: `assistant_reply` with `origin = infer` ---
-
-/// Records an infer round's boundary observations and content hooks as one
-/// line each, so the whole sequence is asserted rather than a count: the
-/// infer turn must read `model_turn_completed` -> (`thinking` when the
-/// backend supplied reasoning) -> `assistant_reply` with `origin =
-/// Infer`.
-#[derive(Default)]
-struct InferRoundRecorder(Mutex<Vec<String>>);
-
-impl InferRoundRecorder {
-    fn push(&self, line: String) {
-        self.0
-            .lock()
-            .expect("the infer round recorder mutex is not poisoned")
-            .push(line);
-    }
-
-    fn lines(&self) -> Vec<String> {
-        self.0
-            .lock()
-            .expect("the infer round recorder mutex is not poisoned")
-            .clone()
-    }
-}
-
-impl Observer for InferRoundRecorder {
-    fn observe(&self, _execution: &str, section: &str, event: Observation) {
-        self.push(format!("{section}: {event}"));
-    }
-
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
-        self.push(format!(
-            "{section}: thinking turn={turn} model={model} text={text}"
-        ));
-    }
-
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
-        self.push(format!(
-            "{section}: assistant_reply origin={origin:?} turn={turn} text={text} finish={finish_reason:?} model={model} metrics={}",
-            metrics.is_some()
-        ));
-    }
-}
-
-/// The index of the first recorded line containing `needle`, panicking with
-/// the whole sequence when it is absent.
-fn line_index(lines: &[String], needle: &str) -> usize {
-    lines
-        .iter()
-        .position(|line| line.contains(needle))
-        .unwrap_or_else(|| panic!("no recorded line contains {needle:?}: {lines:#?}"))
-}
-
-/// Runs one handle-form `models.infer` round scripted with `reply` and
-/// returns the run's output beside every line the recorder saw.
-async fn run_infer_round(reply: GatewayReply) -> (String, Vec<String>) {
-    let gateway = ScriptedGateway::start(vec![reply]).await;
-    let addr = gateway.addr();
-    let recorder = Arc::new(InferRoundRecorder::default());
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Test prompt\n\n```lua shared\n\
-        writer = models.default('writer')\n```\n\n\
-        ## Only\n\n\
-        ```lua\n\
-        return models.infer(writer, 'say hello')\n\
-        ```\n";
-    let prompt = bound_with_tools(md);
-    let out = run(
-        &prompt,
-        "",
-        &[],
-        &TestStore::new(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
-            debug: None,
-        },
-    )
-    .await
-    .expect("handle-form infer must return text");
-    (out, recorder.lines())
-}
-
-/// A text reply carrying a `reasoning_content` side channel.
-fn resp_text_with_reasoning(content: &str, reasoning: &str) -> GatewayReply {
-    GatewayReply::Json(json!({
-        "model": MOCK_MODEL,
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "reasoning_content": reasoning,
-                "content": content,
-            }
-        }]
-    }))
-}
-
-#[tokio::test]
-async fn infer_round_reports_model_turn_completed_then_an_infer_origin_assistant_reply() {
-    // The infer turn's reporting order: the completed boundary, then one
-    // `assistant_reply` tagged `origin = Infer`.
-    let (out, lines) = run_infer_round(resp_text("pong")).await;
-    assert_eq!(out, "pong");
-
-    let completed = line_index(&lines, "Model turn completed");
-    let reply = line_index(&lines, "assistant_reply");
-    assert_eq!(
-        reply,
-        completed + 1,
-        "the infer reply must immediately follow the completed turn: {lines:#?}"
-    );
-    assert!(
-        lines[reply].contains("origin=Infer")
-            && lines[reply].contains("text=pong")
-            && lines[reply].contains("turn=1"),
-        "the infer reply must carry the round's infer origin, text, and turn: {lines:#?}"
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("origin=Chat")),
-        "an infer round must not report a chat-origin reply: {lines:#?}"
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("thinking")),
-        "a reply with no reasoning must not report a thinking block: {lines:#?}"
-    );
-}
-
-#[tokio::test]
-async fn infer_round_reports_thinking_between_the_completed_turn_and_the_reply() {
-    // The thinking parity path: reasoning the backend supplied reaches the
-    // observer as `thinking`, ordered after the completed boundary and
-    // before the infer-origin `assistant_reply`.
-    let (out, lines) = run_infer_round(resp_text_with_reasoning("pong", "let me think")).await;
-    assert_eq!(out, "pong");
-
-    let completed = line_index(&lines, "Model turn completed");
-    let thinking = line_index(&lines, "thinking");
-    let reply = line_index(&lines, "assistant_reply");
-    assert_eq!(
-        thinking,
-        completed + 1,
-        "thinking must follow the completed turn: {lines:#?}"
-    );
-    assert_eq!(
-        reply,
-        completed + 2,
-        "the infer reply must follow the thinking block: {lines:#?}"
-    );
-    assert!(
-        lines[thinking].contains("text=let me think") && lines[thinking].contains("turn=1"),
-        "the thinking block must carry the reasoning text and turn: {lines:#?}"
-    );
-    assert!(
-        lines[reply].contains("text=pong") && lines[reply].contains("origin=Infer"),
-        "the infer reply must carry the round's text and infer origin: {lines:#?}"
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("origin=Chat")),
-        "an infer round must not report a chat-origin reply: {lines:#?}"
-    );
-}
+#[path = "debug_and_counts-infer-rounds.rs"]
+mod infer_rounds;

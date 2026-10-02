@@ -1,4 +1,4 @@
-//! Cloneable host facade for speech lifecycle, facts, and routes.
+//! Cloneable service facade for speech lifecycle, facts, and routes.
 
 use std::sync::Arc;
 

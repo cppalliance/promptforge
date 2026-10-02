@@ -6,9 +6,9 @@ use std::fmt;
 
 /// Why a path or glob pattern was rejected before any backend saw it.
 ///
-/// Every [`VfsError::InvalidPath`] carries one. The store facade
-/// re-exports this type and reuses the first nine reasons for its own
-/// path validation; the last two are reported by VFS sites alone:
+/// Every [`VfsError::InvalidPath`] carries one. The store view's
+/// logical-path validation reports the first nine reasons; the last two
+/// are reported by the glob and rename sites alone:
 /// [`PathReason::Wildcard`] for a glob pattern whose wildcard grammar is
 /// invalid, and [`PathReason::IntoDescendant`] for a rename into the
 /// source's own descendant.

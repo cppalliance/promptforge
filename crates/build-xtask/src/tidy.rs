@@ -1,5 +1,5 @@
 //! Tidy-style architecture checks for the workshop server decomposition,
-//! the harness family, the sans-I/O engine (manifest guard,
+//! the Harness family, the sans-I/O Engine (manifest guard,
 //! retired-symbol scan, and `test-support` leak guard, run from
 //! `engine_guards`), the `promptforge` and `harness` facades' source
 //! shape (run from `facade_shape`), and the `doc(hidden)` ban over both
@@ -37,7 +37,7 @@ const SERVICES: &[Tiered] = &[
 ];
 /// Tier 2: features. Depend on vocabulary and service crates. The
 /// sessions subsystem sits inside the server since Workshop moved onto the
-/// harness, so it has no crate here.
+/// Harness, so it has no crate here.
 const FEATURES: &[Tiered] = &[
     ("workshop-user-state", "user-state"),
     ("workshop-workspace", "workspace"),

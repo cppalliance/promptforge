@@ -130,15 +130,14 @@ fn list_from_section_ambiguous_error_is_loud() {
         synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
         synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
     ];
-    let error = super::super::engine::list_items_from_visible("### Dup", &visible)
+    let error = super::super::walk_target::list_items_from_visible("### Dup", &visible)
         .expect_err("two visible sections with one address must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
 }
 
 /// Two top-level sections sharing one name error loudly as ambiguous rather
-/// than silently resolving to the first (the retired `resolve_h2_section`
-/// first-match behavior).
+/// than silently resolving to the first.
 #[test]
 fn duplicate_top_level_section_names_error_loudly() {
     let sections = vec![
@@ -146,7 +145,7 @@ fn duplicate_top_level_section_names_error_loudly() {
         synthetic_section("Dup", 2, Vec::new(), Vec::new()),
         synthetic_section("Dup", 2, Vec::new(), Vec::new()),
     ];
-    let error = super::super::engine::resolve_jump_target("## Dup", &sections, &sections[0])
+    let error = super::super::walk_target::resolve_jump_target("## Dup", &sections, &sections[0])
         .expect_err("two visible sections with one name must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
@@ -164,8 +163,8 @@ return r[1].text\n\
 ```\n\n"
 );
 
-/// `models.infer(handle, ...)` works inside an arm: the arm installs the infer hook, so a
-/// worker's Lua can call the model directly.
+/// `models.infer(handle, ...)` works inside an arm, so a worker's Lua can call the model
+/// directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_works_inside_an_arm() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
@@ -204,10 +203,10 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 }
 
 /// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
-/// error through the infer hook.
+/// error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_without_a_client_surfaces_the_disabled_gateway() {
-    // A host without a client performs every `Chat` against the disabled
+    // A Harness without a client performs every `Chat` against the disabled
     // gateway: the round fails with that error and nothing reaches the
     // network, however the process environment is configured.
     let md = [
@@ -224,7 +223,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     let rendered = error.to_string();
     assert!(
         rendered.contains("gateway access is disabled"),
-        "the infer hook must surface the disabled-gateway completion error: {rendered}"
+        "an arm's models.infer must surface the disabled-gateway completion error: {rendered}"
     );
 }
 
@@ -251,7 +250,7 @@ return models.infer(models.get('ghost'), 'ping')\n\
 
 #[test]
 fn advance_turn_saturates_and_never_wraps_the_stored_counter() {
-    // FANOUT-008: the shared turn counter must saturate at u32::MAX rather than
+    // The shared turn counter must saturate at u32::MAX rather than
     // wrapping through fetch_add and reusing a turn index.
     let turns = AtomicU32::new(0);
     assert_eq!(advance_turn(&turns), 1);

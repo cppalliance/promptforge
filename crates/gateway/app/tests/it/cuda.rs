@@ -511,7 +511,7 @@ fn test_image_data_url() -> String {
     format!("data:image/png;base64,{}", base64_encode(&png_bytes))
 }
 
-/// Live end-to-end proof on a CUDA host: provisioning, server staging, CUDA
+/// Live end-to-end proof on a CUDA machine: provisioning, server staging, CUDA
 /// device report, GPU offload of both models, digest markers, MTP
 /// acceptance, cache reuse, a tool call, and a projector completion.
 #[tokio::test]

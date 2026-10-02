@@ -1,6 +1,6 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
-//! tool calls, and completion results. The constructors a host that ran no
-//! transport builds a completion from sit in the `canned` sibling.
+//! tool calls, and completion results. The constructors a Harness that
+//! ran no transport builds a completion from sit in the `canned` sibling.
 
 #[path = "wire-canned.rs"]
 mod canned;
@@ -13,7 +13,7 @@ use serde_json::Value;
 /// A plain `user` message serializes to just `{"role":..,"content":..}`; the
 /// optional `tool_call_id` and `tool_calls` fields are emitted only when set,
 /// which keeps the wire shape of ordinary messages unchanged.
-// `PartialEq`/`Eq` compare messages structurally (F9). `serde_json::Value`
+// `PartialEq`/`Eq` compare messages structurally. `serde_json::Value`
 // implements `Eq` (its `Number` compares/hashes float bits), so the
 // `tool_calls` field does not block a total equivalence.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -91,7 +91,7 @@ impl Message {
     }
 
     /// Returns the message text, or `""` when the content is a
-    /// content-parts array rather than a string (only the engine builds
+    /// content-parts array rather than a string (only the Engine builds
     /// that form).
     #[must_use]
     pub fn content(&self) -> &str {
@@ -103,15 +103,15 @@ impl Message {
 ///
 /// When serialized into a request the wrapping code turns this into
 /// `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
-// `PartialEq`/`Eq` compare schemas structurally (F9). `serde_json::Value`
+// `PartialEq`/`Eq` compare schemas structurally. `serde_json::Value`
 // implements `Eq`, so the `parameters` schema does not block equivalence.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ToolSchema {
-    /// The tool's wire name; the engine reads it through
+    /// The tool's wire name; the Engine reads it through
     /// [`crate::detail::tool_schema_name`].
     pub(crate) name: String,
-    /// A one-sentence description shown to the model; the engine reads it
+    /// A one-sentence description shown to the model; the Engine reads it
     /// through [`crate::detail::tool_schema_description`].
     pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
@@ -120,10 +120,10 @@ pub struct ToolSchema {
 
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
-/// `ToolSchema` is built only inside the engine (from the executor's `Tool`
+/// `ToolSchema` is built only inside the Engine (from the executor's `Tool`
 /// contract, through [`crate::detail::tool_schema_new`]), so the raw-`Value`
-/// validation and its error stay off the facade (client F8, lib F3). The
-/// type is public so `promptforge-engine` can box it as an error source.
+/// validation and its error stay off the facade. The type is public so
+/// `promptforge-engine` can box it as an error source.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ToolSchemaError {
@@ -146,8 +146,9 @@ pub enum ToolSchemaError {
 /// A tool invocation requested by the model.
 ///
 /// `OpenAI` returns tool calls with `function.arguments` as a JSON-encoded
-/// string; this type holds that string parsed into a [`Value`] (falling back to
-/// a string `Value` if it is not valid JSON).
+/// string; the wire decoder stores that string decoded into a JSON object,
+/// and fails the turn when the arguments are missing, not a string, not
+/// valid JSON, or not an object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolCall {
@@ -156,7 +157,7 @@ pub struct ToolCall {
     /// The name of the tool to invoke.
     pub(crate) name: String,
     /// The parsed arguments for the call. The raw wire JSON stays
-    /// crate-private (F8): hosts inspect arguments through
+    /// crate-private: the Harness inspects arguments through
     /// [`ToolCall::arguments`].
     pub(crate) arguments: Value,
 }
@@ -176,7 +177,7 @@ impl ToolCall {
 
     /// Returns a typed, borrowed view of the call's arguments.
     ///
-    /// F8: the raw wire JSON - a [`serde_json::Value`] - stays crate-private;
+    /// The raw wire JSON - a [`serde_json::Value`] - stays crate-private;
     /// callers inspect the arguments through [`ToolArguments`] (canonical
     /// JSON text, key presence, argument names).
     #[must_use]
@@ -189,9 +190,10 @@ impl ToolCall {
 
 /// A typed, borrowed view over one [`ToolCall`]'s arguments.
 ///
-/// Tool-call arguments arrive as arbitrary wire JSON; this view exposes them
-/// without leaking a [`serde_json::Value`] into the public API (F8). The raw
-/// `Value` is confined to crate-private wire code.
+/// The arguments are always a JSON object: the wire decoder and
+/// [`ToolCall::from_parts`] both refuse any other value. This view exposes
+/// them without leaking a [`serde_json::Value`] into the public API. The
+/// raw `Value` is confined to crate-private wire code.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ToolArguments<'a> {
@@ -199,14 +201,13 @@ pub struct ToolArguments<'a> {
 }
 
 impl ToolArguments<'_> {
-    /// Returns the arguments serialized as canonical JSON text.
+    /// Returns the arguments object serialized as canonical JSON text.
     #[must_use]
     pub fn to_json_string(&self) -> String {
         self.value.to_string()
     }
 
-    /// Returns whether the call's arguments are empty (a `null` payload or
-    /// an empty JSON object).
+    /// Returns whether the arguments object has no keys.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.value {
@@ -216,8 +217,7 @@ impl ToolArguments<'_> {
         }
     }
 
-    /// Returns whether a top-level argument named `key` is present, when the
-    /// arguments are a JSON object.
+    /// Returns whether the arguments object has a top-level key named `key`.
     #[must_use]
     pub fn contains(&self, key: &str) -> bool {
         self.value
@@ -225,8 +225,7 @@ impl ToolArguments<'_> {
             .is_some_and(|map| map.contains_key(key))
     }
 
-    /// Returns the top-level argument names, when the arguments are a JSON
-    /// object (an empty iterator otherwise).
+    /// Returns the top-level argument names of the arguments object.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.value
             .as_object()
@@ -238,7 +237,7 @@ impl ToolArguments<'_> {
 /// The outcome of a completion round trip.
 ///
 /// `Eq` holds because [`ToolCall`] arguments are a [`serde_json::Value`],
-/// which implements `Eq` (F9), so structural equivalence over the outcome is
+/// which implements `Eq`, so structural equivalence over the outcome is
 /// total.
 ///
 /// # Examples
@@ -282,7 +281,7 @@ pub enum CompletionResult {
 /// metadata - the serving model plus the canonical metrics vocabulary
 /// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
 /// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
-/// accounting. Hosts read through the accessor methods.
+/// accounting. Outside crates read through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
@@ -305,7 +304,7 @@ pub struct Completion {
     pub(crate) client_timing: Option<ClientTiming>,
     /// One line per response metadata section that was present but
     /// malformed and degraded to `None`; empty for a well-formed body. The
-    /// engine reports each line as a `model_metadata_degraded` event.
+    /// Engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
     /// The JSON body sent to the gateway.
     pub(crate) request_body: Value,

@@ -1,4 +1,4 @@
-//! Sandbox hardening for section VMs: global removal, the instruction-budget hook, and scalar return rendering.
+//! Sandbox hardening for section VMs: the `_G` guard, global removal, the instruction-budget hook, and scalar return rendering.
 
 use std::sync::OnceLock;
 
@@ -13,11 +13,18 @@ use super::{
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
 /// never loaded.
 ///
+/// First installs the `_G` guard with its `setmetatable` and
+/// `getmetatable` replacements ([`crate::globals`]).
+///
 /// Also wraps `table.concat` so a value with a `__tostring` metamethod
-/// (fanout result objects, host userdata) coerces like `tostring`, keeping
+/// (fanout result objects, Engine userdata) coerces like `tostring`, keeping
 /// existing `table.concat(results)` callers working with structured
 /// results. Plain tables, booleans, and nil still error as stock Lua would.
 pub(crate) fn harden(lua: &Lua) -> Result<()> {
+    // The guard captures the raw functions removed below, and every later
+    // chunk, the `table.concat` wrapper included, must capture the
+    // replacements rather than the base functions.
+    crate::globals::install(lua)?;
     let globals = lua.globals();
     for name in [
         "load",
@@ -83,7 +90,7 @@ end
 /// loop is legal and only the run's cancel flag aborts it. The flag is the
 /// run's synchronous [`CancelHandle`], installed once by the executor
 /// through [`set_cancel`](Self::set_cancel); a VM no executor claimed
-/// (a test fixture, the legacy chunk path) is never cancelled.
+/// (a test fixture, the direct chunk path) is never cancelled.
 ///
 /// Instruction hooks are per-coroutine in PUC Lua: the hook installed on the
 /// main state at construction never fires inside a resumed coroutine, so

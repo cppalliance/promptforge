@@ -1,14 +1,14 @@
-//! The bindings the server pushes through the harness's public API as
+//! The bindings the server pushes through the Harness's public API as
 //! data: the gateway endpoint and bearer, the chat-capable model
-//! catalog, and the host snapshot a run's `ui()` and model resolution
+//! catalog, and the Host snapshot a run's `ui()` and model resolution
 //! read (the menu's selected model and the workspace's granted roots).
 //!
-//! The harness never resolves a gateway, reads a menu, or names a
+//! The Harness never resolves a gateway, reads a menu, or names a
 //! workspace crate; it observes generation changes through the values
 //! pushed here. [`push_bindings`] reads every source through the
-//! registry's collections and pushes all three, host first, so the
-//! binding that triggers a relaunch never finds a stale selection behind
-//! it. [`forward`] is the long-lived half: it wakes on the gateway
+//! registry's collections and pushes all three, the Host snapshot first,
+//! so the binding that triggers a relaunch never finds a stale selection
+//! behind it. [`forward`] is the long-lived half: it wakes on the gateway
 //! binding's replacement watch, the catalog's chat-generation watch, the
 //! menu's snapshot bus, and the workspace's grant-set generation watch,
 //! and pushes again.
@@ -20,10 +20,10 @@ use workshop_menu::{CatalogBus, MenuHandles};
 use workshop_registry::{Registry, WorkspaceRoots};
 use workshop_support::recv_or_pending;
 
-/// Pushes the server's current host snapshot, chat catalog, and gateway
+/// Pushes the server's current Host snapshot, chat catalog, and gateway
 /// binding into `harness`, each read through `registry` at this moment.
-/// An unregistered subsystem leaves its binding at whatever the harness
-/// last saw (the host snapshot's absent parts read as `null`).
+/// An unregistered subsystem leaves its binding at whatever the Harness
+/// last saw (the Host snapshot's absent parts read as `null`).
 pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     harness.set_host(host_snapshot(registry));
     if let Some(menu) = registry.state::<MenuHandles>() {
@@ -34,10 +34,10 @@ pub(crate) fn push_bindings(registry: &Registry, harness: &Harness) {
     }
 }
 
-/// The host snapshot: `selected_model` from the menu's retained workbench
+/// The Host snapshot: `selected_model` from the menu's retained workbench
 /// state and the granted workspace roots from the registry's roots slot,
 /// so this crate reads the workspace through the slot the workspace
-/// subsystem registered, as the sessions did before the harness.
+/// subsystem registered, as the sessions did before the Harness.
 fn host_snapshot(registry: &Registry) -> HostSnapshot {
     let selected_model = registry
         .state::<MenuHandles>()
@@ -54,7 +54,7 @@ fn host_snapshot(registry: &Registry) -> HostSnapshot {
 
 /// The chat catalog binding: the retained chat-capable generation, or,
 /// when no chat-capable model exists, the current generation with an
-/// empty list - which the harness reads as no catalog to launch under.
+/// empty list - which the Harness reads as no catalog to launch under.
 fn catalog_binding(catalog: &CatalogBus) -> CatalogBinding {
     match catalog.latest_chat() {
         Some(chat) => CatalogBinding {
@@ -78,16 +78,16 @@ fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
     }
 }
 
-/// Keeps the harness's bindings current: pushes all three again whenever
+/// Keeps the Harness's bindings current: pushes all three again whenever
 /// the gateway binding is replaced, the chat-capable catalog changes
 /// generation, the menu publishes a snapshot, or the workspace's granted
-/// roots change. Returns at once when no harness is registered; otherwise
-/// it reads the harness once and runs until every source has closed (the
+/// roots change. Returns at once when no Harness is registered; otherwise
+/// it reads the Harness once and runs until every source has closed (the
 /// server's state is gone) or the graceful-shutdown handle aborts it.
 ///
 /// A fresh watch receiver treats the current value as seen, so a change
 /// landing between the composition root's push and these subscriptions
-/// would otherwise reach the harness only on the next change: the first
+/// would otherwise reach the Harness only on the next change: the first
 /// push happens here, after every subscription is taken.
 pub(crate) async fn forward(registry: Registry) {
     let Some(harness) = registry.state::<Harness>() else {

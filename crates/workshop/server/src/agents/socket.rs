@@ -8,7 +8,7 @@
 //! transcript from index zero and re-announces every unresolved input
 //! wait. While attached, the loop streams four families: durable
 //! `agent_event` frames drained from the session's transcript by a
-//! per-client cursor (the harness's event broadcast is only the wakeup,
+//! per-client cursor (the Harness's event broadcast is only the wakeup,
 //! so a lagged receiver loses nothing), ephemeral `agent_delta` frames
 //! from the session's delta channel (drops repair via the superseding
 //! event), the durable `input_required` / `input_cancelled` wait frames,
@@ -21,7 +21,7 @@
 //!
 //! One task owns the socket: a single `select!` loop reads and writes
 //! the same handle, per the server's socket rule; the session table
-//! behind it is the harness's, [`super`]'s documented carve-out.
+//! behind it is the Harness's, [`super`]'s documented carve-out.
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -273,7 +273,7 @@ async fn handle_frame(
             if let Some(attached) = attached.as_ref() {
                 // Cancellation is a stop reason: no reply frame of any
                 // kind. Pending waits announce their own deaths and the
-                // relaunched run re-asks. The relaunch reads the host
+                // relaunched run re-asks. The relaunch reads the Host
                 // snapshot, so the server's current state is pushed first.
                 if let Some(agents) = state.agents() {
                     agents.sync_bindings();
@@ -395,7 +395,7 @@ async fn handle_open(
 /// The text of the error frame reporting a refused launch: the refusal
 /// and its cause chain. A refusal's `Display` is only its own
 /// message, so a run log that cannot open would otherwise reach the
-/// client as the bare "run log database" with the engine's diagnosis gone.
+/// client as the bare "run log database" with the database's diagnosis gone.
 fn refusal_text(refusal: &LaunchRefusal) -> String {
     display_chain(refusal)
 }

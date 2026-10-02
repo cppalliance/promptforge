@@ -221,7 +221,7 @@ export class RunPanel extends WorkshopPart {
     }
     this.dialog?.dispose();
     this.dialog = showPanelDialog({
-      host: this.element,
+      container: this.element,
       classPrefix: "ws-run-choose",
       titleId: "run-choose-title",
       title: "Choose Prompt",
@@ -265,7 +265,7 @@ export class RunPanel extends WorkshopPart {
     }
     this.dialog?.dispose();
     this.dialog = showPanelDialog({
-      host: this.element,
+      container: this.element,
       classPrefix: "ws-run-input",
       titleId: "run-input-title",
       title: "Choose Input",

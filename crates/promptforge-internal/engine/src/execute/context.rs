@@ -6,6 +6,7 @@
 //! parameter. Per-call data (a section, a `var` snapshot) stays
 //! in parameters or on the per-section frame.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
@@ -13,13 +14,14 @@ use std::sync::{Arc, Mutex};
 #[path = "context-bound.rs"]
 mod bound;
 
+use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::{Emitter, EventSink};
 use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
 
 use crate::Result;
 use crate::cancel::CancelHandle;
-use crate::lua::{LuaProgram, ToolSet, ToolView};
+use crate::lua::{LuaProgram, ToolBinding, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
 use crate::untrusted::GuardNonce;
@@ -28,7 +30,7 @@ use promptforge_vfs::{Access, VfsRef};
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::sys_json;
-use bound::{bound_model_set, bound_tool_set, derive_argv};
+use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv, frontmatter_aliases};
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -61,8 +63,9 @@ pub(crate) struct RunState {
     argv: Option<Arc<serde_json::Value>>,
     /// The run's resource limits.
     limits: RunLimits,
-    /// The run's event buffer, shared by every chain's emitter and every
-    /// spawned leaf task, drained by the driver after each dispatch round.
+    /// The run's event buffer, shared by every chain's emitter, spawned
+    /// task chains' included, and drained once per `step` into the batch
+    /// handed to the Harness.
     events: EventSink,
     /// This context's task-scoped emitter: the root task's at
     /// construction, a spawned chain's own after [`with_task`](Self::with_task).
@@ -75,12 +78,12 @@ pub(crate) struct RunState {
     /// same flag the activated capabilities and the run's `cancel` share.
     cancel: CancelHandle,
     /// Test-only: a copy of every drained event, so a test can assert on
-    /// the values themselves - their provenance included - rather than on
-    /// what the host observer was handed.
+    /// the values themselves - their provenance included - without
+    /// collecting each step's batch.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<Event>>>>,
-    /// The model-turn counter this context advances (the run's, or one
-    /// shared by all arms of a fanout).
+    /// The model-turn counter this context advances: the run's, or a
+    /// spawned task chain's own from [`with_task`](Self::with_task).
     turns: Arc<AtomicU32>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library, so
@@ -94,6 +97,11 @@ pub(crate) struct RunState {
     /// The concrete handle behind `tools`, shared with every section VM
     /// (H1 included). Readers outside the VM layer go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
+    /// Every tool in the prepared catalog, bound under its full id: the
+    /// fallback a script `tools.call` resolves when no frontmatter alias
+    /// matches. Kept apart from `tool_set`, the set section VMs install
+    /// globals and scopes from, so a full id never becomes either.
+    catalog_bindings: Arc<BTreeMap<String, ToolBinding>>,
     /// The run's model set as a read-only view: built from the prepared
     /// bindings at construction. The only writer is `models.default` (a
     /// prompt-wide fact) through the concrete handle the section VMs
@@ -105,9 +113,16 @@ pub(crate) struct RunState {
     /// The run's `started_at` rendered as RFC 3339, stamped into every
     /// section's `sys.when`, the H1 pass included.
     when: Arc<str>,
-    /// The run's host-state snapshot; its presence gives every section VM
+    /// The run's Host-state snapshot; its presence gives every section VM
     /// the `ui()` global and the raw-model-id `models.get` fallback.
     ui: Option<Arc<serde_json::Value>>,
+    /// The run's capability preludes, in install order: every section VM
+    /// installs each one before the shared library replays.
+    preludes: Arc<[Prelude]>,
+    /// Every tool and model alias the prompt's frontmatter declares: the
+    /// names a prelude's globals must not take, because the alias globals
+    /// install after the preludes and would silently replace them.
+    frontmatter_aliases: Arc<[String]>,
     /// Test-only: installs the raw `tools.call_as_model` shim in every
     /// section VM, so a fixture section can yield one model-issued
     /// `tool_call` at the scheduler's dispatch arm without going through a
@@ -122,7 +137,9 @@ impl RunState {
     /// and model sets - built from the prepared bindings on `ctx` (empty on
     /// a caller-built context that never passed through
     /// [`Environment::prepare`](super::Environment::prepare), which runs
-    /// capability-free); the nonce derives from `ctx`'s seed and `when`
+    /// capability-free) - the full-id bindings of `ctx`'s catalog, and the
+    /// prompt's frontmatter alias names that `ctx`'s preludes are checked
+    /// against; the nonce derives from `ctx`'s seed and `when`
     /// renders `ctx`'s `started_at`, so two contexts over the same inputs
     /// agree on both.
     #[must_use]
@@ -136,7 +153,7 @@ impl RunState {
         let tool_set = Arc::new(Mutex::new(bound_tool_set(&prompt, ctx)));
         let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
-        // The root task's counter starts where the host says: past the
+        // The root task's counter starts where the Harness says: past the
         // parse events it logged ahead of the run, or at zero.
         let events = EventSink::seeded(ctx.provenance_start);
         // The root chain - the main walk - is task `0`.
@@ -147,6 +164,7 @@ impl RunState {
             ctx.report_debug,
         ));
         let derived_argv = derive_argv(&prompt, args).map(Arc::from);
+        let frontmatter_aliases = frontmatter_aliases(&prompt).into();
         Self {
             prompt,
             nonce: GuardNonce::from_seed(ctx.seed),
@@ -164,10 +182,13 @@ impl RunState {
             shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
+            catalog_bindings: Arc::new(catalog_bindings(ctx)),
             models: model_set.clone(),
             model_set,
             when: Arc::from(ctx.started_at.to_rfc3339()),
             ui: ctx.ui.clone().map(Arc::new),
+            preludes: ctx.preludes.as_slice().into(),
+            frontmatter_aliases,
             #[cfg(test)]
             raw_shims: false,
         }
@@ -248,7 +269,7 @@ impl RunState {
 
     /// Drains the run's event buffer: every event pushed since the last
     /// drain, in push order. The run's `step` calls this once per step and
-    /// hands the batch to the host.
+    /// hands the batch to the Harness.
     pub(crate) fn take_events(&self) -> Vec<Event> {
         let events = self.events.take();
         #[cfg(test)]
@@ -282,6 +303,13 @@ impl RunState {
             self.tools.bindings()?,
             self.tools.always()?,
         ))
+    }
+
+    /// The binding for the catalog tool whose full id is `id`, the
+    /// fallback a script `tools.call` resolves when no frontmatter alias
+    /// matches.
+    pub(crate) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
+        self.catalog_bindings.get(id)
     }
 
     /// The run's model set, read-only.
@@ -344,8 +372,9 @@ impl RunState {
         ctx
     }
 
-    /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, the emitter, `shared`, the shim caps) from
+    /// The borrowed VM-setup inputs both section drivers share, sourcing the
+    /// run-wide slots (`args`, the emitter, `shared`, the shim caps, the
+    /// preludes and the alias names they are checked against) from
     /// this context; the driver supplies only its own deltas: the `sys`
     /// JSON, the seed, the chain step's access capability (the walk's own,
     /// a call chain's borrowed parent capability, a task chain's spawned
@@ -369,6 +398,8 @@ impl RunState {
             shared: &self.shared,
             max_tool_iterations: self.max_tool_iterations(),
             ui: self.ui.as_ref(),
+            preludes: &self.preludes,
+            frontmatter_aliases: &self.frontmatter_aliases,
             #[cfg(test)]
             raw_shims: self.raw_shims,
         }
@@ -416,10 +447,23 @@ impl fmt::Debug for RunState {
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
+            .field(
+                "catalog_bindings",
+                &self.catalog_bindings.keys().collect::<Vec<_>>(),
+            )
             .field("models", &"<dyn ModelView>")
             .field("model_set", &self.model_set)
             .field("when", &self.when)
             .field("ui", &self.ui)
+            .field(
+                "preludes",
+                &self
+                    .preludes
+                    .iter()
+                    .map(Prelude::capability)
+                    .collect::<Vec<_>>(),
+            )
+            .field("frontmatter_aliases", &self.frontmatter_aliases)
             .finish()
     }
 }

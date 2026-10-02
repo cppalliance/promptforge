@@ -1,17 +1,17 @@
-//! Engine manifest guard: the sans-I/O engine crates declare no async
+//! Engine manifest guard: the sans-I/O Engine crates declare no async
 //! runtime and no HTTP client.
 //!
-//! The engine (the `promptforge` facade and the crates under
+//! The Engine (the `promptforge` facade and the crates under
 //! `crates/promptforge-internal/`) is a deterministic state machine; every
-//! wait becomes an effect the harness performs. Its manifests therefore may
+//! wait becomes an effect the Harness performs. Its manifests therefore may
 //! not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` in
 //! `[dependencies]`, `[build-dependencies]`, or the target-specific forms
-//! of either. `[dev-dependencies]` are outside the guard: the engine's own
-//! suites drive it from a tokio test harness against a mock gateway.
+//! of either. `[dev-dependencies]` are outside the guard: the Engine's own
+//! suites drive it from the tokio test driver against a mock gateway.
 //!
 //! Exemption: an entry marked `optional = true` that only the
 //! `test-support` feature enables is exempt, so the tokio test driver can
-//! ship behind that feature for the engine's own suite and the companion
+//! ship behind that feature for the Engine's own suite and the companion
 //! crates' suites. "Only" is transitive: a feature that enables
 //! `test-support` (such as `default`) would enable the dependency too, so
 //! its presence voids the exemption. The exemption is safe only while
@@ -27,7 +27,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The crates an engine manifest may not declare outside `[dev-dependencies]`.
+/// The crates an Engine manifest may not declare outside `[dev-dependencies]`.
 const FORBIDDEN: [&str; 4] = ["tokio", "tokio-util", "async-trait", "reqwest"];
 
 /// The one feature that may gate an optional forbidden dependency.
@@ -36,7 +36,7 @@ pub(crate) const EXEMPTING_FEATURE: &str = "test-support";
 /// The dependency tables the guard scans, directly and under `[target]`.
 const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 
-/// One finding from scanning an engine manifest.
+/// One finding from scanning an Engine manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Violation {
     /// A forbidden crate declared outside `[dev-dependencies]`.
@@ -78,7 +78,7 @@ impl fmt::Display for Violation {
     }
 }
 
-/// Scans one engine manifest for forbidden dependencies. A manifest that
+/// Scans one Engine manifest for forbidden dependencies. A manifest that
 /// cannot be read or parsed yields one [`Violation::Unreadable`].
 #[must_use]
 pub(crate) fn forbidden_engine_dependencies(manifest: &Path) -> Vec<Violation> {

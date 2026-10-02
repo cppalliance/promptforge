@@ -16,7 +16,7 @@ pub use crate::app::test_helpers::spawn_gateway;
 #[cfg(feature = "test-fixtures")]
 pub use workshop_gateway::test_gateway::{ValidatedGateway, run_validated_gateway_fixture_process};
 
-/// Returns the host-only Gateway publisher from fixture state.
+/// Returns the embedding binary's restricted Gateway publisher from fixture state.
 #[cfg(feature = "test-fixtures")]
 #[must_use]
 pub fn gateway_updater(state: &crate::AppState) -> crate::GatewayUpdater {
@@ -41,7 +41,7 @@ pub fn replace_gateway(
 
 /// Starts the sessions subsystem's bindings forwarder over fixture state:
 /// the registered background task that pushes every gateway, catalog,
-/// menu, and workspace-roots change through the harness's public API. The server
+/// menu, and workspace-roots change through the Harness's public API. The server
 /// spawns it with serving; a test that binds the router directly has no
 /// serving loop, so it spawns the forwarder here. The task ends with the
 /// state.

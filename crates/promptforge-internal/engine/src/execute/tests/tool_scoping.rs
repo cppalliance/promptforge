@@ -70,8 +70,8 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     );
 
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, host) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the always-scoped alias dispatches");
@@ -119,8 +119,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     // The H2 `tools.add` lands in the section's tool runtime; the scope
     // snapshot over it includes the added alias.
@@ -147,8 +147,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     // tool behind it.
     let md = loop_prompt(&format!("tools.add('section_tool')\n{LOOP_TO_TEXT}"));
     let prompt = parse(&md);
-    let (ctx, host) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = loop_context(&prompt, tools);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the section-scoped alias dispatches");

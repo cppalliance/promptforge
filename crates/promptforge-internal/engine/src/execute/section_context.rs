@@ -31,7 +31,7 @@ use super::context::RunState;
 use promptforge_types::emitter::Emitter;
 
 /// The seeds a spawned task chain's first section entry receives beyond the
-/// shared host contract: `tasks.spawn`'s `opts.item` (installed as the
+/// shared Engine values: `tasks.spawn`'s `opts.item` (installed as the
 /// `item` global and the `{{ item }}` substitution source) and `opts.index`
 /// (reported as `sys.index`). Empty for every other entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -65,10 +65,9 @@ pub(crate) struct LocalCall {
 /// No derives: the VM and the trait-object handles support neither `Clone`
 /// nor `Debug`.
 pub(crate) struct SectionContext {
-    /// The frame's engine: the owned section VM, `Some` from construction
+    /// The frame's VM: the owned section VM, `Some` from construction
     /// until the frame's `Drop` takes it for the teardown boundary.
-    /// `SectionVm` stays a standalone type in `lua/` with its own test
-    /// suite.
+    /// `SectionVm` is `promptforge-lua`'s type, tested in that crate.
     vm: Option<SectionVm>,
     /// The section's own name, retained so `Drop` reports the teardown
     /// boundary and the completion observation without a parameter.
@@ -117,7 +116,7 @@ impl SectionContext {
     /// before its drop: the read goes through the live VM.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) if the VM's `var` cannot be
+    /// Returns [`Error::Lua`] if the VM's `var` cannot be
     /// converted back to JSON (the write guard keeps this conversion from
     /// failing in practice).
     pub(crate) fn read_var(&mut self) -> Result<serde_json::Value> {
@@ -135,7 +134,7 @@ impl SectionContext {
     /// repair. `None` reads as nil.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`](crate::Error::Lua) when H1 left `argv` as
+    /// Returns [`Error::Lua`] when H1 left `argv` as
     /// non-JSON data, or [`Error::Internal`] if the VM is gone.
     pub(crate) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
         self.vm()?.argv_json().map_err(Error::from)
@@ -211,7 +210,7 @@ impl SectionContext {
     /// driver thread.
     ///
     /// # Errors
-    /// Returns the [`Error`](crate::Error) of the scope install or the
+    /// Returns the [`Error`] of the scope install or the
     /// alias seeding.
     pub(crate) fn script_call_counts(
         &mut self,

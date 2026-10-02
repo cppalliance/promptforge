@@ -30,7 +30,7 @@ Scratch for review findings: `cabinet/_scratch/vibe-review-promptforge-dev/vibe-
 
 ## 1. What you are building
 
-A small author-facing binary that runs one PromptForge prompt against an already-running gateway, plus a slimmer scenario harness that still self-hosts a temporary 0.6B gateway for CI. Prompt authors declare context / thinking / max_tokens on the prompt; the CLI does not.
+A small author-facing binary that runs one PromptForge prompt against an already-running gateway, plus slimmer scenario fixtures that still run their own temporary 0.6B gateway for CI. Prompt authors declare context / thinking / max_tokens on the prompt; the CLI does not.
 
 ## 2. High-level components (dependency order)
 
@@ -152,7 +152,7 @@ Verify: scheduled (first component complete).
 
 ### Step 2 - Slim `promptforge-core-tests` to scenarios + fixtures
 
-Intent: this crate is only the offline fixture suite + explicit 0.6B scenario harness.
+Intent: this crate is only the offline fixture suite + explicit 0.6B scenario fixtures.
 
 - Delete `dev` command path and unused modules / flags / `prompts/dev/` / Dev profile variants and their tests.
 - Keep Scenario gateway spawn for 0.6B only.

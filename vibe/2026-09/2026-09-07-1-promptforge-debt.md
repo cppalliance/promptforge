@@ -179,7 +179,7 @@ isProject: false
   - `cargo run -p build-user-guide` regenerates `guide/src/SUMMARY.md`, per-part landing pages, and the four single-file guide exports.
 - Focused test command patterns:
   - Rust unit or named test: `cargo test -p <crate> <test-name>`.
-  - Rust integration harness: `cargo test -p <crate> --test it <test-name>`. Gateway, `gateway-stt`, and `workshop-server` use `tests/it/main.rs` as the harness with responsibility-named modules below it.
+  - Rust integration tests: `cargo test -p <crate> --test it <test-name>`. Gateway, `gateway-stt`, and `workshop-server` use `tests/it/main.rs` as the test root with responsibility-named modules below it.
   - STT architecture gates: `node tools/check-stt-architecture.test.mjs`, `node tools/check-stt-architecture.mjs`, and `cargo test -p gateway-stt --test it architecture`.
   - STT feature-gated fixtures: `cargo test -p gateway-stt -F test-fixtures`, `cargo test -p gateway-stt-engine -F test-fixtures`, `cargo test -p gateway-stt-backend-whisper -F test-fixtures`.
   - Native Whisper tests are `#[ignore]` by default: same package command with `-- --ignored --test-threads=1`; require `PROMPTFORGE_WHISPER_LIBRARY` (or model/audio overrides) plus gitignored fixtures under `local/stt-fixtures/` or caller-specific fallback roots.
@@ -218,7 +218,7 @@ isProject: false
 - Component boundaries (from `vibe/archdoc.md` and current manifests):
   - executor (`promptforge`, `promptforge-core`, parser, store, Lua, agent, tools): depends on gateway protocol, store, shared substrate.
   - gateway (`gateway`, `gateway-config`, `gateway-local`, `gateway-logging`, `gateway-routing`, `gateway-stt`, `gateway-web-search`): independent server process; sole holder of vendor credentials (A2); depends on shared substrate only among cross-product crates.
-  - workshop UI (`workshop`, `workshop-server`, `workshop-server/ui`): desktop shell hosts `workshop-server` in-process and attaches to gateway through `shared-sidecar`; depends on executor support crates and shared substrate, not on `gateway-stt`.
+  - workshop UI (`workshop`, `workshop-server`, `workshop-server/ui`): desktop shell runs `workshop-server` in-process and attaches to gateway through `shared-sidecar`; depends on executor support crates and shared substrate, not on `gateway-stt`.
   - STT stack: `gateway-stt` orchestrates HTTP/WebSocket speech routes and session state; depends on `gateway-stt-engine` (backend-neutral workers) and `gateway-stt-backend-whisper` (Whisper policy), which depends on `gateway-whisper-ffi` (runtime-loaded ABI leaf). No STT crate depends on `workshop-server`.
   - Realtime paths at endpoint: `gateway/tests/it/realtime_stt.rs`, `gateway-stt/tests/it/realtime_session.rs` and `realtime_fixtures.rs`, `workshop-server/src/routes/realtime.rs`, `workshop-server/tests/it/realtime_relay.rs` and `chat_gate.rs`, `workshop-server/ui/src/services/realtime-transcription.ts`, `workshop-server/ui/src/ui/realtime-stt.ts`.
   - Sidecar seam: `shared-sidecar` is the sole connection-file implementation; gateway writes, workshop and workshop-server read.

@@ -34,12 +34,14 @@ use crate::common::{
 };
 
 /// The echo agent: a Markdown prompt on the unified runtime that loops
-/// on `user_input`, runs one chat round per input against the fixture's
+/// on `input.ask()`, runs one chat round per input against the fixture's
 /// `test-model`, and returns on `quit`.
 const ECHO_MD: &str = r"---
 name: echo
 description: The echo test agent on the unified runtime.
 promptforge: 0
+capabilities:
+  - promptforge/user-input
 ---
 
 # Echo
@@ -49,10 +51,7 @@ promptforge: 0
 ```lua
 local history = messages.new()
 while true do
-    local text, available = user_input()
-    if not available then
-        return
-    end
+    local text = input.ask()
     if text == 'quit' then
         return
     end
@@ -158,7 +157,7 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
     let (state, base) = spawn_router(&config).await;
     // The router is bound without the serving loop that spawns the
     // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the harness is spawned here.
+    // replacements into the Harness is spawned here.
     spawn_bindings_forwarder(&state);
     // The session's model catalog is built from the retained catalog at
     // launch, so the catalog lands before any test launches.

@@ -92,4 +92,4 @@ Remove the post-run `capture.flush(...)` call once write-through is live.
 - Concurrent fanout / gateway `--parallel`
 - Core `Observer` / `DebugCapture` API changes
 - Streaming tokens inside a single turn (still one JSON file per completed request/response)
-- MCP / CLI hosts (they do not own this dump path)
+- MCP / CLI Hosts (they do not own this dump path)

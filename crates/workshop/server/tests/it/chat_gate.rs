@@ -6,7 +6,7 @@
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
 //! a Markdown prompt on the unified runtime. A session's transcript sits
-//! in memory until the harness's run log lands, so no gate here spans a
+//! in memory until the Harness's run log lands, so no gate here spans a
 //! server restart; reconnect within one process is the agents suite's.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
@@ -144,7 +144,7 @@ async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str
     let (state, ws_base) = spawn_router(&config).await;
     // The router is bound without the serving loop that spawns the
     // registered tasks, so the forwarder that pushes gateway and catalog
-    // replacements into the harness is spawned here.
+    // replacements into the Harness is spawned here.
     spawn_bindings_forwarder(&state);
     state.catalog().publish(
         models

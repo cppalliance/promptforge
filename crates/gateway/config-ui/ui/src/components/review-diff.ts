@@ -17,8 +17,8 @@ function renderValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-/** Opens the Review dialog over `host` with the diff `rows`. */
-export function openReviewDiff(host: HTMLElement, rows: DiffRow[]): void {
+/** Opens the Review dialog over `container` with the diff `rows`. */
+export function openReviewDiff(container: HTMLElement, rows: DiffRow[]): void {
   const overlay = document.createElement("div");
   overlay.className = "overlay review-overlay";
 
@@ -91,7 +91,7 @@ export function openReviewDiff(host: HTMLElement, rows: DiffRow[]): void {
   actions.append(close);
   card.append(actions);
   overlay.append(card);
-  host.append(overlay);
+  container.append(overlay);
 
   // Duck-typed: the HTMLElement global is absent under node --test.
   const opener = document.activeElement as HTMLElement | null;

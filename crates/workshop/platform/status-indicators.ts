@@ -28,12 +28,12 @@ export interface StatusIndicatorHandle extends IDisposable {
   set(state: IndicatorState, tooltip?: string): void;
 }
 
-/** The indicator host consumers resolve from the registry. */
+/** The indicator slots, which consumers resolve from the registry. */
 export interface StatusIndicators {
   /** Adds one indicator in `order`; throws on a duplicate id. */
   register(options: StatusIndicatorOptions): StatusIndicatorHandle;
 }
 
-/** The registry token for the composition root's indicator host. */
+/** The registry token for the indicator slots the composition root registers. */
 export const STATUS_INDICATORS: ServiceToken<StatusIndicators> =
   createServiceToken<StatusIndicators>("workshop.statusIndicators");

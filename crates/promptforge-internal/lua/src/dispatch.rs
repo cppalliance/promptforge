@@ -3,12 +3,12 @@
 //! [`prepare_dispatch`] is the one place a bound tool's answer composes the
 //! per-VM call counts, the succeeded/failed observation, the untrusted nonce
 //! wrap, and the `ToolResult` report. It is synchronous and takes the tool's
-//! outcome as a value, so a host that performed the call elsewhere applies
+//! outcome as a value, so the Harness performs the call and the Engine applies
 //! the same rules when the answer arrives; [`prepare_model_dispatch`] is
 //! the same body under the model-issued rule (a tool's own failure resumes
 //! as untrusted failure text, and the `ToolResult` fires under the model's
 //! call id). Nothing here performs a call: the executor issues the call as
-//! an effect, a host performs it, and one of the two bodies applies the
+//! an effect, the Harness performs it, and one of the two bodies applies the
 //! rules when the answer lands. Keeping both bodies here - the crate every
 //! executor already depends on - is what stops dispatch semantics from
 //! forking.
@@ -28,7 +28,7 @@ use crate::{ToolBinding, ToolCallCounts};
 /// because it owns the model-issued call id the script path lacks. The
 /// script report's `tool_call_id` is therefore empty. The chain and depth
 /// are not part of the report: the emitter
-/// stamps every event with its provenance, which is what a host groups by.
+/// stamps every event with its provenance, which is what the Host groups by.
 #[derive(Debug, Clone, Copy)]
 pub struct ScriptReport {
     /// The section's completed model-turn count at dispatch.
@@ -39,7 +39,7 @@ pub struct ScriptReport {
 /// script coordinates plus the call id the model issued.
 ///
 /// [`prepare_model_dispatch`] fires the `ToolResult` event under
-/// `call_id`, so a host transcript correlates the result with the
+/// `call_id`, so a Host transcript correlates the result with the
 /// assistant tool-call record that requested it.
 #[derive(Debug, Clone)]
 pub struct ModelReport {
@@ -86,8 +86,8 @@ impl ToolDispatch {
 /// Applies the dispatch rules to one bound tool call's answer: the shared
 /// synchronous body every executor invokes once the tool has spoken.
 ///
-/// The sequence is fixed: the counts increment when `counts` is `Some` (a
-/// host that counted the attempt at dispatch passes `None`), the
+/// The sequence is fixed: the counts increment when `counts` is `Some` (an
+/// executor that counted the attempt at dispatch passes `None`), the
 /// succeeded/failed observation,
 /// then the trust rule - a trusted output passes verbatim, anything else is
 /// nonce-wrapped before it can reach a model turn or a calling script. A
@@ -96,9 +96,9 @@ impl ToolDispatch {
 /// fires no content event here: the loop reports the returned
 /// [`ToolDispatch`] under the model-issued call id.
 ///
-/// `call_result` is the tool's own answer, however the host obtained it.
-/// Nothing here awaits, so a host that performed the call on its own
-/// executor applies these rules when the answer arrives.
+/// `call_result` is the tool's own answer, however the Harness obtained it.
+/// Nothing here awaits, so the Harness performs the call on its own
+/// executor and the Engine applies these rules when the answer arrives.
 ///
 /// # Errors
 /// Returns [`Error::Tool`] when `call_result` is the tool's failure (its
@@ -153,8 +153,8 @@ pub fn prepare_dispatch(
 /// nonce-wrapped as untrusted - so the model reads the failure and the
 /// round continues; `prepare_dispatch` has already fired the failed
 /// observation. The counts increment and every other dispatch failure
-/// still propagate. Nothing here awaits, so a host that performed the
-/// call on its own executor applies these rules when the answer arrives.
+/// still propagate. Nothing here awaits, so the Harness performs the call
+/// on its own executor and the Engine applies these rules to the answer.
 ///
 /// # Errors
 /// Returns the counts' own error when `binding`'s alias was never seeded.

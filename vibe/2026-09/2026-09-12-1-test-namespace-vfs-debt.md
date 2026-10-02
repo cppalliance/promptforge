@@ -15,7 +15,7 @@ Two workstreams land together in the promptforge repository, with two supporting
 
 ## Functional Specification
 
-The work is code motion and contract correction, not new behavior. The one externally observable behavior change is failure behavior at the VFS handle boundary: a backend session-open failure stops being a process panic and becomes a recoverable error that fails the run. The one security-relevant change is that model-controlled path volume can no longer grow host memory without bound.
+The work is code motion and contract correction, not new behavior. The one externally observable behavior change is failure behavior at the VFS handle boundary: a backend session-open failure stops being a process panic and becomes a recoverable error that fails the run. The one security-relevant change is that model-controlled path volume can no longer grow machine memory without bound.
 
 - Actors and workflows: the executing agent applies unordered work items; maintainers review per-item diffs; CI validates the whole.
 - Inputs and outputs: inputs are the ten source files, two rulebook/tool files, three committed ledger files, and the VFS crates; outputs are the same trees with the corrections applied, plus one promptforge commit removing the three ledger files.
@@ -72,7 +72,7 @@ Each work item carries a focused check; the shared-vfs changes add new regressio
 - Assumptions, risks, and notes:
   - The CI failure from the bashkit path dependency is inferred from cargo's probed resolution behavior, not an observed run; the mechanism is certain on any sibling-less machine.
   - Debt evidence came from a two-pass collection (analysis, then independent challenge) over the twelve target commits; the challenger upheld all four accepted findings and all twelve rejections.
-  - Rejected debt candidates, recorded so they are not re-litigated: claim granularity for glob/list/grep matches the designed per-path contract; overlays lose `read_range` push-down (performance only); `Ask` collapses to `PermissionDenied` (recorded v1 decision); `write_owned` deferred with no caller; host-backend stage-1 containment limits explicitly scoped; nested-handle double claim registration never self-conflicts; plan-mode copy refusal is conservative and visible; a cancelled run's in-flight store op completes (bounded, documented); anchor-replace duplication shows no drift; agent VMs keep inline store closures (single identity); process-global tables beyond the interner show no independent contradiction.
+  - Rejected debt candidates, recorded so they are not re-litigated: claim granularity for glob/list/grep matches the designed per-path contract; overlays lose `read_range` push-down (performance only); `Ask` collapses to `PermissionDenied` (recorded v1 decision); `write_owned` deferred with no caller; real-filesystem-backend stage-1 containment limits explicitly scoped; nested-handle double claim registration never self-conflicts; plan-mode copy refusal is conservative and visible; a cancelled run's in-flight store op completes (bounded, documented); anchor-replace duplication shows no drift; agent VMs keep inline store closures (single identity); process-global tables beyond the interner show no independent contradiction.
   - `promptforge/vibe/archdoc-next.md` does not exist at the disposition ref; no queue records needed resolution.
 
 ### Deferred and Out of Scope
@@ -177,7 +177,7 @@ Each step is one commit containing its code and tests.
 - Component: vfs-debt-removal
 - In `promptforge/crates/shared-vfs/src/path.rs`: remove the `Interner` and the `OnceLock<Mutex<..>>` global; give `VfsPath` an `Arc<str>` field so `canonicalize` allocates one `Arc<str>` per call and the string frees when its last owner drops. `VfsPath` loses `Copy`; `VfsPath::as_str` returns `&str` borrowed from self instead of `&'static str`. Update claim sites to hold clones, change the `identical_paths_intern_to_one_entry` property test's pointer-equality assertion to content equality, and add the regression check that a loop canonicalizing distinct paths does not grow the heap monotonically.
 - In `promptforge/crates/shared-vfs/src/lib.rs`: extend the section matching in `the_manifest_declares_no_dependencies` so any header equal to or starting with `dependencies.`, `dev-dependencies.`, or `build-dependencies.` is a dependency table, with a regression row.
-- In `promptforge/vibe/archdoc.md`: correct the `store` component line to name the facade and its dependency, and add a VFS layer line covering `shared-vfs` (canonical paths, claims, routing, memory and host backends) and `promptforge-vfs` (policy gate), both depending on none.
+- In `promptforge/vibe/archdoc.md`: correct the `store` component line to name the facade and its dependency, and add a VFS layer line covering `shared-vfs` (canonical paths, claims, routing, memory and real-filesystem backends) and `promptforge-vfs` (policy gate), both depending on none.
 - Verification: the heap-growth check, the claims conflict tests (`two_writes_by_two_identities_conflict`, the copy/rename claim matrix), and the fanout suite pass; the manifest test fails with an injected `[dependencies.foo]` sub-table and passes without it; the archdoc component list matches the workspace's actual dependency directions.
 
 </step-6>

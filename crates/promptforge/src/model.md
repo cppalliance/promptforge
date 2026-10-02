@@ -1,652 +1,371 @@
-Model identities and descriptors, role bindings, and the messages, completions, and errors of a model round.
+Describe the models your program serves, see which model each prompt role got, and answer model rounds.
 
-This module holds every type involved in a model round. You describe your deployment's model, set it on the run's context so the prompt's model roles bind to it, and then answer each model round with a completion or an error. All of it is plain data. Nothing here opens a connection, so the same host code can answer a round from a real gateway, from a canned script in a test, or from a recorded log.
+You need this page when your prompts call a model. A model round is one request to a model and its reply; the run hands your program each round as a `Chat` effect, and your answer is the reply. This page shows how your program describes the models it serves, sees which model each of a prompt's roles got, and answers the model rounds a run asks for.
 
 # Where this fits
 
-Models enter a run at two points.
+The crate overview's [Run a prompt](crate#run-a-prompt) shows how a run hands your program each piece of outside work as an effect, and [Answer a model](crate#answer-a-model) adds a model call to the same prompt. The [effects page](crate::effect) shows a Harness that answers `Chat` effects only in passing. This page covers the models behind those rounds, and what a chat answer holds.
 
-**Before the run.** The host sets the current model with [`RunContext::model`](crate::RunContext::model), then calls [`Environment::prepare`](crate::Environment::prepare), which binds every model role the prompt declares to that model.
+# Describe your models
 
-**During the run.** Each model round reaches the host as an [`Effect::Chat`](crate::effect::Effect::Chat) inside the [`Step::Pending`](crate::Step::Pending) that [`Run::step`](crate::Run::step) returns. The effect has five fields:
+Your program serves one or more models, and you want to tell PromptForge what each one is. For each model you write down a small record: which model it is, a line about what it is for, how many tokens its context window holds, and whether it thinks before it answers. That record is a [`ModelDescriptor`]. A [`ModelCatalog`] is the checked list of them, kept in your order.
 
-- [`Effect::Chat::binding`](crate::effect::Effect#variant.Chat.field.binding) is the [`ModelBinding`] that the round runs under.
-- [`Effect::Chat::messages`](crate::effect::Effect#variant.Chat.field.messages) is the conversation, a [`Vec`] of [`Message`] values in wire order.
-- [`Effect::Chat::tools`](crate::effect::Effect#variant.Chat.field.tools) is a [`Vec`] of the [`ToolSchema`] values advertised to the model. It is empty when the round advertises no tools.
-- [`Effect::Chat::options`](crate::effect::Effect#variant.Chat.field.options) is the round's [`CompletionOptions`], derived from the binding.
-- [`Effect::Chat::stream`](crate::effect::Effect#variant.Chat.field.stream) is a [`bool`] that says whether the host forwards live [`StreamDelta`] values while the reply arrives.
-
-A host that runs its own transport passes the messages, tools, and options to [`build_request_body`](crate::transport::build_request_body), reads the reply through [`read_completion_stream`](crate::transport::read_completion_stream), and gets back a [`Completion`] or a [`CompletionError`]. The [`transport`](crate::transport) module page covers that codec. A host with no transport builds a scripted [`Completion`] instead. Either way, the host answers through [`Run::resume`](crate::Run::resume) with [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat), holding `Ok(Box::new(completion))` or `Err(error)`. [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) gives up on the round instead.
-
-When a completion asks for tool calls, the run issues one [`Effect::ToolCall`](crate::effect::Effect::ToolCall) per call on a later step. After a served round, the run reports its model events, including [`Event::ModelTurnTruncated`](crate::event::Event::ModelTurnTruncated) when a text reply finished with the reason `"length"`.
-
-# A first model round
-
-This program declares one model role, sets the current model, prepares the context, and answers the run's one model round with scripted text.
-
-````
-use std::num::NonZeroU32;
-use std::sync::Arc;
-
-use promptforge::effect::{Effect, EffectAnswer};
-use promptforge::model::{Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::timestamp::Timestamp;
-use promptforge::{Environment, Prompt, Run, RunContext, RunResult, Step};
-
-let source = concat!(
-    "---\n",
-    "name: pinger\n",
-    "description: asks the model once\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  writer: {}\n",
-    "---\n",
-    "\n",
-    "# Pinger\n",
-    "\n",
-    "## Ask\n",
-    "\n",
-    "```lua\n",
-    "models.use('writer', { max_tokens = 256 })\n",
-    "return models.infer('ping')\n",
-    "```\n",
-);
-let (parsed, _parse_events) = Prompt::parse(source, "pinger");
-let prompt = parsed?;
-
-let model = ModelDescriptor::new(
-    ModelId::gateway("house-model")?,
-    "The host's current model",
-    NonZeroU32::new(131_072).ok_or("context is non-zero")?,
-    ThinkingMode::Switchable,
-);
-let ctx = RunContext::new("pinger", 7, Timestamp::UNIX_EPOCH).model(model.clone());
-let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
-assert!(requirements.is_satisfied());
-assert_eq!(ctx.model_bindings().resolve("writer"), Some(&model));
-
-let mut run = Run::new(Arc::new(prompt), "", ctx);
-let result = loop {
-    match run.step() {
-        Step::Pending { effects, .. } => {
-            for (id, _provenance, effect) in effects {
-                let answer = match effect {
-                    Effect::Chat { binding, messages, .. } => {
-                        assert_eq!(binding.alias(), "writer");
-                        assert_eq!(binding.id().name(), "house-model");
-                        assert_eq!(binding.invocation().max_tokens.map(NonZeroU32::get), Some(256));
-                        assert_eq!(messages[0].role(), "user");
-                        assert_eq!(messages[0].content(), "ping");
-                        let reply = CompletionResult::Text("pong".to_owned());
-                        let completion = Completion::from_result(reply, binding.id().name());
-                        EffectAnswer::Chat(Ok(Box::new(completion)))
-                    }
-                    _ => EffectAnswer::Dropped,
-                };
-                run.resume(id, answer);
-            }
-        }
-        Step::Done { result, .. } => break result,
-    }
-};
-
-match result {
-    RunResult::Ok(text) => assert_eq!(text, "pong"),
-    other => panic!("the run should succeed: {other:?}"),
-}
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-Here is what each part does.
-
-1. **Declare a role.** A prompt never names a concrete model. Its `models:` frontmatter declares roles, here one role called `writer` with no keywords. In the section's Lua, `models.use('writer', { max_tokens = 256 })` selects that role for the section with a generation cap, and `models.infer('ping')` runs one tool-free model round and returns the reply text.
-2. **Describe the model.** A [`ModelDescriptor`] names the model with a [`ModelId`] and records a description, the context window in tokens as a [`NonZeroU32`](std::num::NonZeroU32), and a [`ThinkingMode`].
-3. **Bind the roles.** [`RunContext::model`](crate::RunContext::model) sets the descriptor as the run's current model. [`Environment::prepare`](crate::Environment::prepare) binds every declared role to it and reports no unmet requirements, because the role declares neither keywords nor a `min_context`. [`RunContext::model_bindings`](crate::RunContext::model_bindings) returns the resulting [`ModelBindings`], where the role label `writer` resolves to the descriptor.
-4. **Read the round.** The binding carries the role's alias, the model's id, and the cap from `models.use` in its [`ModelInvocation`]. The conversation is one user [`Message`] holding `ping`.
-5. **Answer the round.** [`Completion::from_result`] builds a completion from a [`CompletionResult::Text`] and a model name. The section returns the reply, so the run ends with [`RunResult::Ok`](crate::RunResult::Ok) holding `"pong"`.
-
-# Model identity
-
-A model is named by a [`ModelId`], a two-part identity made of a server namespace and the caller-facing model name. The name is what goes on the wire as the request's model. Gateway models use the namespace `"gateway"`, which is the value of [`ModelId::GATEWAY`], and [`ModelId::gateway`] builds an id in that namespace from the name alone.
-
-Both constructors validate their input. An empty part or a part that holds any Unicode control character fails with a [`ModelIdError`], so an unusable identity never exists. Other non-ASCII text is fine.
-
-````
-use promptforge::model::ModelId;
-
-let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
-assert_eq!(id, ModelId::gateway("claude-sonnet-4-6")?);
-assert_eq!(id.server(), "gateway");
-assert_eq!(id.name(), "claude-sonnet-4-6");
-assert!(ModelId::gateway("café-模型").is_ok());
-
-let error = ModelId::gateway("").err().ok_or("an empty name is rejected")?;
-assert_eq!(error.to_string(), "invalid model id: name must not be empty");
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-# Descriptors and the catalog
-
-A [`ModelDescriptor`] describes one model that the host can serve: its [`ModelId`], a prose description, its context window in tokens, and its [`ThinkingMode`]. The thinking mode says whether the model never, always, or switchably emits thinking tokens. A gateway's model list spells it in lowercase, and [`ThinkingMode`] deserializes from that form.
-
-A host that offers several models collects their descriptors into a [`ModelCatalog`], which keeps them in the host's order and rejects a repeated id with [`ModelCatalogError::DuplicateId`].
+Describing models feels like filling a registry of backends keyed by name. Unlike a `HashMap`, the catalog refuses a repeated key instead of replacing the earlier entry.
 
 ````
 use std::num::NonZeroU32;
 
 use promptforge::model::{ModelCatalog, ModelCatalogError, ModelDescriptor, ModelId, ThinkingMode};
 
-let small = ModelDescriptor::new(
-    ModelId::gateway("small")?,
-    "A tiny model",
-    NonZeroU32::new(8_192).ok_or("context is non-zero")?,
+// 1. Describe gateway/fast: a 32000-token window on a backend that never thinks.
+let fast = ModelDescriptor::new(
+    ModelId::gateway("fast")?,
+    "Quick replies for the greeter",
+    NonZeroU32::new(32_000).ok_or("a context window is never zero")?,
     ThinkingMode::Never,
 );
-let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
-let analyst = ModelDescriptor::new(
-    ModelId::gateway("analyst")?,
-    "A careful analysis model",
-    NonZeroU32::new(131_072).ok_or("context is non-zero")?,
-    mode,
-);
-assert_eq!(analyst.thinking(), ThinkingMode::Switchable);
 
-let catalog = ModelCatalog::new([small.clone(), analyst])?;
-assert_eq!(catalog.models().len(), 2);
-assert_eq!(catalog.get(small.id()), Some(&small));
-assert!(catalog.contains(&ModelId::gateway("analyst")?));
-
-let Err(error) = ModelCatalog::new([small.clone(), small]) else {
-    panic!("a repeated id is rejected");
-};
-assert!(matches!(error, ModelCatalogError::DuplicateId { .. }));
-assert_eq!(error.to_string(), "duplicate model identity in catalog: gateway/small");
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-In this version no function in the crate takes a [`ModelCatalog`]. A run is given exactly one model, the descriptor passed to [`RunContext::model`](crate::RunContext::model), and every declared role binds to it. The catalog is a host-side collection for choosing that descriptor. The event module declares [`Event::ModelCatalogValidationStarted`](crate::event::Event::ModelCatalogValidationStarted), [`Event::ModelCatalogValidationSucceeded`](crate::event::Event::ModelCatalogValidationSucceeded), and [`Event::ModelCatalogValidationFailed`](crate::event::Event::ModelCatalogValidationFailed), but they are not currently emitted. Building a catalog or preparing a run reports none of them.
-
-# Roles and bindings
-
-A prompt declares the model roles it needs under `models:` in its frontmatter. Each role can list keywords, a `min_context`, and a description, and the [`prompt`](crate::prompt) module page lists what a role declares. At run time, Lua picks a role with `models.default(label)` for the whole prompt, called from the H1, or with `models.use(label, opts?)` for one section, for example `models.use('analyst', { temperature = 0, max_tokens = 1024 })`. A model round with neither fails the run with [`RunErrorKind::Binding`](crate::RunErrorKind::Binding).
-
-On the host side, [`Environment::prepare`](crate::Environment::prepare) binds every declared role to the current model and checks each role against it:
-
-- A role's `min_context` above the model's context window fails with [`RequirementCheck::ContextMinimum`](crate::RequirementCheck::ContextMinimum).
-- The hard keyword `thinking` fails against [`ThinkingMode::Never`], and the hard keyword `no-thinking` fails against [`ThinkingMode::Always`]. Both fail with [`RequirementCheck::HardKeyword`](crate::RequirementCheck::HardKeyword). [`ThinkingMode::Switchable`] satisfies both.
-- Soft keywords are never checked.
-
-Each failure becomes an [`UnmetRequirement`](crate::UnmetRequirement) in [`Requirements::unmet_requirements`](crate::Requirements::unmet_requirements), with the required and actual values side by side. The role is bound either way, so the host decides whether to refuse the run. With no current model, prepare binds nothing and checks nothing, and a round that selects a role fails at run time.
-
-This prompt declares two roles, and the current model's context window is too small for one of them:
-
-````
-use std::num::NonZeroU32;
-
-use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::timestamp::Timestamp;
-use promptforge::{Environment, Prompt, RequirementCheck, RunContext};
-
-let source = concat!(
-    "---\n",
-    "name: analysis\n",
-    "description: runs a deep analysis\n",
-    "promptforge: 0\n",
-    "models:\n",
-    "  analyst:\n",
-    "    keywords: [frontier, thinking]\n",
-    "    min_context: 200000\n",
-    "    description: Deep analysis\n",
-    "  scout:\n",
-    "    keywords: [fast]\n",
-    "---\n",
-    "\n",
-    "# Analysis\n",
-);
-let (parsed, _parse_events) = Prompt::parse(source, "analysis");
-let prompt = parsed?;
-let model = ModelDescriptor::new(
-    ModelId::gateway("house-model")?,
-    "The host's current model",
-    NonZeroU32::new(32_000).ok_or("context is non-zero")?,
+// 2. Describe gateway/deep: a 200000-token window on a backend that always thinks.
+let deep = ModelDescriptor::new(
+    ModelId::new(ModelId::GATEWAY, "deep")?,
+    "Careful replies for the greeter",
+    NonZeroU32::new(200_000).ok_or("a context window is never zero")?,
     ThinkingMode::Always,
 );
-let ctx = RunContext::new("analysis", 7, Timestamp::UNIX_EPOCH).model(model.clone());
+
+// 3. Collect both in a catalog, and look gateway/deep up by its id.
+let catalog = ModelCatalog::new([fast.clone(), deep])?;
+assert_eq!(catalog.models().len(), 2);
+let found = catalog.get(&ModelId::gateway("deep")?).ok_or("gateway/deep is in the catalog")?;
+assert_eq!(found.context().get(), 200_000);
+assert_eq!(found.thinking(), ThinkingMode::Always);
+
+// 4. A list that names gateway/fast twice is refused as a whole, naming the repeated id.
+let Err(ModelCatalogError::DuplicateId { server, name, .. }) = ModelCatalog::new([fast.clone(), fast]) else {
+    panic!("a repeated id is refused with DuplicateId");
+};
+assert_eq!((server.as_str(), name.as_str()), ("gateway", "fast"));
+Ok::<(), Box<dyn std::error::Error>>(())
+````
+
+1. Step 1 builds the id with [`ModelId::gateway`], which returns a `Result`. `gateway/fast` gets a 32000-token window as a `NonZeroU32`, and [`ThinkingMode::Never`]. Once the id is valid, the descriptor cannot fail.
+2. Step 2 builds the same kind of id the long way, with [`ModelId::new`] and the [`ModelId::GATEWAY`] namespace. `new` accepts any server namespace, so you can name models from more than one server. When both parts are bad, the [`ModelIdError`] names the server, because the server is checked first. Fix the server part before you trust the error about the name. `gateway/deep` always thinks, so it gets `Always`. Give each descriptor the [`ThinkingMode`] its backend really has: `Never`, `Always`, or `Switchable`. Prepare checks the mode against what a prompt requires of each model it asks for, so a wrong mode makes it report the wrong requirements as unmet; the next section shows those checks.
+3. Step 3 builds the catalog with [`ModelCatalog::new`], which keeps your order. The catalog has no `len` of its own, so count its entries with [`models()`](ModelCatalog::models)`.len()`. [`get`](ModelCatalog::get) finds `gateway/deep` by its id, with its 200000-token window and its `Always` mode intact. [`contains`](ModelCatalog::contains) asks the same question when you only need a yes or no. Prepare and the run never read a `ModelCatalog`; your list of models stays with your program. Use it to offer a choice of models, for example a model picker, then look the chosen model up with `get` and give that descriptor to the run context, as the next section shows.
+4. Step 4 passes a list that names `gateway/fast` twice. `ModelCatalog::new` refuses the whole list with [`ModelCatalogError::DuplicateId`], which names the repeated `server` and `name`. Match it as `DuplicateId { server, name, .. }`. The catalog stops at the first repeat it finds, so fix repeats one at a time.
+
+An id part is refused when it is empty or holds any control character, including newline, NUL, DEL, and U+0085. Non-ASCII names such as `café-模型` pass, and so do ordinary spaces. So handle the `Result` for names read from a config file, and trim names yourself, because ` m` and `m` are two ids.
+
+You might expect `ModelCatalog::new` to keep the last descriptor for a repeated id, as inserting into a `HashMap` does. Instead, it refuses the whole list with `DuplicateId`, naming the id that repeated.
+
+One descriptor per id, with the thinking mode the backend really has. Next, [See which model each role got](#see-which-model-each-role-got) hands one of these descriptors to a run.
+
+# See which model each role got
+
+Your prompt names more than one model it needs, each under a name of its own, a *model role*. Before the run starts, a step called *prepare* fills each role with a real model. A [`RunContext`](crate::RunContext) is what one run starts from; you build it with `RunContext::new(name, seed, started_at)`, and its current model is the one descriptor you set with [`RunContext::model`](crate::RunContext::model). Prepare records, for every declared role, the model that will serve it: the run context's [`ModelBindings`], where every role points at that current model.
+
+Reading bindings feels like reading a resolved dependency lock file: each declared name maps to one concrete entry. Unlike a lock file, you never write it; prepare fills it and you only read.
+
+````
+# use std::num::NonZeroU32;
+# use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
+# let fast = ModelDescriptor::new(
+#     ModelId::gateway("fast")?,
+#     "Quick replies for the greeter",
+#     NonZeroU32::new(32_000).ok_or("a context window is never zero")?,
+#     ThinkingMode::Never,
+# );
+use promptforge::timestamp::Timestamp;
+use promptforge::{Environment, Prompt, RunContext};
+
+// 1. The greeter declares two roles, `writer` and `checker`, and its section asks `writer` once.
+let source = concat!(
+    "---\n",
+    "name: greeter\n",
+    "description: Writes a note and asks a model to reply to it.\n",
+    "promptforge: 0\n",
+    "models:\n",
+    "  writer: {}\n",
+    "  checker: {}\n",
+    "---\n\n",
+    "# Greeter\n\n",
+    "## Greet\n\n",
+    "```lua\n",
+    "store.write('note.md', 'hello')\n",
+    "models.use('writer')\n",
+    "return models.infer(store.read('note.md'))\n",
+    "```\n",
+);
+let (parsed, _parse_events) = Prompt::parse(source, "greeter");
+let prompt = parsed?;
+
+// 2. Set gateway/fast as the current model, and prepare.
+let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(fast.clone());
 let (ctx, requirements) = Environment::new().prepare(&prompt, ctx);
+assert!(requirements.refusal().is_none());
 
+// 3. Read the bindings: both roles resolve to gateway/fast.
 let bindings = ctx.model_bindings();
+assert_eq!(bindings.resolve("writer"), Some(&fast));
+assert_eq!(bindings.resolve("checker"), Some(&fast));
+assert_eq!(bindings.role_id("checker"), Some(fast.id()));
+
+// 4. `len` counts two roles on one shared model, and an undeclared role resolves to nothing.
 assert_eq!(bindings.len(), 2);
-assert_eq!(bindings.role_id("analyst"), Some(model.id()));
-assert_eq!(bindings.resolve("scout"), Some(&model));
-assert_eq!(bindings.model(model.id()), Some(&model));
-assert!(bindings.resolve("undeclared").is_none());
-
-let [unmet] = requirements.unmet_requirements.as_slice() else {
-    panic!("only the context minimum fails");
-};
-assert_eq!(unmet.role, "analyst");
-assert_eq!(unmet.check, RequirementCheck::ContextMinimum);
-assert_eq!(unmet.required, "200000");
-assert_eq!(unmet.actual, "32000");
+assert_eq!(bindings.model(fast.id()), Some(&fast));
+assert!(bindings.resolve("editor").is_none());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-The `thinking` keyword passes here because the model's mode is [`ThinkingMode::Always`], and `frontier` and `fast` are soft keywords. Both roles are bound to the one model, so [`ModelBindings::len`] counts two roles while the bindings hold one descriptor.
+1. Step 1 declares the roles `writer` and `checker` under `models:`, with no keywords. A role can also declare `min_context: N` under its name, the fewest context tokens it needs. The section selects `writer` with `models.use` and asks it once with `models.infer`.
+2. Step 2 sets `gateway/fast` with `RunContext::model`, then calls [`Environment::prepare`](crate::Environment::prepare), which binds every declared role to that one model and returns the context and a [`Requirements`](crate::Requirements) report. The report lists what your program could not provide, and [`notice()`](crate::Requirements::notice) renders it as the [requirements notice](crate#answer-a-model). [`refusal()`](crate::Requirements::refusal) is `Some` whenever anything is listed, including an unmet role requirement, holding a [`RunError`](crate::RunError) of kind `RequirementsUnmet` with that notice; it is `None` when nothing blocks the run. Check `refusal()` after prepare and before you build the run. Here it is `None`, because neither role declares a hard keyword or a `min_context`.
+3. Step 3 reads the context's [`model_bindings()`](crate::RunContext::model_bindings). [`resolve`](ModelBindings::resolve) returns a role's [`ModelDescriptor`], here `gateway/fast` for both `writer` and `checker`, and [`role_id`](ModelBindings::role_id) returns its [`ModelId`]. This is how you log or check which model serves each role.
+4. Step 4 checks that [`len()`](ModelBindings::len) is 2, while [`model(fast.id())`](ModelBindings::model) returns the one shared descriptor. `len()` counts bound roles, not distinct models. The role `editor`, which the prompt never declared, resolves to `None`.
 
-# Bindings and request options
+With no current model, prepare binds no role and checks nothing. `model_bindings()` is empty, `resolve` gives `None` for every declared role, and the report says nothing about roles, so `refusal()` can be `None` even for a role with a `min_context`. The run then fails when a section calls `models.use` on one of those roles, because the role is not bound. So set the current model before prepare, and check `resolve` if you are unsure it was set.
 
-Every model round runs under a [`ModelBinding`]: a prompt-local alias bound to a model id, together with the frozen invocation parameters that every round under it uses. The run builds one binding per bound role and hands it to the host in [`Effect::Chat::binding`](crate::effect::Effect#variant.Chat.field.binding).
+When the current model misses a role's hard need, prepare reports an unmet requirement naming the role, not an error, and that is what makes `refusal()` return `Some`. A role goes unmet when its `min_context` is above the model's window, when it declares `thinking` and the model is `Never`, or when it declares `no-thinking` and the model is `Always`. Soft role keywords are never checked. Read the requirements notice after prepare, and decide whether to run or pick another model.
 
-The frozen parameters live in a [`ModelInvocation`], a plain struct with three public optional fields: the sampling [`Temperature`], the generation cap, and the thinking switch.
+You might expect prepare to pick the best catalog entry for each role from its description. Instead, every role binds to the one current model, because the choice of model is your program's. The current model is the Host's selection, such as the model a user picks from a list, and prepare never sees your catalog, so it can give each role only that model. To serve a role with another model, set that model as current and prepare again. A role that model cannot serve shows up as an unmet requirement.
 
-A binding the run builds carries three things from the role:
+Every role gets the current model; read the bindings to confirm it. Next, [Answer a model round](#answer-a-model-round) answers the round that `writer` asks for.
 
-- The role's description, or the model descriptor's description when the role declares none.
-- The role's keywords, recorded in kebab-case as the binding's capabilities.
-- The thinking switch. A `thinking` keyword freezes [`ModelInvocation::thinking`] to `Some(true)`, and a `no-thinking` keyword freezes it to `Some(false)`.
+# Answer a model round
 
-[`ModelBinding::completion_options`] turns a binding into the wire request options in one call. The run builds every [`Effect::Chat::options`](crate::effect::Effect#variant.Chat.field.options) this way, so the options always match the binding.
+Your run hands you a [`Chat`](crate::effect::Effect::Chat) effect, and you want to send it to your model and give the reply back. Your answer is the whole outcome of that round: the model's reply together with the model that served it, or the reason the round failed. The reply is a [`Completion`], and the failure is a [`CompletionError`].
 
-A host that drives the transport outside a run, or a test that needs a binding, builds one with [`ModelBinding::new`]. A host can also build [`CompletionOptions`] by hand with a builder chain. Every temperature goes through [`Temperature`], which accepts only finite values in the inclusive range `[0.0, 2.0]`, so a bad value never reaches a request.
-
-````
-use std::num::NonZeroU32;
-
-use promptforge::model::{
-    CompletionOptions, ModelBinding, ModelId, ModelInvocation, Temperature, TemperatureError,
-};
-
-let invocation = ModelInvocation {
-    temperature: Some(Temperature::new(0.7)?),
-    max_tokens: None,
-    thinking: Some(true),
-};
-let binding = ModelBinding::new(
-    "analyst",
-    "Deep analysis",
-    ModelId::gateway("house-model")?,
-    invocation,
-    NonZeroU32::new(131_072).ok_or("context is non-zero")?,
-)
-.with_capabilities(vec!["frontier".to_owned(), "thinking".to_owned()]);
-assert_eq!(binding.alias(), "analyst");
-assert_eq!(binding.capabilities().len(), 2);
-assert_eq!(binding.invocation().thinking, Some(true));
-assert_eq!(binding.invocation().temperature.map(Temperature::get), Some(0.7));
-let _from_binding = binding.completion_options();
-
-let cap = NonZeroU32::new(256).ok_or("max tokens is non-zero")?;
-let _by_hand = CompletionOptions::new("house-model")
-    .with_temperature(0.2)?
-    .with_max_tokens(cap)
-    .with_thinking(false);
-
-assert!(matches!(Temperature::new(f64::NAN), Err(TemperatureError::NotFinite)));
-let error = Temperature::try_from(2.5_f64).err().ok_or("2.5 is out of range")?;
-assert_eq!(error.to_string(), "temperature 2.5 is outside the supported range [0.0, 2.0]");
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-The generation cap is a [`NonZeroU32`](std::num::NonZeroU32), so a zero cap, which would forbid all output, cannot be expressed. The thinking switch only matters for a [`ThinkingMode::Switchable`] model. When it is set, the request body carries `chat_template_kwargs.enable_thinking`.
-
-# Messages
-
-A [`Message`] is one entry in a round's conversation. The run hands the host the whole conversation in [`Effect::Chat::messages`](crate::effect::Effect#variant.Chat.field.messages), and [`Message::role`] and [`Message::content`] read any entry, including messages built by the run. A host builds its own messages with [`Message::user`], [`Message::assistant`], and [`Message::tool`]. A tool result's first argument is the id of the [`ToolCall`] it answers, as returned by [`ToolCall::id`]. The constructor does not check that match, so the host keeps the ids straight.
+Answering a round feels like proxying an HTTP call: forward the request, wrap the response. Unlike a plain proxy, you wrap the reply in a `Completion` that also says which model served it.
 
 ````
-use promptforge::model::Message;
+# use std::num::NonZeroU32;
+# use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
+# use promptforge::timestamp::Timestamp;
+# use promptforge::{Environment, Prompt, RunContext};
+# let fast = ModelDescriptor::new(
+#     ModelId::gateway("fast")?,
+#     "Quick replies for the greeter",
+#     NonZeroU32::new(32_000).ok_or("a context window is never zero")?,
+#     ThinkingMode::Never,
+# );
+# let source = concat!(
+#     "---\n",
+#     "name: greeter\n",
+#     "description: Writes a note and asks a model to reply to it.\n",
+#     "promptforge: 0\n",
+#     "models:\n",
+#     "  writer: {}\n",
+#     "  checker: {}\n",
+#     "---\n\n",
+#     "# Greeter\n\n",
+#     "## Greet\n\n",
+#     "```lua\n",
+#     "store.write('note.md', 'hello')\n",
+#     "models.use('writer')\n",
+#     "return models.infer(store.read('note.md'))\n",
+#     "```\n",
+# );
+# let (parsed, _parse_events) = Prompt::parse(source, "greeter");
+# let prompt = parsed?;
+use std::sync::Arc;
+use promptforge::effect::{Effect, EffectAnswer};
+use promptforge::model::{Completion, CompletionError, CompletionResult};
+use promptforge::{transport::ClientError, vfs::perform_vfs_op};
+use promptforge::{Run, RunErrorKind, RunResult, Step};
 
-let question = Message::user("What changed?");
-assert_eq!(question.role(), "user");
-assert_eq!(question.content(), "What changed?");
-assert_eq!(
-    serde_json::to_value(&question)?,
-    serde_json::json!({ "role": "user", "content": "What changed?" }),
-);
-
-let turn = Message::assistant("Two files.");
-assert_eq!(turn.role(), "assistant");
-
-let result = Message::tool("call_1", "src/lib.rs, src/model.rs");
-assert_eq!(result.role(), "tool");
-assert_eq!(result.content(), "src/lib.rs, src/model.rs");
-# Ok::<(), Box<dyn std::error::Error>>(())
-````
-
-[`Message`] and [`ToolSchema`] serialize to the OpenAI chat-completions wire shape, which is how [`build_request_body`](crate::transport::build_request_body) puts them into a request. Only the run builds a `system` message, a multimodal message, or a [`ToolSchema`]. A host passes the schemas from [`Effect::Chat::tools`](crate::effect::Effect#variant.Chat.field.tools) through to the request unchanged.
-
-# Answering with a completion
-
-A [`Completion`] is one finished model round. Its [`Completion::result`] is a [`CompletionResult`], which is either [`CompletionResult::Text`] for a final text reply or [`CompletionResult::ToolCalls`] for a batch of requested tool calls. Each [`ToolCall`] exposes its id, its tool name, and a typed [`ToolArguments`] view of its arguments, so the host never handles raw JSON. Beside the result, a completion carries the round's metadata: the serving model, the finish reason, the reasoning text, token usage, and timings.
-
-A host with a transport gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). A host without one, such as a test or a replay, builds it with [`Completion::from_result`], and builds scripted tool calls with [`ToolCall::from_parts`]. A completion built this way reports the model name it was given, and the rest of its metadata is absent.
-
-````
-use promptforge::effect::EffectAnswer;
-use promptforge::model::{Completion, CompletionResult, Message, ToolCall};
-
-let call = ToolCall::from_parts(
-    "call_1",
-    "fetch",
-    serde_json::json!({ "url": "https://example.com" }),
-);
-let completion = Completion::from_result(CompletionResult::ToolCalls(vec![call]), "house-model");
-assert_eq!(completion.model(), "house-model");
-assert_eq!(completion.finish_reason(), None);
-assert!(completion.usage().is_none());
-
-let CompletionResult::ToolCalls(calls) = completion.result() else {
-    panic!("the round asked for tools");
-};
-let call = &calls[0];
-assert_eq!(call.id(), "call_1");
-assert_eq!(call.name(), "fetch");
-let arguments = call.arguments();
-assert!(arguments.contains("url"));
-assert_eq!(arguments.names().collect::<Vec<_>>(), ["url"]);
-assert_eq!(arguments.to_json_string(), r#"{"url":"https://example.com"}"#);
-let tool_result = Message::tool(call.id(), "<html>example</html>");
-assert_eq!(tool_result.role(), "tool");
-
-let answer = EffectAnswer::Chat(Ok(Box::new(completion)));
-assert!(matches!(answer, EffectAnswer::Chat(Ok(_))));
-````
-
-When a run receives [`CompletionResult::ToolCalls`], it issues one [`Effect::ToolCall`](crate::effect::Effect::ToolCall) per call. A call whose name is outside the tool scope advertised for that round fails as out of scope. [`CompletionResult`] is `#[non_exhaustive]`, and the run fails with an internal error on any variant it does not recognize, so a host answers only with [`CompletionResult::Text`] or [`CompletionResult::ToolCalls`].
-
-# Streaming deltas
-
-While a round streams, [`read_completion_stream`](crate::transport::read_completion_stream) calls the host's `on_delta` callback with each [`StreamDelta`]. [`StreamDelta::Text`] is a fragment of the reply, and [`StreamDelta::Reasoning`] is a fragment of the reasoning side channel. A host forwards them to a live viewer only when [`Effect::Chat::stream`](crate::effect::Effect#variant.Chat.field.stream) is `true`. Tool-call fragments never arrive as deltas, and the final [`Completion`] holds the whole turn either way.
-
-The callback is an [`Fn`], so a callback that builds up text needs interior mutability:
-
-````
-use std::cell::RefCell;
-
-use promptforge::model::StreamDelta;
-
-let visible = RefCell::new(String::new());
-let on_delta = |delta: StreamDelta| match delta {
-    StreamDelta::Text(fragment) => visible.borrow_mut().push_str(&fragment),
-    StreamDelta::Reasoning(_) => {}
-    _ => {}
-};
-on_delta(StreamDelta::Reasoning("checking the diff".to_owned()));
-on_delta(StreamDelta::Text("hel".to_owned()));
-on_delta(StreamDelta::Text("lo".to_owned()));
-assert_eq!(visible.into_inner(), "hello");
-````
-
-# Failed rounds
-
-A [`CompletionError`] is a failed model round. The host gets one from its transport and answers the round with an [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat) holding `Err(error)`. [`CompletionError::kind`] classifies the failure into a [`CompletionErrorKind`], which is stable and matchable. [`CompletionError::is_retryable`] says whether a retry may succeed, and [`CompletionError::is_timeout`] says whether the failure was a timeout. For a backend failure, [`CompletionError::status`] gives the HTTP status and [`CompletionError::backend_body`] gives the backend's error body, which never appears in the [`Display`](std::fmt::Display) text.
-
-````
-use promptforge::model::{CompletionError, CompletionErrorKind};
-
-fn report(error: &CompletionError) -> String {
-    match error.kind() {
-        CompletionErrorKind::Backend => {
-            let status = error.status().map_or_else(|| "unknown".to_owned(), |s| s.to_string());
-            format!("backend status {status}: {}", error.backend_body().unwrap_or(""))
+// 1. Each run prepares the greeter from the last tour with `model`, and its section asks `writer` once.
+fn run_greeter(
+    prompt: &Prompt,
+    model: &ModelDescriptor,
+    chat: impl Fn(&str) -> Result<Box<Completion>, CompletionError>,
+) -> RunResult {
+    let ctx = RunContext::new("greeter", 7, Timestamp::UNIX_EPOCH).model(model.clone());
+    let (ctx, _requirements) = Environment::new().prepare(prompt, ctx);
+    let mut run = Run::new(Arc::new(prompt.clone()), "", ctx);
+    // 2. Answer the store as before, and hand each chat effect's model name to `chat` for its answer.
+    loop {
+        let effects = match run.step() {
+            Step::Pending { effects, .. } => effects,
+            Step::Done { result, .. } => return result,
+        };
+        for (id, _provenance, effect) in effects {
+            let answer = match effect {
+                Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
+                Effect::Chat { binding, .. } => EffectAnswer::Chat(chat(binding.id().name())),
+                _ => EffectAnswer::Dropped,
+            };
+            run.resume(id, answer);
         }
-        _ if error.is_timeout() => "timed out, safe to retry".to_owned(),
-        _ if error.is_retryable() => "transient, safe to retry".to_owned(),
-        _ => error.to_string(),
     }
 }
-# let _ = report;
+
+// 3. Answer with a whole text completion, reported as served by gateway/fast's name.
+let result = run_greeter(&prompt, &fast, |served| {
+    let reply = CompletionResult::Text("hello world".to_owned());
+    Ok(Box::new(Completion::from_result(reply, served)?))
+});
+assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
+
+// 4. Run it again, and answer with a failed round: the backend returned status 503.
+let result = run_greeter(&prompt, &fast, |_served| {
+    Err(ClientError::Backend { status: 503, body: "overloaded".to_owned() }.into())
+});
+let RunResult::Failure(error) = result else { panic!("a failed round fails the run") };
+assert_eq!(error.kind(), RunErrorKind::Completion);
+# Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
-The run treats a [`CompletionErrorKind::EmptyReply`] failure as a completed round with no reply, and it reads [`CompletionError::finish_reason`] to tell a clean empty exit from a truncated one. An empty turn with the reason `"stop"` after successful tool calls is a clean exit. A missing reason or `"length"` stays a hard failure.
+1. Step 1 defines `run_greeter`. It gives the context the model, prepares the two-role greeter from the previous section, and creates a fresh run each time you call it. The `""` passed to [`Run::new`](crate::Run::new) is the run's arguments string, empty because the greeter takes none. One prompt serves both answers below, because your program chooses each answer per round.
+2. Step 2 answers each store effect with [`perform_vfs_op`](crate::vfs::perform_vfs_op), as on the [crate page](crate#run-a-prompt). It answers each chat effect with [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat), holding whatever `chat` returns. [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) answers any other effect without performing it, and a chain waiting on it resumes with a cancelled error; that arm never runs for the greeter. A live Harness sends the effect's `messages`, `tools`, and `options` to its backend, but not its `stream` flag. The options name the model by its id's [`name()`](ModelId::name), not the role name or the server part, so the `writer` role bound to `gateway/fast` reaches your backend as model `fast`.
+3. Step 3 builds the reply with [`Completion::from_result`] and [`CompletionResult::Text`], then boxes it, and the run ends with [`RunResult::Ok`](crate::RunResult::Ok) holding `hello world`. `from_result` is the only way to build a completion without a transport; a live Harness gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). Pass the model name your backend reported as the second argument, because [`Completion::model`] records the model that served the round, which can differ from the one requested. This canned Harness has no backend to report one, so step 2 passes the requested name, `binding.id().name()`; a live Harness passes the name from its backend's response. The `?` turns the constructor's error into a `CompletionError` through `From`.
+4. Step 4 converts [`ClientError::Backend`](crate::transport::ClientError::Backend) with status 503 into a `CompletionError` with `into()`, and answers the round with `Err`. The run ends with [`RunResult::Failure`](crate::RunResult::Failure) of kind [`RunErrorKind::Completion`](crate::RunErrorKind::Completion). The run needs the failure itself, not a missing answer, so answer a failed round with `EffectAnswer::Chat(Err(error))`.
+
+When the model asks for tools instead, build each call with [`ToolCall::from_parts`]. Pass its arguments as a parsed JSON object, not the encoded string the wire carries, and wrap the calls in [`CompletionResult::ToolCalls`]. `from_result` refuses an empty batch and two calls that share an id, but not an empty text reply. A live reply whose text is empty or only whitespace is an `EmptyReply` failure, and `from_result` accepts both, so check `text.trim().is_empty()` yourself when your backend can return one.
+
+To decide on a retry, read [`is_retryable()`](CompletionError::is_retryable). It is true for transport failures, 5xx statuses, and malformed responses, and false for every status below 500, including 429, so add your own backoff for rate limits. A `CompletionError`'s `Display` never shows the backend's error body. Read [`backend_body()`](CompletionError::backend_body) when you want it, so you choose whether that body reaches your logs.
+
+You might expect to answer a chat effect with the reply text. Instead, the answer is a boxed `Completion` built with `Completion::from_result`, which carries whether the model replied or asked for tools, and which model served the round.
+
+Answer each round with a whole completion or its error. The [Reference](#reference) below covers every type this page names.
 
 # Reference
 
-This part covers every item in the module, from identities through bindings and requests to completions and errors.
-
-Three conventions hold across the module. Every struct except [`ModelInvocation`] has private fields, so the host builds one through its constructor or receives it from the run. Builder methods take `self` and return the updated value, so calls chain. [`CompletionErrorKind`], [`CompletionResult`], [`ModelCatalogError`], [`StreamDelta`], [`TemperatureError`], and [`ThinkingMode`] are `#[non_exhaustive]`, so a `match` on them needs a wildcard arm.
-
-## ModelId
-
-[`ModelId`] is the stable identity of one model: a server namespace plus the caller-facing model name. Build one with [`ModelId::new`] or [`ModelId::gateway`].
-
-- [`ModelId::GATEWAY`] is the gateway namespace, the [`&str`](str) value `"gateway"`. Pass it as the `server` argument of [`ModelId::new`].
-
-[`ModelId::new`] takes two arguments and returns a [`Result`] of a [`ModelId`] or a [`ModelIdError`].
-
-- `server`, anything that converts [`Into`] a [`String`], is the identity namespace. Use [`ModelId::GATEWAY`] for gateway models.
-- `name`, anything that converts [`Into`] a [`String`], is the caller-facing model name, the one sent on the wire. For a gateway model it is the gateway's model name.
-
-Each part must be non-empty and free of Unicode control characters, which covers C0 controls, DEL, NUL, and C1 controls such as U+0085. Other non-ASCII text such as `"café-模型"` is accepted. `server` is checked before `name`, so when both are bad the error names `server`.
-
-[`ModelId::gateway`] takes only `name`, with the same rules, and returns the same thing as [`ModelId::new`] with [`ModelId::GATEWAY`] as the server.
-
-- [`ModelId::server`] returns the namespace as a [`&str`](str).
-- [`ModelId::name`] returns the model name as a [`&str`](str). [`ModelBinding::completion_options`] sends it as the request's model.
-
-[`ModelId`] implements [`Eq`], [`Hash`](std::hash::Hash), and [`Ord`], ordered by server and then by name, so it works as a map key. It does not implement [`Display`](std::fmt::Display), [`FromStr`](std::str::FromStr), or any serde trait.
-
-## ModelIdError
-
-[`ModelIdError`] says why a [`ModelId`] could not be built. [`ModelId::new`] and [`ModelId::gateway`] return it, and hosts never build one. It has no accessors. Read it through its [`Display`](std::fmt::Display) text, `invalid model id: {field} {reason}`, where the field is `server` or `name` and the reason is `must not be empty` or `must not contain a control character`. For example, an empty name gives `invalid model id: name must not be empty`. It implements [`std::error::Error`].
-
-## ThinkingMode
-
-[`ThinkingMode`] says whether a model emits thinking tokens. It is recorded on a [`ModelDescriptor`], and [`Environment::prepare`](crate::Environment::prepare) checks it against a role's hard thinking keywords. Name a variant directly, or deserialize one from the gateway's lowercase form `"never"`, `"always"`, or `"switchable"`.
-
-- [`ThinkingMode::Never`]: the model never emits thinking tokens. Use it for a model without a reasoning channel. A role with the hard `thinking` keyword fails against it, reported with the actual value `"Never"`.
-- [`ThinkingMode::Always`]: the model always emits thinking tokens. A role with the hard `no-thinking` keyword fails against it, reported with the actual value `"Always"`.
-- [`ThinkingMode::Switchable`]: the client turns thinking on or off per request. Use it for a model that honors `chat_template_kwargs.enable_thinking`. It satisfies both hard keywords. Per-request control goes through [`CompletionOptions::with_thinking`] or [`ModelInvocation::thinking`].
-
-[`ThinkingMode`] implements serde's [`Deserialize`](https://docs.rs/serde/latest/serde/trait.Deserialize.html) only. It does not implement [`Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html), [`Display`](std::fmt::Display), or [`FromStr`](std::str::FromStr).
-
-## ModelDescriptor
-
-[`ModelDescriptor`] describes one model that the host can serve. The host passes one to [`RunContext::model`](crate::RunContext::model) and receives descriptors back from [`ModelBindings::resolve`], [`ModelBindings::model`], [`ModelCatalog::get`], and [`RunContext::current_model`](crate::RunContext::current_model).
-
-[`ModelDescriptor::new`] takes four arguments and cannot fail.
-
-- `id`, a [`ModelId`], is the model's stable identity.
-- `description`, anything that converts [`Into`] a [`String`], is a prose description of the model. It becomes a binding's description when the role declares none.
-- `context`, a [`NonZeroU32`](std::num::NonZeroU32), is the context window in tokens. A zero-token window cannot be expressed. Prepare compares it against each role's `min_context`.
-- `thinking`, a [`ThinkingMode`], says whether the model emits thinking tokens. Prepare checks it against each role's hard thinking keywords.
-
-Each accessor takes `&self` and returns one field: [`ModelDescriptor::id`] returns a reference to the [`ModelId`], [`ModelDescriptor::description`] returns a [`&str`](str), [`ModelDescriptor::context`] returns the [`NonZeroU32`](std::num::NonZeroU32), and [`ModelDescriptor::thinking`] returns the [`ThinkingMode`]. [`ModelDescriptor`] has no serde support.
-
-## ModelCatalog
-
-[`ModelCatalog`] is the set of models that a host can serve, kept in host order with no repeated ids. A host typically builds it from a gateway's model list or from a pinned offline entry, then picks the run's current model from it.
-
-[`ModelCatalog::new`] takes one argument, `models`, anything that implements [`IntoIterator`] of [`ModelDescriptor`], such as an array or a [`Vec`]. The catalog keeps the iteration order. It returns a [`Result`], and fails with [`ModelCatalogError::DuplicateId`] when two descriptors share an id. The error names the later of the two occurrences. [`ModelCatalog::empty`] returns an empty catalog, and the [`Default`] value is the same empty catalog.
-
-- [`ModelCatalog::models`] returns every descriptor as a slice, in host order.
-- [`ModelCatalog::is_empty`] returns `true` when the catalog holds no descriptors.
-- [`ModelCatalog::get`] takes a reference to a [`ModelId`] and returns an [`Option`] of a reference to the matching [`ModelDescriptor`], or [`None`]. It is a linear search.
-- [`ModelCatalog::contains`] takes a reference to a [`ModelId`] and returns `true` when a descriptor with that id is present.
-
-## ModelCatalogError
-
-[`ModelCatalogError`] says why a [`ModelCatalog`] could not be built. [`ModelCatalog::new`] returns it, and hosts never build one. It implements [`std::error::Error`].
-
-- [`ModelCatalogError::DuplicateId`]: two descriptors share one [`ModelId`], which would make lookups ambiguous. Drop or rename the duplicate and build the catalog again. The variant is itself `#[non_exhaustive]`, so match it as `DuplicateId { server, name, .. }`. Its [`Display`](std::fmt::Display) text is `duplicate model identity in catalog: {server}/{name}`.
-  - [`ModelCatalogError::DuplicateId::server`](ModelCatalogError#variant.DuplicateId.field.server), a [`String`], is the repeated id's namespace, which is `"gateway"` for gateway models.
-  - [`ModelCatalogError::DuplicateId::name`](ModelCatalogError#variant.DuplicateId.field.name), a [`String`], is the repeated id's model name.
-
-## ModelBindings
-
-[`ModelBindings`] records which model each declared role is bound to, and the descriptor of every model that the run may use. Lookups go from role label to id to descriptor. The host reads them from [`RunContext::model_bindings`](crate::RunContext::model_bindings) after [`Environment::prepare`](crate::Environment::prepare), which is their only writer. In this version every declared role binds to the context's current model. With no current model the bindings stay empty and every lookup returns [`None`]. The [`Default`] value is empty.
-
-- [`ModelBindings::role_id`] takes `label`, a [`&str`](str) naming a role declared under `models:`, and returns an [`Option`] of a reference to the bound [`ModelId`]. It is [`None`] when the role is undeclared or no current model was set.
-- [`ModelBindings::resolve`] takes the same `label` and returns an [`Option`] of a reference to the bound model's [`ModelDescriptor`], or [`None`] when the role is unbound.
-- [`ModelBindings::model`] takes `id`, a reference to a [`ModelId`], and returns an [`Option`] of a reference to that model's [`ModelDescriptor`] when the run may use it, or [`None`].
-- [`ModelBindings::len`] returns the number of bound roles as a [`usize`]. Two roles bound to one model count as two, while the descriptor table holds that model once.
-- [`ModelBindings::is_empty`] returns `true` when no roles are bound.
-
-## ModelBinding
-
-[`ModelBinding`] is one prompt-local alias bound to a model id and its frozen invocation parameters. The host receives it in [`Effect::Chat::binding`](crate::effect::Effect#variant.Chat.field.binding), or builds one with [`ModelBinding::new`].
-
-[`ModelBinding::new`] takes five arguments and cannot fail. It returns a binding with an empty capabilities list.
-
-- `alias`, anything that converts [`Into`] a [`String`], is the exact prompt-local alias. It is not validated.
-- `description`, anything that converts [`Into`] a [`String`], is the role's description.
-- `id`, a [`ModelId`], is the bound model's identity.
-- `invocation`, a [`ModelInvocation`], is the frozen per-request fields. Every field is optional, so `ModelInvocation { temperature: None, max_tokens: None, thinking: None }` is valid.
-- `context`, a [`NonZeroU32`](std::num::NonZeroU32), is the model's context window in tokens. It is required at construction, so a binding never exists half-built.
-
-Two builder methods adjust a binding. Each takes it by value and cannot fail.
-
-- [`ModelBinding::with_capabilities`] takes a [`Vec`] of [`String`], the role's full keyword set in kebab-case, and replaces any previous set.
-- [`ModelBinding::with_invocation`] takes a [`ModelInvocation`] and replaces the binding's invocation.
-
-The accessors take `&self` and cannot fail.
-
-- [`ModelBinding::alias`] returns the alias as a [`&str`](str).
-- [`ModelBinding::description`] returns the description as a [`&str`](str). On a binding the run built, it is the role's description, or the model descriptor's description when the role declares none.
-- [`ModelBinding::id`] returns a reference to the bound [`ModelId`].
-- [`ModelBinding::invocation`] returns a reference to the [`ModelInvocation`].
-- [`ModelBinding::context`] returns the context window as a [`NonZeroU32`](std::num::NonZeroU32).
-- [`ModelBinding::capabilities`] returns the keyword set as a slice of [`String`]. It is empty on a binding built with [`ModelBinding::new`] alone.
-- [`ModelBinding::completion_options`] returns the [`CompletionOptions`] for a request under this binding. The wire model is the [`ModelId::name`] of [`ModelBinding::id`], and the temperature, generation cap, and thinking switch are copied from the invocation. Pass the result to [`build_request_body`](crate::transport::build_request_body).
-
-## ModelInvocation
-
-[`ModelInvocation`] holds the frozen per-request fields that every round under a binding uses. It is the one struct in this module built with a struct literal. The host reads it from [`ModelBinding::invocation`]. It has no [`Default`].
-
-- [`ModelInvocation::temperature`], an [`Option`] of [`Temperature`], is the sampling temperature, when one was set. A [`Temperature`] is always valid.
-- [`ModelInvocation::max_tokens`], an [`Option`] of [`NonZeroU32`](std::num::NonZeroU32), is the generation cap, when one was set. A zero cap cannot be expressed.
-- [`ModelInvocation::thinking`], an [`Option`] of [`bool`], is the thinking switch sent as `chat_template_kwargs.enable_thinking`, when set. The run sets `Some(true)` for a role with the `thinking` keyword and `Some(false)` for one with `no-thinking`.
-
-## Temperature
-
-[`Temperature`] is a validated sampling temperature, finite and within `[0.0, 2.0]` inclusive. Building one is the only way to place a temperature into a request.
-
-[`Temperature::new`] takes `value`, an [`f64`], and returns a [`Result`] of a [`Temperature`] or a [`TemperatureError`]. `0.0`, `0.7`, and `2.0` are accepted. NaN and infinities fail with [`TemperatureError::NotFinite`], which is checked first, and a finite value below `0.0` or above `2.0` fails with [`TemperatureError::OutOfRange`]. [`Temperature`] also implements [`TryFrom`] of [`f64`] with the same rules and [`TemperatureError`] as its error type.
-
-[`Temperature::get`] takes the temperature by value and returns the [`f64`].
-
-## TemperatureError
-
-[`TemperatureError`] says why a temperature was rejected. [`Temperature::new`], [`Temperature`]'s [`TryFrom`] conversion, and [`CompletionOptions::with_temperature`] return it, and hosts never build one. It implements [`std::error::Error`].
-
-- [`TemperatureError::NotFinite`]: the value was NaN or an infinity. Supply a finite value in `[0.0, 2.0]`. Its [`Display`](std::fmt::Display) text is `temperature must be finite`.
-- [`TemperatureError::OutOfRange`]: the value was finite but outside `[0.0, 2.0]`, such as `-0.1` or `2.5`. Clamp or correct it. The variant is itself `#[non_exhaustive]`, so match it as `OutOfRange { value, .. }`. Its [`Display`](std::fmt::Display) text is `temperature {value} is outside the supported range [0.0, 2.0]`.
-  - [`TemperatureError::OutOfRange::value`](TemperatureError#variant.OutOfRange.field.value), an [`f64`], is the rejected value.
-
-## CompletionOptions
-
-[`CompletionOptions`] holds the per-call fields merged into a chat-completions request body: the model name sent on the wire and the optional temperature, generation cap, and thinking switch. The host receives them in [`Effect::Chat::options`](crate::effect::Effect#variant.Chat.field.options), derives them with [`ModelBinding::completion_options`], or builds them by hand. They go to [`build_request_body`](crate::transport::build_request_body). There is no [`Default`].
-
-[`CompletionOptions::new`] takes `model`, anything that converts [`Into`] a [`String`], which is the model name sent on the wire. Normally that is the [`ModelId::name`] of the bound model. It is not validated. The new options leave the temperature, generation cap, and thinking switch unset, and three builder methods set them. Each takes the options by value.
-
-- [`CompletionOptions::with_temperature`] takes `temperature`, an [`f64`], and returns a [`Result`] of the updated options or a [`TemperatureError`], under the same rules as [`Temperature::new`]. The options are consumed on failure.
-- [`CompletionOptions::with_max_tokens`] takes `max_tokens`, a [`NonZeroU32`](std::num::NonZeroU32), the most tokens to generate, and cannot fail.
-- [`CompletionOptions::with_thinking`] takes `thinking`, a [`bool`], and cannot fail. Once set, the request body carries `chat_template_kwargs.enable_thinking` with that value.
-
-## Message
-
-[`Message`] is one chat message in a round's conversation. The host receives the conversation in [`Effect::Chat::messages`](crate::effect::Effect#variant.Chat.field.messages), in wire order, or builds messages with three constructors. None of them can fail.
-
-- [`Message::user`] takes `content`, anything that converts [`Into`] a [`String`], and returns a message with the role `user`.
-- [`Message::assistant`] takes `content` the same way and returns a plain `assistant` turn with no tool calls.
-- [`Message::tool`] takes `tool_call_id` and `content`, each anything that converts [`Into`] a [`String`], and returns a message with the role `tool`. `tool_call_id` must be the [`ToolCall::id`] of the call this result answers. The constructor does not check it.
-
-There is no constructor for a `system` message or a multimodal message. Only the run builds those.
-
-- [`Message::role`] returns the role as a [`&str`](str): `system`, `user`, `assistant`, or `tool`.
-- [`Message::content`] returns the message text as a [`&str`](str). For a multimodal message, whose content is a list of parts, it returns `""`.
-
-[`Message`] implements serde's [`Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html) in the OpenAI chat-completions wire shape. A plain message serializes to `{"role":..,"content":..}`, and the `tool_call_id` and `tool_calls` keys appear only when set.
-
-## ToolSchema
-
-[`ToolSchema`] is one tool advertised to the model in the OpenAI function-calling shape: its wire name, a one-sentence description, and the JSON Schema of its parameters. The host receives the round's schemas in [`Effect::Chat::tools`](crate::effect::Effect#variant.Chat.field.tools), and an empty list advertises none. Only the run builds a [`ToolSchema`], and it has no public accessors. The host passes the schemas through to [`build_request_body`](crate::transport::build_request_body). It implements serde's [`Serialize`](https://docs.rs/serde/latest/serde/trait.Serialize.html), and inside a request body each schema is wrapped as `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
-
 ## Completion
 
-[`Completion`] is one finished model round: the text or tool-call outcome plus the round's metadata. The host answers an [`Effect::Chat`](crate::effect::Effect::Chat) with an [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat) holding `Ok(Box::new(completion))`. A host with a transport gets one from [`read_completion_stream`](crate::transport::read_completion_stream).
+[`Completion`] holds the parsed outcome of one model round, plus the metadata the backend reported. You build one to answer a chat effect, or read one to see what a model returned. [`Completion::from_result`] builds one without a transport. It accepts an empty text reply, but fails for an empty tool-call batch, and when two calls share an id; give the batch at least one call, each with its own id. [Answer a model round](#answer-a-model-round) teaches it.
 
-[`Completion::from_result`] builds a completion without a transport, for a test or a replay. It takes two arguments and cannot fail.
-
-- `result`, a [`CompletionResult`], is the round's outcome: [`CompletionResult::Text`] for a reply or [`CompletionResult::ToolCalls`] for a tool batch.
-- `model`, anything that converts [`Into`] a [`String`], is the model name that [`Completion::model`] reports. It is not validated.
-
-On a completion built this way, every optional metadata accessor below returns [`None`], and both the request and response bodies are JSON `null`.
-
-Each accessor takes `&self` and cannot fail.
-
-- [`Completion::result`] returns a reference to the [`CompletionResult`]. Match on it with a wildcard arm.
-- [`Completion::model`] returns the serving model as a [`&str`](str), as the backend named it in the response body. It is empty when the body named none.
-- [`Completion::finish_reason`] returns the finish reason as an [`Option`] of [`&str`](str), such as `"stop"` or `"length"`, or [`None`] when the backend supplied none.
-- [`Completion::reasoning_content`] returns the reasoning side channel as an [`Option`] of [`&str`](str). It is never promoted into the answer.
-- [`Completion::usage`] returns an [`Option`] of a reference to the backend's token accounting, a [`Usage`](crate::metrics::Usage).
-- [`Completion::llama_timings`] returns an [`Option`] of a reference to the llama.cpp timings, a [`LlamaTimings`](crate::metrics::LlamaTimings), when that backend served the round.
-- [`Completion::client_timing`] returns an [`Option`] of a reference to the timing measured on the client's own clock, a [`ClientTiming`](crate::metrics::ClientTiming), when the transport measured one.
-
-The [`metrics`](crate::metrics) module page covers the three metric types. A host that logs answers converts a reference to a [`Completion`] into a [`ChatAnswerRecord`](crate::effect::ChatAnswerRecord) through [`From`]. [`Completion`] is not [`Clone`].
-
-## CompletionResult
-
-[`CompletionResult`] is the outcome of a round. The host reads it from [`Completion::result`], or builds a variant to pass to [`Completion::from_result`].
-
-- [`CompletionResult::Text`] holds a [`String`], the model's final text reply. Display or record the text. The run resumes the section with it.
-- [`CompletionResult::ToolCalls`] holds a [`Vec`] of [`ToolCall`], the requested tool calls. Read each call's id, name, and arguments. The run issues one [`Effect::ToolCall`](crate::effect::Effect::ToolCall) per call.
-
-The run fails with an internal error on any variant it does not recognize, so answer only with these two.
-
-## ToolCall
-
-[`ToolCall`] is one requested tool call: its id, the tool's name, and its arguments. The host receives calls inside [`CompletionResult::ToolCalls`]. The model sends the arguments as a JSON-encoded string, and the call holds them parsed, or as a JSON string when they are not valid JSON.
-
-[`ToolCall::from_parts`] builds a call for a scripted or replayed round. It takes three arguments and cannot fail.
-
-- `id`, anything that converts [`Into`] a [`String`], is the id of the call, which the tool result echoes back through [`Message::tool`]. It is not validated.
-- `name`, anything that converts [`Into`] a [`String`], is the tool to invoke, named by its prompt-local alias as advertised to the model. The run fails the call as out of scope when the name is outside the round's advertised tool scope.
-- `arguments`, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), is the argument payload, normally a JSON object.
-
-The accessors take `&self` and cannot fail.
-
-- [`ToolCall::id`] returns the call's id as a [`&str`](str). Pass it as the `tool_call_id` of [`Message::tool`].
-- [`ToolCall::name`] returns the tool name as a [`&str`](str).
-- [`ToolCall::arguments`] returns a [`ToolArguments`] view that borrows from the call.
-
-## ToolArguments
-
-[`ToolArguments`] is a read-only view of one [`ToolCall`]'s arguments. The host gets one from [`ToolCall::arguments`] and never builds one. It borrows from its call.
-
-- [`ToolArguments::to_json_string`] returns the arguments as canonical JSON text in a [`String`]. When the wire arguments were not valid JSON, the call holds them as a JSON string, so this returns that string JSON-quoted.
-- [`ToolArguments::is_empty`] returns `true` for a JSON `null` payload or an empty object, and `false` for anything else.
-- [`ToolArguments::contains`] takes `key`, a [`&str`](str), and returns `true` when the arguments are a JSON object with that top-level key. It returns `false` when the key is absent or the arguments are not an object.
-- [`ToolArguments::names`] returns an [`Iterator`] over the top-level argument names as [`&str`](str) values when the arguments are an object, or an empty iterator otherwise.
-
-## StreamDelta
-
-[`StreamDelta`] is one live increment of a streaming round. Reply text and reasoning stay separate so a viewer can render them differently. The host receives deltas in the `on_delta` callback it passes to [`read_completion_stream`](crate::transport::read_completion_stream), and forwards them only when [`Effect::Chat::stream`](crate::effect::Effect#variant.Chat.field.stream) is `true`. Tool-call fragments never arrive as deltas. They are held back until the batch is complete and validated.
-
-- [`StreamDelta::Text`] holds a [`String`], a fragment of the reply text. Append it to the visible reply.
-- [`StreamDelta::Reasoning`] holds a [`String`], a fragment of the reasoning side channel, never part of the answer. Render it apart from the reply, or ignore it.
+- [`model`](Completion::model): the name the backend reported serving, which can differ from the request; empty when the response named no model.
+- [`reasoning_content`](Completion::reasoning_content): never folded into the answer text, so show or log it yourself.
+- [`finish_reason`](Completion::finish_reason): the choice's `finish_reason`, when the backend supplied one.
+- [`usage`](Completion::usage), [`llama_timings`](Completion::llama_timings), [`client_timing`](Completion::client_timing): token accounting, llama.cpp's `timings`, and client-clock timings; always `None` after `from_result`.
 
 ## CompletionError
 
-[`CompletionError`] describes why a model round failed. The host gets one from [`read_completion_stream`](crate::transport::read_completion_stream) or [`read_body_capped`](crate::transport::read_body_capped), or converts a [`ClientError`](crate::transport::ClientError) into one through [`From`]. The host answers the round with an [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat) holding `Err(error)`. Each method takes `&self`, has no arguments, and cannot fail.
+[`CompletionError`] reports why a model round or a catalog fetch failed. Answer a chat effect with one to fail the round, and match [`kind()`](CompletionError::kind) for the cause. Retry only when [`is_retryable()`](CompletionError::is_retryable) is true: for transport failures, 5xx statuses, and malformed responses, but never for a status below 500, including 429, so rate limits need your own backoff. A transport builds one only by converting a [`ClientError`](crate::transport::ClientError) through `From`, which is what step 4's `into()` does. [Answer a model round](#answer-a-model-round) teaches it.
 
-- [`CompletionError::kind`] returns the stable [`CompletionErrorKind`]. Branch on it instead of matching message text.
-- [`CompletionError::is_retryable`] returns `true` for transport failures, malformed responses, failures reading a backend error body, and backend statuses of 500 or above. It returns `false` for everything else, including a backend status below 500, an empty reply, disabled access, and configuration failures.
-- [`CompletionError::is_timeout`] returns `true` when the failure was a transport timeout. The check looks for a [`ClientTimeout`](crate::transport::ClientTimeout) in the error's source, so a transport must wrap its own timeout error in [`ClientTimeout`](crate::transport::ClientTimeout) before boxing it, or this returns `false`.
-- [`CompletionError::status`] returns the HTTP status as an [`Option`] of [`u16`] for a backend failure or a failure reading the backend error body. It is [`None`] otherwise.
-- [`CompletionError::backend_body`] returns the backend's error body as an [`Option`] of [`&str`](str), bounded in size and with control characters escaped. It is [`Some`] only for a backend failure. The body never appears in the [`Display`](std::fmt::Display) text, so reading it is an opt-in diagnostic.
-- [`CompletionError::finish_reason`] returns the finish reason as an [`Option`] of [`&str`](str) for an empty-reply failure whose backend supplied one. It is [`None`] for every other failure.
+- [`backend_body`](CompletionError::backend_body): the backend's error body for a non-success status; the error's `Display` never includes it.
+- [`status`](CompletionError::status): the HTTP status from a status failure or a failed body read, which is still `Transport`; do not infer the kind from it.
+- [`is_timeout`](CompletionError::is_timeout): true only when the transport wrapped its error in the crate's `Timeout` marker; a custom transport must mark its timeouts.
+- [`finish_reason`](CompletionError::finish_reason): `Some` only for an empty reply; after successful tool calls, `Some("stop")` exits cleanly, and a missing or `"length"` reason fails hard.
 
-Its [`Display`](std::fmt::Display) text is the underlying message, such as `http transport failure` or `non-success backend status 503`. It implements [`std::error::Error`], and [`source`](std::error::Error::source) reaches the underlying transport cause. It also converts back into a [`ClientError`](crate::transport::ClientError) through [`From`]. [`CompletionError`] is not [`Clone`].
+## CompletionOptions
+
+[`CompletionOptions`] holds the per-call fields merged into a chat-completions request body. Use it to build request options with a validated temperature, a token cap, or a thinking switch. [`CompletionOptions::new`] takes the caller-facing model name sent on the wire, and sets no temperature, no token cap, and no thinking switch, so the backend's defaults apply. There are no public getters, so you cannot read a value back out.
+
+- [`with_temperature`](CompletionOptions::with_temperature): the only fallible setter; it returns [`TemperatureError::NotFinite`] for NaN or an infinity and `OutOfRange` outside `[0.0, 2.0]`.
+- [`with_thinking`](CompletionOptions::with_thinking): sends `chat_template_kwargs.enable_thinking` without checking the model's mode, so check [`ModelDescriptor::thinking`] yourself first.
+
+## Message
+
+[`Message`] is one chat message in a request's message list. Read them from a chat effect, or build them for a scripted round. There is no public `system` constructor, though a message you read can be a system message. A plain message serializes to just `role` and `content`. An assistant turn that requested tools may re-render each call, so its key order and whitespace can differ from the provider's raw `tool_calls`.
+
+- [`role`](Message::role): returns `system`, `user`, `assistant`, or `tool`.
+- [`content`](Message::content): returns `""` for a multimodal message whose content is a list of parts, so an empty string does not mean an empty message.
+- [`tool`](Message::tool): builds a `tool` result; its id should match the [`ToolCall`] it answers, and nothing checks that it does.
+- [`assistant`](Message::assistant): builds a plain text turn with no `tool_calls` field.
+
+## ModelBinding
+
+[`ModelBinding`] ties one prompt-local role alias to a model identity and the frozen request fields for that role. It tells you the model and settings a chat round runs under. [`completion_options()`](ModelBinding::completion_options) sends the id's [`ModelId::name`] as the wire model, not the alias or the server namespace, so a `writer` role bound to `gateway/m` sends `"model": "m"`. [Answer a model round](#answer-a-model-round) reads the binding a chat effect carries.
+
+- [`with_invocation`](ModelBinding::with_invocation): replaces all three invocation fields at once rather than merging them, so carry over any field you want to keep.
+- [`new`](ModelBinding::new): starts with an empty keyword list; add keywords with [`with_capabilities`](ModelBinding::with_capabilities).
+- [`capabilities`](ModelBinding::capabilities): the bound role's keywords, from the closed kebab-case frontmatter vocabulary; Lua sees them on the handle as `capabilities`.
+- [`description`](ModelBinding::description): in a binding prepare builds, the role's `description` from the front matter, or the model descriptor's description when the role declares none.
+- [`context`](ModelBinding::context): the context window in tokens.
+
+## ModelBindings
+
+[`ModelBindings`] records which model each declared role was bound to during prepare. Read it after prepare through [`RunContext::model_bindings`](crate::RunContext::model_bindings). Every declared role binds to the context's current model, and a hard keyword or context minimum that model misses shows up as an unmet requirement naming the role. You cannot write bindings; change the current model and prepare again. [See which model each role got](#see-which-model-each-role-got) teaches it.
+
+- [`resolve`](ModelBindings::resolve): the role's descriptor; an undeclared role gives `None`.
+- [`model`](ModelBindings::model): the descriptor under an identity, when this run may use it.
+- [`len`](ModelBindings::len) and [`is_empty`](ModelBindings::is_empty): count bound roles, not distinct models, so two roles on one model give `len() == 2`.
+
+## ModelCatalog
+
+[`ModelCatalog`] collects the models your program serves, with no two sharing an id. Build one from a gateway `GET /v1/models` listing or a pinned offline entry. [`ModelCatalog::new`] keeps your order, and returns [`ModelCatalogError::DuplicateId`] when two descriptors share one [`ModelId`]. It stops at the first repeat, so after you fix one there may be another. [Describe your models](#describe-your-models) teaches it.
+
+- [`empty`](ModelCatalog::empty): an empty catalog, as `Default` also gives, listing no models.
+- [`models`](ModelCatalog::models): the descriptors in your order; the catalog has no length method of its own, so count this slice.
+
+## ModelDescriptor
+
+[`ModelDescriptor`] describes one model you serve: its id, description, context window, and thinking mode. Build one for a catalog, or to hand the run context its current model. The description is not checked, so nothing warns you about a blank one. Prepare reports a role's `min_context` above the context window as an unmet [`ContextMinimum`](crate::RequirementCheck::ContextMinimum), with both numbers as strings. [Describe your models](#describe-your-models) teaches it.
+
+- [`thinking`](ModelDescriptor::thinking): the mode; prepare reports a hard `thinking` role on a `Never` model, or `no-thinking` on `Always`, as unmet, showing that value.
+
+## ModelId
+
+[`ModelId`] names one model by a server namespace plus the caller-facing model name. Its constructors return [`ModelIdError`] when a part is empty or holds any Unicode control character, including NUL, newline, DEL, and U+0085. Non-ASCII names such as `café-模型` pass, and so does other whitespace, so trim names yourself, or ` m` and `m` are two ids. When both parts are bad, the error names `server`. [Describe your models](#describe-your-models) teaches it.
+
+- [`new`](ModelId::new): accepts any server namespace, not only `gateway`, so you can name models from more than one server.
+- [`gateway`](ModelId::gateway): builds an id in the `gateway` namespace, whose name is the gateway's model name, the OpenAI model `id`.
+- [`name`](ModelId::name): the caller-facing model name, which is what a request sends as its model.
+
+## ModelIdError
+
+[`ModelIdError`] says why a [`ModelId`] could not be built. Its message names the rejected part, `server` or `name`, and why: the part was empty or held a control character. That message alone tells whoever supplied the id what to fix, so report it back to them. There are no accessors for the part or the reason, so you cannot branch on the cause. Fix the named part and build the id again.
+
+## ModelInvocation
+
+[`ModelInvocation`] holds the frozen per-request fields for one binding: temperature, token cap, and thinking switch. You build one for a [`ModelBinding`], or to replace its settings with [`ModelBinding::with_invocation`]. The fields are public and there is no `Default`, so build it with a struct literal that names all three. In each binding prepare builds, `temperature` and `max_tokens` are `None`; leave a field `None` to send nothing for it.
+
+- [`thinking`](ModelInvocation::thinking): sets `chat_template_kwargs.enable_thinking`; prepare sets it to `Some(true)` for a `thinking` role, `Some(false)` for a `no-thinking` role, and `None` otherwise.
+
+## Temperature
+
+[`Temperature`] holds a sampling temperature that is finite and within `[0.0, 2.0]`, for [`ModelInvocation::temperature`]. [`Temperature::new`] returns [`TemperatureError::NotFinite`] for NaN or an infinity, and `OutOfRange` outside the range; `TryFrom<f64>` runs the same check. Both endpoints are inclusive, and `-0.0` passes because it compares equal to `0.0`. It is `Copy` and `PartialEq`, but not `Eq` or `PartialOrd`, so compare temperatures through [`get()`](Temperature::get).
+
+## ToolArguments
+
+[`ToolArguments`] gives a borrowed, typed view of one tool call's arguments object. Use it when you run a tool the model asked for. The arguments are always a JSON object, because the decoder and [`ToolCall::from_parts`] both refuse any other value, so you never handle a bare string or array.
+
+- [`names`](ToolArguments::names) and [`contains`](ToolArguments::contains): see only top-level keys; check nested keys by parsing [`to_json_string()`](ToolArguments::to_json_string), which serializes the object as JSON text.
+- [`is_empty`](ToolArguments::is_empty): true for an object with no keys.
+
+## ToolCall
+
+[`ToolCall`] holds one tool invocation the model asked for: its id, tool name, and arguments. You read them from a [`CompletionResult::ToolCalls`] reply, or script one with [`ToolCall::from_parts`]. `from_parts` takes a parsed JSON value, not the encoded string the wire carries, and fails when `id` or `name` is blank, meaning empty or only whitespace, or `arguments` is not a JSON object. It does not check for duplicate ids; [`Completion::from_result`] checks them across the batch.
+
+- [`id`](ToolCall::id): the id the model assigned; answer with [`Message::tool`] using the same id.
+- [`arguments`](ToolCall::arguments): always an object, because a model call with missing or invalid arguments fails the round, not your tool.
+
+## ToolSchema
+
+[`ToolSchema`] advertises one tool to the model in the OpenAI function-calling shape. You pass a chat effect's tool list to your backend; you cannot build or inspect one, because the run builds each from the prompt's tool contract. Its wire name is never empty and uses only `[A-Za-z0-9_.-]`, and its parameters schema is always a JSON object. It serializes as a flat `{name, description, parameters}` object, without the `{"type":"function","function":{..}}` wrapper a request uses.
 
 ## CompletionErrorKind
 
-[`CompletionErrorKind`] is the matchable classification of a [`CompletionError`], returned by [`CompletionError::kind`]. Hosts never build one, but they name its variants to compare against or match on. It does not implement [`Display`](std::fmt::Display).
+[`CompletionErrorKind`] classifies a [`CompletionError`] into a stable kind you can match. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm. A failed read of a non-success body counts as a transport failure, so a transport failure can still carry a status. [Answer a model round](#answer-a-model-round) teaches the errors it classifies.
 
-- [`CompletionErrorKind::Transport`]: the HTTP request failed at the transport layer, such as a lost connection or a timeout, or the body of a non-success response could not be read. A retry may succeed. Check [`CompletionError::is_timeout`] to spot a timeout, and [`CompletionError::status`] for a body-read failure, which still carries its status.
-- [`CompletionErrorKind::Backend`]: the backend returned a non-success HTTP status. Read [`CompletionError::status`] and, when needed, [`CompletionError::backend_body`]. It is retryable only for a status of 500 or above.
-- [`CompletionErrorKind::MalformedResponse`]: the response could not be decoded or was structurally invalid. That includes a stream that passed its byte cap, ended without the `[DONE]` sentinel, or cut a tool-call batch short. A retry may succeed.
-- [`CompletionErrorKind::EmptyReply`]: the model returned neither tool calls nor text. Read [`CompletionError::finish_reason`]. It is not retryable. The run treats it as a completed round with no reply.
-- [`CompletionErrorKind::Disabled`]: the host disabled gateway access. It is not retryable until the host enables access again.
-- [`CompletionErrorKind::Config`]: the client could not be configured, because of a missing or non-Unicode environment variable, a bad endpoint, or an invalid configuration, or the shared model set's lock was poisoned. It is not retryable. Fix the configuration.
+| Variant | Meaning |
+|---|---|
+| [`Transport`](CompletionErrorKind::Transport) | The request failed at the transport layer, such as a connection failure or a timeout, including a failed read of a non-success body. |
+| [`Backend`](CompletionErrorKind::Backend) | The backend returned a non-success status. |
+| [`MalformedResponse`](CompletionErrorKind::MalformedResponse) | The response could not be decoded or was structurally invalid, including an oversized or undecodable catalog body. |
+| [`EmptyReply`](CompletionErrorKind::EmptyReply) | The model returned no tool calls and no text other than whitespace. |
+| [`Disabled`](CompletionErrorKind::Disabled) | The Host explicitly disabled gateway access. |
+| [`Config`](CompletionErrorKind::Config) | The client could not be configured, from missing environment, invalid environment, or invalid config. |
 
+## CompletionResult
+
+[`CompletionResult`] holds the outcome of a model round: [`Text`](CompletionResult::Text), a final text reply, or [`ToolCalls`](CompletionResult::ToolCalls), a batch of tool calls the model asked for. You build one to answer a chat effect, or read one from a [`Completion`]. It is `#[non_exhaustive]`, so a `match` needs a `_` arm. [`Completion::from_result`] rejects an empty `ToolCalls` batch but accepts an empty `Text`. [Answer a model round](#answer-a-model-round) teaches it.
+
+## ModelCatalogError
+
+[`ModelCatalogError`] says why [`ModelCatalog::new`] refused its descriptors. Its variant [`DuplicateId`](ModelCatalogError::DuplicateId) means two descriptors shared one [`ModelId`]; its `server` and `name` are the repeated id's parts, from the second occurrence. The enum and the variant are both `#[non_exhaustive]`, so match `DuplicateId { .. }`, and you cannot build one. Remove or rename the repeated model, and build the catalog again. [Describe your models](#describe-your-models) teaches it.
+
+## StreamDelta
+
+[`StreamDelta`] carries one live piece of a streaming reply to the delta callback. [`Text`](StreamDelta::Text) is a fragment of the answer text, and [`Reasoning`](StreamDelta::Reasoning) a fragment of reasoning, never part of the answer. Tool calls arrive only in the finished completion. Forward deltas only for a `Chat` effect whose `stream` flag is true: a section's chat round, not a nested `models.infer` round. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
+
+## TemperatureError
+
+[`TemperatureError`] says why [`Temperature::new`] or [`CompletionOptions::with_temperature`] rejected a temperature. [`NotFinite`](TemperatureError::NotFinite) means NaN or an infinity, and [`OutOfRange`](TemperatureError::OutOfRange) means a finite value outside `[0.0, 2.0]`, held in its `value`. NaN reports `NotFinite`, because finiteness is checked first. The enum and `OutOfRange` are both `#[non_exhaustive]`, so match `OutOfRange { value, .. }`. Pass a finite value from `0.0` to `2.0`.
+
+## ThinkingMode
+
+[`ThinkingMode`] says whether a model you describe can emit thinking tokens. Pass it as the last argument of [`ModelDescriptor::new`]. When a role's hard keyword needs thinking the model never does, or forbids thinking the model always does, prepare reports one unmet requirement; bind a matching model and prepare again, or refuse the run. Deserializing accepts only `"never"`, `"always"`, and `"switchable"`; any other string, a capitalized name included, is a serde error. [Describe your models](#describe-your-models) teaches it.
+
+- [`Never`](ThinkingMode::Never): the backend never emits thinking tokens, so a `thinking` role is unmet.
+- [`Always`](ThinkingMode::Always): the backend always emits thinking tokens; it satisfies a `thinking` role, and a `no-thinking` role is unmet.
+- [`Switchable`](ThinkingMode::Switchable): the client may turn thinking on or off per request.

@@ -7,6 +7,9 @@ use std::num::NonZeroU32;
 use super::{ArgType, ModelKeyword, ToolSlot};
 use crate::{ParseError, ParseErrorKind, Prompt};
 
+#[path = "tests-capabilities.rs"]
+mod capabilities;
+
 fn parse(yaml: &str) -> Result<Prompt, ParseError> {
     let src = format!("---\n{yaml}---\n\n# T\n\n## S\n\np\n");
     Prompt::parse(&src, "test").0
@@ -132,119 +135,133 @@ fn an_unknown_key_inside_a_contract_entry_is_rejected() {
     }
 }
 
+/// One reserved name from each category, with the category the refusal
+/// names: a guarded Engine global, an Engine table, a Lua base function, and a
+/// Lua keyword (quoted so YAML keeps `true` a string).
+const RESERVED_SAMPLES: [(&str, &str); 5] = [
+    ("argv", "an Engine global"),
+    ("store", "an Engine global"),
+    ("pairs", "a Lua standard-library global"),
+    ("end", "a Lua keyword"),
+    ("true", "a Lua keyword"),
+];
+
 #[test]
-fn a_capability_id_must_have_exactly_two_segments() {
-    for id in ["web", "promptforge/web/fetch", "promptforge//web"] {
-        let yaml = format!("name: x\ndescription: d\ncapabilities:\n  - {id}\n");
-        let error = parse(&yaml).expect_err("a bad capability id must be rejected");
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{id}: {error}");
+fn a_reserved_name_is_refused_as_a_tool_alias_naming_the_map_and_the_category() {
+    for (name, kind) in RESERVED_SAMPLES {
+        let yaml = format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n");
+        let error = parse(&yaml).expect_err("a reserved tool alias must be rejected");
+        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+        assert!(
+            error.to_string().contains(&format!(
+                "tool alias `{name}` in `tools` is reserved ({kind}): tool aliases and model \
+                 role labels install as section VM globals, so none may take a reserved name"
+            )),
+            "the refusal names the alias, the map, and why: {error}"
+        );
+        assert_eq!(error.line(), Some(5), "the alias's own line: {error}");
     }
 }
 
 #[test]
-fn an_at_sign_in_a_capability_id_is_rejected() {
-    // v1 is unversioned: version pins are deferred, so `@` is a parse error.
-    let error = parse("name: x\ndescription: d\ncapabilities:\n  - promptforge/web@1\n")
-        .expect_err("a `@` version pin must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-}
-
-#[test]
-fn a_capability_id_with_uppercase_is_rejected() {
-    let error = parse("name: x\ndescription: d\ncapabilities:\n  - Promptforge/web\n")
-        .expect_err("uppercase is outside the segment charset");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-}
-
-#[test]
-fn a_capability_is_required_unless_flagged_optional() {
-    let prompt = parse(concat!(
-        "name: x\ndescription: d\n",
-        "capabilities:\n",
-        "  - promptforge/web\n",
-        "  - ref: io.github.corp/mcp\n",
-        "    optional: true\n",
-    ))
-    .expect("capability entries must parse");
-    let caps = prompt.frontmatter().capabilities();
-    assert_eq!(caps.len(), 2);
-    assert!(!caps[0].is_optional(), "a plain string entry is required");
-    assert!(caps[1].is_optional());
-}
-
-#[test]
-fn a_capability_entry_must_be_a_string_or_a_ref_map() {
-    let error = parse("name: x\ndescription: d\ncapabilities:\n  - 42\n")
-        .expect_err("a numeric capability entry must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-}
-
-#[test]
-fn a_map_valued_tool_slot_is_rejected_naming_the_exact_path_expectation() {
-    // Exact paths are the only slot form: the former fuzzy `{ want, optional }`
-    // map is no longer a slot, so it fails to parse rather than binding a
-    // picker that no longer exists.
-    let error = parse(concat!(
-        "name: x\ndescription: d\n",
-        "tools:\n",
-        "  wiki:\n",
-        "    want: searches private wikis\n",
-        "    optional: true\n",
-    ))
-    .expect_err("a map-valued tool slot must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
-    assert!(
-        error.to_string().contains("an exact tool path string"),
-        "the error must name the exact-path expectation: {error}"
-    );
-}
-
-#[test]
-fn a_malformed_exact_tool_path_is_a_parse_error() {
-    for path in [
-        "promptforge/web",
-        "web",
-        "promptforge/Web/fetch",
-        "promptforge/web/",
-    ] {
-        let yaml = format!("name: x\ndescription: d\ntools:\n  search: {path}\n");
-        let error = parse(&yaml).expect_err("a malformed exact path must be rejected");
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{path}: {error}");
+fn a_reserved_name_is_refused_as_a_model_role_label_naming_the_map_and_the_category() {
+    for (name, kind) in RESERVED_SAMPLES {
+        let yaml = format!("name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n");
+        let error = parse(&yaml).expect_err("a reserved role label must be rejected");
+        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+        assert!(
+            error.to_string().contains(&format!(
+                "model role label `{name}` in `models` is reserved ({kind}): tool aliases and \
+                 model role labels install as section VM globals, so none may take a reserved \
+                 name"
+            )),
+            "the refusal names the label, the map, and why: {error}"
+        );
+        assert_eq!(error.line(), Some(5), "the label's own line: {error}");
     }
 }
 
 #[test]
-fn the_reserved_open_tool_slot_key_is_rejected() {
-    // The open host-offered posture is deferred, so `open` is reserved even
-    // though it satisfies the alias grammar.
-    let error = parse("name: x\ndescription: d\ntools:\n  open: true\n")
-        .expect_err("the reserved `open` key must be rejected");
-    assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-    assert!(
-        error.to_string().contains("reserved"),
-        "the error must name the reservation: {error}"
-    );
+fn every_reserved_name_is_refused_in_both_maps() {
+    for (name, _) in promptforge_lua::RESERVED_NAMES {
+        // `_G` and `_VERSION` fail the grammar's leading-letter rule first.
+        let expected = if name.starts_with('_') {
+            "invalid"
+        } else {
+            "is reserved"
+        };
+        for yaml in [
+            format!("name: x\ndescription: d\ntools:\n  '{name}': promptforge/web/search\n"),
+            format!("name: x\ndescription: d\nmodels:\n  '{name}': {{}}\n"),
+        ] {
+            let error = parse(&yaml).expect_err("a reserved name must be rejected");
+            assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{name}: {error}");
+            assert!(
+                error.to_string().contains(&format!("`{name}`"))
+                    && error.to_string().contains(expected),
+                "{name}: {error}"
+            );
+        }
+    }
 }
 
 #[test]
-fn tool_slot_aliases_must_match_the_alias_grammar() {
-    for alias in ["1search", "has space", "has/slash", "has.dot"] {
-        let yaml =
-            format!("name: x\ndescription: d\ntools:\n  '{alias}': promptforge/web/search\n");
-        let error = parse(&yaml).expect_err("a bad alias must be rejected");
-        assert_eq!(
-            error.kind(),
-            ParseErrorKind::Frontmatter,
-            "{alias}: {error}"
+fn a_name_that_only_resembles_a_reserved_one_still_parses() {
+    // Lua names are case-sensitive, and the rule matches whole names only.
+    for name in ["Store", "stores", "my_argv", "pairs2", "ending", "search"] {
+        let prompt = parse(&format!(
+            "name: x\ndescription: d\ntools:\n  {name}: promptforge/web/search\n\
+             models:\n  {name}_model: {{}}\n"
+        ))
+        .expect("a non-reserved alias and role label parse");
+        assert!(prompt.frontmatter().tools().get(name).is_some(), "{name}");
+        assert!(
+            prompt
+                .frontmatter()
+                .models()
+                .get(&format!("{name}_model"))
+                .is_some(),
+            "{name}_model"
         );
     }
-    // The length boundary: 64 characters pass, 65 fail.
-    let longest_ok = format!("a{}", "b".repeat(63));
-    let too_long = format!("a{}", "b".repeat(64));
-    let yaml = format!("name: x\ndescription: d\ntools:\n  {longest_ok}: promptforge/web/search\n");
-    parse(&yaml).expect("a 64-character alias must parse");
-    let yaml = format!("name: x\ndescription: d\ntools:\n  {too_long}: promptforge/web/search\n");
-    parse(&yaml).expect_err("a 65-character alias must be rejected");
+}
+
+#[test]
+fn an_arg_name_may_be_a_reserved_name_because_args_are_argv_fields() {
+    let prompt = parse(concat!(
+        "name: x\ndescription: d\n",
+        "args:\n",
+        "  prose:\n    type: string\n",
+        "  store:\n    type: string\n",
+        "  end:\n    type: boolean\n",
+    ))
+    .expect("reserved names parse as arg names");
+    let args = prompt.frontmatter().args();
+    assert_eq!(args.len(), 3);
+    assert!(args.get("store").is_some() && args.get("end").is_some());
+}
+
+#[test]
+fn one_name_as_both_a_tool_alias_and_a_model_role_label_is_refused() {
+    let error = parse(concat!(
+        "name: x\ndescription: d\n",
+        "tools:\n  scout: promptforge/web/search\n  writer: promptforge/web/fetch\n",
+        "models:\n  writer: {}\n  scout: {}\n",
+    ))
+    .expect_err("a name in both maps must be rejected");
+    assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{error}");
+    assert_eq!(
+        error.to_string(),
+        "invalid frontmatter: `scout` is both a tool alias in `tools` and a model role label \
+         in `models`; each installs as a section VM global of its own name, so the two must \
+         differ",
+        "the refusal names the first shared name in sorted order"
+    );
+    assert_eq!(
+        error.name(),
+        None,
+        "a frontmatter failure predates the name"
+    );
 }
 
 #[test]

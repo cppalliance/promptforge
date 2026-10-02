@@ -6,21 +6,9 @@
 //! `models.infer(handle?, prompt)` takes the handle as an optional leading
 //! argument.
 
-use std::sync::Arc;
-
-use mlua::{Lua, UserData, UserDataFields};
+use mlua::{UserData, UserDataFields};
 
 use promptforge_model_client::model::ModelBinding;
-
-/// Host hook that runs `models.infer` from Lua via the executor's shared
-/// context.
-///
-/// Takes only the prompt: the hook resolves the section's current model
-/// binding itself, because the executor side knows the section name needed
-/// for a typed model-required failure.
-/// Installed as Lua app data; absent app data means `models.infer` is
-/// unavailable in that context.
-pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
 
 /// Inspectable Lua userdata returned by `models.use` / `models.default` /
 /// `models.get`.

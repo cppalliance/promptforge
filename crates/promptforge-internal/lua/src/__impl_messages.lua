@@ -3,7 +3,7 @@
 -- `messages.new()` returns a normal numerically indexed table. The
 -- chainable methods live behind the table's metatable __index, never as
 -- direct fields, so the list itself stays a plain array of message records:
--- the host's serde conversion, prose substitution, and the chat protocol's
+-- the Engine's serde conversion, prose substitution, and the chat protocol's
 -- validation consume the records exactly as if the author had written the
 -- array by hand. The builders validate nothing; the protocol parse owns the
 -- whole message contract, so a malformed record fails at the models.loop

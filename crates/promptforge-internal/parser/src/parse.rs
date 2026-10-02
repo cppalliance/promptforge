@@ -41,7 +41,10 @@ impl Prompt {
     ///
     /// # Errors
     /// The first half of the pair is a [`ParseError`] classified `Frontmatter` when the frontmatter
-    /// delimiters are missing or the frontmatter is invalid; `Structure` when
+    /// delimiters are missing or the frontmatter is invalid, a tool alias or
+    /// model role label is a reserved name, one name is both, a capability
+    /// is declared twice, or a tool slot names a capability declared
+    /// optional; `Structure` when
     /// the required H1 is missing or the body has no `##` sections; `Fence` when
     /// the H1 opens with the removed `lua prompt` fence form, an exact fence
     /// is not closed, more than one `lua shared` fence exists, or a
@@ -69,7 +72,7 @@ impl Prompt {
     fn parse_inner(input: &str, emitter: &Emitter) -> Result<Prompt> {
         let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
         let frontmatter: Frontmatter = serde_yaml_ng::from_str(&yaml).map_err(|e| {
-            // Retain the YAML decode failure as the `#[source]` cause (F3) and
+            // Retain the YAML decode failure as the `#[source]` cause and
             // surface its location, so the public parse error exposes the
             // frontmatter syntax position as stored fields. The location is
             // relative to the frontmatter block, which starts on file line 2
@@ -89,6 +92,15 @@ impl Prompt {
                 column,
             }
         })?;
+        crate::contract::check_distinct_aliases(frontmatter.tools(), frontmatter.models())
+            .and_then(|()| crate::contract::check_distinct_capabilities(frontmatter.capabilities()))
+            .and_then(|()| {
+                crate::contract::check_slot_capabilities(
+                    frontmatter.tools(),
+                    frontmatter.capabilities(),
+                )
+            })
+            .map_err(|message| Error::parse(ParseErrorKind::Frontmatter, message))?;
         // Everything past the frontmatter postdates the prompt's name, so a
         // failure from here on is stamped with it (and its span's position).
         let name = frontmatter.name().to_owned();
@@ -136,9 +148,10 @@ impl Prompt {
                 "prompt allows at most one `lua shared` fence",
             ));
         }
-        if shared_fences.len() != h1_shared_fences.len() {
-            return Err(Error::parse(
+        if let ([start], true) = (shared_fences.as_slice(), h1_shared_fences.is_empty()) {
+            return Err(Error::parse_at(
                 ParseErrorKind::Fence,
+                *start..*start + "```lua shared".len(),
                 "`lua shared` fence is allowed only in H1",
             ));
         }

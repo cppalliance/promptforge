@@ -5,12 +5,13 @@
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`CapabilityId`] - kind is encoded by arity, so a capability id is
 //! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. Before a run is prepared, the harness activates
+//! `namespace/pack/name`. Before a run is prepared, the Harness activates
 //! each declared capability by calling [`Capability::create`] with the
-//! run's [`RunServices`]; the returned [`Contribution`] is v1 tools-only
-//! and grows without redesign. An activation failure is a
-//! [`CapabilityError`]: a stable kind for code plus a message written to be
-//! read by a model, mirroring [`ToolError`](promptforge::tools::ToolError).
+//! run's [`RunServices`]; the returned [`Contribution`] holds tools and an
+//! optional Lua prelude, and grows without redesign. An activation failure
+//! is a [`CapabilityError`]: a stable kind for code plus a message written
+//! to be read by a model, mirroring
+//! [`ToolError`](promptforge::tools::ToolError).
 
 use std::sync::Arc;
 
@@ -18,6 +19,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 use promptforge::vfs::VfsRef;
 
+use crate::input::InputBroker;
 use crate::tool::Tool;
 
 #[cfg(test)]
@@ -29,10 +31,10 @@ mod tests;
 ///
 /// A capability is delivered in a pack (a crate now, a DLL via an adapter
 /// later) and declared in a prompt's frontmatter by its
-/// [`id`](Capability::id). Before a run is prepared, the harness calls
+/// [`id`](Capability::id). Before a run is prepared, the Harness calls
 /// [`create`](Capability::create) once per declared capability, in
 /// declaration order, and assembles the returned [`Contribution`] into the
-/// run's tool catalog.
+/// run's tool catalog and its preludes.
 ///
 /// # Implementing
 ///
@@ -78,7 +80,7 @@ pub trait Capability: Send + Sync {
     /// Returns the capability's stable identity (`namespace/pack`).
     fn id(&self) -> &CapabilityId;
 
-    /// A one-sentence description, surfaced to hosts.
+    /// A one-sentence description, surfaced to Hosts.
     fn description(&self) -> &str;
 
     /// Returns the capabilities this one cannot be activated with in one
@@ -94,6 +96,20 @@ pub trait Capability: Send + Sync {
         &[]
     }
 
+    /// Returns the run services this capability needs from
+    /// [`RunServices`].
+    ///
+    /// Activation checks these against [`RunServices::provides`] before
+    /// any capability code runs. When a required capability needs a
+    /// service the Host does not provide, activation does not call
+    /// [`create`](Capability::create) and refuses the run naming both.
+    /// When the capability is optional, activation calls `create` anyway
+    /// and the capability decides how to work without the service. The
+    /// default is no needs.
+    fn needs(&self) -> &[Service] {
+        &[]
+    }
+
     /// Activates the capability for one run.
     ///
     /// Called once per run before prepare with the run's services. A
@@ -102,29 +118,67 @@ pub trait Capability: Send + Sync {
     ///
     /// # Errors
     /// Returns a [`CapabilityError`] if the capability cannot activate (a
-    /// missing host service, a failed backend handshake, cancellation).
+    /// failed backend handshake, cancellation).
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError>;
+}
+
+/// A run service a capability can need: the closed set of optional
+/// services the Harness supplies through [`RunServices`].
+///
+/// A capability names what it needs through [`Capability::needs`], and
+/// activation checks each one with [`RunServices::provides`]. The run's
+/// filesystem and cancel signal are always present, so they are not
+/// listed here. Adding a service is a Harness change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Service {
+    /// The operator's input broker, [`RunServices::input`].
+    Input,
+}
+
+impl Service {
+    /// Returns the service's name as a model reads it in a refusal, such
+    /// as "an input broker".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use harness_capabilities::Service;
+    ///
+    /// assert_eq!(Service::Input.description(), "an input broker");
+    /// ```
+    #[must_use]
+    pub fn description(self) -> &'static str {
+        match self {
+            Service::Input => "an input broker",
+        }
+    }
 }
 
 /// What a capability is given at activation.
 ///
-/// Non-exhaustive so new fields (the input broker, the model client) can
-/// be added when a bridge capability needs them without breaking existing
-/// capability implementations. Host-supplied per-capability config arrives
-/// here, never via the prompt.
-#[derive(Clone, Debug)]
+/// Non-exhaustive so new fields (the model client) can be added when a
+/// bridge capability needs them without breaking existing capability
+/// implementations. Host-supplied per-capability config arrives here,
+/// never via the prompt.
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct RunServices {
-    /// The run's whole filesystem: the host roots and the declared store,
-    /// built by the host before activation.
+    /// The run's whole filesystem: the real directories and the declared
+    /// store, handed over by the Harness before activation.
     pub vfs: VfsRef,
-    /// The run's cancellation flag: the same synchronous handle the engine
-    /// polls, so a capability observes the host's cancel by polling too.
+    /// The run's cancellation flag: the same synchronous handle the Engine
+    /// polls, so a capability observes the Host's cancel by polling too.
     pub cancel: CancelHandle,
+    /// The operator's input broker, when the Host has someone to ask.
+    /// `None` is a legitimate answer: a batch or eval Host has nobody at
+    /// the other end. Present or absent, it stays so for the whole run.
+    pub input: Option<Arc<dyn InputBroker>>,
 }
 
 impl RunServices {
-    /// Builds the services handed to [`Capability::create`] for one run.
+    /// Builds the services handed to [`Capability::create`] for one run,
+    /// with no input broker.
     ///
     /// # Examples
     ///
@@ -134,18 +188,82 @@ impl RunServices {
     ///
     /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     /// assert!(!services.cancel.is_cancelled());
+    /// assert!(services.input.is_none());
     /// ```
     #[must_use]
     pub fn new(vfs: VfsRef, cancel: CancelHandle) -> RunServices {
-        RunServices { vfs, cancel }
+        RunServices {
+            vfs,
+            cancel,
+            input: None,
+        }
+    }
+
+    /// Supplies the run's input broker, returning the updated services.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use harness_capabilities::{InputBroker, InputError, RunServices};
+    /// use promptforge::cancel::CancelHandle;
+    ///
+    /// struct Scripted;
+    ///
+    /// #[async_trait::async_trait]
+    /// impl InputBroker for Scripted {
+    ///     async fn wait(&self) -> Result<String, InputError> {
+    ///         Ok("hello".to_owned())
+    ///     }
+    /// }
+    ///
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
+    ///     .with_input(Arc::new(Scripted));
+    /// assert!(services.input.is_some());
+    /// ```
+    #[must_use]
+    pub fn with_input(mut self, broker: Arc<dyn InputBroker>) -> RunServices {
+        self.input = Some(broker);
+        self
+    }
+
+    /// Returns whether this run has `service`: for [`Service::Input`],
+    /// whether the Harness supplied an input broker.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use harness_capabilities::{RunServices, Service};
+    /// use promptforge::cancel::CancelHandle;
+    ///
+    /// let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    /// assert!(!services.provides(Service::Input));
+    /// ```
+    #[must_use]
+    pub fn provides(&self, service: Service) -> bool {
+        match service {
+            Service::Input => self.input.is_some(),
+        }
     }
 }
 
-/// What a capability contributes to a run.
+impl std::fmt::Debug for RunServices {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunServices")
+            .field("vfs", &self.vfs)
+            .field("cancel", &self.cancel)
+            .field("input", &self.input.is_some())
+            .finish()
+    }
+}
+
+/// What a capability contributes to a run: its tools and, optionally, a
+/// prelude of Lua source.
 ///
-/// v1 is tools-only: mounts, prompt fragments, and Lua surface are deferred
-/// until the capabilities that need them land. The struct is
-/// [`Default`] and grows without redesign.
+/// Mounts and prompt fragments are deferred until the capabilities that
+/// need them land. The struct is [`Default`] and grows without redesign.
 ///
 /// # Examples
 ///
@@ -154,12 +272,19 @@ impl RunServices {
 ///
 /// let contribution = Contribution::default();
 /// assert!(contribution.tools.is_empty());
+/// assert!(contribution.prelude.is_none());
 /// ```
 #[derive(Default)]
 pub struct Contribution {
     /// The contributed tools, each identified under the capability's own
     /// full id (`namespace/pack/name` for a `namespace/pack` capability).
     pub tools: Vec<Arc<dyn Tool>>,
+    /// Lua source that every section VM of the run installs, built by
+    /// [`Capability::create`] for this run so it can embed facts fixed at
+    /// activation. A prelude defines tables and functions that reach the
+    /// capability's tools through `tools.call` by full id; it must not
+    /// call a tool or the store while it loads.
+    pub prelude: Option<String>,
 }
 
 impl std::fmt::Debug for Contribution {
@@ -170,6 +295,7 @@ impl std::fmt::Debug for Contribution {
                 "tools",
                 &self.tools.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
             )
+            .field("prelude", &self.prelude.is_some())
             .finish()
     }
 }

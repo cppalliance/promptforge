@@ -1,21 +1,24 @@
 //! Run preparation: everything between a prompt file on disk and a `Run`
 //! the effect loop can drive.
 //!
-//! The harness is the engine's host, so the host inputs the engine
-//! refuses to draw itself are drawn here: the run's seed from the OS
-//! CSPRNG and its `started_at` from the wall clock, both written to the
-//! run's row in the log before anything else, so the record can hand them
-//! back verbatim to a future replay. Then the ceremony the engine's
-//! `Environment` expects of a host: parse; hand the run's whole
-//! filesystem, host roots and the declared store, to the capabilities'
+//! Here the Harness draws the inputs the Engine refuses to draw itself:
+//! the run's seed from the OS CSPRNG and its `started_at` from the wall
+//! clock, both written to the run's row in the log before anything else,
+//! so the record can hand them back verbatim to a future replay. Then
+//! the ceremony the Engine's `Environment` expects of the Harness:
+//! parse; put the prompt's declared `input:` file in place in the store
+//! (`files::stage_input`); hand the run's whole filesystem, real
+//! directories and the declared store, to the capabilities'
 //! services and to the context as given; activate the prompt's declared
 //! capabilities against the caller's registry, which assembles the
-//! catalog and the implementation table; install the catalog and prepare
-//! the context; merge activation's report into prepare's and refuse an
-//! unsatisfiable prompt with the engine's model-readable notice; and
+//! catalog, the preludes, and the implementation table; install the
+//! catalog and the preludes and prepare the context; merge activation's
+//! report into prepare's and refuse an
+//! unsatisfiable prompt with the Engine's model-readable notice; and
 //! build the `Run` beside its performers.
 //!
-//! A refusal (or a prompt that fails to parse) is a run that ended before
+//! A refusal (or a prompt that fails to parse, or an input file that
+//! cannot be put in place) is a run that ended before
 //! it began: its row is closed as failed with the refusal as the message,
 //! so the log answers "why did this session fail" for a run the loop
 //! never saw.
@@ -26,54 +29,59 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_capabilities::{CapabilityRegistry, RunServices, activate};
+use harness_capabilities::{CapabilityRegistry, InputBroker, RunServices, activate};
 use harness_log::{LogError, Record, RecordKind, RunId, RunMeta, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
 use promptforge::timestamp::Timestamp;
-use promptforge::vfs::VfsRef;
+use promptforge::vfs::{VfsError, VfsRef};
 use promptforge::{Environment, RunContext, RunError};
 use promptforge::{ParseError, Prompt, Run};
 use sha2::{Digest as _, Sha256};
 
 use crate::display_chain::display_chain;
 use crate::effect_loop::{SharedLog, failed_outcome};
-use crate::performers::{
-    ActivatedTools, ChatPerformer, InputPerformer, LogTaskEvents, Performers, TokioTimer, VfsStore,
-};
+use crate::files::{InputFileError, stage_input};
+use crate::performers::{ActivatedTools, ChatPerformer, Performers, TokioTimer};
+use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
-/// installed capabilities, the host roots, the run's cancel flag, the
-/// log, the two performers that reach beyond the runner, and the
-/// session's identity for the run's row.
+/// installed capabilities, the real directories, the run's cancel flag, the
+/// log, the chat performer and the optional input broker that reach
+/// beyond the runner, and the session's identity for the run's row.
 pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
-    /// against; `None` is a host with no capabilities, where every
+    /// against; `None` is a Harness with no capabilities, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<CapabilityRegistry>>,
-    /// The run's whole filesystem: the host roots and the declared store,
+    /// The run's whole filesystem: the real directories and the declared store,
     /// passed straight to the context's VFS and handed to the capabilities
     /// as the run's services.
     pub vfs: VfsRef,
+    /// The text staged at the prompt's declared `input:` path before the
+    /// run, when the launch supplied one.
+    pub input_text: Option<String>,
     /// The run's cancel flag: handed to the context, to every capability
-    /// activated for the run, and polled by the engine.
+    /// activated for the run, and polled by the Engine.
     pub cancel: CancelHandle,
     /// The run log the row is opened in and the loop will write to.
     pub log: SharedLog,
     /// Performs the run's `Chat` effects.
     pub chat: Arc<dyn ChatPerformer>,
-    /// Performs the run's `UserInput` effects.
-    pub input: Arc<dyn InputPerformer>,
+    /// The operator's input broker, when the Host has someone to ask:
+    /// handed to every capability activated for the run. `None` is a Host
+    /// with nobody to ask.
+    pub input: Option<Arc<dyn InputBroker>>,
     /// The session launching the run: the row's `session_id` and the
     /// run's execution identifier.
     pub session_id: String,
     /// The agent the session runs: the row's `agent`.
     pub agent: String,
-    /// The host's current model, when one is selected; prepare binds
+    /// The Host's current model, when one is selected; prepare binds
     /// every declared role to it and checks each role's requirements.
     pub model: Option<ModelDescriptor>,
-    /// The host-state snapshot the `ui()` global serves, when the run has
+    /// The Host snapshot the `ui()` global serves, when the run has
     /// one.
     pub ui: Option<serde_json::Value>,
 }
@@ -90,7 +98,7 @@ impl fmt::Debug for Services {
     }
 }
 
-/// A run ready for the effect loop, with the host inputs it was given.
+/// A run ready for the effect loop, with the inputs the Harness drew for it.
 #[derive(Debug)]
 pub struct Prepared {
     /// The run, built over the prepared context.
@@ -101,14 +109,17 @@ pub struct Prepared {
     pub seed: u64,
     /// The start the run was given, as written to its row.
     pub started_at: Timestamp,
-    /// The performers for the run: the caller's chat and input performers
-    /// beside the runner's own over the activated tools, the VFS, tokio's
-    /// timer, and the log.
+    /// The performers for the run: the caller's chat performer beside the
+    /// runner's own over the activated tools, the VFS, tokio's timer, and
+    /// the log.
     pub performers: Performers,
     /// What parsing reported, already recorded in the log ahead of the
     /// run's own events; the caller hands them to its sink so the session
     /// sees them in order.
     pub parse_events: Vec<Event>,
+    /// The prompt's declared `output:` path, which the caller reads with
+    /// [`read_output`](crate::files::read_output) once the run completes.
+    pub output_path: Option<String>,
 }
 
 /// Why a run could not be prepared.
@@ -139,7 +150,7 @@ pub enum PrepareError {
     },
     /// The environment cannot satisfy the prompt: a required capability
     /// is missing, two declared capabilities conflict, or the current
-    /// model falls short of a role's requirements. The engine's
+    /// model falls short of a role's requirements. The Engine's
     /// model-readable notice, one line per gap, is the source; the run's
     /// row is closed as failed with that notice.
     #[error("the environment cannot satisfy the prompt")]
@@ -150,6 +161,18 @@ pub enum PrepareError {
         #[source]
         error: RunError,
     },
+    /// The prompt's declared input file could not be put in place: the
+    /// launch supplied text the prompt declares no file for, the prompt
+    /// declares a file that is neither supplied nor in the store, or the
+    /// store refused. The run's row is closed as failed with kind `Input`.
+    #[error("the prompt's declared input file cannot be put in place")]
+    Input {
+        /// The run's row, closed with this refusal.
+        run_id: RunId,
+        /// Why the input could not be put in place.
+        #[source]
+        source: InputFileError,
+    },
     /// The run log refused a write; the run cannot be recorded, so it is
     /// not prepared.
     #[error(transparent)]
@@ -158,16 +181,18 @@ pub enum PrepareError {
 
 /// Prepares the prompt at `prompt_path` for one run with `args`: draws the
 /// run's seed and start and opens its row in the log, parses the prompt,
-/// activates its declared capabilities against the caller's registry,
-/// prepares the context, refuses an unsatisfiable prompt, and builds the
-/// `Run` and its performers.
+/// puts its declared input file in place, activates its declared
+/// capabilities against the caller's registry, prepares the context,
+/// refuses an unsatisfiable prompt, and builds the `Run` and its
+/// performers.
 ///
 /// # Errors
 /// Returns [`PrepareError::Read`] when the file cannot be read (no row is
-/// written), [`PrepareError::Parse`] when it does not parse and
-/// [`PrepareError::Refused`] when the environment cannot satisfy it (in
-/// both cases the row is closed as failed), and [`PrepareError::Log`]
-/// when the log refuses a write.
+/// written), [`PrepareError::Parse`] when it does not parse,
+/// [`PrepareError::Input`] when its declared input file cannot be put in
+/// place, and [`PrepareError::Refused`] when the environment cannot
+/// satisfy it (in these three cases the row is closed as failed), and
+/// [`PrepareError::Log`] when the log refuses a write.
 pub async fn prepare_run(
     prompt_path: &Path,
     args: &str,
@@ -188,10 +213,12 @@ pub async fn prepare_run(
 /// source is attributed to in [`PrepareError::Parse`].
 ///
 /// # Errors
-/// Returns [`PrepareError::Parse`] when the source does not parse and
-/// [`PrepareError::Refused`] when the environment cannot satisfy it (in
-/// both cases the row is closed as failed), and [`PrepareError::Log`]
-/// when the log refuses a write. Never [`PrepareError::Read`].
+/// Returns [`PrepareError::Parse`] when the source does not parse,
+/// [`PrepareError::Input`] when its declared input file cannot be put in
+/// place, and [`PrepareError::Refused`] when the environment cannot
+/// satisfy it (in these three cases the row is closed as failed), and
+/// [`PrepareError::Log`] when the log refuses a write. Never
+/// [`PrepareError::Read`].
 pub async fn prepare_source(
     source: &str,
     prompt_path: &Path,
@@ -201,6 +228,7 @@ pub async fn prepare_source(
     let Services {
         registry,
         vfs,
+        input_text,
         cancel,
         log,
         chat,
@@ -211,7 +239,7 @@ pub async fn prepare_source(
         ui,
     } = services;
 
-    // The host inputs the engine never draws itself, recorded before the
+    // The inputs the Engine leaves to the Harness, recorded before the
     // run exists so the record has them however the run ends.
     let seed: u64 = rand::random();
     let started_at = now_timestamp();
@@ -220,7 +248,7 @@ pub async fn prepare_source(
         .await
         .begin_run(RunMeta {
             session_id: session_id.clone(),
-            agent,
+            agent: agent.clone(),
             prompt_hash: prompt_hash(source),
             seed,
             flags: 0,
@@ -253,6 +281,15 @@ pub async fn prepare_source(
         }
     };
 
+    // The declared input is in place before anything else sees the
+    // store: the capabilities activate over the same filesystem, and the
+    // run's first section may read it.
+    stage_declared_input(&prompt, &vfs, input_text, &agent, &log, run_id).await?;
+    let output_path = prompt
+        .frontmatter()
+        .output()
+        .map(|decl| decl.path().to_owned());
+
     // The parse events were stamped under task `0` from zero; the run's
     // root task continues the sequence past them, so `(task_id, task_seq)`
     // is unique across every record of the run.
@@ -266,17 +303,21 @@ pub async fn prepare_source(
     if let Some(model) = model {
         ctx = ctx.model(model);
     }
-    // The activate-prepare-refuse ceremony: the run's filesystem is the
-    // host's whole - host roots and the declared store - handed to the
+    // The activate-prepare-refuse ceremony: the run's whole filesystem,
+    // the real directories and the declared store, is handed to the
     // capabilities' services and to the context as given, so the
     // capabilities and the run share one filesystem; the activated
-    // catalog is what prepare fills slots against, and the
-    // implementations stay here for the tool performer.
+    // catalog is what prepare fills slots against, its preludes go to
+    // every section VM, and the implementations stay here for the tool
+    // performer.
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
-    let run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
+    let mut run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
+    if let Some(broker) = &input {
+        run_services = run_services.with_input(Arc::clone(broker));
+    }
     let activation = activate(registry.as_deref(), &prompt, &run_services);
-    let env = env.tools(activation.catalog);
+    let env = env.tools(activation.catalog).preludes(activation.preludes);
     let (ctx, mut requirements) = env.prepare(&prompt, ctx);
     requirements.merge(activation.requirements);
     if let Some(error) = requirements.refusal() {
@@ -288,10 +329,7 @@ pub async fn prepare_source(
     let performers = Performers {
         chat,
         tool: Arc::new(ActivatedTools::new(activation.tools)),
-        input,
-        store: Arc::new(VfsStore),
         timer: Arc::new(TokioTimer),
-        task_events: Arc::new(LogTaskEvents::new(Arc::clone(&log), run_id)),
     };
     Ok(Prepared {
         run,
@@ -300,7 +338,51 @@ pub async fn prepare_source(
         started_at,
         performers,
         parse_events,
+        output_path,
     })
+}
+
+/// Puts `prompt`'s declared input file in place in `vfs`'s store on the
+/// blocking pool, tagged with `agent`. A refusal closes `run_id`'s row as
+/// failed under the `Input` kind, with the cause chain as its message.
+async fn stage_declared_input(
+    prompt: &Prompt,
+    vfs: &VfsRef,
+    input_text: Option<String>,
+    agent: &str,
+    log: &SharedLog,
+    run_id: RunId,
+) -> Result<(), PrepareError> {
+    let declared = prompt
+        .frontmatter()
+        .input()
+        .map(|decl| decl.path().to_owned());
+    if declared.is_none() && input_text.is_none() {
+        return Ok(());
+    }
+    let staging = vfs.clone();
+    let path = declared.clone();
+    let staged = spawn_blocking_launch(agent, move || {
+        stage_input(&staging, path.as_deref(), input_text)
+    })
+    .await
+    .unwrap_or_else(|join| {
+        Err(InputFileError::Vfs {
+            path: declared.unwrap_or_default(),
+            source: VfsError::Backend {
+                message: format!("the staging task failed: {join}"),
+            },
+        })
+    });
+    let Err(source) = staged else {
+        return Ok(());
+    };
+    let outcome = RunOutcome::Failed {
+        kind: "Input".to_owned(),
+        message: display_chain(&source),
+    };
+    close_failed(log, run_id, outcome).await?;
+    Err(PrepareError::Input { run_id, source })
 }
 
 /// Closes `run_id`'s row with `outcome`, a run that ended before the loop
@@ -334,10 +416,10 @@ fn prompt_hash(source: &str) -> String {
     hash
 }
 
-/// The system clock now as the engine's `Timestamp`: the host's stamp for
-/// a run's `started_at`, since the engine reads no clock of its own. A
+/// The system clock now as the Engine's `Timestamp`: the Harness's stamp for
+/// a run's `started_at`, since the Engine reads no clock of its own. A
 /// clock before the epoch or beyond `i64` milliseconds (neither reachable
-/// on a real host) saturates to the epoch rather than refusing the launch.
+/// on a real machine) saturates to the epoch rather than refusing the launch.
 fn now_timestamp() -> Timestamp {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

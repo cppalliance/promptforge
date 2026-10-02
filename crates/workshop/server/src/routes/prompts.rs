@@ -44,7 +44,7 @@ pub(crate) struct ContractResponse {
     name: String,
     /// The one-line description shown in listings.
     description: String,
-    /// The declared promptforge engine major; `null` when absent.
+    /// The Engine major the `promptforge:` key declares; `null` when absent.
     promptforge: Option<u32>,
     /// The declared tool-loop cap; `null` for the runtime default.
     max_tool_iterations: Option<u32>,

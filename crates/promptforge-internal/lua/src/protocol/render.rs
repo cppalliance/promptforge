@@ -6,7 +6,7 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 use crate::error_value::{ErrorValue, error_table};
 use crate::tools::local_handler;
 
-use super::answer::{Answer, ChatResult, StoreOutcome, TaskDelivery, TaskStatus, ToolCallOutcome};
+use super::answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
 
 /// Renders one [`TaskStatus`] as the plain Lua status table. Absent
 /// optional fields are never set, so they resume as nil; `tasks` is always
@@ -32,29 +32,6 @@ fn task_status_table(lua: &Lua, status: TaskStatus) -> mlua::Result<mlua::Table>
         table.raw_set("note", note)?;
     }
     Ok(table)
-}
-
-/// The serde options an event table is built under: an absent optional
-/// field (`finish_reason`, `metrics`, a spawn seed) reads as nil in author
-/// code, never as the bridge's NULL sentinel, so an author tests presence
-/// with a plain truth test.
-const EVENT_TABLE_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
-    .serialize_none_to_null(false)
-    .serialize_unit_to_null(false);
-
-/// Renders one task's events as a 1-based sequence of plain tables, each
-/// the event's serialized shape: `kind`, `execution`, `section`,
-/// `provenance = { task, seq }`, then the variant's own fields. The one
-/// serde-boundary conversion for events; no codec reaches author code.
-fn event_sequence(
-    lua: &Lua,
-    events: &[promptforge_types::event::Event],
-) -> mlua::Result<mlua::Table> {
-    let sequence = lua.create_table_with_capacity(events.len(), 0)?;
-    for (position, event) in events.iter().enumerate() {
-        sequence.raw_set(position + 1, lua.to_value_with(event, EVENT_TABLE_OPTIONS)?)?;
-    }
-    Ok(sequence)
 }
 
 /// Renders task ids as a 1-based sequence of their path strings.
@@ -119,14 +96,13 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
 }
 
 /// Renders a store op's return value: nil for the mutating ops, the text
-/// for reads, a sequence table for glob, a boolean for exists - the legacy
-/// closures' exact return shapes.
-fn store_value(lua: &Lua, outcome: StoreOutcome) -> mlua::Result<Value> {
+/// for reads, a sequence table for glob, a boolean for exists.
+fn store_value(lua: &Lua, outcome: VfsOutcome) -> mlua::Result<Value> {
     Ok(match outcome {
-        StoreOutcome::Unit => Value::Nil,
-        StoreOutcome::Text(text) => Value::String(lua.create_string(&text)?),
-        StoreOutcome::Paths(paths) => Value::Table(lua.create_sequence_from(paths)?),
-        StoreOutcome::Bool(exists) => Value::Boolean(exists),
+        VfsOutcome::Unit => Value::Nil,
+        VfsOutcome::Text(text) => Value::String(lua.create_string(&text)?),
+        VfsOutcome::Paths(paths) => Value::Table(lua.create_sequence_from(paths)?),
+        VfsOutcome::Bool(exists) => Value::Boolean(exists),
     })
 }
 
@@ -156,7 +132,7 @@ impl<E: ErrorValue> Answer<E> {
     /// `(false, table)`, where `table` is the error's structured value
     /// (`kind`, `message` as the error's display string, and the kind's
     /// fields, with `tostring` returning the message) - the shim raises it
-    /// with `error(result, 0)`, so a printing author sees exactly the host's
+    /// with `error(result, 0)`, so a printing author sees exactly the Engine's
     /// message and a branching one reads `kind` - and the typed error
     /// is returned alongside for the driver to retain. A successful
     /// `join_any` whose member failed retains the member's error the same
@@ -174,7 +150,7 @@ impl<E: ErrorValue> Answer<E> {
                 vec![Value::String(lua.create_string(&text)?)]
             }
             // The task id resumes as its path text; the shim builds the
-            // `{ task = id }` table around it, so no host handle crosses.
+            // `{ task = id }` table around it, so no Engine handle crosses.
             Answer::Spawn(Ok(task)) | Answer::Timer(Ok(task)) => {
                 vec![Value::String(lua.create_string(task.to_string())?)]
             }
@@ -192,9 +168,6 @@ impl<E: ErrorValue> Answer<E> {
                 vec![Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX))]
             }
             Answer::Note(Ok(())) | Answer::Cancel(Ok(())) => vec![Value::Nil],
-            // Always a sequence, empty included, so the shim's `#` and
-            // `ipairs` need no nil check.
-            Answer::TaskEvents(Ok(events)) => vec![Value::Table(event_sequence(lua, &events)?)],
             // Always a sequence, empty included, so the shim's `#` and
             // `ipairs` need no nil check.
             Answer::DrainTaskNotices(Ok(notices)) => {
@@ -215,13 +188,6 @@ impl<E: ErrorValue> Answer<E> {
                 lua.to_value(&args)?,
             ],
             Answer::Chat(Ok(result)) => vec![Value::Table(chat_result_table(lua, *result)?)],
-            // The availability flag is a third resume value beside the text,
-            // so the shim returns both and the broker's fixed fallback
-            // sentence stays unspoofable by identical human text.
-            Answer::UserInput(Ok(outcome)) => vec![
-                Value::String(lua.create_string(&outcome.text)?),
-                Value::Boolean(outcome.available),
-            ],
             Answer::Store(Ok(outcome)) => vec![store_value(lua, outcome)?],
             Answer::Infer(Err(error))
             | Answer::Call(Err(error))
@@ -234,12 +200,10 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Concurrency(Err(error))
             | Answer::Note(Err(error))
             | Answer::Cancel(Err(error))
-            | Answer::TaskEvents(Err(error))
             | Answer::DrainTaskNotices(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error))
-            | Answer::Store(Err(error))
-            | Answer::UserInput(Err(error)) => {
+            | Answer::Store(Err(error)) => {
                 let table = error_table(lua, &error)?;
                 return Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::Table(table)]),

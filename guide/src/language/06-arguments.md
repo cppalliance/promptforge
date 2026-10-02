@@ -187,7 +187,7 @@ Three placeholder failures involve `args` and `argv`:
 - A dotted path into a field `argv` does not have, or into a scalar, such as `{{ argv.query.x }}` when `query` is a string, fails with `missing {{ {path} }}`, as in `missing {{ argv.query.x }}`.
 - `args` is a string, so a dotted placeholder into it, such as `{{ args.x }}`, fails with `args is a string, not a table`.
 
-Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+Each of these is an ordinary Lua error raised where the block reads `prose`. You can catch it by reading `prose` inside [`pcall`](05-lua-environment.md#catching-and-inspecting-errors). Uncaught, it ends the run with the run error kind `RequirementsUnmet` in the H1 pass and `Lua` anywhere else; [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 ## Arg declarations
 
@@ -262,7 +262,7 @@ This is an explicit declaration, so the argument string is parsed as JSON like u
 
 ### Declaration errors
 
-Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](17-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
+Every declaration mistake is a `Frontmatter` parse error, so the prompt never runs. The message starts with `invalid frontmatter: ` and the error gives the 1-based line and column in the file; [Parse error kinds](16-limits-and-errors.md#parse-error-kinds) covers the parse error kinds.
 
 | Mistake | Message after `invalid frontmatter: ` |
 |---|---|
@@ -361,13 +361,13 @@ return argv.query
 ```
 ````
 
-Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
+Run with `{}`, the assertion fails and `## Search` never runs. Because the failure happens in the H1 pass, the run ends with the run error kind `RequirementsUnmet`, and its notice is the Lua error text, which includes `query is required`. [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains the run error kinds.
 
 ## The H1 repair pattern
 
 The H1 body's Lua is the only place a prompt can write `argv`. When the H1 pass completes, before the walk starts, the value the H1 body left in `argv` is read back and frozen. Every other section gets `argv` read-only, including every section on the walk and every section in a [called chain](08-jump-and-call.md#call-input-and-args), the walk that a `call` starts.
 
-Inside the H1 body, `argv` is an ordinary writable global with no guard in the way. That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
+Inside the H1 body, `argv` is an ordinary writable global with no guard in the way, and a metatable you put on `_G` never sees it, so a nil `argv` reads as nil and the repair lands even under a strict or write-hooking metatable ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)). That makes it the place to repair input: read the raw `args` string and assign `argv` a fixed-up value. Whatever `argv` holds when the H1 body finishes, the parsed input or your repair, is what every later section reads, both in Lua and in `{{ argv }}` and `{{ argv.field }}` placeholders:
 
 ````markdown
 ---
@@ -415,7 +415,7 @@ if argv.limit == nil then
 end
 ````
 
-Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
+Leave `argv` as JSON data, meaning strings, numbers, booleans, and tables of them, or as nil when the H1 body finishes. Assigning anything else, such as a function, raises no error at the assignment. The read-back at the freeze, after the H1 pass and before any section on the walk, then fails the run with the run error kind `Lua`, even though it happens at the end of the H1 pass ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). For a top-level function, userdata, or coroutine, the message is `argv must be JSON data, got {type}`, naming the Lua type `function`, `userdata`, or `thread`. A table holding a value that cannot be JSON also fails the read-back with a Lua error.
 
 ## Frozen argv
 
@@ -467,6 +467,8 @@ Outside the H1 body, `getmetatable` on any `argv` table returns the string `"arg
 
 Only the name `argv` is guarded. Every other global can still be defined, read, and assigned normally, so `scratch = 42` followed by `assert(scratch == 42)` works in any section. The [`prose` global](03-blocks-and-prose.md#the-prose-global), the rendered Markdown above a fence, keeps working normally beside it.
 
+A metatable of your own on `_G` cannot lift the freeze. After `setmetatable(_G, mt)`, `setmetatable(_G, nil)`, or any change to the table `getmetatable(_G)` returns, `argv` still reads the frozen value and assigning it still raises the freeze error, and your `__index` and `__newindex` never see the name ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)).
+
 ## Freeze errors
 
 Assigning `argv` or writing into it in any section other than the H1 body raises a runtime error:
@@ -492,7 +494,7 @@ if wrote then return 'written' end
 return 'refused'
 ````
 
-This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) covers.
+This block returns `refused`. Uncaught, a freeze error ends the run with the run error kind `Lua`, which [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) covers.
 
 A nil `argv` is frozen too. Under an explicit `args:` declaration, a run with no arguments gets a nil `argv`, because the empty string is not JSON; a prompt with no `args:` key gets `argv.prose == ''` instead. Assigning the nil `argv` outside the H1 body, as in `argv = {}`, fails with `argv is frozen outside H1: assign it in H1 only`.
 

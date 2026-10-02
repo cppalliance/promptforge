@@ -3,12 +3,12 @@
 // component - it imports only `@workshop/platform/lifecycle`, `@workshop/look/icons`, skin
 // tokens through CSS, `lucide`, and `@tiptap/*` - so this test walks
 // every file in the directory and fails on any quoted import prefix that
-// reaches back into the host layers (`"../agent`, `"../stt`,
+// reaches back into the embedding layers (`"../agent`, `"../stt`,
 // `"../chrome`, `"../../services`, or any `"@workshop/platform/` module
 // other than `lifecycle`; bare quoted prefixes, so an
-// `import type` line trips it too) or on the string `grant`, the host
-// concern that must never leak into the component. No jsdom: this is a
-// source-text check.
+// `import type` line trips it too) or on the string `grant`, the owning
+// part's concern that must never leak into the component. No jsdom:
+// this is a source-text check.
 // Run: node --test test/chatbox-boundary.mjs
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
@@ -35,7 +35,7 @@ const FORBIDDEN = [
     name: "an import from @workshop/platform other than lifecycle",
     pattern: new RegExp('"' + "@workshop/platform/" + "(?!" + "lifecycle" + '")'),
   },
-  { name: "the host's access-control vocabulary", pattern: ["gr", "ant"].join("") },
+  { name: "the owning part's access-control vocabulary", pattern: ["gr", "ant"].join("") },
 ];
 
 const files = (await readdir(chatboxDir, { recursive: true, withFileTypes: true }))
@@ -47,7 +47,7 @@ test("the chatbox directory holds the component's files", () => {
   assert.ok(files.length > 0, "src/parts/chatbox/ holds no files; the walk is broken");
 });
 
-test("no file under src/parts/chatbox/ reaches into the host layers", async () => {
+test("no file under src/parts/chatbox/ reaches into the embedding layers", async () => {
   const offenders = [];
   for (const file of files) {
     const lines = (await readFile(file, "utf8")).split("\n");

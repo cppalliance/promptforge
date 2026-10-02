@@ -4,22 +4,22 @@ use std::io;
 
 use crate::RunId;
 
-/// The database engine's error behind [`LogError::Database`], so the
-/// public error surface names no engine type. Renders and sources exactly
-/// as the engine's error does; [`as_inner`](Self::as_inner) restores
-/// branching on the engine's own variant, which the chain walks past.
+/// The database's error behind [`LogError::Database`], so the
+/// public error surface names no database type. Renders and sources exactly
+/// as the database's error does; [`as_inner`](Self::as_inner) restores
+/// branching on the database's own variant, which the chain walks past.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct DatabaseSource(turso::Error);
 
 impl DatabaseSource {
-    /// The wrapped engine error.
+    /// The wrapped database error.
     #[must_use]
     pub fn as_inner(&self) -> &turso::Error {
         &self.0
     }
 
-    /// Takes the wrapped engine error out of the wrapper.
+    /// Takes the wrapped database error out of the wrapper.
     #[must_use]
     pub fn into_inner(self) -> turso::Error {
         self.0
@@ -64,11 +64,11 @@ impl From<serde_json::Error> for JsonSource {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LogError {
-    /// The database engine refused an operation; the engine's error is
+    /// The database refused an operation; the database's error is
     /// the source.
     #[error("run log database")]
     Database {
-        /// The engine's error.
+        /// The database's error.
         #[source]
         source: DatabaseSource,
     },
@@ -76,7 +76,7 @@ pub enum LogError {
     #[error("run log file")]
     Io {
         /// The I/O error.
-        #[from]
+        #[source]
         source: io::Error,
     },
     /// A payload could not be serialized on the way in or parsed on the
@@ -97,6 +97,12 @@ pub enum LogError {
     /// found the described value.
     #[error("run log: corrupt row: {0}")]
     Corrupt(String),
+}
+
+impl From<io::Error> for LogError {
+    fn from(source: io::Error) -> Self {
+        LogError::Io { source }
+    }
 }
 
 impl From<turso::Error> for LogError {
@@ -122,16 +128,16 @@ mod tests {
     use crate::{DatabaseSource, JsonSource, LogError};
 
     #[test]
-    fn the_database_variant_reaches_the_engine_error_through_the_log_wrapper() {
-        let engine = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
-        let rendered = engine.to_string();
-        let error = LogError::from(engine);
+    fn the_database_variant_reaches_the_database_error_through_the_log_wrapper() {
+        let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
+        let rendered = database.to_string();
+        let error = LogError::from(database);
         let Some(cause) = error.source() else {
-            panic!("the database variant reports its engine cause as source()");
+            panic!("the database variant reports its database cause as source()");
         };
         assert_eq!(cause.to_string(), rendered);
         let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
-            panic!("the engine cause is harness-log's DatabaseSource");
+            panic!("the database cause is harness-log's DatabaseSource");
         };
         assert!(matches!(wrapper.as_inner(), turso::Error::Corrupt(_)));
     }
@@ -154,10 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn the_database_wrapper_hands_back_the_engine_error_it_wraps() {
-        let engine = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
-        let rendered = engine.to_string();
-        let inner = DatabaseSource::from(engine).into_inner();
+    fn the_database_wrapper_hands_back_the_database_error_it_wraps() {
+        let database = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
+        let rendered = database.to_string();
+        let inner = DatabaseSource::from(database).into_inner();
         assert_eq!(inner.to_string(), rendered);
         assert!(matches!(inner, turso::Error::Corrupt(_)));
     }

@@ -76,7 +76,7 @@ alpha-1
 beta-2
 ````
 
-The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and host calls](05-lua-environment.md#standard-lua-and-host-calls)).
+The first member's arm reads `sys.index` as 1 and the second member's arm reads 2. `tostring(result)` returns the result's text, so `table.concat(results, sep)` joins the arms' texts directly, as it does for any value with a `__tostring` ([standard Lua and Engine calls](05-lua-environment.md#standard-lua-and-engine-calls)).
 
 Results land in collection order no matter which arm finishes first, so a join or merge built from them is the same on every run. In this worker section, which sends prompts with [`models.infer`](10-models.md#running-a-round-with-modelsinfer), the arm for `a` makes a second model call and so finishes after the arms for `b` and `c`:
 
@@ -227,7 +227,7 @@ return item
 lua: fanout over an empty collection: no work is likely a bug
 ````
 
-`pcall(fanout, '### Worker', 5)` likewise returns `false` and an error value whose text contains `collection`. Left uncaught, any of these errors fails the run with the same message text, as run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), or as `RequirementsUnmet` when the call is in the H1 pass ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
+`pcall(fanout, '### Worker', 5)` likewise returns `false` and an error value whose text contains `collection`. Left uncaught, any of these errors fails the run with the same message text, as run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), or as `RequirementsUnmet` when the call is in the H1 pass ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
 
 ## The worker section
 
@@ -461,7 +461,7 @@ An arm that ends without a result, such as the one arm of a fanout over `{'alpha
 
 ### Read-only results
 
-Results are read-only. Assigning any field raises the Lua error `fanout results are read-only`, reported at the assigning line. `pcall` receives that message, and an uncaught one fails the run with run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). `setmetatable` on a result raises an error containing `protected metatable`, and `getmetatable(result)` returns a stand-in table that holds `__tostring` and no `__index` or `__newindex`:
+Results are read-only. Assigning any field raises the Lua error `fanout results are read-only`, reported at the assigning line. `pcall` receives that message, and an uncaught one fails the run with run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). `setmetatable` on a result raises an error containing `protected metatable`, and `getmetatable(result)` returns a stand-in table that holds `__tostring` and no `__index` or `__newindex`:
 
 ````lua
 local r = fanout('### Worker', {'alpha', 'beta'})
@@ -485,7 +485,7 @@ Conversations overlap the same way. With `models.loop` in every arm, all the arm
 
 ### The concurrency limit
 
-The host running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
+The Harness running the prompt sets one concurrency limit for the whole run: at most 8 tasks running at once by default, and no frontmatter key changes it. Every task counts against it: fanout arms, tasks started with `tasks.spawn`, and the tasks those spawn in turn, nested fanouts included. A fanout inside an arm shares the one budget with its arm and every ancestor instead of multiplying it, so the whole run never exceeds the limit.
 
 `fanout` starts one arm per member, first member first, each seeded with its member as `item`, its position as `sys.index`, and a snapshot of the caller's `var` ([the var snapshot](08-jump-and-call.md#the-var-snapshot)). It spawns every arm up front and then collects them, and an arm that cannot run yet waits for a slot, reading `blocked` `queued` in `tasks.status` ([Checking on tasks](15-tasks.md#checking-on-tasks)). The scheduler admits the waiting arms in spawn order as slots free up, even while an earlier arm is still waiting: over nine members, the ninth arm starts as soon as any one of the first eight finishes, not only when the first one does. Each arm is a task, started through the same request `tasks.spawn` uses, which can also give a task its own `item` and `sys.index`, as [Starting a task](15-tasks.md#starting-a-task) explains.
 
@@ -647,7 +647,7 @@ return item
 ```
 ````
 
-The run fails with run error kind `Determinism` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
+The run fails with run error kind `Determinism` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)). Its message begins `store determinism violation:` and names the contested path, the words `conflicts with`, and both arms. Because the arms are never ordered after each other, whichever of the two writes runs second always detects the conflict, so the outcome never depends on timing.
 
 `store.append` counts as a write. Two arms appending to one path end the run the same way, and only one arm's append lands: with both arms running `store.append('log.txt', item .. ';')`, `log.txt` afterward holds exactly `alpha;` or `beta;`.
 
@@ -700,7 +700,7 @@ Work.
 - beta
 ````
 
-Left uncaught, as here, the failure ends the run with run error kind `Lua` ([how a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the run's message contains `arm deliberately failed`. The error `fanout` raises is the failing arm's own error value, with its original kind and message, not a wrapper around it. For an arm that called `error('message')`, that kind is `lua`. The same uncaught failure in the H1 pass ends the run as `RequirementsUnmet` instead ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
+Left uncaught, as here, the failure ends the run with run error kind `Lua` ([how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the run's message contains `arm deliberately failed`. The error `fanout` raises is the failing arm's own error value, with its original kind and message, not a wrapper around it. For an arm that called `error('message')`, that kind is `lua`. The same uncaught failure in the H1 pass ends the run as `RequirementsUnmet` instead ([control from the H1 pass](08-jump-and-call.md#control-from-the-h1-pass)).
 
 `pcall(fanout, worker, collection)` catches a fanout failure ([catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors)): it returns `false` plus the error value, and the block keeps going, further `models.infer` calls included. A late reply meant for a cancelled sibling is discarded instead of failing the run. Here the worker section calls the model and then raises an error for the member `boom`:
 
@@ -738,7 +738,7 @@ UNKNOWN
 
 When an arm is cancelled because a sibling failed, everything under it stops too: a chain it started with `call` stops, a nested fanout's arms stop with it, and so on down, and anything that had not yet run its block never runs it. What a cancelled arm had started is abandoned with the reason `owner_aborted`, which [Cancellation and task lifetimes](15-tasks.md#cancellation-and-task-lifetimes) explains.
 
-If the host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](17-limits-and-errors.md#cancelling-a-run)).
+If the Host cancels the run while arms wait on model replies, the run ends at once with the [cancelled outcome](04-how-a-prompt-runs.md#failure-and-cancellation), not a failure, without waiting for those replies, and no arm outlives the run ([Cancelling a run](16-limits-and-errors.md#cancelling-a-run)).
 
 ## Addressing from an arm
 

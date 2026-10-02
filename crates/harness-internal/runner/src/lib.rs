@@ -1,13 +1,15 @@
-//! harness-runner - the harness effect loop: prepares an engine `Run`
-//! from a prompt file (drawing the host inputs the engine refuses to draw
-//! itself, activating capabilities, opening the run's row), steps it,
-//! performs each effect on tokio through one performer per effect kind,
+//! harness-runner - the Harness effect loop: prepares an Engine `Run`
+//! from a prompt file (drawing the inputs the Engine refuses to draw
+//! itself, putting the declared input file in place, activating
+//! capabilities, opening the run's row), steps it,
+//! performs each chat, tool-call, and timer effect on tokio through its
+//! performer and answers each Vfs effect inline in the loop,
 //! feeds the answers back, records every event, effect, and answer in the
 //! run log, and owns cancellation.
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -16,8 +18,8 @@
 //!   edit.
 //! - [`spawn::spawn_tagged`], [`spawn::spawn_blocking_tagged`],
 //!   [`spawn::spawn_session`], and [`spawn::spawn_blocking_launch`] are
-//!   the only sites in the harness that call
-//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other harness crate's
+//!   the only sites in the Harness that call
+//!   `tokio::spawn` and `tokio::task::spawn_blocking`; every other Harness crate's
 //!   `clippy.toml` bans the raw calls, and `cargo test -p build-xtask`
 //!   checks the bans are declared.
 //! - The log is written in loop order: a step's events before the step's
@@ -26,15 +28,11 @@
 //!   exactly one answer record; a dropped effect's answer is `Dropped`.
 //! - The loop never reads an event to decide anything; control comes
 //!   from the run's own word (`Step`, `Run::decided`) and the cancel flag.
-//! - [`cancel::CancelHandle`] is the awaitable token a host selects over;
-//!   the engine observes only the polled flag in
-//!   `promptforge::cancel`, and a host bridges the one to the
-//!   other when it launches a run. The `harness` facade re-exports the
-//!   module.
 
 pub mod cancel;
 mod display_chain;
 pub mod effect_loop;
+pub mod files;
 pub mod performers;
 pub mod prepare;
 pub mod spawn;

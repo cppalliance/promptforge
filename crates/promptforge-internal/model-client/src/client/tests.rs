@@ -7,7 +7,7 @@ use crate::detail::{message_from_validated_parts, tool_schema_new};
 
 #[test]
 fn from_validated_parts_serializes_role_and_content_verbatim() {
-    // The engine's chat-round seam: a `system` role and a content-parts array
+    // The Engine's chat-round seam: a `system` role and a content-parts array
     // must reach the wire exactly as validated, and the inherent constructors'
     // string form must stay byte-identical to the pre-seam shape.
     let parts = serde_json::json!([
@@ -40,7 +40,7 @@ fn from_validated_parts_serializes_role_and_content_verbatim() {
 
 #[test]
 fn tool_arguments_view_exposes_no_raw_value() {
-    // F8: the public arguments view surfaces typed accessors, never a
+    // The public arguments view surfaces typed accessors, never a
     // serde_json::Value.
     let call = ToolCall {
         id: "call_1".to_owned(),
@@ -68,8 +68,57 @@ fn tool_arguments_view_exposes_no_raw_value() {
 }
 
 #[test]
+fn from_parts_refuses_a_blank_id_a_blank_name_and_non_object_arguments() {
+    let object = || serde_json::json!({ "url": "x" });
+    for (id, name, arguments, label) in [
+        (" ", "fetch", object(), "blank id"),
+        ("call_1", "\t", object(), "blank name"),
+        ("call_1", "fetch", Value::Null, "null arguments"),
+        (
+            "call_1",
+            "fetch",
+            serde_json::json!("{}"),
+            "string arguments",
+        ),
+        ("call_1", "fetch", serde_json::json!([1]), "array arguments"),
+    ] {
+        assert!(
+            matches!(
+                ToolCall::from_parts(id, name, arguments),
+                Err(crate::Error::MalformedResponse(_))
+            ),
+            "{label} must be refused"
+        );
+    }
+    let call = ToolCall::from_parts("call_1", "fetch", object()).expect("a whole call is accepted");
+    assert_eq!((call.id(), call.name()), ("call_1", "fetch"));
+}
+
+#[test]
+fn from_result_refuses_an_empty_batch_and_duplicate_ids_and_accepts_text() {
+    assert!(matches!(
+        Completion::from_result(CompletionResult::ToolCalls(Vec::new()), "m"),
+        Err(crate::Error::EmptyModelReply {
+            finish_reason: None,
+            ..
+        })
+    ));
+    let call = ToolCall::from_parts("call_1", "fetch", json_object()).expect("a whole call");
+    let twice = CompletionResult::ToolCalls(vec![call.clone(), call.clone()]);
+    assert!(matches!(
+        Completion::from_result(twice, "m"),
+        Err(crate::Error::MalformedResponse(message)) if message.contains("\"call_1\"")
+    ));
+    let text = Completion::from_result(CompletionResult::Text("pong".to_owned()), "m")
+        .expect("a text result is accepted");
+    assert_eq!(text.model(), "m");
+    Completion::from_result(CompletionResult::ToolCalls(vec![call]), "m")
+        .expect("a batch of distinct calls is accepted");
+}
+
+#[test]
 fn tool_schema_new_validates_wire_name_and_object_schema() {
-    // F7: a valid name and object schema are accepted.
+    // A valid name and object schema are accepted.
     let schema =
         tool_schema_new("web.search-1", "desc", json_object()).expect("a valid schema is accepted");
     assert_eq!(schema.name, "web.search-1");

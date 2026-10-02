@@ -17,6 +17,8 @@
 //! completion: a malformed section degrades to `None` with a returned
 //! diagnostic naming it.
 
+use std::collections::HashSet;
+
 use promptforge_types::metrics::{LlamaTimings, Usage, VllmMetrics};
 use serde::Deserialize;
 use serde_json::Value;
@@ -31,12 +33,7 @@ const EMPTY_REPLY_REASONING_IGNORED: &str =
     "empty model reply: reasoning content was present but ignored";
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
-///
-/// `Eq` is intentionally omitted: [`CompletionResult`] holds tool-call
-/// arguments as a [`serde_json::Value`], which is not `Eq` (it can hold an
-/// `f64`), so only `Clone` and `PartialEq` are coherent here.
 #[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 pub(crate) struct NormalizedTurn {
     /// The text or tool-call product the tool loop consumes.
     pub(crate) outcome: CompletionResult,
@@ -191,16 +188,16 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
 /// rejected rather than coerced.
 pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
     let mut calls = Vec::with_capacity(raw_calls.len());
-    let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen_ids = HashSet::new();
     for raw in raw_calls {
         if !raw.is_object() {
             return Err(Error::MalformedResponse(
                 "tool call was not an object".into(),
             ));
         }
-        // `type` must be present and name a function call (PF-NORM-003): the
-        // OpenAI protocol invariant requires `"type": "function"`, so a missing,
-        // null, non-string, or other value is a malformed shape, not an absence.
+        // `type` must be present and name a function call: the OpenAI protocol
+        // invariant requires `"type": "function"`, so a missing, null,
+        // non-string, or other value is a malformed shape, not an absence.
         match raw.get("type") {
             Some(Value::String(kind)) if kind == "function" => {}
             _ => {
@@ -213,14 +210,8 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no string id".into()))?;
-        if id.trim().is_empty() {
-            return Err(Error::MalformedResponse("tool call id was blank".into()));
-        }
-        if !seen_ids.insert(id) {
-            return Err(Error::MalformedResponse(format!(
-                "duplicate tool call id {id:?} within one turn"
-            )));
-        }
+        check_call_id(id)?;
+        check_unique_call_id(&mut seen_ids, id)?;
         let function = raw
             .get("function")
             .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
@@ -233,9 +224,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
             .get("name")
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no string name".into()))?;
-        if name.trim().is_empty() {
-            return Err(Error::MalformedResponse("tool call name was blank".into()));
-        }
+        check_call_name(name)?;
         // OpenAI encodes `function.arguments` as a JSON string. It must be
         // present, a string, and decode to a JSON object - the shape tools
         // accept. Missing, null, non-string, invalid-JSON, and non-object
@@ -247,11 +236,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
                         "tool call arguments were not valid JSON: {error}"
                     ))
                 })?;
-                if !decoded.is_object() {
-                    return Err(Error::MalformedResponse(
-                        "tool call arguments did not decode to a JSON object".into(),
-                    ));
-                }
+                check_call_arguments(&decoded)?;
                 decoded
             }
             None | Some(Value::Null) => {
@@ -272,6 +257,43 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
         });
     }
     Ok(calls)
+}
+
+/// Refuses a blank tool-call id.
+pub(crate) fn check_call_id(id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        return Err(Error::MalformedResponse("tool call id was blank".into()));
+    }
+    Ok(())
+}
+
+/// Refuses a blank tool-call name.
+pub(crate) fn check_call_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(Error::MalformedResponse("tool call name was blank".into()));
+    }
+    Ok(())
+}
+
+/// Refuses tool-call arguments that are not a JSON object, the shape tools
+/// accept.
+pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
+    if !arguments.is_object() {
+        return Err(Error::MalformedResponse(
+            "tool call arguments were not a JSON object".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Records `id` in `seen`, refusing an id another call in the turn has.
+pub(crate) fn check_unique_call_id<'a>(seen: &mut HashSet<&'a str>, id: &'a str) -> Result<()> {
+    if !seen.insert(id) {
+        return Err(Error::MalformedResponse(format!(
+            "duplicate tool call id {id:?} within one turn"
+        )));
+    }
+    Ok(())
 }
 
 /// First nonblank string among the known reasoning field synonyms.
@@ -319,7 +341,7 @@ pub(crate) struct ResponseMetadata {
     pub(crate) vllm_metrics: Option<VllmMetrics>,
     /// One line per section that was present but malformed and so
     /// degraded to `None`, and one for a body naming no string `model`:
-    /// the engine reports each as a `model_metadata_degraded` event, since
+    /// the Engine reports each as a `model_metadata_degraded` event, since
     /// this crate reaches no logger.
     pub(crate) diagnostics: Vec<String>,
 }
@@ -469,718 +491,9 @@ fn parse_vllm_metrics(value: &Value) -> std::result::Result<VllmMetrics, serde_j
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "normalize-tests.rs"]
+mod tests;
 
-    /// Wraps one assistant message in the gateway's one-choice envelope.
-    fn one_choice(message: impl Into<Value>) -> Value {
-        let message = message.into();
-        serde_json::json!({ "choices": [{ "message": message }] })
-    }
-
-    /// Wraps one raw tool call in a null-content assistant message.
-    fn one_tool_call(call: impl Into<Value>) -> Value {
-        let call = call.into();
-        one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": null,
-            "tool_calls": [call]
-        }))
-    }
-
-    #[test]
-    fn answer_and_reasoning_keeps_side_channel() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "answer",
-                    "reasoning_content": "scratch work"
-                },
-                "finish_reason": "stop"
-            }]
-        });
-
-        let turn = normalize(&body).unwrap();
-        assert_eq!(turn.finish_reason.as_deref(), Some("stop"));
-        assert_eq!(turn.reasoning_content.as_deref(), Some("scratch work"));
-        match turn.outcome {
-            CompletionResult::Text(text) => assert_eq!(text, "answer"),
-            CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
-        }
-    }
-
-    #[test]
-    fn tools_with_empty_content_succeed() {
-        let body = serde_json::json!({
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "web_search",
-                            "arguments": "{\"query\":\"rust\",\"count\":3}"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        });
-
-        let turn = normalize(&body).unwrap();
-        assert_eq!(turn.finish_reason.as_deref(), Some("tool_calls"));
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].id, "call_1");
-                assert_eq!(calls[0].name, "web_search");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "query": "rust", "count": 3 })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
-    }
-
-    #[test]
-    fn tools_with_null_content_succeed() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_2",
-            "type": "function",
-            "function": { "name": "web_fetch", "arguments": "{\"url\":\"https://example.com\"}" }
-        }));
-
-        let turn = normalize(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "url": "https://example.com" })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
-    }
-
-    #[test]
-    fn malformed_tool_arguments_are_rejected_not_coerced() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_bad",
-            "type": "function",
-            "function": { "name": "web_fetch", "arguments": "not json" }
-        }));
-
-        assert!(
-            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
-            "invalid-JSON tool arguments must be rejected, never coerced to a string"
-        );
-    }
-
-    #[test]
-    fn non_string_tool_arguments_are_rejected() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_obj",
-            "type": "function",
-            "function": { "name": "web_fetch", "arguments": { "url": "x" } }
-        }));
-
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-    }
-
-    #[test]
-    fn absent_tool_arguments_are_rejected() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_none",
-            "type": "function",
-            "function": { "name": "ping" }
-        }));
-
-        assert!(
-            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
-            "missing tool arguments must be rejected, not coerced to null"
-        );
-    }
-
-    #[test]
-    fn non_object_decoded_arguments_are_rejected() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_arr",
-            "type": "function",
-            "function": { "name": "ping", "arguments": "[1,2,3]" }
-        }));
-
-        assert!(
-            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
-            "arguments that decode to a non-object must be rejected"
-        );
-    }
-
-    #[test]
-    fn blank_tool_call_id_is_rejected() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "   ",
-            "type": "function",
-            "function": { "name": "ping", "arguments": "{}" }
-        }));
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-    }
-
-    #[test]
-    fn duplicate_tool_call_ids_are_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        { "id": "dup", "type": "function", "function": { "name": "a", "arguments": "{}" } },
-                        { "id": "dup", "type": "function", "function": { "name": "b", "arguments": "{}" } }
-                    ]
-                }
-            }]
-        });
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-    }
-
-    #[test]
-    fn wrong_type_type_field_is_rejected() {
-        let body = one_tool_call(serde_json::json!({
-            "id": "call_x",
-            "type": "not_function",
-            "function": { "name": "ping", "arguments": "{}" }
-        }));
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-    }
-
-    #[test]
-    fn missing_or_null_type_field_is_rejected() {
-        // PF-NORM-003: `type` is required to be exactly "function"; a missing or
-        // null value is malformed rather than tacitly accepted.
-        for type_field in [None, Some(serde_json::Value::Null)] {
-            let mut call = serde_json::json!({
-                "id": "call_x",
-                "function": { "name": "ping", "arguments": "{}" }
-            });
-            if let Some(value) = type_field {
-                call["type"] = value;
-            }
-            let body = one_tool_call(call);
-            assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-        }
-    }
-
-    #[test]
-    fn wrong_typed_top_level_fields_are_malformed() {
-        // choices not an array
-        assert!(matches!(
-            normalize(&serde_json::json!({ "choices": {} })),
-            Err(Error::MalformedResponse(_))
-        ));
-        // message not an object
-        assert!(matches!(
-            normalize(&serde_json::json!({ "choices": [{ "message": 7 }] })),
-            Err(Error::MalformedResponse(_))
-        ));
-        // finish_reason not a string
-        assert!(matches!(
-            normalize(&serde_json::json!({
-                "choices": [{ "message": { "content": "hi" }, "finish_reason": 3 }]
-            })),
-            Err(Error::MalformedResponse(_))
-        ));
-        // content wrong type
-        assert!(matches!(
-            normalize(&serde_json::json!({
-                "choices": [{ "message": { "content": [] } }]
-            })),
-            Err(Error::MalformedResponse(_))
-        ));
-        // tool_calls wrong type
-        assert!(matches!(
-            normalize(&serde_json::json!({
-                "choices": [{ "message": { "content": null, "tool_calls": {} } }]
-            })),
-            Err(Error::MalformedResponse(_))
-        ));
-        // reasoning wrong type
-        assert!(matches!(
-            normalize(&serde_json::json!({
-                "choices": [{ "message": { "content": "hi", "reasoning_content": 5 } }]
-            })),
-            Err(Error::MalformedResponse(_))
-        ));
-    }
-
-    #[test]
-    fn whitespace_only_content_is_empty_reply() {
-        let body = one_choice(serde_json::json!({ "content": "   \n\t " }));
-        assert!(matches!(
-            normalize(&body),
-            Err(Error::EmptyModelReply { .. })
-        ));
-    }
-
-    #[test]
-    fn empty_content_with_reasoning_is_error() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "reasoning_content": "only thinking"
-                },
-                "finish_reason": "stop"
-            }]
-        });
-
-        match normalize(&body) {
-            Err(Error::EmptyModelReply {
-                detail,
-                finish_reason,
-            }) => {
-                assert_eq!(detail, EMPTY_REPLY_REASONING_IGNORED);
-                assert_eq!(
-                    finish_reason.as_deref(),
-                    Some("stop"),
-                    "the choice's finish_reason must survive on the error"
-                );
-            }
-            other => panic!("expected EmptyModelReply, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn empty_string_content_without_tools_is_error() {
-        let body = one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": ""
-        }));
-
-        match normalize(&body) {
-            Err(Error::EmptyModelReply {
-                detail,
-                finish_reason,
-            }) => {
-                assert_eq!(detail, EMPTY_REPLY);
-                assert_eq!(finish_reason, None, "no finish_reason on the wire");
-            }
-            other => panic!("expected EmptyModelReply, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn null_content_without_tools_is_error() {
-        let body = one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": null
-        }));
-
-        match normalize(&body) {
-            Err(Error::EmptyModelReply { detail, .. }) => assert_eq!(detail, EMPTY_REPLY),
-            other => panic!("expected EmptyModelReply, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn empty_reply_error_stores_the_finish_reason() {
-        let with_reason = empty_reply_error(false, Some("length".to_owned()));
-        assert!(
-            matches!(
-                with_reason,
-                Error::EmptyModelReply {
-                    finish_reason: Some(ref reason),
-                    ..
-                } if reason == "length"
-            ),
-            "a supplied finish_reason must be stored: {with_reason:?}"
-        );
-
-        let without_reason = empty_reply_error(true, None);
-        assert!(
-            matches!(
-                without_reason,
-                Error::EmptyModelReply {
-                    finish_reason: None,
-                    ..
-                }
-            ),
-            "a missing finish_reason stays missing: {without_reason:?}"
-        );
-    }
-
-    #[test]
-    fn synonym_reasoning_field_is_side_channel() {
-        let body = one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": "answer",
-            "reasoning": "via synonym"
-        }));
-
-        let turn = normalize(&body).unwrap();
-        assert_eq!(turn.reasoning_content.as_deref(), Some("via synonym"));
-        match turn.outcome {
-            CompletionResult::Text(text) => assert_eq!(text, "answer"),
-            CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
-        }
-    }
-
-    #[test]
-    fn empty_reasoning_synonym_falls_through() {
-        let body = one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": "answer",
-            "reasoning_content": "",
-            "thinking": "from thinking"
-        }));
-
-        let turn = normalize(&body).unwrap();
-        assert_eq!(turn.reasoning_content.as_deref(), Some("from thinking"));
-    }
-
-    #[test]
-    fn missing_content_and_tools_is_empty_model_reply() {
-        let body = one_choice(serde_json::json!({ "role": "assistant" }));
-
-        assert!(matches!(
-            normalize(&body),
-            Err(Error::EmptyModelReply { .. })
-        ));
-    }
-
-    #[test]
-    fn no_choices_is_malformed() {
-        let body = serde_json::json!({ "choices": [] });
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
-    }
-
-    #[test]
-    fn tool_code_fence_stays_text_in_openai_normalizer() {
-        let content = "```tool_code\nsearch(query=\"C++ Alliance founder\")\n```";
-        let body = serde_json::json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": content },
-                "finish_reason": "stop"
-            }]
-        });
-
-        let turn = normalize(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::Text(text) => assert_eq!(text, content),
-            CompletionResult::ToolCalls(_) => {
-                panic!("OpenAI normalizer must not parse content fences")
-            }
-        }
-    }
-
-    #[test]
-    fn fenced_json_tool_calls_stays_text_in_openai_normalizer() {
-        let content = "```json\n{\"tool_calls\":[{\"id\":\"1\",\"type\":\"function\",\"function\":{\"name\":\"fetch\",\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]}\n```";
-        let body = one_choice(serde_json::json!({
-            "role": "assistant",
-            "content": content
-        }));
-
-        let turn = normalize(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::Text(text) => assert_eq!(text, content),
-            CompletionResult::ToolCalls(_) => {
-                panic!("OpenAI normalizer must not parse content fences")
-            }
-        }
-    }
-
-    /// Parses the metadata and counts its diagnostics, so the tests can pin
-    /// both halves of the degrade policy: malformed sections report, and
-    /// well-formed or absent sections stay silent.
-    fn with_warn_count(body: &Value) -> (ResponseMetadata, usize) {
-        let metadata = response_metadata(body);
-        let warnings = metadata.diagnostics.len();
-        (metadata, warnings)
-    }
-
-    /// One assistant text choice, shared by the metadata fixture bodies.
-    fn reply_choice() -> Value {
-        serde_json::json!([{
-            "index": 0,
-            "message": { "role": "assistant", "content": "hi" },
-            "finish_reason": "stop"
-        }])
-    }
-
-    #[test]
-    fn llama_body_parses_model_usage_and_timings() {
-        let body = serde_json::json!({
-            "id": "chatcmpl-llama",
-            "object": "chat.completion",
-            "created": 1_726_000_000_u64,
-            "model": "qwen3-30b",
-            "choices": reply_choice(),
-            "usage": { "completion_tokens": 3, "prompt_tokens": 7, "total_tokens": 10 },
-            "timings": {
-                "prompt_n": 7,
-                "prompt_ms": 12.5,
-                "prompt_per_token_ms": 1.75,
-                "prompt_per_second": 560.0,
-                "predicted_n": 3,
-                "predicted_ms": 30.5,
-                "predicted_per_token_ms": 10.25,
-                "predicted_per_second": 98.5,
-                "draft_n": 4,
-                "draft_n_accepted": 2
-            }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 0, "a well-formed body must not warn");
-        assert_eq!(metadata.model, "qwen3-30b");
-        assert_eq!(
-            metadata.usage,
-            Some(Usage {
-                prompt_tokens: 7,
-                completion_tokens: 3,
-                total_tokens: 10,
-                cached_tokens: None,
-                reasoning_tokens: None,
-            }),
-            "flat llama.cpp usage reports the token counts only"
-        );
-        assert_eq!(
-            metadata.llama_timings,
-            Some(LlamaTimings {
-                prompt_n: 7,
-                prompt_ms: 12.5,
-                prompt_per_second: 560.0,
-                predicted_n: 3,
-                predicted_ms: 30.5,
-                predicted_per_second: 98.5,
-                draft_n: 4,
-                draft_n_accepted: 2,
-            })
-        );
-        assert_eq!(metadata.vllm_metrics, None);
-    }
-
-    #[test]
-    fn llama_timings_without_draft_counters_default_to_zero() {
-        // Without a configured draft model llama.cpp omits the draft
-        // counters entirely; zero drafted tokens is the truthful reading,
-        // so the common non-speculative body must not degrade to None.
-        let body = serde_json::json!({
-            "model": "qwen3-30b",
-            "choices": reply_choice(),
-            "timings": {
-                "prompt_n": 7,
-                "prompt_ms": 12.5,
-                "prompt_per_second": 560.0,
-                "predicted_n": 3,
-                "predicted_ms": 30.5,
-                "predicted_per_second": 98.5
-            }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 0);
-        let timings = metadata.llama_timings.unwrap();
-        assert_eq!(timings.draft_n, 0);
-        assert_eq!(timings.draft_n_accepted, 0);
-    }
-
-    #[test]
-    fn vllm_body_parses_metrics_and_cached_tokens() {
-        let body = serde_json::json!({
-            "id": "chatcmpl-vllm",
-            "object": "chat.completion",
-            "model": "meta-llama/Llama-3.1-8B-Instruct",
-            "choices": reply_choice(),
-            "usage": {
-                "prompt_tokens": 20,
-                "completion_tokens": 5,
-                "total_tokens": 25,
-                "prompt_tokens_details": { "cached_tokens": 16 }
-            },
-            "metrics": {
-                "time_to_first_token_ms": 8.5,
-                "generation_time_ms": 22.5,
-                "queue_time_ms": 1.5,
-                "mean_itl_ms": 7.5,
-                "tokens_per_second": 133.5
-            }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 0, "a well-formed body must not warn");
-        assert_eq!(metadata.model, "meta-llama/Llama-3.1-8B-Instruct");
-        assert_eq!(
-            metadata.usage,
-            Some(Usage {
-                prompt_tokens: 20,
-                completion_tokens: 5,
-                total_tokens: 25,
-                cached_tokens: Some(16),
-                reasoning_tokens: None,
-            }),
-            "the prompt_tokens_details cache detail must flatten into usage"
-        );
-        assert_eq!(metadata.llama_timings, None);
-        assert_eq!(
-            metadata.vllm_metrics,
-            Some(VllmMetrics {
-                time_to_first_token_ms: Some(8.5),
-                generation_time_ms: Some(22.5),
-                queue_time_ms: Some(1.5),
-                mean_itl_ms: Some(7.5),
-                tokens_per_second: Some(133.5),
-            })
-        );
-    }
-
-    #[test]
-    fn vllm_metrics_omit_what_was_not_measured() {
-        let body = serde_json::json!({
-            "model": "m",
-            "choices": reply_choice(),
-            "metrics": { "time_to_first_token_ms": 8.5 }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 0);
-        assert_eq!(
-            metadata.vllm_metrics,
-            Some(VllmMetrics {
-                time_to_first_token_ms: Some(8.5),
-                generation_time_ms: None,
-                queue_time_ms: None,
-                mean_itl_ms: None,
-                tokens_per_second: None,
-            }),
-            "fields vLLM did not measure stay None inside a parsed section"
-        );
-    }
-
-    #[test]
-    fn frontier_body_parses_usage_detail_fields() {
-        let body = serde_json::json!({
-            "id": "chatcmpl-frontier",
-            "object": "chat.completion",
-            "model": "gpt-5.2",
-            "choices": reply_choice(),
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 40,
-                "total_tokens": 140,
-                "prompt_tokens_details": { "cached_tokens": 64, "audio_tokens": 0 },
-                "completion_tokens_details": {
-                    "reasoning_tokens": 25,
-                    "audio_tokens": 0,
-                    "accepted_prediction_tokens": 0,
-                    "rejected_prediction_tokens": 0
-                }
-            }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 0, "a well-formed body must not warn");
-        assert_eq!(metadata.model, "gpt-5.2");
-        assert_eq!(
-            metadata.usage,
-            Some(Usage {
-                prompt_tokens: 100,
-                completion_tokens: 40,
-                total_tokens: 140,
-                cached_tokens: Some(64),
-                reasoning_tokens: Some(25),
-            })
-        );
-        assert_eq!(
-            metadata.llama_timings, None,
-            "frontier bodies have no timings"
-        );
-        assert_eq!(
-            metadata.vllm_metrics, None,
-            "frontier bodies have no metrics"
-        );
-    }
-
-    #[test]
-    fn absent_metadata_sections_are_none_without_warning() {
-        let bare = serde_json::json!({ "model": "m", "choices": reply_choice() });
-        let with_nulls = serde_json::json!({
-            "model": "m",
-            "choices": reply_choice(),
-            "usage": null,
-            "timings": null,
-            "metrics": null
-        });
-
-        for body in [bare, with_nulls] {
-            let (metadata, warnings) = with_warn_count(&body);
-            assert_eq!(warnings, 0, "absence is normal, never a warning: {body}");
-            assert_eq!(metadata.model, "m");
-            assert_eq!(metadata.usage, None);
-            assert_eq!(metadata.llama_timings, None);
-            assert_eq!(metadata.vllm_metrics, None);
-        }
-    }
-
-    #[test]
-    fn malformed_metadata_degrades_to_none_with_a_warning() {
-        // The deliberate degrade path: every section malformed at once, each
-        // one warning and dropping to None, and the call still succeeds.
-        let body = serde_json::json!({
-            "model": 7,
-            "choices": reply_choice(),
-            "usage": { "prompt_tokens": "seven" },
-            "timings": { "prompt_n": 7 },
-            "metrics": ["not", "an", "object"]
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(metadata.model, "", "a non-string model records as empty");
-        assert_eq!(metadata.usage, None, "non-numeric token counts degrade");
-        assert_eq!(
-            metadata.llama_timings, None,
-            "timings missing required fields degrade"
-        );
-        assert_eq!(metadata.vllm_metrics, None, "a non-object metrics degrades");
-        assert_eq!(warnings, 4, "each malformed section warns exactly once");
-    }
-
-    #[test]
-    fn metadata_sections_degrade_independently() {
-        let body = serde_json::json!({
-            "model": "qwen3-30b",
-            "choices": reply_choice(),
-            "usage": "broken",
-            "timings": {
-                "prompt_n": 7,
-                "prompt_ms": 12.5,
-                "prompt_per_second": 560.0,
-                "predicted_n": 3,
-                "predicted_ms": 30.5,
-                "predicted_per_second": 98.5
-            }
-        });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(warnings, 1, "only the broken section warns");
-        assert_eq!(metadata.usage, None);
-        assert!(
-            metadata.llama_timings.is_some(),
-            "a malformed sibling section must not take timings down with it"
-        );
-    }
-
-    #[test]
-    fn missing_model_records_empty_and_warns() {
-        let body = serde_json::json!({ "choices": reply_choice() });
-
-        let (metadata, warnings) = with_warn_count(&body);
-        assert_eq!(metadata.model, "");
-        assert_eq!(warnings, 1, "an OpenAI-shaped body without a model warns");
-    }
-}
+#[cfg(test)]
+#[path = "normalize-metadata-tests.rs"]
+mod metadata_tests;

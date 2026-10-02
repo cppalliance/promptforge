@@ -19,13 +19,11 @@ use axum::routing::post;
 use harness_log::{RecordFilter, RecordKind, RunId, RunLog, RunOutcome, StoredRecord};
 use harness_models::{GatewayChatPerformer, GatewayClient, GatewayEndpoint, SecretString};
 use harness_runner::effect_loop::{SharedLog, drive_run};
-use harness_runner::performers::{BoxFuture, InputPerformer};
 use harness_runner::prepare::{Prepared, Services, prepare_run};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -91,7 +89,7 @@ fn reply_stream() -> String {
 }
 
 /// Serves the mock gateway on a loopback port, spawned under the
-/// harness's tagged wrapper, and returns a keyed client at its `/v1`
+/// Harness's tagged wrapper, and returns a keyed client at its `/v1`
 /// root beside what it saw.
 async fn mock_gateway() -> (GatewayClient, Seen) {
     async fn completions(
@@ -123,20 +121,7 @@ async fn mock_gateway() -> (GatewayClient, Seen) {
     (client, seen)
 }
 
-/// The fixture issues no input wait; reaching this is the test's failure.
-struct NoInput;
-
-impl InputPerformer for NoInput {
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        unreachable!("the fixture issues no UserInput effect")
-    }
-}
-
-/// The host's current model: what every declared role binds to.
+/// The Host's current model: what every declared role binds to.
 fn current_model() -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway("m").expect("the model id is valid"),
@@ -257,7 +242,7 @@ fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> Stri
     let chat = effects[1];
     assert_eq!(
         store.record.payload,
-        json!({ "Store": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
+        json!({ "Vfs": { "op": { "Write": { "path": "notes.md", "contents": "kept" } } } })
     );
     assert_eq!(chat.record.payload["Chat"]["model"], "m");
     assert_eq!(chat.record.payload["Chat"]["alias"], "writer");
@@ -288,7 +273,7 @@ fn assert_effects_and_answers(records: &[StoredRecord], request: &Value) -> Stri
             .payload
             .clone()
     };
-    assert_eq!(answer_for(store), json!({ "Store": { "Ok": "Unit" } }));
+    assert_eq!(answer_for(store), json!({ "Vfs": { "Ok": "Unit" } }));
     assert_eq!(
         answer_for(chat),
         json!({ "Chat": { "Ok": {
@@ -337,10 +322,11 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let services = Services {
         registry: None,
         vfs: promptforge::vfs::VfsRef::default(),
+        input_text: None,
         cancel: CancelHandle::new(),
         log: Arc::clone(&log),
         chat: Arc::new(GatewayChatPerformer::new(client, deltas)),
-        input: Arc::new(NoInput),
+        input: None,
         session_id: "session-e2e".to_owned(),
         agent: "end-to-end".to_owned(),
         model: Some(current_model()),

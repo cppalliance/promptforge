@@ -1,4 +1,4 @@
-﻿//! The `GET /admin/system` route: live host metrics for the config UI's
+﻿//! The `GET /admin/system` route: live machine metrics for the config UI's
 //! Settings > System cards - CPU, RAM, the artifact-cache drive, and the
 //! NVIDIA GPU when a driver is present.
 //!
@@ -28,10 +28,10 @@ use crate::registry::RouteInfo;
 
 const SYSTEM: RouteInfo = RouteInfo::walled("/admin/system", &[Method::GET]);
 
-/// The host-metrics route, as the registry sees it.
+/// The machine-metrics route, as the registry sees it.
 pub(crate) const ROUTES: &[RouteInfo] = &[SYSTEM];
 
-/// The host-metrics route.
+/// The machine-metrics route.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(SYSTEM.path, get(admin_system))
 }
@@ -142,7 +142,7 @@ impl fmt::Debug for SystemSampler {
     }
 }
 
-/// The `GET /admin/system` route: bearer-authed, reports a live host-metrics
+/// The `GET /admin/system` route: bearer-authed, reports a live machine-metrics
 /// snapshot as JSON for the config UI's Settings > System cards.
 ///
 /// `cpu` and `ram` are always present. `disk` reports the drive holding the
@@ -151,7 +151,7 @@ impl fmt::Debug for SystemSampler {
 /// when no NVML-capable NVIDIA driver is present; NVML unavailability never
 /// fails the request.
 ///
-/// The route is compiled into every build: host metrics do not depend on the
+/// The route is compiled into every build: machine metrics do not depend on the
 /// `local` feature, and the NVML dependency probes its driver at runtime
 /// rather than link time.
 pub(crate) async fn admin_system(

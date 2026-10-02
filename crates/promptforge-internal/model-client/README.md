@@ -6,8 +6,10 @@ The PromptForge model vocabulary: the chat-completions wire types a
 streamed body into one `Completion`, the model catalog (`ModelCatalog`,
 `ModelDescriptor`, `ModelId`), and the prompt-local binding vocabulary
 (`ModelBinding`, `ModelSet`, `ModelView`) the executor resolves model
-declarations against. No transport: the HTTP client that sends a round to
-the gateway is the harness's (`harness-models`).
+declarations against. The model catalog types are defined in
+`promptforge-types` and re-exported by this crate's `model` module. No
+transport: the HTTP client that sends a round to
+the gateway is the Harness's (`harness-models`).
 
 A round is always streamed. The transport asks for
 `stream_options.include_usage`, hands each SSE `data:` payload to the
@@ -22,8 +24,9 @@ the serving `model`, `usage` token accounting (with cached- and
 reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
 `client_timing` (TTFT, mean inter-token latency, end-to-end) the
 transport measured on its own clock. The metrics vocabulary (`Usage`,
-`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) is canonical
-in `promptforge-types` and re-exported at this crate's root. A
+`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) and
+`StreamDelta` are canonical in `promptforge-types`; this crate uses them
+from there and does not re-export them. A
 malformed metadata section degrades to `None` with a diagnostic line that
-the engine reports as a `model_metadata_degraded` event; it never fails
+the Engine reports as a `model_metadata_degraded` event; it never fails
 the call.

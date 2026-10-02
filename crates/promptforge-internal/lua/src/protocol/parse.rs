@@ -4,9 +4,8 @@
 //! answer so the shim raises it at the call site. The chat request parser,
 //! which owns the message-record validation, sits in the `chat` sibling.
 
-#[path = "parse-chat.rs"]
 mod chat;
-#[path = "parse-tasks.rs"]
+mod store;
 mod tasks;
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
@@ -14,16 +13,17 @@ use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::TaskOrigin;
 
 use chat::parse_chat;
+use store::parse_store;
 use tasks::{
     parse_cancel, parse_concurrency, parse_join_any, parse_note, parse_pending, parse_ready,
-    parse_status, parse_task_events, parse_timer,
+    parse_status, parse_timer,
 };
 
 use crate::tools::tool_alias;
 use crate::{Error, LuaModelHandle, Result, resolve_section_target, scalar_return};
 
 use super::answer::Answer;
-use super::request::{LocalToolOutcome, Request, StoreOp};
+use super::request::{LocalToolOutcome, Request};
 
 /// The fixed failure for a yield that is not a well-formed request table.
 ///
@@ -66,14 +66,12 @@ enum FieldFailure {
     Malformed,
     /// An author-supplied argument had the wrong shape: the call's error,
     /// resumed as the answer so the shim raises it at the call site - an
-    /// author `pcall` catches it, as the legacy callback's argument error
-    /// surfaced.
+    /// author `pcall` catches it.
     Call(Error),
 }
 
 /// Reads one author-supplied required string argument. Every wrong shape,
-/// absent included, is the call's error: the legacy callback's argument
-/// conversion failed at the call site too.
+/// absent included, is the call's error, raised at the call site.
 fn call_string(table: &mlua::Table, name: &str) -> std::result::Result<String, FieldFailure> {
     match table.raw_get::<Value>(name) {
         Ok(Value::String(value)) => value.to_str().map(|value| value.to_owned()).map_err(|_| {
@@ -162,8 +160,7 @@ pub enum YieldParse {
     Request(Request),
     /// A well-formed shim call whose author-supplied argument failed
     /// validation: the call's answer, resumed into the caller so the shim
-    /// raises the error at the call site, as the legacy callback's argument
-    /// error surfaced.
+    /// raises the error at the call site.
     Call(Answer<Error>),
     /// Not a well-formed request table: a hand-rolled or corrupted yield,
     /// failing the block with the fixed direct-yield message.
@@ -180,10 +177,9 @@ impl Request {
     /// yield directly". A well-formed shim call whose author-supplied
     /// argument fails validation is [`YieldParse::Call`]: the error is
     /// returned as the call's answer so the shim raises it at the call site,
-    /// keeping the legacy callback's errors catchable by an author `pcall`.
-    /// One boundary conversion keeps its own byte-identical error: a `call`
-    /// or `spawn` target that is not a string fails as
-    /// `resolve_section_target` fails.
+    /// where an author `pcall` can catch it. One boundary conversion keeps
+    /// its own byte-identical error: a `call` or `spawn` target that is not
+    /// a string fails as `resolve_section_target` fails.
     pub fn from_yield(lua: &Lua, yielded: &Value) -> YieldParse {
         let Value::Table(table) = yielded else {
             return YieldParse::Malformed(direct_yield_error());
@@ -209,9 +205,6 @@ impl Request {
                 Answer::Concurrency(Err(error))
             }),
             "cancel" => classify(parse_cancel(table), |error| Answer::Cancel(Err(error))),
-            "task_events" => classify(parse_task_events(table), |error| {
-                Answer::TaskEvents(Err(error))
-            }),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
             }),
@@ -221,9 +214,7 @@ impl Request {
             },
             "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
             // No author arguments exist to fail validation: a well-formed
-            // `user_input` or `drain_task_notices` yield is always the unit
-            // request.
-            "user_input" => YieldParse::Request(Request::UserInput),
+            // `drain_task_notices` yield is always the unit request.
             "drain_task_notices" => YieldParse::Request(Request::DrainTaskNotices),
             "store" => classify(parse_store(table), |error| Answer::Store(Err(error))),
             "mcp" => match parse_mcp(lua, table) {
@@ -437,85 +428,6 @@ fn parse_local_tool_done(table: &mlua::Table) -> Option<Request> {
         _ => return None,
     };
     Some(Request::LocalToolDone { outcome })
-}
-
-/// Reads one author-supplied optional line bound: absent or nil is `None`,
-/// an integer (or a float with an integral value, matching the legacy
-/// callback's `i64` conversion) is `Some`, any other shape is the call's
-/// error.
-fn call_optional_line(
-    table: &mlua::Table,
-    name: &str,
-) -> std::result::Result<Option<i64>, FieldFailure> {
-    match table.raw_get::<Value>(name) {
-        Ok(Value::Nil) => Ok(None),
-        Ok(Value::Integer(line)) => Ok(Some(line)),
-        // The bounds are exact powers of two (-2^63 and 2^63), so the
-        // range check needs no lossy i64-to-f64 cast.
-        Ok(Value::Number(line))
-            if line.fract() == 0.0
-                && (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&line) =>
-        {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "the range check above bounds the value to i64"
-            )]
-            Ok(Some(line as i64))
-        }
-        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
-            "{name} must be an integer, got {}",
-            other.type_name()
-        )))),
-        Err(_) => Err(FieldFailure::Malformed),
-    }
-}
-
-/// Parses a `store` request: the operation name and its author-supplied
-/// arguments. Every wrong shape is the call's error, resumed as the answer
-/// so the shim raises it at the call site - an author `pcall` catches it,
-/// as the legacy callback's argument conversion failed there.
-fn parse_store(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let op = call_string(table, "store_op")?;
-    let op = match op.as_str() {
-        "write" => StoreOp::Write {
-            path: call_string(table, "path")?,
-            contents: call_string(table, "contents")?,
-        },
-        "append" => StoreOp::Append {
-            path: call_string(table, "path")?,
-            contents: call_string(table, "contents")?,
-        },
-        "read" => StoreOp::Read {
-            path: call_string(table, "path")?,
-            start: call_optional_line(table, "start")?,
-            end: call_optional_line(table, "end")?,
-        },
-        "read_numbered" => StoreOp::ReadNumbered {
-            path: call_string(table, "path")?,
-            start: call_optional_line(table, "start")?,
-            end: call_optional_line(table, "end")?,
-        },
-        "str_replace" => StoreOp::StrReplace {
-            path: call_string(table, "path")?,
-            old: call_string(table, "old")?,
-            new: call_string(table, "new")?,
-        },
-        "delete" => StoreOp::Delete {
-            path: call_string(table, "path")?,
-        },
-        "glob" => StoreOp::Glob {
-            pattern: call_string(table, "pattern")?,
-        },
-        "exists" => StoreOp::Exists {
-            path: call_string(table, "path")?,
-        },
-        other => {
-            return Err(FieldFailure::Call(Error::Lua(format!(
-                "unknown store operation {other:?}"
-            ))));
-        }
-    };
-    Ok(Request::Store { op })
 }
 
 /// Parses a reserved `mcp` request. No call surface produces one, so every

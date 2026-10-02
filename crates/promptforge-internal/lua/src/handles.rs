@@ -7,7 +7,7 @@ use super::{Error, Json, Mutex, Result, ToolId, Value};
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
-/// Declared on the binding, not the tool implementation, so a host decides
+/// Declared on the binding, not the tool implementation, so the Harness decides
 /// per binding how scripts receive the output. Every existing tool is
 /// [`Plain`](ToolOutputKind::Plain); the model tool loop never consults the
 /// kind (its results are always added to the conversation as text).
@@ -28,7 +28,7 @@ pub enum ToolOutputKind {
 ///
 /// Run-time execution (schema preparation, script dispatch) reads the
 /// binding alone; a call is issued as an effect naming the identity, and
-/// the host resolves the implementation against its own table.
+/// the Harness resolves the implementation against its own tool table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolBinding {
     /// The exact prompt-local alias.
@@ -220,7 +220,7 @@ pub trait ToolView: Send + Sync {
 }
 
 /// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
-/// in the Lua host layer.
+/// in this crate.
 fn lock_tool_set(set: &Mutex<ToolSet>) -> Result<std::sync::MutexGuard<'_, ToolSet>> {
     set.lock()
         .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))

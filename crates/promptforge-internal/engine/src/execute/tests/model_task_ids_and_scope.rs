@@ -13,10 +13,10 @@ use std::time::Duration;
 use promptforge_types::ids::TaskId;
 
 use super::model_task_acceptance::{
-    LATER, SOON, count_under, model_starts, task_events, two_child_prompt,
+    LATER, SOON, count_under, model_starts, task_lifecycle, two_child_prompt,
 };
-use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
-use super::model_tasks::{NeverBroker, model_task_context_with, owner_prompt, task};
+use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
+use super::model_tasks::{model_task_context_with, owner_prompt, task};
 use super::*;
 use crate::test_support::tokio_driver::TokioDriver;
 
@@ -39,22 +39,22 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
              local second = msgs[9].content:match('^Task id=(%S+)')\n\
              return sys.id .. '|' .. first .. '|' .. second",
         ),
-        ("A", "user_input()\nreturn sys.id"),
-        ("B", "user_input()\nreturn sys.id"),
+        ("A", "tools.call('tests/tools/delayed')\nreturn sys.id"),
+        ("B", "tools.call('tests/tools/delayed')\nreturn sys.id"),
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&delays),
+        DelayedTool::new(&delays),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("both tasks end inside the two waits");
     let records = recorder.events();
-    let succeeded = task_events(&records)
+    let succeeded = task_lifecycle(&records)
         .into_iter()
         .filter(|(label, _)| *label == "succeeded")
         .map(|(_, task)| task)
@@ -122,12 +122,12 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

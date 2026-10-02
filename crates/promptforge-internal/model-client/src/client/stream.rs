@@ -8,8 +8,8 @@
 //! buffered turns are judged by one rule set.
 //!
 //! No HTTP happens here. The transport that reads the bytes off the wire
-//! lives with the host that performs the `Chat` effect (the harness's model
-//! client); the engine's own suites drive the same reassembly through a
+//! lives in the Harness's model client, which performs each `Chat` effect;
+//! `promptforge-engine`'s own suites drive the same reassembly through a
 //! dev-only client against a mock gateway. Both hand bytes to the scanner,
 //! payloads to the accumulator, and take the completion from `finish`.
 //!
@@ -24,9 +24,10 @@
 use std::collections::BTreeMap;
 
 use promptforge_types::metrics::ClientTiming;
+use promptforge_types::wire::StreamDelta;
 use serde_json::{Map, Value};
 
-use super::{Completion, StreamDelta};
+use super::Completion;
 use crate::model::CompletionError;
 use crate::{Error, Result};
 
@@ -40,13 +41,18 @@ use crate::{Error, Result};
 #[derive(Debug, Default)]
 pub struct SseScanner {
     buffer: Vec<u8>,
+    /// How much of `buffer` is already known to hold no `\n`.
+    scanned: usize,
 }
 
 impl SseScanner {
     /// A scanner with an empty buffer.
     #[must_use]
     pub fn new() -> SseScanner {
-        SseScanner { buffer: Vec::new() }
+        SseScanner {
+            buffer: Vec::new(),
+            scanned: 0,
+        }
     }
 
     /// Buffers freshly received bytes for line extraction.
@@ -58,7 +64,15 @@ impl SseScanner {
     /// fully buffered.
     pub fn next_data(&mut self) -> Option<String> {
         loop {
-            let end = self.buffer.iter().position(|byte| *byte == b'\n')?;
+            let Some(offset) = self.buffer[self.scanned..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+            else {
+                self.scanned = self.buffer.len();
+                return None;
+            };
+            let end = self.scanned + offset;
+            self.scanned = 0;
             let line: Vec<u8> = self.buffer.drain(..=end).collect();
             let line = String::from_utf8_lossy(&line);
             let line = line.trim_end_matches(['\r', '\n']);
@@ -158,7 +172,7 @@ impl StreamAccumulator {
         // report a failure after the 200 has already been sent: the
         // completion died in flight, so it classifies as a transport
         // failure, with the bounded, control-escaped message as the cause.
-        if let Some(envelope) = chunk.get("error") {
+        if let Some(envelope) = chunk.get("error").filter(|error| !error.is_null()) {
             let message = envelope
                 .get("message")
                 .and_then(Value::as_str)
@@ -435,7 +449,7 @@ fn append_string_fragment(
 ///
 /// Control characters (including newlines and carriage returns) are rendered in
 /// their `\u{..}`/`\n` escaped form so a backend body cannot forge log lines or
-/// smuggle terminal control sequences into a diagnostic (F5). An empty body is
+/// smuggle terminal control sequences into a diagnostic. An empty body is
 /// reported as a fixed marker.
 ///
 /// A transport runs a non-success status's error body through here before

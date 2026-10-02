@@ -6,30 +6,27 @@
 //! The global stays unresolved until its first runtime read, which
 //! snapshots the section state (the section's `var` table, the live
 //! `sys`, and the bare globals), renders every `{{ }}` substitution once
-//! through the host's callback, and memoizes the string for later reads.
+//! through the Engine's callback, and memoizes the string for later reads.
 //! Assigning to `prose` raises, and `{{ prose }}` inside the template is
 //! rejected as recursive.
 //!
-//! The guard sits on the `_G` metatable: `__index` renders and memoizes
-//! the `prose` key, `__newindex` rejects writes to it, and every other key
-//! delegates to whatever metatable author code (say, the shared library)
-//! installed first. Each install replaces the previous pair's handler, so
-//! a later fence's buffer evaluates fresh while an already rendered string
-//! the author kept in a local or `var` survives untouched.
+//! The guard is the `_G` guard ([`crate::globals`]): it serves `prose`
+//! through the current install's render and refuses every write, before
+//! any metatable author code set on `_G` sees the key. Before the first
+//! install, `prose` reads nil and still refuses writes. Each install
+//! replaces the previous render, so a later fence's buffer evaluates fresh
+//! while an already rendered string the author kept in a local or `var`
+//! survives untouched.
 
-use super::{Arc, Error, Json, Lua, LuaSerdeExt, MultiValue, Mutex, Result, Value, var_to_json};
+use super::{Arc, Error, Json, Lua, LuaSerdeExt, Mutex, Result, Value, var_to_json};
 
-/// Marker field on a metatable this module installed: a re-install reuses
-/// the recorded delegates instead of chaining a new handler over its own.
-const GUARD_MARKER: &str = "__promptforge_prose_guard";
-/// The metatable field recording the `__index` the guard shadows.
-const DELEGATE_INDEX: &str = "__promptforge_prose_delegate_index";
-/// The metatable field recording the `__newindex` the guard shadows.
-const DELEGATE_NEWINDEX: &str = "__promptforge_prose_delegate_newindex";
+/// The refusal an assignment of the `prose` global raises.
+pub(crate) const ASSIGNMENT_REFUSAL: &str =
+    "prose is read-only: assign to `var` or a section global instead";
 
 /// The section state a `prose` render snapshots at the first read.
 ///
-/// The host's render callback receives the section's `var` table and the
+/// The Engine's render callback receives the section's `var` table and the
 /// live `sys` JSON as read at render time, plus a bare-global lookup for
 /// `{{ name }}` resolution. The lookup reads the section VM's globals:
 /// `Ok(None)` when unset, the JSON form when set, and an error for a
@@ -61,174 +58,78 @@ impl std::fmt::Debug for ProseState<'_> {
 /// install and first read is visible to the render.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the guard metatable cannot be built or
-/// installed.
+/// Returns [`Error::Lua`] if the read cannot be built or the guard cannot
+/// record it.
 pub(crate) fn install<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<()>
 where
     F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
 {
-    let globals = lua.globals();
-    let old = globals.metatable();
-    // The delegates the new guard shadows: a metatable of our own already
-    // recorded its delegates, so a re-install reuses them rather than
-    // chaining over the previous handler; any other metatable (a shared
-    // library's) contributes its own index pair.
-    let (delegate_index, delegate_newindex) = match &old {
-        Some(old) if matches!(old.raw_get::<Value>(GUARD_MARKER), Ok(Value::Boolean(true))) => (
-            old.raw_get::<Value>(DELEGATE_INDEX).map_err(Error::lua)?,
-            old.raw_get::<Value>(DELEGATE_NEWINDEX)
-                .map_err(Error::lua)?,
-        ),
-        Some(old) => (
-            old.raw_get::<Value>("__index").map_err(Error::lua)?,
-            old.raw_get::<Value>("__newindex").map_err(Error::lua)?,
-        ),
-        None => (Value::Nil, Value::Nil),
-    };
-    let metatable = lua.create_table().map_err(Error::lua)?;
-    // Copy every other field the previous metatable installed (a shared
-    // library's `_G` metatable keeps working), then shadow the index pair
-    // with the prose guard.
-    if let Some(old) = &old {
-        // `pairs` order is unspecified; each iteration only assigns one
-        // non-shadowed metatable field, so the copy's content is fixed.
-        for pair in old.clone().pairs::<Value, Value>() {
-            let (key, value) = pair.map_err(Error::lua)?;
-            let shadowed =
-                matches!(&key, Value::String(name) if name == "__index" || name == "__newindex");
-            if !shadowed {
-                metatable.raw_set(key, value).map_err(Error::lua)?;
-            }
-        }
-    }
-    metatable.raw_set(GUARD_MARKER, true).map_err(Error::lua)?;
-    metatable
-        .raw_set(DELEGATE_INDEX, delegate_index.clone())
-        .map_err(Error::lua)?;
-    metatable
-        .raw_set(DELEGATE_NEWINDEX, delegate_newindex.clone())
-        .map_err(Error::lua)?;
-
-    // The memo slot is per install: the raw global stays unset, so every
-    // read and every write of `prose` crosses the guard, the read-only
-    // rejection cannot be escaped by an assignment after the first read,
-    // and the next fence's install starts unresolved.
-    let memo = Arc::new(Mutex::new(None::<String>));
-    let index = guard_index(lua, sys_live, &memo, &delegate_index, render)?;
-    let newindex = guard_newindex(lua, &delegate_newindex)?;
-    metatable.raw_set("__index", index).map_err(Error::lua)?;
-    metatable
-        .raw_set("__newindex", newindex)
-        .map_err(Error::lua)?;
-    globals.set_metatable(Some(metatable)).map_err(Error::lua)
+    let read = lazy_read(lua, sys_live, render)?;
+    crate::globals::install_prose(lua, read)
 }
 
-/// Builds the guard's `__index`: a `prose` read renders once through the
-/// host callback and memoizes; every other key delegates to the shadowed
-/// `__index`.
+/// Builds one install's `prose` read: the first call renders once through
+/// the Engine callback and memoizes, and every later call returns the memo.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the closure cannot be created.
-fn guard_index<F>(
-    lua: &Lua,
-    sys_live: &Arc<Mutex<Option<Json>>>,
-    memo: &Arc<Mutex<Option<String>>>,
-    delegate_index: &Value,
-    render: F,
-) -> Result<mlua::Function>
+fn lazy_read<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<mlua::Function>
 where
     F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
 {
-    let memo = Arc::clone(memo);
+    // The memo slot is per install, so the next fence's install starts
+    // unresolved.
+    let memo = Mutex::new(None::<String>);
     let sys_live = Arc::clone(sys_live);
-    let delegate_index = delegate_index.clone();
-    lua.create_function(move |lua, (target, key): (mlua::Table, Value)| {
-        if matches!(&key, Value::String(name) if name == "prose") {
-            {
-                let guard = memo.lock().map_err(|_| {
-                    mlua::Error::external(Error::Lua("prose memo slot was poisoned".to_owned()))
-                })?;
-                if let Some(rendered) = guard.as_ref() {
-                    return lua.create_string(rendered).map(Value::String);
-                }
-            }
-            let var = var_to_json(lua).map_err(mlua::Error::external)?;
-            let sys = {
-                let guard = sys_live.lock().map_err(|_| {
-                    mlua::Error::external(Error::Lua("sys live slot was poisoned".to_owned()))
-                })?;
-                guard.clone().ok_or_else(|| {
-                    mlua::Error::external(Error::Lua(
-                        "section VM host values have not been injected".to_owned(),
-                    ))
-                })?
-            };
-            let globals_lookup = |name: &str| -> Result<Option<Json>> {
-                if name == "prose" {
-                    return Err(Error::Lua(
-                        "recursive {{ prose }}: prose cannot reference itself".to_owned(),
-                    ));
-                }
-                let value: Value = lua.globals().get(name).map_err(Error::lua)?;
-                match value {
-                    Value::Nil => Ok(None),
-                    Value::Function(_) | Value::UserData(_) | Value::Thread(_) => {
-                        Err(Error::Lua(format!(
-                            "global `{name}` is a {}; bare globals in prose must be JSON data",
-                            value.type_name()
-                        )))
-                    }
-                    other => Ok(Some(lua.from_value(other).map_err(Error::lua)?)),
-                }
-            };
-            let rendered = render(ProseState {
-                var,
-                sys,
-                globals: &globals_lookup,
-            })?;
-            let mut guard = memo.lock().map_err(|_| {
+    lua.create_function(move |lua, ()| {
+        {
+            let guard = memo.lock().map_err(|_| {
                 mlua::Error::external(Error::Lua("prose memo slot was poisoned".to_owned()))
             })?;
-            *guard = Some(rendered.clone());
-            drop(guard);
-            return lua.create_string(&rendered).map(Value::String);
+            if let Some(rendered) = guard.as_ref() {
+                return lua.create_string(rendered);
+            }
         }
-        match &delegate_index {
-            Value::Function(function) => Ok(function
-                .call::<MultiValue>((target, key))?
-                .into_iter()
-                .next()
-                .unwrap_or(Value::Nil)),
-            Value::Table(table) => table.get(key),
-            _ => Ok(Value::Nil),
-        }
-    })
-    .map_err(Error::lua)
-}
-
-/// Builds the guard's `__newindex`: a `prose` write raises the read-only
-/// error; every other write delegates to the shadowed `__newindex`.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the closure cannot be created.
-fn guard_newindex(lua: &Lua, delegate_newindex: &Value) -> Result<mlua::Function> {
-    let delegate_newindex = delegate_newindex.clone();
-    lua.create_function(
-        move |_lua, (target, key, value): (mlua::Table, Value, Value)| -> mlua::Result<()> {
-            if matches!(&key, Value::String(name) if name == "prose") {
-                return Err(mlua::Error::runtime(
-                    "prose is read-only: assign to `var` or a section global instead",
+        let var = var_to_json(lua).map_err(mlua::Error::external)?;
+        let sys = {
+            let guard = sys_live.lock().map_err(|_| {
+                mlua::Error::external(Error::Lua("sys live slot was poisoned".to_owned()))
+            })?;
+            guard.clone().ok_or_else(|| {
+                mlua::Error::external(Error::Lua(
+                    "section VM Engine values have not been injected".to_owned(),
+                ))
+            })?
+        };
+        let globals_lookup = |name: &str| -> Result<Option<Json>> {
+            if name == "prose" {
+                return Err(Error::Lua(
+                    "recursive {{ prose }}: prose cannot reference itself".to_owned(),
                 ));
             }
-            match &delegate_newindex {
-                Value::Function(function) => {
-                    function.call::<MultiValue>((target, key, value))?;
-                    Ok(())
+            let value: Value = lua.globals().get(name).map_err(Error::lua)?;
+            match value {
+                Value::Nil => Ok(None),
+                Value::Function(_) | Value::UserData(_) | Value::Thread(_) => {
+                    Err(Error::Lua(format!(
+                        "global `{name}` is a {}; bare globals in prose must be JSON data",
+                        value.type_name()
+                    )))
                 }
-                Value::Table(table) => table.set(key, value),
-                _ => target.raw_set(key, value),
+                other => Ok(Some(lua.from_value(other).map_err(Error::lua)?)),
             }
-        },
-    )
+        };
+        let rendered = render(ProseState {
+            var,
+            sys,
+            globals: &globals_lookup,
+        })?;
+        let mut guard = memo.lock().map_err(|_| {
+            mlua::Error::external(Error::Lua("prose memo slot was poisoned".to_owned()))
+        })?;
+        *guard = Some(rendered.clone());
+        drop(guard);
+        lua.create_string(&rendered)
+    })
     .map_err(Error::lua)
 }

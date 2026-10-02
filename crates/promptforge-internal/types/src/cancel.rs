@@ -1,29 +1,32 @@
-//! The synchronous cancellation handle the engine observes.
+//! The synchronous cancellation handle the Engine observes.
 //!
-//! The engine is a pure state machine, so it polls a flag between chain
+//! The Engine is a pure state machine, so it polls a flag between chain
 //! steps and from the Lua instruction hook rather than awaiting a
-//! cancellation, and the host that cancels it sets that flag from
+//! cancellation; when the Host cancels, the Harness sets that flag from
 //! whichever thread it likes. [`CancelHandle`] is that flag, arranged as a
 //! tree so a run-level cancel reaches every task while one task can be
 //! cancelled without touching its siblings or its owner.
 //!
-//! This is the handle the engine's `RunContext` holds and the one
-//! `RunServices` hands a capability; the tokio-aware token a host selects
+//! This is the handle the Engine's `RunContext` holds and the one
+//! `RunServices` hands a capability; the tokio-aware token a Host selects
 //! over is `harness::cancel::CancelHandle`, defined in `harness-runner`,
-//! and it bridges to this flag. A host that drives the engine and must
+//! and it bridges to this flag. A Harness that steps the Engine and must
 //! wait on the flag itself awaits [`CancelHandle::cancelled`], a std-only
-//! future woken by the cancel, so no host has to poll the flag on a timer.
+//! future the cancel itself wakes, in place of a timer that polls the flag.
 
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Waker};
 
 #[cfg(test)]
 #[path = "cancel-tests.rs"]
 mod tests;
+
+/// The source of each [`Cancelled`]'s registration key.
+static NEXT_WAITER: AtomicU64 = AtomicU64::new(0);
 
 /// A cloneable cancellation flag in a parent-child tree.
 ///
@@ -41,12 +44,12 @@ mod tests;
 /// - **No registry.** A child holds its parent, never the reverse, so there
 ///   are no reference cycles and nothing to unregister when a handle drops.
 /// - **Awaitable.** [`cancelled`](Self::cancelled) is a future the cancel
-///   wakes, for a host that waits on the flag beside its other sources.
+///   wakes, for a Harness that waits on the flag beside its other sources.
 ///   Polling stays a flag read; waiting costs one waker per node per
-///   waiter, dropped when the cancel fires them.
+///   waiter, dropped when the cancel fires them or the waiter drops.
 ///
 /// Reading walks the ancestor chain, one atomic load per level. The chain is
-/// as deep as the run's task nesting, which the engine caps, so a poll from
+/// as deep as the run's task nesting, which the Engine caps, so a poll from
 /// the instruction hook stays a handful of loads.
 ///
 /// # Examples
@@ -76,14 +79,20 @@ struct Node {
     cancelled: AtomicBool,
     parent: Option<Arc<Node>>,
     /// The wakers of the [`Cancelled`] futures waiting on this node or on
-    /// a descendant: a waiter registers on every node up its chain, since
-    /// a cancel anywhere on the chain completes it, and a node holds
-    /// wakers (never handles), so the tree still has no reference cycles.
-    /// Drained by the cancel that fires them.
-    wakers: Mutex<Vec<Waker>>,
+    /// a descendant, one per waiter key: a waiter registers on every node
+    /// up its chain, since a cancel anywhere on the chain completes it,
+    /// and a node holds wakers (never handles), so the tree still has no
+    /// reference cycles. Drained by the cancel that fires them; a waiter
+    /// dropped first removes its own entries.
+    wakers: Mutex<Vec<(u64, Waker)>>,
 }
 
 impl Node {
+    /// This node and each of its ancestors, nearest first.
+    fn chain(&self) -> impl Iterator<Item = &Node> {
+        std::iter::successors(Some(self), |node| node.parent.as_deref())
+    }
+
     fn is_cancelled(&self) -> bool {
         let mut node = self;
         loop {
@@ -97,43 +106,76 @@ impl Node {
         }
     }
 
-    /// Registers `waker` on this node unless an equivalent waker already
-    /// waits here, so a future polled many times leaves one entry.
-    fn register(&self, waker: &Waker) {
+    /// Registers `waker` for waiter `key`, replacing that waiter's earlier
+    /// waker unless the two wake the same task, so a future polled many
+    /// times leaves one entry and is woken through its latest waker.
+    ///
+    /// Entries are keyed by waiter rather than deduplicated by
+    /// `will_wake`: two waiters polled by one task hand in equivalent
+    /// wakers, and dropping one must not remove the entry the other needs.
+    fn register(&self, key: u64, waker: &Waker) {
         let mut wakers = self.wakers.lock().unwrap_or_else(PoisonError::into_inner);
-        if !wakers.iter().any(|known| known.will_wake(waker)) {
-            wakers.push(waker.clone());
+        match wakers.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, known)) => {
+                if !known.will_wake(waker) {
+                    known.clone_from(waker);
+                }
+            }
+            None => wakers.push((key, waker.clone())),
         }
+    }
+
+    /// Removes waiter `key`'s entry; a no-op once a cancel drained it.
+    fn deregister(&self, key: u64) {
+        self.wakers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(known, _)| *known != key);
     }
 }
 
 /// Completes when the handle it was drawn from reports cancelled.
 ///
 /// Returned by [`CancelHandle::cancelled`]. The future is `Unpin` and owns
-/// its handle, so a host can hold it across awaits or select over it
+/// its handle, so a Harness can hold it across awaits or select over it
 /// beside its other sources. It never times out or spins: the cancel that
 /// sets the flag wakes it.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct Cancelled {
+    waiter: Waiter,
+}
+
+/// A [`Cancelled`]'s handle and registration key. Dropping it removes the
+/// key's entries from every node up the chain.
+///
+/// The `Drop` sits here rather than on `Cancelled` because a `Drop` impl
+/// on `Cancelled` would enter the facade's public API listing.
+#[derive(Debug)]
+struct Waiter {
     handle: CancelHandle,
+    key: u64,
+}
+
+impl Drop for Waiter {
+    fn drop(&mut self) {
+        for node in self.handle.inner.chain() {
+            node.deregister(self.key);
+        }
+    }
 }
 
 impl Future for Cancelled {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let waiter = &self.waiter;
         // Register before reading the flag, so a cancel landing between
         // the two is observed by the read rather than lost.
-        let mut node = &*self.handle.inner;
-        loop {
-            node.register(cx.waker());
-            match &node.parent {
-                Some(parent) => node = parent,
-                None => break,
-            }
+        for node in waiter.handle.inner.chain() {
+            node.register(waiter.key, cx.waker());
         }
-        if self.handle.is_cancelled() {
+        if waiter.handle.is_cancelled() {
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -182,14 +224,14 @@ impl CancelHandle {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner),
         );
-        for waker in wakers {
+        for (_, waker) in wakers {
             waker.wake();
         }
     }
 
     /// A future that completes when this handle reports cancelled: at once
     /// if it already does, otherwise when a cancel lands on it or on an
-    /// ancestor. This is how a host that must wait on the flag waits
+    /// ancestor. This is how a Harness that must wait on the flag waits
     /// without polling it on a timer.
     ///
     /// # Examples
@@ -210,7 +252,10 @@ impl CancelHandle {
     /// ```
     pub fn cancelled(&self) -> Cancelled {
         Cancelled {
-            handle: self.clone(),
+            waiter: Waiter {
+                handle: self.clone(),
+                key: NEXT_WAITER.fetch_add(1, Ordering::Relaxed),
+            },
         }
     }
 

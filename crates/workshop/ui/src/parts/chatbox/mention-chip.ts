@@ -9,9 +9,9 @@
 // automatically. (The rename must happen in extend: configure() merges
 // its argument into the options and explicitly keeps the parent name.)
 // The node holds the chip model beyond upstream's id and label: kind,
-// icon, preview, tone, and the opaque host payload `data`, each written
-// to and read from a data attribute so the pill survives the clipboard
-// (copy renders HTML, paste parses it) and JSON persistence alike.
+// icon, preview, tone, and the owning part's opaque payload `data`, each
+// written to and read from a data attribute so the pill survives the
+// clipboard (copy renders HTML, paste parses it) and JSON persistence alike.
 // The suggestion here is configured only as far as the schema cares
 // (trigger, plugin key, no spaces); the item source, the popup
 // renderer, and the fetch timing are the chat box's to configure per
@@ -161,8 +161,8 @@ export const MentionChip = Mention.extend({
           return typeof value === "string" && TONES.has(value) ? { "data-tone": value } : {};
         },
       },
-      // The opaque host payload travels as one JSON-encoded attribute,
-      // so whatever the host put in comes back byte-for-byte.
+      // The owning part's opaque payload travels as one JSON-encoded
+      // attribute, so whatever that part put in comes back byte-for-byte.
       data: {
         default: null,
         parseHTML: (element: HTMLElement) => parsePayload(element.getAttribute("data-payload")),

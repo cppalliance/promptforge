@@ -107,7 +107,7 @@ fn activation_receives_the_runs_own_services() {
         context("prepare-services").cancel(cancel.clone()),
     );
     assert!(requirements.is_satisfied());
-    // The host-supplied cancellation handle reached `create` unchanged.
+    // The Harness-supplied cancellation handle reached `create` unchanged.
     let activations = activations.lock().expect("the lock is not poisoned");
     assert_eq!(activations.len(), 1, "create ran exactly once");
     assert_eq!(activations[0].marker.as_deref(), Some("active"));
@@ -118,7 +118,7 @@ fn activation_receives_the_runs_own_services() {
         "the activated handle is the run's own"
     );
     drop(activations);
-    // The services VFS is the run's own handle: the host handed it to
+    // The services VFS is the run's own handle: the Harness handed it to
     // activation and to the context, so the activation's marker - written
     // into the declared store at `/` - is readable through the context's
     // handle after prepare.

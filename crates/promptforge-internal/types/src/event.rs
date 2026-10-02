@@ -1,21 +1,21 @@
-//! The engine's event vocabulary: everything a run reports, as values.
+//! The Engine's event vocabulary: everything a run reports, as values.
 //!
 //! An [`Event`] is one thing that happened during a run, returned to the
-//! host from `Run::step` beside the effects the run wants performed. It is
+//! Harness from `Run::step` beside the effects the run wants performed. It is
 //! the one report-only vocabulary: lifecycle boundaries, content the model,
 //! tools, and user produced, and the opt-in debug capture, in one
-//! serializable enum. The engine emits through an
-//! [`Emitter`](crate::emitter::Emitter), the host appends to its log, and
-//! nothing is ever read back into the engine by this path: recording every
+//! serializable enum. The Engine emits through an
+//! [`Emitter`](crate::emitter::Emitter), the Harness appends to its log, and
+//! nothing is ever read back into the Engine by this path: recording every
 //! event or dropping them all leaves a run's outputs, errors, and ordering
 //! unchanged. The payload-free lifecycle variants have named constructors
-//! in [`lifecycle`] for the engine's emit sites.
+//! in [`lifecycle`] for the Engine's emit sites.
 //!
 //! Every variant includes three coordinates before its payload: `execution`
 //! (the caller-chosen run identifier), `section` (the reporting H2 heading
 //! or agent name), and `provenance` (the [`Provenance`] replay key: the
-//! nearest enclosing task and the item's position within it). A host writes
-//! `task_id` and `task_seq` for every record from `provenance` alone,
+//! nearest enclosing task and the item's position within it). The Harness
+//! writes `task_id` and `task_seq` for every record from `provenance` alone,
 //! without inspecting the payload.
 //!
 //! # Sensitivity
@@ -25,8 +25,8 @@
 //! `ModelMetadataDegraded`, whose message may quote values from a
 //! backend's response. Content variants hold model-, tool-, or
 //! user-authored text; task variants hold the author's spawn seeds; debug
-//! variants hold the verbatim request and response bodies. A host that
-//! persists or forwards events owns treating all of it as untrusted.
+//! variants hold the verbatim request and response bodies. A Harness or
+//! Host that persists or forwards events must treat all of it as untrusted.
 //!
 //! # Serialized form
 //! One event serializes to one JSON object tagged by `kind` (the variant
@@ -139,7 +139,7 @@ macro_rules! events {
 /// ([`Infer`](Self::Infer)).
 ///
 /// The default is `chat`, so an older log written before the field existed
-/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a host
+/// reads back as a chat reply. The enum is `#[non_exhaustive]`, so a Host
 /// matches the two known origins and keeps a wildcard for a future one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -149,7 +149,7 @@ pub enum ReplyOrigin {
     #[default]
     Chat,
     /// A programmatic inference round (`models.infer`): the reply is a
-    /// model result the host may treat apart from the conversation.
+    /// model result the Host may treat apart from the conversation.
     Infer,
 }
 
@@ -195,7 +195,7 @@ events! {
         ModelMetadataDegraded {
             /// The model-turn counter the response was served under.
             turn: u32,
-            /// The engine's sentence naming the section and why it did not
+            /// The Engine's sentence naming the section and why it did not
             /// parse; it may quote backend-supplied values.
             message: String,
         },
@@ -245,42 +245,40 @@ events! {
         ModelCatalogValidationSucceeded {},
         /// Live-catalog model binding validation failed.
         ModelCatalogValidationFailed {},
-        // Lifecycle: store operations.
+        // Lifecycle: operations on the run's store view (the `store.*` calls).
         /// A harness-mediated store write succeeded.
-        StoreWriteSucceeded {},
+        VfsWriteSucceeded {},
         /// A harness-mediated store write failed.
-        StoreWriteFailed {},
+        VfsWriteFailed {},
         /// A harness-mediated store append succeeded.
-        StoreAppendSucceeded {},
+        VfsAppendSucceeded {},
         /// A harness-mediated store append failed.
-        StoreAppendFailed {},
+        VfsAppendFailed {},
         /// A harness-mediated store read (verbatim) succeeded.
-        StoreReadSucceeded {},
+        VfsReadSucceeded {},
         /// A harness-mediated store read (verbatim) failed.
-        StoreReadFailed {},
+        VfsReadFailed {},
         /// A harness-mediated store read_numbered succeeded.
-        StoreReadNumberedSucceeded {},
+        VfsReadNumberedSucceeded {},
         /// A harness-mediated store read_numbered failed.
-        StoreReadNumberedFailed {},
+        VfsReadNumberedFailed {},
         /// A harness-mediated store replacement succeeded.
-        StoreReplaceSucceeded {},
+        VfsReplaceSucceeded {},
         /// A harness-mediated store replacement failed.
-        StoreReplaceFailed {},
+        VfsReplaceFailed {},
         /// A harness-mediated store deletion succeeded.
-        StoreDeleteSucceeded {},
+        VfsDeleteSucceeded {},
         /// A harness-mediated store deletion failed.
-        StoreDeleteFailed {},
+        VfsDeleteFailed {},
         /// A harness-mediated store glob succeeded.
-        StoreGlobSucceeded {},
+        VfsGlobSucceeded {},
         /// A harness-mediated store glob failed.
-        StoreGlobFailed {},
+        VfsGlobFailed {},
         /// A harness-mediated store existence check succeeded.
-        StoreExistsSucceeded {},
+        VfsExistsSucceeded {},
         /// A harness-mediated store existence check failed.
-        StoreExistsFailed {},
-        // Lifecycle: input and the author's checkpoints.
-        /// A section began waiting on operator input.
-        UserInputWaitStarted {},
+        VfsExistsFailed {},
+        // Lifecycle: the author's checkpoints.
         /// The one author-controlled checkpoint: a validated Lua
         /// `log(message)`. Prompt authors must never place arguments,
         /// replies, tool data, credentials, paths, or store contents in it.
@@ -291,7 +289,7 @@ events! {
         // Tasks.
         /// A task chain was started by `tasks.spawn`, by the `fanout` shim
         /// for each of its arms, or by the model's `task` tool. The payload
-        /// is the task's spawn seeds: everything a host needs to start the
+        /// is the task's spawn seeds: everything the Harness needs to start the
         /// same chain again under the same id. Reported under the spawning
         /// section.
         TaskStarted {
@@ -332,7 +330,7 @@ events! {
             task: TaskId,
         },
         /// Terminal: the task's owner chain ended while the task was live,
-        /// so the engine ended the task. Distinct from a cancellation: the
+        /// so the Engine ended the task. Distinct from a cancellation: the
         /// task lost its owner rather than being stopped on purpose.
         TaskAbandoned {
             /// The task's id.
@@ -371,7 +369,7 @@ events! {
             model: String,
             /// Everything the call measured, when anything reported.
             metrics: Option<CallMetrics>,
-            /// The provenance a host inspects to distinguish an inference
+            /// The provenance a Host inspects to distinguish an inference
             /// round (`infer`) from a user-facing chat turn (`chat`).
             /// Defaults to `chat` when an older log carries no `origin`.
             #[serde(default)]
@@ -401,15 +399,10 @@ events! {
             /// not nonce-wrapped).
             trusted: bool,
         },
-        /// Text the user supplied, byte-exact.
-        UserInput {
-            /// The user's text: untrusted input.
-            text: String,
-        },
         /// One model-task notice as it is queued for the task's owner: the
-        /// engine's own sentence telling the model how a task it started
+        /// Engine's own sentence telling the model how a task it started
         /// ended. A completed task's final text is embedded nonce-wrapped
-        /// as untrusted; the rest of the sentence is the engine's.
+        /// as untrusted; the rest of the sentence is the Engine's.
         /// Reported under the owner's section.
         TaskNotice {
             /// The owner's model-turn counter when the notice was queued.
@@ -419,9 +412,10 @@ events! {
             /// The sentence the model reads.
             text: String,
         },
-        /// A task set its own progress note through `tasks.note`, the text
-        /// its owner reads through `task_status`. Reported under the task's
-        /// target section.
+        /// Reserved for a task setting its own progress note through
+        /// `tasks.note`, the text its owner reads through `task_status`,
+        /// under the task's target section. Not yet produced: the Engine
+        /// stores the note on the chain without reporting it.
         TaskNote {
             /// The task that set the note.
             task: TaskId,

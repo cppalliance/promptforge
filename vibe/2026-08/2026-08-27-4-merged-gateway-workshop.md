@@ -1,6 +1,6 @@
 ---
 name: Merged gateway workshop build
-overview: Harden the workshop server with the six immediate fixes from the SPA-crate survey, then make the gateway optionally host it in the same process (second loopback listener), with the desktop shell booting the merged gateway in-process and auto-generating a gateway config and profile on first run.
+overview: Harden the workshop server with the six immediate fixes from the SPA-crate survey, then make the gateway optionally serve it in the same process (second loopback listener), with the desktop shell booting the merged gateway in-process and auto-generating a gateway config and profile on first run.
 todos:
   - id: commit-format-rulebook
     content: "Pre-run: fold the commit-message format into vibe-rulebook.md and commit in tools-public"
@@ -103,7 +103,7 @@ Code drift since drafting (2026-08-27 evening): the server refactor and Model-me
 
 ## Pre-merge hardening (Steps 1-6)
 
-Source: [tools-public/output/what-to-steal/compare-spa-crate-server-idioms.md](c:\Users\Vinnie\cursor\tools-public\output\what-to-steal\compare-spa-crate-server-idioms.md), Findings 1-5 plus the traversal check. These are independent of the merge mechanics but run first because hosting the workshop inside the gateway widens the blast radius of both Critical items. Each step is one commit with its test, per the vibe loop.
+Source: [tools-public/output/what-to-steal/compare-spa-crate-server-idioms.md](c:\Users\Vinnie\cursor\tools-public\output\what-to-steal\compare-spa-crate-server-idioms.md), Findings 1-5 plus the traversal check. These are independent of the merge mechanics but run first because embedding the workshop inside the gateway widens the blast radius of both Critical items. Each step is one commit with its test, per the vibe loop.
 
 ## Step 1: block cross-site requests (Critical)
 
@@ -152,7 +152,7 @@ Anchor the runtime files: when `[workshop.tape].path` is absent or relative, res
 
 Profile rule: like `[server]`, the `[workshop]` section is boot-only and lives only in the boot config; a profile that carries a differing `[workshop]` is refused, same as the existing bind/api_key match check in `runner.rs:233-257`. This check gained teeth since drafting: the workshop UI itself now triggers switches mid-run, and the switch SSE stream's terminal error event is the natural carrier for the refusal.
 
-## Step 9: Gateway hosts the workshop
+## Step 9: Gateway embeds the workshop
 
 [crates/promptforge-gateway/Cargo.toml](c:\Users\Vinnie\cursor\promptforge\crates\promptforge-gateway\Cargo.toml):
 
@@ -220,7 +220,7 @@ On Aug 27 the user commissioned a five-subagent web survey of Rust projects serv
 
 > "update the merge workshop plan to include all the fixes and improvements"
 
-The assistant scoped that down with his later approval: only the six immediate fixes entered this plan, because (paraphrase) hosting the workshop inside the gateway widens the blast radius of the two Critical items (cross-site exposure, non-atomic writes). The seven refactor-riders were deliberately pointed at the separate chat_ws.rs decomposition and nine ideas stayed deferred in the report. The plan's "takes only what gates or strengthens the merge" line is the record of that scoping decision.
+The assistant scoped that down with his later approval: only the six immediate fixes entered this plan, because (paraphrase) embedding the workshop inside the gateway widens the blast radius of the two Critical items (cross-site exposure, non-atomic writes). The seven refactor-riders were deliberately pointed at the separate chat_ws.rs decomposition and nine ideas stayed deferred in the report. The plan's "takes only what gates or strengthens the merge" line is the record of that scoping decision.
 
 ## Config philosophy (the why behind Step 8 and Step 10)
 

@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
-use super::model_task_notices::{DelayedBroker, NoticeRecorder, loop_owner};
-use super::model_tasks::{NeverBroker, PARKED_CHILD, model_task_context_with, owner_prompt, task};
+use super::model_task_notices::{DelayedTool, NoticeRecorder, loop_owner};
+use super::model_tasks::{PARKED_CHILD, model_task_context_with, owner_prompt, task};
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
 
-/// A broker delay that orders one child's end against another's. The
+/// A tool delay that orders one child's end against another's. The
 /// scripted rounds between them complete in milliseconds on the loopback
 /// gateway, so the margin is wide; a test's wall time is its longest delay.
 pub(super) const SOON: Duration = Duration::from_millis(300);
@@ -31,7 +31,7 @@ pub(super) const LATER: Duration = Duration::from_millis(900);
 
 /// Every task observation in `records`, as `(label, task id)` pairs in
 /// order, so a test can pair each started task with its terminals.
-pub(super) fn task_events(records: &[(String, Observation)]) -> Vec<(&'static str, TaskId)> {
+pub(super) fn task_lifecycle(records: &[(String, Observation)]) -> Vec<(&'static str, TaskId)> {
     records
         .iter()
         .filter_map(|(_, observation)| match observation {
@@ -51,7 +51,7 @@ pub(super) fn task_events(records: &[(String, Observation)]) -> Vec<(&'static st
 pub(super) fn terminals_per_started_task(
     records: &[(String, Observation)],
 ) -> BTreeMap<TaskId, Vec<&'static str>> {
-    let events = task_events(records);
+    let events = task_lifecycle(records);
     let mut terminals: BTreeMap<TaskId, Vec<&'static str>> = BTreeMap::new();
     for (label, task) in &events {
         if *label == "started" {
@@ -157,12 +157,12 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -200,7 +200,7 @@ async fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
         terminals_per_started_task(&records),
         BTreeMap::from([(task("0.0"), vec!["succeeded"])]),
         "one start, one terminal: {:?}",
-        task_events(&records)
+        task_lifecycle(&records)
     );
     assert_eq!(
         count_under(&records, "Only", &Observation::ToolCallSucceeded),
@@ -235,16 +235,16 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
              local results = tasks.join(adopted)\n\
              return tostring(results[1].ok) .. '|' .. results[1].result .. '|' .. #msgs",
         ),
-        "user_input()\nreturn 'child result'",
+        "tools.call('tests/tools/delayed')\nreturn 'child result'",
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[SOON]),
+        DelayedTool::new(&[SOON]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -269,7 +269,7 @@ async fn the_author_adopts_a_model_task_and_collects_its_result() {
         terminals_per_started_task(&records),
         BTreeMap::from([(task("0.0"), vec!["succeeded"])]),
         "the adopted task succeeds once and is never abandoned: {:?}",
-        task_events(&records)
+        task_lifecycle(&records)
     );
     let notices = recorder.notices();
     assert_eq!(
@@ -304,17 +304,23 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
     .await;
     let md = two_child_prompt(
         &loop_owner("return msgs[7].content .. '|' .. msgs[9].content .. '|' .. #msgs"),
-        ("Quick", "user_input()\nreturn 'quick result'"),
-        ("Slow", "user_input()\nreturn 'slow result'"),
+        (
+            "Quick",
+            "tools.call('tests/tools/delayed')\nreturn 'quick result'",
+        ),
+        (
+            "Slow",
+            "tools.call('tests/tools/delayed')\nreturn 'slow result'",
+        ),
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        DelayedBroker::new(&[SOON, LATER]),
+        DelayedTool::new(&[SOON, LATER]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -362,7 +368,7 @@ async fn two_waits_deliver_two_notices_once_each_in_finish_order() {
             (task("0.1"), vec!["succeeded"]),
         ]),
         "each task succeeds once: {:?}",
-        task_events(&records)
+        task_lifecycle(&records)
     );
     assert_eq!(
         count_under(&records, "Only", &Observation::ToolCallSucceeded),
@@ -397,12 +403,12 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
     );
     let prompt = parse(&md);
     let recorder = Arc::new(NoticeRecorder::default());
-    let (ctx, host) = model_task_context_with(
+    let (ctx, harness) = model_task_context_with(
         &prompt,
         Arc::clone(&recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -427,7 +433,7 @@ async fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_witho
         terminals_per_started_task(&records),
         BTreeMap::from([(task("0.0"), vec!["cancelled"])]),
         "the task is cancelled once and the timer is never a started task: {:?}",
-        task_events(&records)
+        task_lifecycle(&records)
     );
     assert!(
         recorder.notices().is_empty(),

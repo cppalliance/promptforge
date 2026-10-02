@@ -117,7 +117,7 @@ impl<'de> serde::Deserialize<'de> for ToolId {
 /// A stable, matchable classification of a [`ToolIdError`].
 ///
 /// Every public error exposes a `kind()` classifier so callers can branch on the
-/// failure without matching a private representation (DESIGN-5).
+/// failure without matching a private representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolIdErrorKind {
@@ -146,7 +146,7 @@ pub struct ToolIdError {
 }
 
 impl ToolIdError {
-    /// Returns the stable classification of this error (DESIGN-5).
+    /// Returns the stable classification of this error.
     #[must_use]
     pub fn kind(&self) -> ToolIdErrorKind {
         self.kind
@@ -190,7 +190,7 @@ impl ToolIdError {
 /// A component must be non-empty and free of the `/` namespace separator and any
 /// control character. Tool identity itself is the 3-segment global grammar
 /// ([`ToolId`]); this rule set remains for tool wire names, which are
-/// single-segment transport tokens (tools.rs F4).
+/// single-segment transport tokens.
 pub(crate) fn validate_identifier(field: &'static str, value: &str) -> Result<(), ToolIdError> {
     if value.is_empty() {
         return Err(ToolIdError {

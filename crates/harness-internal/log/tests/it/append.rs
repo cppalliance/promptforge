@@ -6,11 +6,10 @@ use serde_json::json;
 /// Every record of a run, in loop order.
 const ALL: RecordFilter = RecordFilter {
     kind: None,
-    task: None,
     last: None,
 };
 
-/// A run's opening row as the harness would write it.
+/// A run's opening row as the Harness would write it.
 fn meta() -> RunMeta {
     RunMeta {
         session_id: "session-1".to_owned(),
@@ -121,12 +120,11 @@ async fn seq_is_per_run_so_two_runs_each_start_at_zero() {
 }
 
 #[tokio::test]
-async fn a_filter_selects_by_kind_and_task_and_keeps_the_last_n() {
+async fn a_filter_selects_by_kind_and_keeps_the_last_n() {
     let mut log = RunLog::in_memory().await.unwrap();
     let run = log.begin_run(meta()).await.unwrap();
-    // Two tasks interleaved (the main walk and its first child); task
-    // `0.0`'s records arrive out of `task_seq` order so the per-task slice
-    // must sort by `task_seq`, not `seq`.
+    // Two tasks interleaved (the main walk and its first child); records
+    // come back in loop order, not in any one task's `task_seq` order.
     let appended = [
         ("0", 0, RecordKind::Event),
         ("0.0", 1, RecordKind::Event),
@@ -162,33 +160,17 @@ async fn a_filter_selects_by_kind_and_task_and_keeps_the_last_n() {
         expected(&[("0", 0), ("0.0", 1), ("0.0", 0), ("0", 2)])
     );
 
-    let task_one = log
+    let last_two = log
         .records(
             run,
             RecordFilter {
-                task: Some("0.0".to_owned()),
-                ..ALL
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(positions(task_one), expected(&[("0.0", 0), ("0.0", 1)]));
-
-    let last_two_of_task_zero = log
-        .records(
-            run,
-            RecordFilter {
-                task: Some("0".to_owned()),
                 last: Some(2),
                 ..ALL
             },
         )
         .await
         .unwrap();
-    assert_eq!(
-        positions(last_two_of_task_zero),
-        expected(&[("0", 1), ("0", 2)])
-    );
+    assert_eq!(positions(last_two), expected(&[("0.0", 0), ("0", 2)]));
 
     let last_event = log
         .records(

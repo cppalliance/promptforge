@@ -41,7 +41,7 @@ impl RetainedPcmBudget {
     fn reserve(&self, capacity: usize) -> Result<RetainedPcmOwner, AudioError> {
         self.state
             .retained
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |retained| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |retained| {
                 retained
                     .checked_add(capacity)
                     .filter(|total| *total <= self.state.limit)

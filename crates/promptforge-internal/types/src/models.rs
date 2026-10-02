@@ -1,10 +1,10 @@
-//! Host-facing model vocabulary: stable identity, catalog, and descriptor.
+//! Public model vocabulary: stable identity, catalog, and descriptor.
 //!
-//! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
+//! The Harness builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a
 //! pinned offline entry) and names catalog entries by their validated
 //! [`ModelId`]. These types are the shared vocabulary every promptforge
-//! crate and host may name, with no transport, binding, or invocation
-//! machinery.
+//! crate, the Harness, and the Host may name, with no transport, binding,
+//! or invocation machinery.
 
 use std::num::NonZeroU32;
 
@@ -76,7 +76,7 @@ impl ModelId {
 
     /// Validates one identity component, naming the field in any error.
     ///
-    /// Rejection is by Unicode scalar, not raw byte (MODEL-004): every control
+    /// Rejection is by Unicode scalar, not raw byte: every control
     /// character is refused, including C1 controls such as U+0085 (NEL) whose
     /// UTF-8 encoding a byte-range scan would miss.
     fn validate(field: &'static str, value: &str) -> std::result::Result<(), ModelIdError> {
@@ -239,7 +239,6 @@ impl ModelDescriptor {
 ///
 /// `#[non_exhaustive]` so the collision-free catalog invariant is only ever
 /// established through [`ModelCatalog::new`]/[`ModelCatalog::empty`].
-// No `Eq`: bindings hold `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelCatalog {
@@ -247,7 +246,7 @@ pub struct ModelCatalog {
 }
 
 impl ModelCatalog {
-    /// Builds a catalog from descriptors in host order.
+    /// Builds a catalog from descriptors in the Harness's order.
     ///
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
@@ -286,18 +285,10 @@ impl ModelCatalog {
         Ok(Self { models })
     }
 
-    /// Builds a catalog from descriptors already known to be collision-free.
-    ///
-    /// Used by internal callers whose inputs are already validated, where
-    /// duplicate checking is redundant.
-    pub(crate) fn from_validated(models: Vec<ModelDescriptor>) -> ModelCatalog {
-        Self { models }
-    }
-
     /// An empty catalog; every `models.bind` resolves as absent.
     #[must_use]
     pub fn empty() -> Self {
-        Self::from_validated(Vec::new())
+        Self { models: Vec::new() }
     }
 
     /// Returns every descriptor.
@@ -334,7 +325,7 @@ mod tests {
         // The C0 record separator (U+001E) must never survive into an id.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{001e}b").is_err());
         // A C1 control (NEL, U+0085) whose UTF-8 bytes (0xC2 0x85) a byte-range
-        // scan would miss but a scalar `is_control` scan rejects (MODEL-004).
+        // scan would miss but a scalar `is_control` scan rejects.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{0085}b").is_err());
         // DEL (U+007F) and NUL are refused too.
         assert!(ModelId::new(ModelId::GATEWAY, "a\u{007f}b").is_err());

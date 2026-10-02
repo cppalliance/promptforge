@@ -70,7 +70,7 @@ Two rules govern every choice:
 3. **Picker overlap analysis.** The picker reports near-duplicate selected tools using its existing vectors and threshold. Effective scope validation depends on this API.
 4. **Compiled Lua runtime.** `LuaProgram` owns source and bytecode; `SectionVm` owns one sandbox across both section phases. Parser output and execution depend on these types.
 5. **Prompt grammar.** The parser extracts H1 shared Lua and three-phase sections, then returns only syntax-valid executable prompts.
-6. **Lua capability phases.** H1 declares needs and universal aliases; H2 scopes aliases. Binding and execution depend on phase-correct host APIs.
+6. **Lua capability phases.** H1 declares needs and universal aliases; H2 scopes aliases. Binding and execution depend on phase-correct Engine functions.
 7. **Capability binding.** H1 needs become an immutable one-to-one alias and `ToolId` map before execution.
 8. **Section executor.** The executor consumes a bound prompt, validates effective scope, runs the model, and dispatches aliased calls.
 9. **Host adapters.** CLI and MCP construct complete matching live registries and picker catalogs.
@@ -103,7 +103,7 @@ Two rules govern every choice:
 
 - Shared source is compiled once but executed independently in every section VM.
 - One VM remains alive from shared load through preamble, model await, `reply` binding, and epilog.
-- Shared functions can read host globals injected after shared load because they retain the same environment table.
+- Shared functions can read Engine globals injected after shared load because they retain the same environment table.
 - H1 declarations replay only from immutable cached bindings and perform no embeddings.
 - `tools.need` and `tools.always` are legal only during top-level H1 execution. Calling them later through a helper is an error.
 - `tools.add` is legal only during H2 preamble execution and closes before any model turn.
@@ -125,8 +125,8 @@ Two rules govern every choice:
 
 ### Public API and async boundary
 
-- `LuaProgram`, parsed `Prompt`, and immutable `BoundPrompt` are public because hosts parse, bind, and execute in separate phases. Each phase requires the same observer reference.
-- Binding is a synchronous public operation over a prepared picker and live registry. Async hosts run it in `spawn_blocking`; the CLI calls it directly.
+- `LuaProgram`, parsed `Prompt`, and immutable `BoundPrompt` are public because the Harness parses, binds, and executes in separate phases. Each phase requires the same observer reference.
+- Binding is a synchronous public operation over a prepared picker and live registry. Async Hosts run it in `spawn_blocking`; the CLI calls it directly.
 - `execute::run` accepts a `BoundPrompt` and preserves existing store, observer, child-section, and fall-through behavior.
 - mlua's `send` feature keeps the execution future `Send`; no mutex guard may cross an await.
 
@@ -157,7 +157,7 @@ Each step carries its code, owning regression tests, Rust documentation, and the
 2. **Stable live-tool identity**
    - Code: extend [`tools.rs`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/src/tools.rs) and concrete tools with stable `ToolId`, description, and schema fidelity; preserve concrete wire names only as transport details.
    - Test: descriptor fidelity and ID-based registry lookup.
-   - Complete when current hosts compile against the identity surface without semantic binding.
+   - Complete when current Hosts compile against the identity surface without semantic binding.
 3. **Picker near-duplicate primitive**
    - Code: add public `NearDuplicate` and `ToolPicker::near_duplicates(ids)` in [`promptforge-tool-picker`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-tool-picker), reusing stored vectors and `duplicate_threshold`.
    - Test: absent and repeated IDs, below threshold, exact threshold, cross-server pairs, and deterministic order.
@@ -167,7 +167,7 @@ Each step carries its code, owning regression tests, Rust documentation, and the
    - Test: bytecode round trip, malformed Lua, and source-bearing diagnostics.
    - Complete when parser and executor remain otherwise unchanged.
 5. **Persistent `SectionVm`**
-   - Code: add hardened VM ownership, one environment, delayed host injection, preamble, `reply`, epilog, scalar return extraction, one instruction counter, mlua `send`, send-safe recorders, and reports for shared load, preamble, reply binding, epilog, and teardown.
+   - Code: add hardened VM ownership, one environment, delayed Engine global injection, preamble, `reply`, epilog, scalar return extraction, one instruction counter, mlua `send`, send-safe recorders, and reports for shared load, preamble, reply binding, epilog, and teardown.
    - Test: helper visibility, two-VM isolation, reply visibility, instruction-budget continuity, return conversion, and compile-time `Send`.
    - Complete without capability APIs or model execution.
 6. **Lua declaration and scope modes**
@@ -220,10 +220,10 @@ Each step carries its code, owning regression tests, Rust documentation, and the
 4. **Exact leading preamble and trailing epilog fences.** Ordinary examples must remain prose. Falsifier: exact extraction cannot preserve real CommonMark prompt content.
 5. **Parse-time compilation.** A successful `Prompt` must be executable. Falsifier: dumped bytecode cannot safely retain environment behavior or diagnostics for the prompt lifetime.
 6. **Shared source with isolated execution.** Helper reuse must not create cross-section mutable Lua state. Falsifier: a settled feature requires shared Lua closures across sections.
-7. **Semantic local aliases only.** Prompts state needs while hosts own concrete availability. Falsifier: a required capability cannot be described accurately without naming an implementation.
+7. **Semantic local aliases only.** Prompts state needs while Hosts own concrete availability. Falsifier: a required capability cannot be described accurately without naming an implementation.
 8. **Explicit `add` and `always`.** No capability is exposed accidentally. Falsifier: universal capabilities cannot be expressed without repetitive section code.
 9. **One binding pass and exact replay.** Replay is deterministic and performs no embeddings. Falsifier: tool availability must intentionally change during one run.
-10. **One-to-one alias and identity.** Symbols and dispatch targets must be unambiguous. Falsifier: a supported host requires intentional synonyms for one `ToolId`.
+10. **One-to-one alias and identity.** Symbols and dispatch targets must be unambiguous. Falsifier: a supported Host requires intentional synonyms for one `ToolId`.
 11. **Near-duplicate validation per effective scope.** Only tools competing in one model turn need semantic separation. Falsifier: the calibrated threshold rejects distinct operations with adequate descriptions and hints.
 12. **One persistent VM per section.** Preamble functions and globals must remain visible to epilog. Falsifier: the VM cannot remain safe and `Send` across model await.
 13. **Scalar return ends the run.** This preserves compact Lua control flow. Falsifier: an accepted scalar cannot map honestly to the string result contract.
@@ -259,7 +259,7 @@ Each step carries its code, owning regression tests, Rust documentation, and the
 - Step 11 follows steps 1, 8, and 10.
 - Step 12 follows steps 1, 3, 6, and 11.
 - Steps 13 and 14 may run in parallel after step 12.
-- Step 15 follows both host integrations.
+- Step 15 follows both Host integrations.
 - Do not begin dependent same-branch work while a prior commit is under review because its fixes must fold into that commit.
 
 ## Verification commands

@@ -14,11 +14,11 @@ use super::load::{FACADE, Loaded};
 /// Crates any surface item may mention.
 const STD_CRATES: [&str; 3] = ["std", "core", "alloc"];
 
-/// Third-party crates the surface may mention: serde's traits are how hosts
-/// serialize the surface's types, and `serde_json` and `serde_yaml_ng`
-/// supply the values some of those types carry. `serde` defines its traits
-/// in `serde_core` and re-exports them, and rustdoc names the defining
-/// crate.
+/// Third-party crates the surface may mention: serde's traits are how
+/// dependents serialize the surface's types, and `serde_json` and
+/// `serde_yaml_ng` supply the values some of those types carry. `serde`
+/// defines its traits in `serde_core` and re-exports them, and rustdoc
+/// names the defining crate.
 const ALLOWLIST: [&str; 4] = ["serde", "serde_core", "serde_json", "serde_yaml_ng"];
 
 /// What a closure mention must be, naming every crate it may come from.
@@ -62,7 +62,7 @@ pub(crate) fn target(krate: &Crate, id: Id) -> Option<Target<'_>> {
 /// One facade re-export, resolved to its defining item.
 #[derive(Debug)]
 pub(crate) struct Entry {
-    /// The facade path hosts name it by (`promptforge::model::Message`).
+    /// The facade path dependents name it by (`promptforge::model::Message`).
     pub(crate) label: String,
     /// The defining internal crate's name.
     pub(crate) krate: String,

@@ -1,5 +1,5 @@
-//! The engine's test drivers: hosts for a [`Run`] for this crate's own
-//! suites and, under the `test-support` feature, for companion crates'.
+//! The Engine's test drivers: each plays the Harness for a [`Run`] in this
+//! crate's suites and, under the `test-support` feature, companion crates'.
 //!
 //! [`drive`] is the serial sans-IO driver: it steps a run on the calling
 //! thread and answers every effect the moment it is issued, through a
@@ -7,26 +7,26 @@
 //! timer effect is answered however the closure sees fit, so a test's
 //! timeouts are instant.
 //!
-//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat`,
-//! `ToolCall`, and `UserInput` effects through the caller's [`Performers`]
+//! [`drive_tokio`] is the tokio driver: it performs a run's `Chat` and
+//! `ToolCall` effects through the caller's [`Performers`]
 //! (a struct of boxed async closures, one per kind) on the current tokio
 //! runtime, runs store operations on the blocking pool, sleeps timers on
 //! the timer wheel, and hands every event to the caller's sink. It is the
-//! host the engine's own suites drive.
+//! Harness for the Engine's own suites.
 //!
-//! [`RunHost`] bundles the resources the suites used to hand the retired
-//! in-crate loop - an observer, a client, a fixture tool table, a broker, a
-//! delta hook - and [`run_with_host`] is that loop's implicit-prepare path
-//! over the tokio driver: prepare, refuse or run. The tool and broker
-//! fixtures implement the stand-in traits [`TestTool`] and [`TestBroker`];
-//! the production traits are the harness's, which no engine crate names.
+//! [`RunHarness`] bundles a suite's resources for one run - an observer, a
+//! client, a fixture tool table, a delta hook - and [`run_with_harness`] is
+//! the implicit-prepare path over the tokio driver: prepare, refuse or
+//! run. The tool fixtures implement
+//! the stand-in trait [`TestTool`]; the production trait is the Harness's,
+//! which no Engine crate names.
 //! [`Observer`](recording::Observer) and
 //! [`Observation`](recording::Observation) are the suites' recording
 //! vocabulary, and [`forward`] is the adapter that replays returned events
 //! onto one, so the observation suites hold without rewriting their
 //! assertions. Everything else here - the raw-body capture, the null
 //! observer, the detail constants, the fixture tool table - is
-//! crate-internal test plumbing, not host API.
+//! crate-internal test plumbing, outside the facade API.
 
 use std::sync::Arc;
 
@@ -35,11 +35,10 @@ use promptforge_types::event::Event;
 use crate::Error;
 use crate::execute::{
     Effect, EffectAnswer, EffectId, Environment, Run, RunContext, RunError, RunResult, Step,
-    task_history,
 };
 use crate::parser::Prompt;
 
-pub(crate) mod host;
+pub(crate) mod harness;
 #[cfg(test)]
 #[path = "test_support/mock-gateway-client.rs"]
 pub(crate) mod mock_gateway_client;
@@ -47,10 +46,10 @@ pub mod recording;
 pub(crate) mod tokio_driver;
 pub(crate) mod tools;
 
-pub use host::{ChatClient, DeltaHook, RunHost};
+pub use harness::{ChatClient, DeltaHook, RunHarness};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
-pub use tools::{TestBroker, TestTool, TestToolTable};
+pub use tools::{TestTool, TestToolTable};
 
 /// The suites' mock-gateway client performs a `Chat` round over its
 /// dev-only HTTP under the run's limits.
@@ -88,15 +87,12 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// through `perform` as it is issued, and returns the run's result with
 /// every event it reported, in order.
 ///
-/// The driver is the simplest correct host. After each `step` it answers
-/// the step's effects in issue order - each through `perform`, except a
-/// [`Effect::TaskEvents`] read, which it answers from the events it has
-/// collected so far (the step's own events are collected before its
-/// effects are answered, so a task reading its history sees everything
-/// reported before the read) - and steps again. Once the run has decided
+/// The driver is the simplest correct Harness. After each `step` it answers
+/// the step's effects in issue order, each through `perform`, and steps
+/// again. Once the run has decided
 /// its outcome ([`Run::decided`]), the effects it still issues are
 /// answered [`EffectAnswer::Dropped`] without reaching `perform`, as a
-/// host abandoning a cancelled run would answer them.
+/// Harness abandoning a cancelled run would answer them.
 ///
 /// `perform` is handed the effect's id beside the effect so a scripted
 /// performer can correlate answers however it likes; it must return an
@@ -109,7 +105,8 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
 /// use std::sync::Arc;
 ///
 /// use promptforge_engine::test_support::drive;
-/// use promptforge_engine::{Prompt, Run, RunContext, RunResult};
+/// use promptforge_engine::{Run, RunContext, RunResult};
+/// use promptforge_parser::Prompt;
 /// use promptforge_types::event::Event;
 /// use promptforge_types::timestamp::Timestamp;
 ///
@@ -131,15 +128,15 @@ pub fn drive(
     mut run: Run,
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,
 ) -> (RunResult, Vec<Event>) {
-    let mut history = Vec::new();
+    let mut reported = Vec::new();
     loop {
         match run.step() {
             Step::Done { result, events } => {
-                history.extend(events);
-                return (result, history);
+                reported.extend(events);
+                return (result, reported);
             }
             Step::Pending { effects, events } => {
-                history.extend(events);
+                reported.extend(events);
                 if effects.is_empty() {
                     // Every effect is answered the step it is issued, so a
                     // pending step that issued nothing has nothing to wait
@@ -147,14 +144,12 @@ pub fn drive(
                     let error = Error::internal(
                         "the serial driver was handed a pending run with no effect to answer",
                     );
-                    return (RunResult::Failure(RunError::from(error)), history);
+                    return (RunResult::Failure(RunError::from(error)), reported);
                 }
                 let decided = run.decided();
                 for (id, _, effect) in effects {
                     let answer = if decided {
                         EffectAnswer::Dropped
-                    } else if let Effect::TaskEvents { task, last } = &effect {
-                        EffectAnswer::TaskEvents(task_history(&history, task, *last))
                     } else {
                         perform(id, &effect)
                     };
@@ -165,41 +160,46 @@ pub fn drive(
     }
 }
 
-/// The retired loop's implicit-prepare path over the tokio driver: prepares
-/// and runs `prompt` with the resources `host` bundles.
+/// The implicit-prepare path over the tokio driver: prepares and runs
+/// `prompt` with the resources `harness` bundles.
 ///
 /// The environment's catalog is what prepare fills slots against; a suite
 /// with fixture tools installs their descriptors there
 /// ([`Environment::tools`] over [`TestToolTable::catalog`]) and the
-/// implementations on the host ([`RunHost::tools`]). Capability activation
-/// is the harness's and never happens here.
+/// implementations on `harness` ([`RunHarness::tools`]). Capability activation
+/// is the Harness's and never happens here.
 ///
 /// An unsatisfiable prompt - a missing required capability or an unmet
 /// model requirement - is refused with [`RunResult::Failure`] holding
 /// [`RequirementsUnmet`](crate::RunErrorKind::RequirementsUnmet) and the
 /// model-readable notice naming each gap once.
-pub async fn run_with_host(
+pub async fn run_with_harness(
     env: &Environment,
     prompt: &Prompt,
     args: &str,
     ctx: RunContext,
-    host: RunHost,
+    harness: RunHarness,
 ) -> RunResult {
     let (ctx, requirements) = env.prepare(prompt, ctx);
     if let Some(refusal) = requirements.refusal() {
         return RunResult::Failure(refusal);
     }
-    run_host(prompt, args, ctx, host).await
+    run_harness(prompt, args, ctx, harness).await
 }
 
 /// Runs an already-prepared `prompt` under `ctx` with the resources
-/// `host` bundles, on the tokio driver: the host's
-/// [`performers`](RunHost::performers) perform the effects under the
+/// `harness` bundles, on the tokio driver: the bundle's
+/// [`performers`](RunHarness::performers) perform the effects under the
 /// context's limits, and every event is replayed onto its observer and
 /// capture.
-pub async fn run_host(prompt: &Prompt, args: &str, ctx: RunContext, host: RunHost) -> RunResult {
+pub async fn run_harness(
+    prompt: &Prompt,
+    args: &str,
+    ctx: RunContext,
+    harness: RunHarness,
+) -> RunResult {
     let limits = ctx.limits;
     let run = Run::new(Arc::new(prompt.clone()), args, ctx);
     let cancel = run.cancel_handle();
-    drive_tokio(run, host.performers(limits), host.sink(), cancel).await
+    drive_tokio(run, harness.performers(limits), harness.sink(), cancel).await
 }

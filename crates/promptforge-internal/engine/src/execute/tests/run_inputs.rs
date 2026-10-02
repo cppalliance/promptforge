@@ -1,4 +1,4 @@
-//! The host-drawn inputs on `RunContext` that replaced the engine's own
+//! The Harness-drawn inputs on `RunContext` that replaced the Engine's own
 //! clock and RNG: `seed` (the untrusted-envelope nonce derives from it),
 //! `started_at` (rendered as `sys.when` for the H1 pass and every walked
 //! section alike), and `ui` (the snapshot the `ui()` global serves). Two
@@ -8,7 +8,7 @@
 use promptforge_types::replay::Flags;
 use promptforge_types::timestamp::Timestamp;
 
-use super::task_events::text_of;
+use super::serial_driver::text_of;
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;
@@ -81,8 +81,8 @@ fn a_different_seed_changes_the_nonce_but_not_sys_when() {
 
 #[test]
 fn the_h1_pass_reads_the_same_sys_when_as_the_walk() {
-    // H1 used to stamp its own `now`; both now read the run's `started_at`.
-    // A scalar H1 return short-circuits the run with that value.
+    // The H1 pass and the walk both read the run's `started_at`. A scalar
+    // H1 return short-circuits the run with that value.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Title\n\n\
         ```lua\n\
@@ -97,7 +97,7 @@ fn the_h1_pass_reads_the_same_sys_when_as_the_walk() {
 
 #[test]
 fn sys_when_is_timestamp_to_rfc3339_for_any_started_at() {
-    // Whatever instant the host stamps, `sys.when` is that value's own
+    // Whatever instant the Harness stamps, `sys.when` is that value's own
     // rendering: here one on a whole second, so the fraction is omitted,
     // which the millisecond fixture above cannot show.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
@@ -122,7 +122,7 @@ fn sys_when_is_timestamp_to_rfc3339_for_any_started_at() {
 #[test]
 fn the_context_holds_the_flags_and_starts_them_empty() {
     // `Flags` is a run input like the seed: empty from `new`, kept
-    // verbatim when the host sets it (a replay hands back the recorded
+    // verbatim when the Harness sets it (a replay hands back the recorded
     // set), and readable beside the other inputs.
     let fresh = test_context(EXECUTION);
     assert_eq!(fresh.run_flags(), Flags::EMPTY);

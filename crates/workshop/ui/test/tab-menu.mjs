@@ -271,7 +271,7 @@ KeybindingsRegistry.registerKeybindingRule({ id: LABELLED, keybinding: "alt+f8",
 getService(CONTEXT_KEY_SERVICE).createKey("activeEditor", "").set("");
 
 const platform = detectPlatform();
-/** The label the keybinding registry renders for `chord` on this host. */
+/** The label the keybinding registry renders for `chord` on this platform. */
 function chordLabel(chord) {
   const parsed = parseKeybinding(chord, platform);
   return parsed.ok ? formatKeybinding(parsed.value, platform) : `malformed ${chord}`;

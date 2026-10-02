@@ -24,20 +24,20 @@ pub(crate) const GENERIC_COMPLETION: &str = "done";
 /// Advances the shared turn counter with saturation, returning the 1-based
 /// index of the turn just started.
 ///
-/// Uses `fetch_update` so the STORED counter saturates at [`u32::MAX`] rather
+/// Uses `try_update` so the STORED counter saturates at [`u32::MAX`] rather
 /// than wrapping through `fetch_add`. A wrapped counter would reuse a turn index
 /// and desynchronize debug capture; saturation makes that unrepresentable. The
 /// closure never returns `None`, so the update never fails.
 pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
     turns
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             Some(current.saturating_add(1))
         })
         .unwrap_or(u32::MAX)
         .saturating_add(1)
 }
 
-/// The `sys` JSON every engine driver builds for its section or arm: the
+/// The `sys` JSON every section driver builds for its section or arm: the
 /// six shared fields in one construction. A driver with an extra field
 /// (`index`, on a fanout arm or a spawned chain) inserts it at its own call
 /// site. `when` is the run's `started_at` rendered as RFC 3339, the same
@@ -136,7 +136,7 @@ pub(crate) fn report_model_turn(
             }
         });
     }
-    // The content reports every host transcript is built from: the
+    // The content reports every Host transcript is built from: the
     // thinking side channel first, then the reply, each with model and
     // metrics.
     if let Some(thinking) = &thinking {

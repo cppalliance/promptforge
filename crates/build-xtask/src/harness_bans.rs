@@ -1,7 +1,7 @@
-//! Harness clippy-ban check: every internal harness crate forbids raw
+//! Harness clippy-ban check: every internal Harness crate forbids raw
 //! tokio spawns.
 //!
-//! The harness spawns only through one instrumented wrapper in
+//! The Harness spawns only through one instrumented wrapper in
 //! `harness-runner` that tags each task with its `EffectId` and
 //! `Provenance`, so every crate under `crates/harness-internal/` has a
 //! `clippy.toml` whose `disallowed-methods` names `tokio::spawn` and
@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The methods every harness `clippy.toml` must disallow.
+/// The methods every Harness `clippy.toml` must disallow.
 const BANNED: [&str; 2] = ["tokio::spawn", "tokio::task::spawn_blocking"];
 
 /// Checks every crate under `container` for a complete clippy ban list.
@@ -26,7 +26,7 @@ pub(crate) fn harness_clippy_bans(container: &Path) -> Vec<String> {
     crates.iter().filter_map(|dir| check_crate(dir)).collect()
 }
 
-/// The harness family's crate directories: every crate under `container`
+/// The Harness family's crate directories: every crate under `container`
 /// plus `public_crate` when its directory exists.
 #[must_use]
 pub(crate) fn harness_crates(container: &Path, public_crate: &Path) -> Vec<PathBuf> {

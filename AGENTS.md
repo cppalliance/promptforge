@@ -1,6 +1,28 @@
 # PromptForge
 
-Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that hosts it, the inference gateway, and the Workshop desktop product.
+Multi-crate Rust workspace for the Engine, the Harness that runs it, the Gateway, and Workshop, a Host.
+
+## Definitions
+
+Three words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
+
+- **Engine**: the `promptforge` crates, `crates/promptforge/` and everything under `crates/promptforge-internal/`; the Structure rules below call this product PromptForge. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for the Harness to answer it.
+- **Harness**: the `harness` crates, `crates/harness/` and everything under `crates/harness-internal/`. The Harness steps the Engine, performs every effect, returns each answer, and keeps the run log. Production code runs prompts only through the Harness. In Engine tests and examples, the code that steps the Engine plays the Harness's part and is called the Harness too.
+- **Host**: an application that runs prompts through the Harness, such as Workshop or Papergate. The Host makes every policy decision. It runs prompts only through the Harness; it may also use the Engine's parser and types to read prompts and show events.
+
+### Using the terms
+
+- "Host", in any capitalization and as hosts, hosted, or hosting, means only the Host. Other meanings use these words:
+  - "Engine globals" for the Lua globals the Engine installs in every section, and "Engine call" for a call to one
+  - "real files" and "the real filesystem" for the operating system's files
+  - "machine" for the computer something runs on
+  - the part's own name for a program or UI part that embeds another, such as "the desktop app" or "the container element"
+  - "run", "serve", "embed", or "hold" for the verb
+- "Engine" and "Harness" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
+- Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host and target vocabulary and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
+- Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Code names follow the same terms.
+- Quotations of people stay verbatim.
+- `crates/workshop/ui/test/docs-claims.mjs` enforces these rules in every `AGENTS.md`, every `## Invariants` crate doc, and every `.cursor/rules` file.
 
 ## Principles
 
@@ -14,10 +36,8 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 
 ## Roles
 
-- Workshop is a user-facing agentic development environment: a Tauri desktop application with an HTML/CSS/TypeScript UI
-- PromptForge is the runtime execution engine for the PromptForge Prompting Language: structured Markdown files with live Lua code fences
+- Workshop is a Host: a user-facing agentic development environment, a Tauri desktop application with an HTML/CSS/TypeScript UI
 - Gateway is an independent service that proxies local and remote inference through one OpenAI-compatible HTTP and WebSocket endpoint
-- Harness is the engine's only production host: it owns the tokio runtime, the performers that execute the engine's effects, agent sessions, and the run log; Workshop and other clients drive runs through it
 
 ## Vocabulary
 
@@ -34,7 +54,7 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - **entry bundle**: the eagerly loaded composition: `crates/workshop/ui/src/main.ts` and the `*.contribution.ts` modules it imports. Lazy panels never import a module inside it, directly or through another import. Everything else that eager and lazy code both import, such as `@workshop/platform`, `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code.
 - **take**: one push-to-talk dictation recording and the transcript region it owns in the target text.
 - **zone**: a named Dockview tab bank in the Workshop layout: `left`, `main`, and `right`, with `bottom` reserved. A zone survives its last panel closing. The default layout is product policy set at the composition root (`LAYOUT_POLICY`, registered in `main.ts`): the workspace tree anchors `left` and the agent session anchors `right`. Document editors open in `main` through the editor type's default zone.
-- **chip**: an inline pill in the chat box: a mention, a typeahead row, or an attachment. The host owns its kind and payload.
+- **chip**: an inline pill in the chat box: a mention, a typeahead row, or an attachment. The part that embeds the chat box owns its kind and payload.
 - **contribution**: an item a subsystem self-registers into `workshop-registry`: a route, background task, state handle, or push sink. In the SPA, an eager `*.contribution.ts` module that registers a feature's command, menu, tab-menu, and quick-access rows and its panel types at module scope, before any service exists.
 - **status bus**: the broadcast channel in `workshop-status` that carries status bar updates from every subsystem to every connected `/ws` session and retains the newest update for sessions that connect later.
 - **sidecar**: the local `promptforge-gateway` process the desktop app attaches to through its discovery file or launches beside itself. An explicitly configured gateway endpoint is not a sidecar.
@@ -46,14 +66,14 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - Workshop crates are named workshop-* and must not depend on gateway crates; workshop crates may name the gateway public pair, the promptforge public API, and `harness`
 - Gateway's public surface is two root crates, `gateway-api-types` and `gateway-api-discovery`; everything else lives under crates/gateway/, a manifestless container private to the family - no outside crate may depend into it, and workshop crates may name only the public pair. Gateway crates must not depend on promptforge or workshop crates
 - Workshop crates live under crates/workshop/, a manifestless container private to the family - no outside crate may depend into it; the desktop app is crates/workshop/desktop (package `workshop`), and the server and its subsystems sit beside it with short directory names
-- Harness crates are named `harness` and harness-*. Their public surface is one root crate, `harness` at crates/harness/: a facade of single-item re-exports, laid out like `promptforge`. Everything else lives under crates/harness-internal/, a fourth manifestless container private to the family, and `harness` is the only outside crate permitted to depend into it. harness-* crates may depend only on `promptforge`, never on gateway, shared, or workshop crates; crates outside the family, build-* included, reach the harness only through `harness`; promptforge-* and gateway-* crates must not depend on harness crates
+- Harness crates are named `harness` and harness-*. Their public surface is one root crate, `harness` at crates/harness/: a facade of single-item re-exports, laid out like `promptforge`. Everything else lives under crates/harness-internal/, a fourth manifestless container private to the family, and `harness` is the only outside crate permitted to depend into it. harness-* crates may depend only on `promptforge`, never on gateway, shared, or workshop crates; crates outside the family, build-* included, reach the Harness only through `harness`; promptforge-* and gateway-* crates must not depend on Harness crates
 - The composed topology rule: a crate in a family container (crates/promptforge-internal/, crates/gateway/, crates/workshop/, crates/harness-internal/) may depend only on crates at the crates/ root and its own siblings; the root is the public layer. Crates named build-* are meta tooling, exempt from container privacy
-- PromptForge crates are named `promptforge` and promptforge-* and must not depend on gateway, workshop, or harness crates
-- PromptForge has one public crate, `promptforge` at crates/promptforge/: a facade of single-item re-exports grouped into documented role modules. Crates outside the family may depend only on `promptforge`, never on a promptforge-* crate. Everything else lives under crates/promptforge-internal/, a manifestless container private to the family that holds the engine (`promptforge-engine`), the types crate (`promptforge-types`), the virtual filesystem (`promptforge-vfs`), and the lua, parser, and model-client crates; `promptforge` is the only outside crate permitted to depend into it
+- PromptForge crates are named `promptforge` and promptforge-* and must not depend on gateway, workshop, or Harness crates
+- PromptForge has one public crate, `promptforge` at crates/promptforge/: a facade of single-item re-exports grouped into documented role modules. Crates outside the family may depend only on `promptforge`, never on a promptforge-* crate. Everything else lives under crates/promptforge-internal/, a manifestless container private to the family that holds the executor (`promptforge-engine`), the types crate (`promptforge-types`), the virtual filesystem (`promptforge-vfs`), and the lua, parser, and model-client crates; `promptforge` is the only outside crate permitted to depend into it
 - The desktop app (the `workshop` crate) depends on `workshop-server-api` and never on `workshop-server`; the facade is the desktop app's entire view of the server
-- Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates. PromptForge's own public surface is the `promptforge` facade, and its types crate (`promptforge-types`) has left shared-* for the private container; Gateway's is gateway-api-types and gateway-api-discovery, named gateway-* now that both have left shared-*; the types crate contains the wire vocabulary only, never code
+- Shared crates are named shared-*, contain the public API surface across products and downstream crates, and must not depend on any product crates. PromptForge's own public surface is the `promptforge` facade, and its types crate (`promptforge-types`) has left shared-* for the private container; Gateway's is gateway-api-types and gateway-api-discovery, named gateway-* now that both have left shared-*; `promptforge-types` holds the shared vocabulary together with run-support code (the untrusted guards, the cancellation tree, and the event emitter)
 - Crates named build-* are for building specific outputs
-- Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies. One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths hosts see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules.
+- Dependency rules bind all kinds: normal, dev, build, and target-specific dependencies. One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules.
 
 ## Engineering
 
@@ -75,13 +95,14 @@ Multi-crate Rust workspace for the PromptForge pipeline engine, the harness that
 - Docs: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`; user guide: `cargo xtask site --books-only`. Rustdoc lints are not covered by clippy; never skip the docs gate.
 - Facade docs: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`, without `--all-features`, so the facade's docs build with default features.
 - Facade surface: `cargo +<pinned nightly> xtask api --check`, where the pinned nightly is the one named in `crates/build-xtask/src/api/toolchain.rs`; on any other toolchain it fails at once, naming the nightly it needs. It checks that every path a surface item's signature, fields, bounds, impls, or doc links name is a facade re-export (or std, core, alloc, or an allowlisted crate), that no surface doc text names an internal crate, and that the surface listing matches the committed `crates/promptforge/public-api.txt`.
-- Boundary and structural harness: `cargo test -p build-xtask`.
+- Facade pages: a change that adds, moves, renames, or removes a public item of a facade crate (`promptforge` or `harness`) runs `tools/cicerone.md` in update mode for that crate before merge. A plan never defers a facade's pages to later work.
+- Boundary and structural checks: `cargo test -p build-xtask`.
 
 ## Structural Rules
 
 - Dependencies flow one way: server -> features -> services -> vocabulary. Never add a dependency from a lower tier to a higher one. If Cargo rejects a cycle, the design is wrong, not the graph. On the SPA side, lazy panels never import a module inside the entry bundle, directly or through another import. Everything else that eager and lazy code both import, such as `@workshop/platform`, `services/`, `base/`, and shared parts modules like `parts/layout/zones.ts`, is shared code.
 - Every workshop-* and harness-* crate's lib.rs opens with a //! doc containing a `## Invariants` marker that lists what the crate may depend on and what it may not. The marker is mandatory for those families by package name; a family crate without it fails `cargo test -p build-xtask`. The desktop app (the `workshop` crate) is exempt, and the `harness` facade has no marker, like `promptforge`. Read the marker before adding an import.
-- No file in a crate with the marker exceeds 500 lines. If an edit would push a file past 500, split first, then edit. `cargo test -p build-xtask` enforces the tier graph, the mandatory marker, the lint inheritance, the ceiling over the Rust files in every workshop-* and harness-* crate plus any other crate with the marker, and the product-boundary matrix above (including the single-public-crate rules for promptforge and harness and the container privacy rules for crates/promptforge-internal/, crates/gateway/, crates/workshop/, crates/harness-internal/, and the nested crates/gateway/stt/ subsystem, whose only family-visible crate is gateway-stt) across every workspace manifest; the desktop app (the `workshop` crate) is exempt from the marker and the ceiling until the headless agent mode plan.
+- No file in a crate with the marker exceeds 500 lines. If an edit would push a file past 500, split first, then edit. `cargo test -p build-xtask` enforces the tier graph, the mandatory marker, the lint inheritance, the ceiling over the Rust files in every workshop-* and harness-* crate plus any other crate with the marker, and the product-boundary matrix above (including the single-public-crate rules for `promptforge` and `harness` and the container privacy rules for crates/promptforge-internal/, crates/gateway/, crates/workshop/, crates/harness-internal/, and the nested crates/gateway/stt/ subsystem, whose only family-visible crate is gateway-stt) across every workspace manifest; the desktop app (the `workshop` crate) is exempt from the marker and the ceiling until the headless agent mode plan.
 - Source directories are flat by default. A subdirectory of source files must contain at least three files, and its count includes the files in its nested subdirectories; one or two files belong beside the parent module as `foo-bar.rs` (parent stem, dash, kebab label), wired with an explicit path attribute so the module name stays clean: `#[path = "foo-bar.rs"] mod bar;`. The two forms are convertible in both directions: when a `foo-*.rs` sibling group grows to three files, rehydrate it into a `foo/` subdirectory in standard module layout (`foo/bar.rs` beside `foo.rs`) and drop the path attributes; when a subdirectory shrinks below three files, flatten it back to kebab siblings. Both conversions apply at each level of nesting. Apply whichever conversion applies when you touch files in a group on the wrong side of the line. Top-level `tests/` and `benches/` trees are exempt; they follow Cargo target conventions.
 
 ## SPA and CSS Rules

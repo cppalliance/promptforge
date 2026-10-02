@@ -1,6 +1,8 @@
 //! The run-scoped sets built from the prepared bindings, and the `argv`
 //! derivation: the pieces `RunState::new` assembles once per run.
 
+use std::collections::BTreeMap;
+
 use promptforge_parser::ModelKeyword;
 
 use crate::lua::{ToolBinding, ToolSet};
@@ -26,6 +28,37 @@ pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
         set.bindings.push(ToolBinding::from_descriptor(alias, tool));
     }
     set
+}
+
+/// Binds every tool in the prepared catalog under its full id, keyed by
+/// that id: what a script `tools.call` falls back to when no frontmatter
+/// alias matches. These bindings stay out of the tool set, so they never
+/// become globals, never enter a section's scope, and are never
+/// advertised.
+pub(super) fn catalog_bindings(ctx: &RunContext) -> BTreeMap<String, ToolBinding> {
+    ctx.tools
+        .tools()
+        .iter()
+        .map(|tool| {
+            let id = tool.id.to_string();
+            let binding = ToolBinding::from_descriptor(&id, tool);
+            (id, binding)
+        })
+        .collect()
+}
+
+/// Every tool and model alias the prompt's frontmatter declares, filled or
+/// not: the names a capability prelude's globals must not take, so whether
+/// a prelude installs depends only on the frontmatter.
+pub(super) fn frontmatter_aliases(prompt: &Prompt) -> Vec<String> {
+    let frontmatter = prompt.frontmatter();
+    frontmatter
+        .tools()
+        .iter()
+        .map(|(alias, _)| alias)
+        .chain(frontmatter.models().iter().map(|(label, _)| label))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// The keyword's stable kebab-case spelling, journaled onto the binding as

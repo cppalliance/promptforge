@@ -1,7 +1,8 @@
 //! One run of a session's program on the effect loop: resolve the
 //! client's current model, arm the run's cancel flag, build the session's
-//! performers, prepare the run (opening its row in the log), and drive it
-//! to its end.
+//! performers, prepare the run (opening its row in the log and staging the
+//! declared input file), drive it to its end, and read the declared
+//! output file once it completes.
 //!
 //! Every event the run reports goes through the session core's sink once
 //! the log has recorded it, so the live broadcast and the transcript read
@@ -29,7 +30,7 @@ use crate::transition::RunId;
 
 use super::SessionCore;
 
-/// Why one run produced no outcome of the engine's.
+/// Why one run produced no outcome of the Engine's.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunFailure {
     /// The client's selected model could not be resolved; the resolution
@@ -56,12 +57,11 @@ pub(crate) struct RunInputs {
     pub(crate) gateway: Arc<GatewayResources>,
     /// The model client built for that generation.
     pub(crate) client: GatewayClient,
-    /// The capability registry built for that generation, when the
-    /// binding could build one.
-    pub(crate) registry: Option<Arc<CapabilityRegistry>>,
+    /// The capability registry built for that generation.
+    pub(crate) registry: Arc<CapabilityRegistry>,
     /// The catalog generation the run is frozen to.
     pub(crate) catalog: Option<CatalogBinding>,
-    /// The host snapshot read at launch.
+    /// The Host snapshot read at launch.
     pub(crate) host: HostSnapshot,
 }
 
@@ -85,16 +85,18 @@ pub(crate) async fn run_once(
     let cancel = core.arm_cancel(run);
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
+    let vfs = core.files.run_vfs();
     let services = Services {
-        registry,
-        vfs: promptforge::vfs::VfsRef::default(),
+        registry: Some(registry),
+        vfs: vfs.clone(),
+        input_text: core.files.input_text(),
         cancel: cancel.clone(),
         log: Arc::clone(&core.log),
         chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),
-        input: Arc::new(SessionInputBroker::new(
+        input: Some(Arc::new(SessionInputBroker::new(
             Arc::clone(&core.waits),
             core.wait_frames.clone(),
-        )),
+        ))),
         session_id: core.id.as_str().to_owned(),
         agent: core.agent.clone(),
         model,
@@ -119,7 +121,7 @@ pub(crate) async fn run_once(
         let core = Arc::clone(&core);
         move |event: Event| core.observe(&event)
     };
-    drive_run(
+    let outcome = drive_run(
         prepared.run,
         prepared.performers,
         Arc::clone(&core.log),
@@ -128,13 +130,21 @@ pub(crate) async fn run_once(
         sink,
     )
     .await
-    .map_err(RunFailure::Drive)
+    .map_err(RunFailure::Drive)?;
+    if matches!(outcome, RunOutcome::Completed { .. }) {
+        core.files
+            .collect(&core.agent, vfs, prepared.output_path)
+            .await;
+    }
+    Ok(outcome)
 }
 
 /// The row a failed preparation opened and closed, when it opened one.
 fn opened_run(error: &PrepareError) -> Option<LogRunId> {
     match error {
-        PrepareError::Parse { run_id, .. } | PrepareError::Refused { run_id, .. } => Some(*run_id),
+        PrepareError::Parse { run_id, .. }
+        | PrepareError::Input { run_id, .. }
+        | PrepareError::Refused { run_id, .. } => Some(*run_id),
         // `Read`, `Log`, or a variant `harness-runner` adds behind its
         // `#[non_exhaustive]` `PrepareError`: none of them opened a row.
         _ => None,

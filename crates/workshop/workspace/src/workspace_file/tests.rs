@@ -12,18 +12,18 @@ mod mutations;
 mod ui_state_kv_tests;
 
 #[test]
-fn the_database_variant_reaches_the_engine_error_through_the_shared_wrapper() {
+fn the_database_variant_reaches_the_database_error_through_the_shared_wrapper() {
     let error = WorkspaceFileError::from(turso::Error::Corrupt(
         "page 1 is not a b-tree page".to_owned(),
     ));
     let Some(cause) = std::error::Error::source(&error) else {
-        panic!("the database variant reports its engine cause as source()");
+        panic!("the database variant reports its database cause as source()");
     };
     let Some(wrapper) = cause.downcast_ref::<DatabaseSource>() else {
-        panic!("the engine cause is the shared DatabaseSource");
+        panic!("the database cause is the shared DatabaseSource");
     };
     assert!(matches!(wrapper.as_inner(), turso::Error::Corrupt(_)));
-    // The refusal path reads the engine variant through that same
+    // The refusal path reads the database error's variant through that same
     // accessor; a wrapper that hid it would silently stop refusing.
     assert!(is_not_a_database(&error));
 }
@@ -72,11 +72,11 @@ async fn open_database_refuses_a_path_whose_parent_is_missing() {
     let error = open_database(&path)
         .await
         .expect_err("a database cannot be created under a directory that does not exist");
-    // The path is UTF-8, so the only failure left is the engine refusing
+    // The path is UTF-8, so the only failure left is the database refusing
     // to create the file under a directory that is not there.
     assert!(
         matches!(error, WorkspaceFileError::Database { .. }),
-        "a missing parent surfaces as an engine failure, got {error:?}"
+        "a missing parent surfaces as a database failure, got {error:?}"
     );
     assert!(!path.exists(), "a refused open creates nothing");
 }
@@ -266,7 +266,7 @@ async fn create_leaves_only_the_file_in_the_directory() {
     created.close().await;
 
     // No directory ceremony: the workspace is the file. Close checkpoints
-    // and removes the engine's `-wal` sidecar, so nothing else remains.
+    // and removes the database's `-wal` sidecar, so nothing else remains.
     let mut names = Vec::new();
     for entry in fs::read_dir(dir.path()).expect("the tempdir lists") {
         let entry = entry.expect("entry reads");
@@ -295,7 +295,7 @@ async fn a_failed_create_removes_the_half_written_file_so_a_retry_succeeds() {
 
     assert!(
         matches!(error, WorkspaceFileError::Database { .. }),
-        "expected the engine failure, got {error:?}"
+        "expected the database failure, got {error:?}"
     );
     assert!(!path.exists(), "a failed create leaves no file behind");
     assert!(

@@ -37,7 +37,7 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// `#[non_exhaustive]` so the crate can evolve the retained representation
 /// (fields are already private) without a breaking change before release.
 ///
-/// # Sensitivity (LUA-015)
+/// # Sensitivity
 /// A program retains the author's original prompt Lua source verbatim, and
 /// [`source`](Self::source) exposes it. Prompt source can embed
 /// author-sensitive material (system instructions, embedded credentials in a
@@ -231,7 +231,7 @@ impl LuaProgram {
 
     /// Maps a Lua runtime failure to its ordered core outcome.
     ///
-    /// A recognized host quota returns [`Error::LuaQuota`]. All remaining
+    /// A recognized Engine quota returns [`Error::LuaQuota`]. All remaining
     /// failures return [`Error::LuaRuntime`] with this program's
     /// chunk-relative line rewritten to an absolute prompt-source line. Nested
     /// errors from other chunks (for example a fanout arm) are left unchanged.
@@ -241,12 +241,12 @@ impl LuaProgram {
     #[must_use]
     pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
         let raw = error.to_string();
-        // A host-quota refusal is a stable typed error, not an authoring error.
+        // An Engine-quota refusal is a stable typed error, not an authoring error.
         if let Some(resource) = quota_resource(&raw) {
             return Error::LuaQuota { resource };
         }
         let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
-        // Retain the originating `mlua` error as the private source (F4) with the
+        // Retain the originating `mlua` error as the private source with the
         // mapped prompt-location message, instead of flattening it to a string.
         Error::LuaRuntime {
             message: mapped,
@@ -261,9 +261,9 @@ impl LuaProgram {
     }
 }
 
-/// Maps a raw Lua error string to the exhausted host-quota resource, if any.
+/// Maps a raw Lua error string to the exhausted Engine-quota resource, if any.
 ///
-/// Recognizes the stable quota messages our host callbacks emit so a refusal
+/// Recognizes the stable quota messages our Engine functions emit so a refusal
 /// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
 pub(crate) fn quota_resource(raw: &str) -> Option<&'static str> {
     use crate::error::lua_quota;
@@ -335,7 +335,7 @@ pub(crate) fn map_chunk_line_to_absolute(
     result.push_str(rest);
 
     if let Some(absolute) = first_absolute {
-        // Leading tag hosts can show next to the file name: `briefer.md:51: ...`
+        // Leading tag the Host can show next to the file name: `briefer.md:51: ...`
         format!("{location}:{absolute}: {result}")
     } else {
         result

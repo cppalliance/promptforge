@@ -1,9 +1,15 @@
 //! Shared context builders, parsers, stores, and recorders for the
-//! execution suites.
+//! execution suites. The fixture tool-set helpers sit in `tools` and
+//! are re-exported here.
 
 use super::*;
 
-/// A fresh default handle's access capability, for tests that inject host
+#[path = "context-tools.rs"]
+mod tools;
+
+pub(super) use self::tools::*;
+
+/// A fresh default handle's access capability, for tests that inject Engine
 /// values into a standalone VM.
 pub(super) fn fresh_access() -> Arc<Access> {
     Arc::new(
@@ -15,7 +21,7 @@ pub(super) fn fresh_access() -> Arc<Access> {
 
 pub(super) const EXECUTION: &str = "execute-test";
 
-/// The fixed host inputs every test run shares: a seed and a start instant
+/// The fixed Harness inputs every test run shares: a seed and a start instant
 /// a test that does not care about them never has to choose. The tests of
 /// the inputs themselves (`run_inputs`) build their contexts directly.
 pub(super) const TEST_SEED: u64 = 1;
@@ -27,7 +33,7 @@ pub(super) fn test_context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, TEST_SEED, TEST_STARTED_AT)
 }
 
-/// F10: compile-time proof that the public execution types are thread-safe.
+/// Compile-time proof that the public execution types are thread-safe.
 ///
 /// `RunContext` holds `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
 /// trait objects) and must be `Send + Sync + 'static` to cross the run's task
@@ -111,9 +117,9 @@ pub(super) fn test_model_catalog() -> ModelCatalog {
 
 /// Declares the `writer` role and parks it as the prompt-wide default, so a
 /// model-facing fixture prompt runs its sections under a bound model.
-/// Prompts with their own `models.default` call (or the legacy
-/// `models.bind` of the removal tests) keep their shape and get only the
-/// role declaration.
+/// Prompts with their own `models.default` call (or the `models.bind`
+/// call the removal tests expect to fail) keep their shape and get only
+/// the role declaration.
 pub(super) fn ensure_model_h1(md: &str) -> String {
     let source = md.to_string();
     if source.contains("models.default") || source.contains("models.bind") {
@@ -151,10 +157,9 @@ pub(super) fn bound_for_model(md: &str) -> TestPrompt {
     }
 }
 
-// PFCORE-EXEC-TESTS-001: the former `resolver` parameter was a fake seam - it was
-// accepted and discarded because live tool binding resolved elsewhere. It has
-// been removed so the test helper cannot imply a resolution path it does not
-// exercise; exact slots fill by identity against the fixture capability's
+// The helper takes no resolver: live tool binding resolves elsewhere, so a
+// resolver argument would imply a resolution path the helper does not
+// exercise. Exact slots fill by identity against the fixture capability's
 // contributed tools at prepare.
 pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
     let mut live_source = md.to_owned();
@@ -230,22 +235,22 @@ impl TestStore {
     }
 }
 
-/// Builds a [`RunContext`] and its [`RunHost`] from the test-local
+/// Builds a [`RunContext`] and its [`RunHarness`] from the test-local
 /// [`RunOptions`], for the tests that call [`Environment::run`] directly.
 /// The context sets the test model as the current selection, so prepare's
 /// trivial fill binds every declared role to it; the observer, client, and
-/// capture go on the host the driver performs and reports through.
-pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHost) {
+/// capture go on the Harness the driver performs and reports through.
+pub(super) fn to_context(opts: RunOptions) -> (RunContext, RunHarness) {
     let mut ctx = test_context(opts.execution).model(test_model_catalog().models()[0].clone());
-    let mut host = RunHost::new().observer(opts.observer);
+    let mut harness = RunHarness::new().observer(opts.observer);
     if let Some(client) = opts.client {
-        host = host.client(client);
+        harness = harness.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        host = host.debug(debug);
+        harness = harness.debug(debug);
     }
-    (ctx, host)
+    (ctx, harness)
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -298,180 +303,69 @@ pub(super) async fn run(
     opts: RunOptions,
 ) -> Result<String> {
     let mut env = Environment::new();
-    let mut host = RunHost::new().observer(opts.observer);
+    let mut harness = RunHarness::new().observer(opts.observer);
     // The test store's handle is the run's whole filesystem: the context
     // takes it as given, so post-run assertions read what the run
     // actually wrote.
     let mut ctx = test_context(opts.execution).vfs(store.vfs());
     if !tools.is_empty() {
-        // The host pattern with tools: the fixtures' descriptors form the
+        // The Harness pattern with tools: the fixtures' descriptors form the
         // catalog the run binds its frontmatter slots against, and the
-        // implementations go to the host table the driver's tool
+        // implementations go to the Harness's tool table the driver's tool
         // performer resolves a `ToolCall` effect in - the two halves a
-        // harness assembles from its activated capabilities.
+        // Harness assembles from its activated capabilities.
         let (catalog, table) = fixture_tools(tools);
         env = env.tools(catalog);
-        host = host.tools(table);
+        harness = harness.tools(table);
     }
-    // The host pattern: the context holds the current model, and
+    // The Harness pattern: the context holds the current model, and
     // prepare's trivial fill binds every declared role to it.
     if let Some(model) = test.models.models().first() {
         ctx = ctx.model(model.clone());
     }
     if let Some(client) = opts.client {
-        host = host.client(client);
+        harness = harness.client(client);
     }
     if let Some(debug) = opts.debug {
         ctx = ctx.report_debug(promptforge_types::emitter::DebugMode::On);
-        host = host.debug(debug);
+        harness = harness.debug(debug);
     }
-    match crate::test_support::run_with_host(&env, &test.prompt, args, ctx, host).await {
+    match crate::test_support::run_with_harness(&env, &test.prompt, args, ctx, harness).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(Error::Interrupted),
         RunResult::Failure(error) => Err(Error::from(error)),
     }
 }
 
-/// A binding for a fixture tool beside its implementation: the binding
-/// goes into the run's tool set, the implementation into the host table
-/// [`arm_tools`] hands the driver, so a script or model call on the alias
-/// resolves through the same id the binding journals.
-pub(super) fn fixture_binding(
-    alias: &str,
-    description: &str,
-    tool: Arc<dyn TestTool>,
-) -> (crate::lua::ToolBinding, Arc<dyn TestTool>) {
-    let binding = crate::lua::ToolBinding::for_test(alias, description, &tool.descriptor());
-    (binding, tool)
-}
-
-/// A run's tool set beside the implementations behind it: the set goes to
-/// the run state (what the engine advertises and journals), the table to
-/// the state's test host (what the driver performs a `ToolCall` with).
-/// A bare [`ToolSet`](crate::lua::ToolSet) converts into a fixture with no
-/// implementations, for the tests whose tools are never called.
-#[derive(Clone, Default)]
-pub(super) struct FixtureTools {
-    set: crate::lua::ToolSet,
-    table: TestToolTable,
-}
-
-impl FixtureTools {
-    /// Builds the fixture from bindings paired with their implementations
-    /// and the prompt-wide `always` aliases.
-    pub(super) fn new(
-        bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-        always: Vec<String>,
-    ) -> Self {
-        let mut table = TestToolTable::new();
-        let bindings = bindings
-            .into_iter()
-            .map(|(binding, tool)| {
-                table.insert(tool);
-                binding
-            })
-            .collect();
-        Self {
-            set: crate::lua::ToolSet::for_test(bindings, always),
-            table,
-        }
-    }
-
-    /// The bindings as the run's set, for a test that inspects them.
-    pub(super) fn set(&self) -> &crate::lua::ToolSet {
-        &self.set
-    }
-
-    /// Installs the set on the run state and returns `host` carrying the
-    /// implementations the driver's tool performer resolves.
-    pub(super) fn install(&self, ctx: &RunState, host: RunHost) -> RunHost {
-        *ctx.tool_set()
-            .lock()
-            .expect("the tool set mutex is not poisoned") = self.set.clone();
-        host.tools(self.table.clone())
-    }
-}
-
-impl From<crate::lua::ToolSet> for FixtureTools {
-    fn from(set: crate::lua::ToolSet) -> Self {
-        Self {
-            set,
-            table: TestToolTable::new(),
-        }
-    }
-}
-
-/// Arms the run state's shared tool set with `bindings` (every alias
-/// prompt-wide through `always`) and returns `host` carrying the
-/// implementations, so `TokioDriver::new` performs the calls.
-pub(super) fn arm_tools(
-    ctx: &RunState,
-    host: RunHost,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-) -> RunHost {
-    let always = bindings
-        .iter()
-        .map(|(binding, _)| binding.alias().to_owned())
-        .collect();
-    arm_tools_scoped(ctx, host, bindings, always)
-}
-
-/// Arms the run state's shared tool set with `bindings` and exactly
-/// `always` as the prompt-wide scope, returning `host` carrying the
-/// implementations.
-pub(super) fn arm_tools_scoped(
-    ctx: &RunState,
-    host: RunHost,
-    bindings: Vec<(crate::lua::ToolBinding, Arc<dyn TestTool>)>,
-    always: Vec<String>,
-) -> RunHost {
-    FixtureTools::new(bindings, always).install(ctx, host)
-}
-
-/// The test's tools as the two halves a host assembles from its
-/// activated capabilities: the catalog of descriptors the run's
-/// frontmatter tool slots (under `tests/tools`) fill against at prepare,
-/// and the table of implementations the driver's tool performer resolves
-/// a `ToolCall` effect's id in.
-pub(super) fn fixture_tools(
-    tools: &[Arc<dyn TestTool>],
-) -> (promptforge_types::tools::ToolCatalog, TestToolTable) {
-    let table = TestToolTable::from_tools(tools);
-    let catalog = table
-        .catalog()
-        .expect("the fixture tools have legal wire names and distinct ids");
-    (catalog, table)
-}
-
-/// The test-support driver ([`crate::test_support::run_with_host`]) with the
-/// context and host [`to_context`] assembled (observer, client, capture).
+/// The test-support driver ([`crate::test_support::run_with_harness`]) with the
+/// context and Harness [`to_context`] assembled (observer, client, capture).
 pub(super) async fn env_run(
     env: &Environment,
     prompt: &Prompt,
     args: &str,
-    prepared: (RunContext, RunHost),
+    prepared: (RunContext, RunHarness),
 ) -> RunResult {
-    let (ctx, host) = prepared;
-    crate::test_support::run_with_host(env, prompt, args, ctx, host).await
+    let (ctx, harness) = prepared;
+    crate::test_support::run_with_harness(env, prompt, args, ctx, harness).await
 }
 
 /// Runs a fixture offline through the test-support driver
-/// ([`crate::test_support::run_with_host`]) with a caller-customized
-/// [`RunContext`] and [`RunHost`], returning the typed [`RunError`]
+/// ([`crate::test_support::run_with_harness`]) with a caller-customized
+/// [`RunContext`] and [`RunHarness`], returning the typed [`RunError`]
 /// so a test can assert on its kind (limits, cancellation).
 pub(super) async fn run_with_context(
     test: &TestPrompt,
-    configure: impl FnOnce(RunContext, RunHost) -> (RunContext, RunHost),
+    configure: impl FnOnce(RunContext, RunHarness) -> (RunContext, RunHarness),
 ) -> std::result::Result<String, RunError> {
     let env = Environment::new();
-    let (mut ctx, host) = configure(test_context(EXECUTION), RunHost::new());
+    let (mut ctx, harness) = configure(test_context(EXECUTION), RunHarness::new());
     ctx = ctx.vfs(TestStore::new().vfs());
     if ctx.model.is_none()
         && let Some(model) = test.models.models().first()
     {
         ctx = ctx.model(model.clone());
     }
-    match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await {
+    match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness).await {
         RunResult::Ok(output) => Ok(output),
         RunResult::Cancelled => Err(RunError::from(Error::Interrupted)),
         RunResult::Failure(error) => Err(error),

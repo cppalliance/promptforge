@@ -47,14 +47,20 @@ impl fmt::Display for SessionId {
     }
 }
 
-/// What a client asks the harness to launch.
+/// What a client asks the Harness to launch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchRequest {
     /// The agent's name, as discovered under the configured agents path.
     pub agent: String,
-    /// The run's argument text, handed to the prompt as its input.
+    /// The run's argument text, handed to the prompt as `args`.
     #[serde(default)]
     pub args: String,
+    /// The text staged at the prompt's declared `input:` file before each
+    /// run. A run is refused when the prompt declares no input file, or
+    /// when this is `None` and the session's store does not already hold
+    /// the declared one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_text: Option<String>,
 }
 
 /// One durable entry of a session's event log.
@@ -72,7 +78,7 @@ pub struct SessionEvent {
     /// content kinds and omitted elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<u64>,
-    /// The logged engine event, in its persisted shape.
+    /// The logged Engine event, in its persisted shape.
     pub event: serde_json::Value,
 }
 

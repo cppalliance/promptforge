@@ -5,7 +5,7 @@
 //! same wrapper existed under the same name in crates that could not see
 //! each other. This crate depends on no workspace crate, which is what lets
 //! the workshop and gateway families both use it without a cross-family
-//! edge. The harness owns its wrappers so that `promptforge` stays its only
+//! edge. The Harness owns its wrappers so that `promptforge` stays its only
 //! outside dependency.
 //!
 //! `#[error(transparent)]` delegates both `Display` and `source()` to the
@@ -75,8 +75,8 @@ impl From<reqwest::Error> for HttpSource {
 }
 
 /// The database engine's error behind a product error variant, so the
-/// public error surface names no engine type. Renders and sources exactly
-/// as the engine's error does.
+/// public error surface names no database type. Renders and sources exactly
+/// as the database's error does.
 #[cfg(feature = "database")]
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
@@ -84,13 +84,13 @@ pub struct DatabaseSource(turso::Error);
 
 #[cfg(feature = "database")]
 impl DatabaseSource {
-    /// The wrapped engine error.
+    /// The wrapped database error.
     #[must_use]
     pub fn as_inner(&self) -> &turso::Error {
         &self.0
     }
 
-    /// Takes the wrapped engine error out of the wrapper.
+    /// Takes the wrapped database error out of the wrapper.
     #[must_use]
     pub fn into_inner(self) -> turso::Error {
         self.0
@@ -167,7 +167,7 @@ mod tests {
         let error = turso::Error::Corrupt("page 1 is not a b-tree page".to_owned());
         let rendered = error.to_string();
         let source = crate::DatabaseSource::from(error);
-        // The engine's own variant, which the chain flattens to text.
+        // The database's own variant, which the chain flattens to text.
         assert!(matches!(source.as_inner(), turso::Error::Corrupt(_)));
 
         let outer = Outer(source);

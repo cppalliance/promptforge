@@ -60,7 +60,7 @@ pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
 }
 
 /// Locks the run's shared tool set, mapping a poisoned lock to the Lua
-/// boundary error every host callback uses.
+/// boundary error every Engine function uses.
 fn lock_tools(set: &Mutex<ToolSet>) -> mlua::Result<std::sync::MutexGuard<'_, ToolSet>> {
     set.lock()
         .map_err(|_| mlua::Error::external("tool set mutex was poisoned"))

@@ -1,5 +1,5 @@
 //! Every shipped prompt under the workspace `prompts/` tree parses offline,
-//! and so does every fixture the engine keeps as a positive example.
+//! and so does every fixture the Engine keeps as a positive example.
 
 use std::fs;
 use std::path::{Path, PathBuf};

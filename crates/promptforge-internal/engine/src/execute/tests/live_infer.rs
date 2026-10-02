@@ -26,15 +26,15 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_hosts_client_serves_a_run_the_context_never_names() {
-    // The context is the engine's input; the client lives on the host's
-    // `RunHost`, and `Environment::run` performs the run's completions
-    // with it. Nothing about the gateway crosses the engine's boundary.
-    let gateway = ScriptedGateway::start(vec![resp_text("host answer")]).await;
+async fn the_harness_client_serves_a_run_the_context_never_names() {
+    // The context is the Engine's input; the client lives on the Harness's
+    // `RunHarness`, and `Environment::run` performs the run's completions
+    // with it. Nothing about the gateway crosses the Engine's boundary.
+    let gateway = ScriptedGateway::start(vec![resp_text("canned answer")]).await;
     let addr = gateway.addr();
 
-    let source = "---\nname: host-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Host Client\n\n\
+    let source = "---\nname: harness-client\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Harness Client\n\n\
         ```lua\n\
         local writer = models.default('writer')\n\
         var.answer = models.infer(writer, 'answer once')\n\
@@ -43,18 +43,19 @@ async fn the_hosts_client_serves_a_run_the_context_never_names() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let host = RunHost::new().client(gateway_client(addr));
-    let (ctx, _host) = to_context(silent());
-    let RunResult::Ok(out) = crate::test_support::run_with_host(&env, &prompt, "", ctx, host).await
+    let harness = RunHarness::new().client(gateway_client(addr));
+    let (ctx, _harness) = to_context(silent());
+    let RunResult::Ok(out) =
+        crate::test_support::run_with_harness(&env, &prompt, "", ctx, harness).await
     else {
-        panic!("the host's client must serve the run");
+        panic!("the Harness's client must serve the run");
     };
 
-    assert_eq!(out, "host answer");
+    assert_eq!(out, "canned answer");
     assert_eq!(
         gateway.call_count(),
         1,
-        "the completion must have gone to the host's client"
+        "the completion must have gone to the Harness's client"
     );
 }
 
@@ -89,9 +90,9 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_function_resolves_host_globals_when_called() {
-    let source = "---\nname: shared-host\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Host\n\n\
+async fn shared_function_resolves_engine_globals_when_called() {
+    let source = "---\nname: shared-globals\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Shared Globals\n\n\
         ```lua shared\n\
         function read_args() return args end\n\
         ```\n\n\
@@ -99,21 +100,22 @@ async fn shared_function_resolves_host_globals_when_called() {
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
     let env = Environment::new();
-    let RunResult::Ok(out) = env_run(&env, &prompt, "later host value", to_context(silent())).await
+    let RunResult::Ok(out) =
+        env_run(&env, &prompt, "later canned value", to_context(silent())).await
     else {
-        panic!("shared function must resolve host globals when called");
+        panic!("shared function must resolve Engine globals when called");
     };
 
-    assert_eq!(out, "later host value");
+    assert_eq!(out, "later canned value");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_library_calls_host_apis_at_load_time() {
-    // The shared library replays as each section's first chunk with the full
-    // host environment installed, so top-level shared code may use `store`,
+async fn shared_library_calls_engine_globals_at_load_time() {
+    // The shared library replays as each section's first chunk with every
+    // Engine global installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
-    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
-        # Shared Host Load\n\n\
+    let source = "---\nname: shared-globals-load\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+        # Shared Globals Load\n\n\
         ```lua shared\n\
         store.write('loaded.txt', args)\n\
         log('shared loaded')\n\
@@ -125,7 +127,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // The multi-step path: prepare builds the run's own router, and the
     // test store wraps the prepared handle so the post-run assertion
     // reads what the run actually wrote.
-    let (ctx, _host) = to_context(silent());
+    let (ctx, _harness) = to_context(silent());
     let (ctx, requirements) = env.prepare(&prompt, ctx);
     assert!(
         requirements.is_satisfied(),
@@ -133,9 +135,9 @@ async fn shared_library_calls_host_apis_at_load_time() {
     );
     let store = TestStore::from_vfs(ctx.vfs_handle().clone());
     let RunResult::Ok(out) =
-        crate::test_support::run_host(&prompt, "load-time args", ctx, RunHost::new()).await
+        crate::test_support::run_harness(&prompt, "load-time args", ctx, RunHarness::new()).await
     else {
-        panic!("top-level shared host calls must succeed");
+        panic!("top-level shared Engine calls must succeed");
     };
 
     assert_eq!(out, "load-time args");
@@ -174,8 +176,8 @@ async fn captured_bindings_reach_section_call_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n";
     let prompt = parse(source);
     let tools: [Arc<dyn TestTool>; 1] = [echo];
-    // The host pattern: the fixture capability is activated into the
-    // catalog and the host's table, and the run's tool slot fills by id.
+    // The Harness pattern: the fixture capability is activated into the
+    // catalog and the Harness's tool table; the run's tool slot fills by id.
     let out = super::run(
         &TestPrompt {
             prompt,
@@ -240,9 +242,9 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn nested_lua_infer_emits_a_model_turn_observation() {
-    // observe.rs F1: a nested Lua infer must surface its model-turn
-    // observation to the run's observer, proving owned-observer propagation
-    // reaches the nested inference path.
+    // A nested Lua infer must surface its model-turn observation to the
+    // run's observer, proving owned-observer propagation reaches the nested
+    // inference path.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
     let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
@@ -324,10 +326,10 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
     let ctx = test_context(EXECUTION)
         .model(test_model_catalog().models()[0].clone())
         .cancel(cancel);
-    let host = RunHost::new()
+    let harness = RunHarness::new()
         .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
         .client(gateway_client(gateway.addr()));
-    let result = env_run(&env, &prompt, "", (ctx, host)).await;
+    let result = env_run(&env, &prompt, "", (ctx, harness)).await;
     assert!(
         matches!(result, RunResult::Cancelled),
         "cancelling an in-flight infer must interrupt the run: {result:?}"

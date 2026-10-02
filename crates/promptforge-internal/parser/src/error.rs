@@ -1,7 +1,7 @@
 //! The parser's internal error type and its public classification.
 //!
 //! [`Error`] is the internal error type every parsing module returns
-//! through [`Result`]. [`ParseError`] is the host-facing wrapper returned
+//! through [`Result`]. [`ParseError`] is the public wrapper returned
 //! by [`Prompt::parse`](crate::Prompt::parse): it classifies the internal
 //! type into a stable [`ParseErrorKind`] and surfaces the failure's
 //! location fields.
@@ -41,7 +41,8 @@ pub enum Error {
     ParseStructured {
         /// The stable classification of this parse failure.
         kind: ParseErrorKind,
-        /// The byte span of the offending region within the source, when known.
+        /// The byte span of the offending region within the body (after the
+        /// frontmatter and a leading BOM, CRLF normalized to LF), when known.
         span: Option<(usize, usize)>,
         /// The human-readable diagnostic.
         message: String,
@@ -76,6 +77,24 @@ impl Error {
         Error::ParseStructured {
             kind,
             span: None,
+            message: message.into(),
+            name: None,
+            line: None,
+            column: None,
+        }
+    }
+
+    /// Builds a parse failure with a stable classification and the byte span
+    /// of the offending region within the body, so
+    /// [`with_prompt_context`](Error::with_prompt_context) can locate it.
+    pub(crate) fn parse_at(
+        kind: ParseErrorKind,
+        span: std::ops::Range<usize>,
+        message: impl Into<String>,
+    ) -> Error {
+        Error::ParseStructured {
+            kind,
+            span: Some((span.start, span.end)),
             message: message.into(),
             name: None,
             line: None,
@@ -237,7 +256,11 @@ impl ParseError {
     /// Returns the byte span of the offending region, when one is available.
     ///
     /// Structural failures that can locate the offending region (for example a
-    /// duplicate sibling section) have a byte span; others return `None`.
+    /// duplicate sibling section) have a byte span; others return `None`. The
+    /// offsets are relative to the document body after the frontmatter and a
+    /// leading BOM, with CRLF normalized to LF, so they do not index the
+    /// original source; [`line`](ParseError::line) and
+    /// [`column`](ParseError::column) locate the failure in the original file.
     #[must_use]
     pub fn span(&self) -> Option<(usize, usize)> {
         self.span
@@ -248,7 +271,7 @@ impl ParseError {
     ///
     /// A frontmatter YAML failure predates the name (the parser learns the
     /// name from the frontmatter itself), so it reports `None` and the
-    /// host's own label for the source takes its place.
+    /// Host's own label for the source takes its place.
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
@@ -269,7 +292,7 @@ impl ParseError {
         self.column
     }
 
-    /// Unwraps the internal error; the engine reaches it through
+    /// Unwraps the internal error; the Engine reaches it through
     /// [`crate::detail::parse_error_into_inner`].
     #[must_use]
     pub(crate) fn into_inner(self) -> Error {

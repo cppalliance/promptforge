@@ -23,23 +23,22 @@ pub enum RunErrorKind {
     Completion,
     /// A dispatched tool failed, was unknown, or the tool loop did not converge.
     Tool,
-    /// A run-scoped store operation failed.
-    Store,
+    /// A run-scoped store operation failed, or the run's handle declares no
+    /// store.
+    Vfs,
     /// Two live execution identities claimed one store path: the claims
     /// model terminated the run to keep interleaving deterministic.
     Determinism,
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
-    /// A Lua host resource quota (log events, log bytes, or instructions) was
+    /// A Lua resource quota (log events, log bytes, or instructions) was
     /// exhausted.
     Quota,
     /// The selected compactor exhausted the model's context window.
     ContextExhausted,
-    /// The host's input broker failed a `user_input` request.
-    Input,
     /// A `{{ }}` prose substitution failed.
     Substitution,
-    /// The host cancelled the run.
+    /// The Host cancelled the run.
     Cancelled,
     /// An unexpected internal invariant failure.
     Internal,
@@ -58,13 +57,18 @@ pub struct SourceLocation {
     /// The prompt's frontmatter name when parse got that far, or the Rust
     /// source file (from `file!()`) for an internal fault. A frontmatter
     /// YAML failure predates the name, so its path is a placeholder the
-    /// host replaces with its own label for the source.
+    /// Host replaces with its own label for the source.
     pub path: String,
     /// The 1-based line, when known.
     pub line: Option<u32>,
     /// The 1-based column, when known.
     pub column: Option<u32>,
-    /// The byte span of the offending region, as today, when known.
+    /// The byte span of the offending region, when known. Only structured
+    /// parse failures have one. The offsets are relative to the document
+    /// body after the frontmatter and a leading BOM, with CRLF normalized to
+    /// LF, so they do not index the original source;
+    /// [`line`](SourceLocation::line) and [`column`](SourceLocation::column)
+    /// locate the failure in the original file.
     pub span: Option<Range<usize>>,
 }
 
@@ -90,7 +94,6 @@ impl RunError {
             Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => RunErrorKind::Parse,
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
-            Error::Input { .. } => RunErrorKind::Input,
             // A leaked task, a task reached for by a chain that does not
             // own it, a result waited on twice, and a wait's delivery of a
             // cancelled task surfacing uncaught are the author's program
@@ -122,19 +125,19 @@ impl RunError {
             | Error::UnboundToolCall { .. }
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal { .. } => RunErrorKind::Internal,
-            Error::Store { .. } => RunErrorKind::Store,
+            Error::Store { .. } => RunErrorKind::Vfs,
             Error::Determinism(_) => RunErrorKind::Determinism,
             Error::BindSchema { .. } | Error::ModelRequired { .. } => RunErrorKind::Binding,
         }
     }
 
-    /// Returns `true` when the run failed because the host cancelled it.
+    /// Returns `true` when the run failed because the Host cancelled it.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         matches!(self.inner, Error::Interrupted)
     }
 
-    /// Dissolves the boundary error into the engine's own, for the test
+    /// Dissolves the boundary error into the Engine's own, for the test
     /// drivers that report in that vocabulary.
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn into_inner(self) -> Error {

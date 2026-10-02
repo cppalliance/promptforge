@@ -3,14 +3,14 @@
 
 use super::*;
 
-/// The single configurable mock gateway every execution test uses
-/// (EXEC-TESTS-005). It serves a fixed script of chat-completions responses in
-/// order, repeating the last entry once the script is exhausted, records every
-/// request body it receives, and counts calls. Scripts stay in the buffered
-/// chat-completion shape; each is converted to the SSE chunk stream the
-/// always-streaming client consumes at serve time (see [`sse_events`]).
+/// The single configurable mock gateway every execution test uses. It serves a
+/// fixed script of chat-completions responses in order, repeating the last
+/// entry once the script is exhausted, records every request body it receives,
+/// and counts calls. Scripts stay in the buffered chat-completion shape; each
+/// is converted to the SSE chunk stream the always-streaming client consumes
+/// at serve time (see [`sse_events`]).
 ///
-/// The server is OWNED (EXEC-TESTS-003): the guard holds the bound address, a
+/// The server is OWNED: the guard holds the bound address, a
 /// graceful-shutdown sender, and the serving task's `JoinHandle`. Dropping the
 /// guard (at test end) signals shutdown and aborts the task, so no detached
 /// server survives the test to `.unwrap()`-panic during runtime teardown. The
@@ -25,7 +25,7 @@ pub(super) struct ScriptedGateway {
 }
 
 /// One scripted reply: either a JSON completion body (HTTP 200) or a
-/// status-coded error body, so one harness covers success and backend-failure
+/// status-coded error body, so one fixture covers success and backend-failure
 /// tests alike.
 #[derive(Clone)]
 pub(super) enum GatewayReply {
@@ -154,7 +154,7 @@ pub(super) fn sse_response(body: &Value) -> axum::response::Response {
 
 /// Validates every replayed `messages[].tool_calls[]` entry against the
 /// OpenAI function-call schema, mirroring `parse_openai_tool_calls` (the
-/// engine's own inbound parser, `pub(crate)` to `model-client` and so
+/// Engine's own inbound parser, `pub(crate)` to `model-client` and so
 /// unreachable from here).
 ///
 /// The mock gateway owes the suites a strict endpoint: without this check a
@@ -286,7 +286,7 @@ impl ScriptedGateway {
         let (shutdown, rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             // No `.unwrap()`: the serve outcome is swallowed so a torn-down test
-            // runtime can never trigger a detached-task panic (EXEC-TESTS-003).
+            // runtime can never trigger a detached-task panic.
             let _ = axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
                     let _ = rx.await;

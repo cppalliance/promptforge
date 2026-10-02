@@ -1,4 +1,4 @@
-//! Fixture tests for the harness clippy-ban check, plus the live check over
+//! Fixture tests for the Harness clippy-ban check, plus the live check over
 //! this workspace's `crates/harness-internal/` container and the coverage
 //! of its `crates/harness/` facade.
 
@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::*;
 
-/// A fake workspace root; `container` and `facade` name its harness
+/// A fake workspace root; `container` and `facade` name its Harness
 /// directories whether or not they exist yet.
 fn fake_root() -> tempfile::TempDir {
     tempfile::TempDir::new().expect("tempdir")
@@ -159,7 +159,7 @@ fn the_harness_crates_are_the_eight_container_crates_and_the_facade() {
         internal.join("capabilities"),
         internal.join("log"),
         internal.join("sessions"),
-        // The first-party capabilities, moved in from the engine's
+        // The first-party capabilities, moved in from the Engine's
         // container with the traits they implement.
         internal.join("web"),
         internal.join("webfetch"),

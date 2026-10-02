@@ -18,7 +18,7 @@ import {
   modelsFixture,
   navigate,
   settle,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 function fixtureStub(extra = {}) {
   return gatewayStub({
@@ -186,7 +186,7 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
   assert.equal(
     root.querySelector(".field-row[data-key='bind']"),
     null,
-    "the inert hosting bind stays out of the editor: the gateway hosts no workshop listener",
+    "the inert listener bind stays out of the editor: the gateway runs no workshop listener",
   );
   assert.equal(
     root.querySelector(".field-row[data-key='open_browser']"),
@@ -216,7 +216,7 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
   assert.equal(
     bodies[0].workshop?.bind,
     undefined,
-    "a fresh section omits the inert hosting bind",
+    "a fresh section omits the inert listener bind",
   );
   assert.equal(bodies[0].stt.window_seconds, 15);
   assert.equal(bodies[0].workshop?.stt, undefined, "the UI never writes legacy workshop.stt");

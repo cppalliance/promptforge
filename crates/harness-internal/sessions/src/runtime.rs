@@ -1,10 +1,10 @@
-//! The harness handle: its configuration, the bindings a client pushes
+//! The Harness handle: its configuration, the bindings a client pushes
 //! through the public API, the run log, and the sessions it serves.
 //!
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, pushes the gateway binding at startup and on
 //! every replacement (the capability registry and model client are
-//! rebuilt when the generation changes), pushes its chat catalog and host
+//! rebuilt when the generation changes), pushes its chat catalog and Host
 //! snapshot as they change, and launches sessions by discovered agent
 //! name. Sessions outlive client connections: a client that reattaches
 //! looks its session up by id and reads the transcript past its cursor.
@@ -18,26 +18,45 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use harness_log::{LogError, RunLog};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
+use promptforge::vfs::VfsRef;
 use tokio::sync::{OnceCell, mpsc};
 
 use crate::discovery::{agent_source, discover_agents};
 use crate::environment::{Bindings, CatalogBinding, GatewayBinding, HostSnapshot};
 use crate::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
 use crate::protocol::{LaunchRequest, SessionId};
+use crate::session::files::SessionFiles;
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
 
 /// The file under the state directory the run log is stored in.
 const RUN_LOG_FILE: &str = "runs.db";
 
-/// What a client tells the harness at construction.
+/// What a client tells the Harness at construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessConfig {
-    /// The directory the harness discovers launchable agents in.
+    /// The directory the Harness discovers launchable agents in.
     pub agents_path: PathBuf,
-    /// The directory the harness keeps its state under, the run log
+    /// The directory the Harness keeps its state under, the run log
     /// included.
     pub state_dir: PathBuf,
+}
+
+/// What a launch hands the session beyond its [`LaunchRequest`]: the
+/// session's environment rather than data about what to run. Build it
+/// with `..LaunchOptions::default()` so a later field is not a break.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOptions {
+    /// The filesystem every run of the session works in: its declared
+    /// store, and any real mounts, overlays, policy, and op sink the
+    /// client built into the handle with `promptforge::vfs`. Every run
+    /// shares it, relaunches included, so files a retired run wrote are
+    /// still there, and the declared input is staged and the declared
+    /// output read through its store. The Harness owns the handle from
+    /// launch on; a backend, policy, or op sink in it runs inside the
+    /// session's store operations. `None` gives each run a fresh memory
+    /// store at `/`.
+    pub vfs: Option<VfsRef>,
 }
 
 /// A refused launch.
@@ -100,8 +119,8 @@ impl SessionTable {
     }
 }
 
-/// The harness: the engine's production host, seen from outside the
-/// family.
+/// The Harness, which steps every Engine run and performs its effects,
+/// seen from outside the family.
 pub struct Harness {
     config: HarnessConfig,
     bindings: Arc<Bindings>,
@@ -123,7 +142,7 @@ impl fmt::Debug for Harness {
 }
 
 impl Harness {
-    /// A harness over `config` with no gateway bound yet. Nothing touches
+    /// A Harness over `config` with no gateway bound yet. Nothing touches
     /// the filesystem here: discovery reads the agents directory per
     /// request, and the run log opens on the first launch.
     #[must_use]
@@ -136,7 +155,7 @@ impl Harness {
         }
     }
 
-    /// The configuration this harness was built with.
+    /// The configuration this Harness was built with.
     #[must_use]
     pub fn config(&self) -> &HarnessConfig {
         &self.config
@@ -165,7 +184,7 @@ impl Harness {
         self.bindings.set_catalog(catalog);
     }
 
-    /// Replaces the host snapshot; the next launch reads it.
+    /// Replaces the Host snapshot; the next launch reads it.
     pub fn set_host(&self, host: HostSnapshot) {
         self.bindings.set_host(host);
     }
@@ -201,9 +220,12 @@ impl Harness {
     }
 
     /// Launches a session running the discovered agent `request.agent`
-    /// with `request.args` and returns it. The session runs until its
+    /// with `request.args`, staging `request.input_text` at the prompt's
+    /// declared input file, and returns it. The session runs until its
     /// program returns, fails, or it is closed; turn-cancel relaunches the
     /// program over the retained transcript without ending the session.
+    /// Each run works in a fresh memory store; [`Harness::launch_with`]
+    /// hands the session a filesystem of the client's own.
     ///
     /// # Errors
     /// Returns [`LaunchError::UnknownAgent`] when the name is not a
@@ -213,12 +235,30 @@ impl Harness {
     /// the agent's source cannot be read, and [`LaunchError::Log`] when the
     /// run log cannot be opened.
     pub async fn launch(&self, request: LaunchRequest) -> Result<Session, LaunchError> {
-        let LaunchRequest { agent, args } = request;
+        self.launch_with(request, LaunchOptions::default()).await
+    }
+
+    /// Launches a session as [`Harness::launch`] does, under `options`:
+    /// every run of the session works in `options.vfs` when it is set.
+    ///
+    /// # Errors
+    /// Returns the errors [`Harness::launch`] does.
+    pub async fn launch_with(
+        &self,
+        request: LaunchRequest,
+        options: LaunchOptions,
+    ) -> Result<Session, LaunchError> {
+        let LaunchRequest {
+            agent,
+            args,
+            input_text,
+        } = request;
+        let LaunchOptions { vfs } = options;
         // Resolving through the discovered list is the trust boundary: a
         // client-sent name never reaches the filesystem unless it is the
         // bare stem of a real `.md` file in the configured directory. The
         // directory walk is filesystem work and runs on the blocking pool,
-        // through the harness's one spawn site.
+        // through the Harness's one spawn site.
         let agents_path = self.config.agents_path.clone();
         let known = spawn_blocking_launch(&agent, move || discover_agents(&agents_path))
             .await
@@ -261,6 +301,7 @@ impl Harness {
             agent,
             source,
             args,
+            files: SessionFiles::new(vfs, input_text),
             lifecycle: Arc::new(RunLifecycle::new(events, cancellations)),
             log,
         });
@@ -288,7 +329,7 @@ impl Harness {
 
     /// Ends the session with this id: its run is cancelled for good (no
     /// relaunch), pending waits die as cancelled, and the session leaves
-    /// the harness at once. Returns whether a session was ended. The
+    /// the Harness at once. Returns whether a session was ended. The
     /// run's outstanding effects are answered `Dropped` before its state
     /// reaches `Closed`; a handle still held sees that through
     /// [`Session::subscribe_state`].

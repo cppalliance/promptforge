@@ -12,7 +12,7 @@ models:
 
 ---
 
-Demonstrates prompt-local model selection. The frontmatter `models:` key declares the `analyst` role, filled from the host's current model at prepare. A section that calls `models.use` runs every completion under that role's bound model; a section that omits `models.use` inherits the prompt-wide `models.default` model when one is declared.
+Demonstrates prompt-local model selection. The frontmatter `models:` key declares the `analyst` role, filled from the Host's current model at prepare. A section that calls `models.use` runs every completion under that role's bound model; a section that omits `models.use` inherits the prompt-wide `models.default` model when one is declared.
 
 ## Analyze
 

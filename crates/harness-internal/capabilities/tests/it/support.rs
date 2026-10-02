@@ -16,10 +16,10 @@ use promptforge::cancel::CancelHandle;
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::{Origin, perform_store_op};
+use promptforge::vfs::{Origin, perform_vfs_op};
 use promptforge::{Environment, Requirements, RunContext, RunResult};
 
-/// A [`RunContext`] for the run `name` under fixed host inputs: no fixture
+/// A [`RunContext`] for the run `name` under fixed Harness inputs: no fixture
 /// here asserts on the nonce or `sys.when`.
 pub(super) fn context(name: impl Into<String>) -> RunContext {
     RunContext::new(name, 1, Timestamp::UNIX_EPOCH)
@@ -32,7 +32,7 @@ pub(super) fn parse(source: &str, execution: &str) -> Prompt {
         .expect("the fixture prompt parses")
 }
 
-/// The harness's activate-then-prepare ceremony spelled out, so a test can
+/// The Harness's activate-then-prepare ceremony spelled out, so a test can
 /// inspect what the run path folds into one refusal: activates the
 /// prompt's declared capabilities against `registry` with the run's own
 /// services - its filesystem handle and cancel flag - installs the
@@ -54,7 +54,7 @@ pub(super) fn prepare_activated(
     (ctx, requirements, activation)
 }
 
-/// The harness's run path with capabilities: activates against
+/// The Harness's run path with capabilities: activates against
 /// `registry`, installs the catalog, prepares, merges the activation
 /// report, refuses an unsatisfiable prompt, and otherwise drives the run
 /// on the store-only loop below (no fixture here performs a chat, tool,
@@ -72,18 +72,18 @@ pub(super) fn run_activated(
     drive_store_only(Run::new(Arc::new(prompt.clone()), "", ctx))
 }
 
-/// Drives `run` to its result, answering [`Effect::Store`] through
-/// [`perform_store_op`] and panicking on any other effect, which names a
-/// fixture that issues something this suite does not host.
+/// Drives `run` to its result, answering [`Effect::Vfs`] through
+/// [`perform_vfs_op`] and panicking on any other effect, which names a
+/// fixture that issues something this suite does not answer.
 fn drive_store_only(mut run: Run) -> RunResult {
     loop {
         match run.step() {
             Step::Pending { effects, .. } => {
                 for (id, _provenance, effect) in effects {
-                    let Effect::Store { access, op } = effect else {
+                    let Effect::Vfs { access, op } = effect else {
                         panic!("the activation suite performs only store effects: {effect:?}");
                     };
-                    run.resume(id, EffectAnswer::Store(perform_store_op(&access, op)));
+                    run.resume(id, EffectAnswer::Vfs(perform_vfs_op(&access, op)));
                 }
             }
             Step::Done { result, .. } => return result,
@@ -270,6 +270,7 @@ impl Capability for ToolFixture {
         let _ = services;
         Ok(Contribution {
             tools: self.tools.clone(),
+            prelude: None,
         })
     }
 }

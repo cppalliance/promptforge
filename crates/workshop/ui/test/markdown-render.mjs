@@ -58,11 +58,11 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Renders text into a host element and returns the .ws-markdown-content root.
+// Renders text into a container element and returns the .ws-markdown-content root.
 function render(text, options) {
-  const host = document.createElement("div");
-  host.append(renderMarkdown(text, options));
-  return host.firstElementChild;
+  const container = document.createElement("div");
+  container.append(renderMarkdown(text, options));
+  return container.firstElementChild;
 }
 
 // --- Structure -----------------------------------------------------------

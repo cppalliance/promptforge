@@ -3,21 +3,21 @@
 //! `/v1/models` catalog relay ([`relay`]), their shared route state
 //! ([`state`]), and
 //! [`AgentSessions`], the server's opener of agent sessions in the
-//! harness. The `/ws` workshop socket sits outside this subsystem; the
+//! Harness. The `/ws` workshop socket sits outside this subsystem; the
 //! two share only [`crate::websocket`].
 //!
-//! Agent sessions run in the harness. The composition root constructs a
+//! Agent sessions run in the Harness. The composition root constructs a
 //! [`Harness`] from `harness` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
-//! every session through it. Everything the harness knows about the server
+//! every session through it. Everything the Harness knows about the server
 //! arrives as data pushed through its public API ([`bindings`]): the
-//! gateway endpoint and bearer, the chat-capable catalog, and the host
+//! gateway endpoint and bearer, the chat-capable catalog, and the Host
 //! snapshot (the menu's selection and the workspace's granted roots).
 //! Status-bar reporting stays in the server (`status`): a per-session
 //! reporter derives it from the session's events, deltas, and error reports.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
-//! attach and detach (`socket`), so the harness keeps the session table
+//! attach and detach (`socket`), so the Harness keeps the session table
 //! the server's socket rule otherwise forbids. The rule governed
 //! per-request relay work, where every held resource belonged to one
 //! socket; an agent session is longer-lived than any socket on purpose.
@@ -42,13 +42,13 @@ pub(crate) use bindings::forward as forward_bindings;
 use bindings::push_bindings;
 pub(crate) use state::{SessionsState, register, register_tasks};
 
-/// The directory under the server's state directory the harness keeps
+/// The directory under the server's state directory the Harness keeps
 /// its own state in: the run log every agent session is recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
 
-/// The harness every agent session runs in, built for `config` with the
+/// The Harness every agent session runs in, built for `config` with the
 /// server's current state already pushed through its public API: the
-/// gateway endpoint and bearer, the chat catalog, and the host snapshot,
+/// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
 /// each read through `registry` from the subsystems registered before it.
 /// The composition root registers the returned handle and the forwarder
 /// task ([`register_tasks`]) that keeps the bindings current from the
@@ -68,7 +68,7 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
 /// wires up - the status reporter.
 ///
 /// Typed and construction-phased: the registry and the server's backoff
-/// are captured when the composition root builds it, and the harness is
+/// are captured when the composition root builds it, and the Harness is
 /// read through the registry at the point of use, so this handle never
 /// holds another subsystem's handle.
 #[derive(Clone)]
@@ -78,7 +78,7 @@ pub struct AgentSessions {
 
 /// The shared state behind the cloneable handle.
 struct Inner {
-    /// The subsystem registry: the harness, the gateway and menu handles,
+    /// The subsystem registry: the Harness, the gateway and menu handles,
     /// the workspace roots, and the push facade are read through it.
     registry: Registry,
     /// Reset on completed replies: an agent reply is useful gateway work.
@@ -104,7 +104,7 @@ impl AgentSessions {
         }
     }
 
-    /// The registered harness, or `None` while the composition root has
+    /// The registered Harness, or `None` while the composition root has
     /// not registered one - every operation then degrades to its empty
     /// answer.
     fn harness(&self) -> Option<Arc<Harness>> {
@@ -113,15 +113,15 @@ impl AgentSessions {
 
     /// The launchable agent names: the `.md` file stems under the
     /// configured agents directory plus the built-in `chat`, sorted. An
-    /// unregistered harness discovers nothing.
+    /// unregistered Harness discovers nothing.
     #[must_use]
     pub fn discover(&self) -> Vec<String> {
         self.harness()
             .map_or_else(Vec::new, |harness| harness.discover())
     }
 
-    /// Pushes the server's current gateway, catalog, and host state into
-    /// the harness, so the next run the harness prepares reads them.
+    /// Pushes the server's current gateway, catalog, and Host state into
+    /// the Harness, so the next run the Harness prepares reads them.
     pub(crate) fn sync_bindings(&self) {
         if let Some(harness) = self.harness() {
             push_bindings(&self.inner.registry, &harness);
@@ -138,8 +138,8 @@ impl AgentSessions {
     /// caught up with the latest replacement.
     ///
     /// # Errors
-    /// Returns [`LaunchRefusal::Unavailable`] when no harness is
-    /// registered, and the harness's own [`LaunchError`] otherwise: an
+    /// Returns [`LaunchRefusal::Unavailable`] when no Harness is
+    /// registered, and the Harness's own [`LaunchError`] otherwise: an
     /// unknown agent, an unusable gateway, unreadable agent source, or a
     /// run log that could not open.
     pub(crate) async fn launch(&self, name: &str) -> Result<Session, LaunchRefusal> {
@@ -149,6 +149,7 @@ impl AgentSessions {
             .launch(LaunchRequest {
                 agent: name.to_owned(),
                 args: String::new(),
+                input_text: None,
             })
             .await?;
         status::spawn_reporter(
@@ -167,7 +168,7 @@ impl AgentSessions {
 
     /// Ends the session with this id: its run is cancelled for good (no
     /// relaunch), pending waits die as `input_cancelled`, and the session
-    /// leaves the harness. Returns whether a session was ended.
+    /// leaves the Harness. Returns whether a session was ended.
     #[must_use]
     pub fn close(&self, id: &str) -> bool {
         self.harness()
@@ -183,8 +184,7 @@ impl AgentSessions {
     }
 
     /// Delivers a fixture response after running `after_acceptance`
-    /// between its acceptance and the waiting `user_input` call's
-    /// resumption.
+    /// between its acceptance and the waiting ask's resumption.
     #[cfg(feature = "test-fixtures")]
     pub fn deliver_input_after_acceptance_for_test(
         &self,
@@ -200,10 +200,10 @@ impl AgentSessions {
 /// A refused agent launch, relayed to the client as an error frame.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum LaunchRefusal {
-    /// The composition root registered no harness.
+    /// The composition root registered no Harness.
     #[error("agent sessions are unavailable")]
     Unavailable,
-    /// The harness refused the launch.
+    /// The Harness refused the launch.
     #[error(transparent)]
     Refused(#[from] LaunchError),
 }

@@ -4,6 +4,7 @@ description: The built-in Workshop chat agent on the unified runtime.
 promptforge: 0
 capabilities:
   - promptforge/web
+  - promptforge/user-input
 tools:
   fetch: promptforge/web/fetch
   search: promptforge/web/search
@@ -31,10 +32,7 @@ tools.always("search")
 ```lua
 local history = messages.new()
 while true do
-    local text, available = user_input()
-    if not available then
-        return
-    end
+    local text = input.ask()
     history:user(text)
     pcall(function() return models.loop(history) end)
 end

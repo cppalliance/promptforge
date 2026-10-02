@@ -8,9 +8,9 @@
 // skin's min/max height tokens.
 //
 // The component is isolated: props in (every one defaulted), events out
-// through one sink, an imperative handle for the host and for dictation.
-// It reaches no service registry - the text-control registrar is
-// injected - and imports nothing from the host layers. Every prop-driven
+// through one sink, an imperative handle for the owning part and for
+// dictation. It reaches no service registry - the text-control registrar is
+// injected - and imports nothing from the embedding layers. Every prop-driven
 // state is mirrored onto the DOM as a data attribute beside the classes
 // the skin already relies on. The `@` typeahead's items come from the
 // injected mentionSource (a three-item stub by default) through the
@@ -56,8 +56,8 @@ const DEFAULT_MAX_HEIGHT_PX = 200;
 const MENTION_DEBOUNCE_MS = 60;
 
 // STUB for the future workspace file index: three canned entries keep
-// the popup's open/filter/select cycle working until a host supplies a
-// mentionSource.
+// the popup's open/filter/select cycle working until the owning part
+// supplies a mentionSource.
 const STUB_CHIPS: readonly ChipRef[] = [
   { id: "README.md", label: "README.md", kind: "file", data: null },
   { id: "src/main.ts", label: "src/main.ts", kind: "file", data: null },
@@ -125,10 +125,10 @@ function micTitle(mic: ResolvedDynamicProps["mic"]): string {
 
 /**
  * The chat box: the bar (`ws-agent-session__bar`) holding the framed
- * editor, an optional host-owned controls element, and the box's own mic
- * and send buttons. Disposable: dispose() destroys the editor, releases
- * the text-control registration, and takes its buttons back out of the
- * controls element it was handed.
+ * editor, an optional controls element the owning part supplies, and
+ * the box's own mic and send buttons. Disposable: dispose() destroys
+ * the editor, releases the text-control registration, and takes its
+ * buttons back out of the controls element it was handed.
  *
  * The handle is a structural superset of dictation's input target:
  * dictation splices the transcript in through insertionContext and
@@ -149,8 +149,8 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   private readonly dynamic: ResolvedDynamicProps;
   private attachments: ChipRef[] = [];
   // Held for the `/` trigger, which is not wired to a plugin in this
-  // plan: a typed `/` stays text. The seam exists so the host's source
-  // is in place when the command chip arrives.
+  // plan: a typed `/` stays text. The seam exists so the owning part's
+  // source is in place when the command chip arrives.
   private readonly commandSource: ChipSource;
 
   // Two locks, one property: the pending-wait gate (the editable prop)
@@ -200,7 +200,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     this.send.addEventListener("click", () => this.emitAction());
 
     // Two bar shapes, one owner: with a controls element the buttons
-    // trail the host's toolbar; without one they sit on the bar. The
+    // trail the owning part's toolbar; without one they sit on the bar. The
     // buttons are the box's in both cases.
     if (props.controls !== undefined) {
       props.controls.append(this.mic, this.send);
@@ -326,9 +326,9 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
     );
     // The box is its own text-control adapter: the Edit menu's
     // undo/redo/select-all route here whenever the box holds focus. The
-    // adapter registers only when the host supplied a registrar and the
-    // history plugin is present - without it the commands would no-op,
-    // and the native execCommand fallback is the better path.
+    // adapter registers only when the owning part supplied a registrar
+    // and the history plugin is present - without it the commands would
+    // no-op, and the native execCommand fallback is the better path.
     // canUndo/canRedo read the history depth so an empty stack falls back
     // instead of swallowing the command.
     const hasHistory = this.editor.extensionManager.extensions.some(
@@ -386,7 +386,7 @@ export class ChatBox extends Disposable implements ChatBoxHandle {
   /**
    * The send button's press and the submitting Enter share this path:
    * `idle` is silent, `stop` emits `stop`, and both send states emit
-   * `send` - `send-blocked` included, so the host can name the blocker.
+   * `send`, `send-blocked` included, so the owning part can name the blocker.
    */
   private emitAction(): void {
     switch (this.dynamic.action) {

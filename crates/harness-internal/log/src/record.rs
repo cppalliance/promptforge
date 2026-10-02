@@ -52,7 +52,7 @@ impl fmt::Display for Seq {
     }
 }
 
-/// What the harness knows about a run when it begins.
+/// What the Harness knows about a run when it begins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunMeta {
     /// The session that launched the run.
@@ -62,23 +62,23 @@ pub struct RunMeta {
     /// A content hash of the prompt file, so a transcript can be matched
     /// to the exact text that produced it.
     pub prompt_hash: String,
-    /// The host-drawn seed handed to the engine.
+    /// The Harness-drawn seed handed to the Engine.
     pub seed: u64,
-    /// The engine's behavior flags, a bitset; empty until a flag exists.
+    /// The Engine's behavior flags, a bitset; empty until a flag exists.
     pub flags: u32,
     /// When the run started, UTC milliseconds since the Unix epoch; the
-    /// engine's `started_at` input, so the log and the run agree.
+    /// Engine's `started_at` input, so the log and the run agree.
     pub started_at: i64,
 }
 
 /// Which side of the effect loop a record came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecordKind {
-    /// An effect the engine issued; the payload is an `EffectRecord`.
+    /// An effect the Engine issued; the payload is an `EffectRecord`.
     Effect,
     /// The answer to an effect; the payload is an `EffectAnswer`.
     Answer,
-    /// An event the engine emitted; the payload is an `Event`.
+    /// An event the Engine emitted; the payload is an `Event`.
     Event,
 }
 
@@ -105,10 +105,10 @@ impl RecordKind {
     }
 }
 
-/// One record as the harness appends it. `seq` and `at` are the log's.
+/// One record as the Harness appends it. `seq` and `at` are the log's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    /// The nearest enclosing task, as the engine's `TaskId` renders: a
+    /// The nearest enclosing task, as the Engine's `TaskId` renders: a
     /// dot-separated path of child indices from the root chain, so the
     /// main walk is task `0` and its second child task is `0.1`.
     pub task_id: String,
@@ -124,17 +124,12 @@ pub struct Record {
 
 /// Which of a run's records to read. The default reads them all.
 ///
-/// Without `task`, records come back in `seq` order, the loop's order.
-/// With `task`, they come back in that task's own `task_seq` order, which
-/// can differ from `seq` when tasks interleave. `last` keeps only the
-/// final `n` in whichever order applies.
+/// Records come back in `seq` order, the loop's order. `last` keeps only
+/// the final `n`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecordFilter {
     /// Only records of this kind.
     pub kind: Option<RecordKind>,
-    /// Only records from this task (its rendered path), ordered by
-    /// `task_seq`.
-    pub task: Option<String>,
     /// Only the final `n` records.
     pub last: Option<u32>,
 }
@@ -151,7 +146,7 @@ pub struct StoredRecord {
     pub record: Record,
 }
 
-/// How a run ended. Mirrors the engine's `RunResult`.
+/// How a run ended. Mirrors the Engine's `RunResult`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     /// The run completed with its final text.
@@ -166,7 +161,7 @@ pub enum RunOutcome {
         /// The failure's message.
         message: String,
     },
-    /// The host cancelled the run.
+    /// The Host cancelled the run.
     Cancelled,
 }
 
@@ -188,7 +183,7 @@ impl RunOutcome {
 pub struct RunRow {
     /// The run's identity.
     pub id: RunId,
-    /// What the harness knew when the run began.
+    /// What the Harness knew when the run began.
     pub meta: RunMeta,
     /// When the run ended, UTC milliseconds since the Unix epoch; `None`
     /// while the run is open.

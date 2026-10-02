@@ -169,7 +169,7 @@ all-features = true
 
 ### Add `documentation` field
 
-Set `documentation = "https://cppalliance.github.io/promptforge/"` on all publishable crates. This points crates.io to the mdbook guide rather than to docs.rs (which still hosts API reference automatically).
+Set `documentation = "https://cppalliance.github.io/promptforge/"` on all publishable crates. This points crates.io to the mdbook guide rather than to docs.rs (which still serves API reference automatically).
 
 ### Add GitHub Pages deploy workflow
 

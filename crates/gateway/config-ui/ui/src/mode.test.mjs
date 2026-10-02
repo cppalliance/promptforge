@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub } from "./harness.mjs";
+import { bootApp, gatewayStub } from "./test-support.mjs";
 
 test("?mode=panel skips the key prompt and the medallion", async () => {
   const stub = gatewayStub();

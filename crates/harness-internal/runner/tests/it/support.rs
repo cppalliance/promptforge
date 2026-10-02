@@ -4,29 +4,43 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
-use std::time::Duration;
 
 use harness_log::{RunId, RunOutcome};
 use harness_runner::effect_loop::SharedLog;
 use harness_runner::performers::{
-    BoxFuture, ChatPerformer, InputPerformer, Performers, StorePerformer, TaskEventsPerformer,
-    TimerPerformer, ToolPerformer,
+    BoxFuture, ChatPerformer, Performers, TimerPerformer, ToolPerformer,
 };
-use promptforge::event::Event;
-use promptforge::ids::TaskId;
-use promptforge::input::{InputError, InputOutcome};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::Access;
-use promptforge::vfs::{StoreOp, StoreOutcome, VfsError};
-use promptforge::{Prompt, Run, RunContext};
-use serde_json::Value;
+use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
+use promptforge::vfs::{
+    AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+};
+use promptforge::{Environment, Prompt, Run, RunContext};
+use serde_json::{Value, json};
 
 /// The run's execution identifier.
 pub(crate) const EXECUTION: &str = "runner-test";
+
+/// A section body that calls the fixture wait tool by its full id and
+/// returns its answer: the section parks until the test's tool performer
+/// answers.
+pub(crate) const WAITS: &str = "return tools.call('tests/runner/wait')";
+
+/// The catalog every fixture run is prepared against: the one wait tool
+/// [`WAITS`] calls, so a section reaches it by full id without binding an
+/// alias.
+fn catalog() -> ToolCatalog {
+    let wait = ToolDescriptor::new(
+        ToolId::parse("tests/runner/wait").expect("the wait tool id is valid"),
+        "wait",
+        "Wait until the test's tool performer answers.",
+        json!({ "type": "object", "properties": {} }),
+    );
+    ToolCatalog::new(&[wait]).expect("the one-tool catalog is valid")
+}
 
 /// A prompt whose one section runs `lua` as its only block.
 pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
@@ -38,10 +52,30 @@ pub(crate) fn prompt(lua: &str) -> Arc<Prompt> {
     Arc::new(prompt.expect("the fixture prompt parses"))
 }
 
-/// A capability-free run over `lua` with a fixed seed and start.
+/// A capability-free run over `prompt` with a fixed seed and start,
+/// prepared against the fixture [`catalog`], over the run's filesystem
+/// `vfs`.
+fn prepared(prompt: Arc<Prompt>, vfs: VfsRef) -> Run {
+    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH).vfs(vfs);
+    let (ctx, requirements) = Environment::new().tools(catalog()).prepare(&prompt, ctx);
+    assert!(
+        requirements.is_satisfied(),
+        "the runner fixture prompt declares nothing the host must supply: {requirements:?}"
+    );
+    Run::new(prompt, "", ctx)
+}
+
+/// A capability-free run over `lua` with a fixed seed and start, over a
+/// fresh memory store.
 pub(crate) fn run(lua: &str) -> Run {
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
-    Run::new(prompt(lua), "", ctx)
+    run_over(lua, VfsRef::default())
+}
+
+/// A capability-free run over `lua` whose `store` table operates on
+/// `vfs`: the test holds the handle, so it can read what the run wrote or
+/// mount a backend of its own.
+pub(crate) fn run_over(lua: &str, vfs: VfsRef) -> Run {
+    prepared(prompt(lua), vfs)
 }
 
 /// A capability-free run over two sections: `## Main` runs `main`, and
@@ -53,12 +87,11 @@ pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     );
     let (prompt, _parse_events) = Prompt::parse(&source, EXECUTION);
     let prompt = Arc::new(prompt.expect("the two-section fixture prompt parses"));
-    let ctx = RunContext::new(EXECUTION, 7, Timestamp::UNIX_EPOCH);
-    Run::new(prompt, "", ctx)
+    prepared(prompt, VfsRef::default())
 }
 
 /// A main section that parks on a 30-second timer beside its child: the
-/// child's own wait and the timer are two effects out at once.
+/// child's own tool call and the timer are two effects out at once.
 pub(crate) const TIMED_MAIN: &str = "local t = tasks.spawn('## Child')\n\
      local _first, _ok, result = tasks.join_any({ t }, { timeout = 30 })\n\
      return result";
@@ -87,35 +120,13 @@ impl ToolPerformer for Unused {
         _alias: String,
         _args: Value,
     ) -> BoxFuture<Result<ToolOutput, ToolError>> {
-        unreachable!("no test issues a ToolCall effect")
-    }
-}
-
-impl InputPerformer for Unused {
-    fn wait(
-        &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        unreachable!("this test issues no UserInput effect")
-    }
-}
-
-impl StorePerformer for Unused {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        unreachable!("this test issues no Store effect")
+        unreachable!("this test issues no ToolCall effect")
     }
 }
 
 impl TimerPerformer for Unused {
     fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
         unreachable!("no test issues a Timer effect")
-    }
-}
-
-impl TaskEventsPerformer for Unused {
-    fn events(&self, _task: TaskId, _last: Option<u32>) -> BoxFuture<Vec<Event>> {
-        unreachable!("no test issues a TaskEvents effect")
     }
 }
 
@@ -126,53 +137,53 @@ pub(crate) fn unused() -> Performers {
     Performers {
         chat: unused.clone(),
         tool: unused.clone(),
-        input: unused.clone(),
-        store: unused.clone(),
-        timer: unused.clone(),
-        task_events: unused,
+        timer: unused,
     }
 }
 
-/// Answers every input wait with the same operator text.
-pub(crate) struct TextInput(pub(crate) &'static str);
+/// Answers every tool call with the same trusted text.
+pub(crate) struct TextTool(pub(crate) &'static str);
 
-impl InputPerformer for TextInput {
-    fn wait(
+impl ToolPerformer for TextTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
-        let text = self.0.to_owned();
-        Box::pin(async move { Ok(InputOutcome::Text(text)) })
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
+        let text = self.0;
+        Box::pin(async move { Ok(ToolOutput::trusted(text)) })
     }
 }
 
-/// Stays pending forever: the wait an operator never returns from.
-pub(crate) struct PendingInput;
+/// Stays pending forever: the tool call that never returns.
+pub(crate) struct PendingTool;
 
-impl InputPerformer for PendingInput {
-    fn wait(
+impl ToolPerformer for PendingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::pending())
     }
 }
 
-/// Panics instead of answering: a performer the host lost to a bug. The
-/// wait panics on its first poll.
-pub(crate) struct PanickingInput;
+/// Panics instead of answering: a performer the Harness lost to a bug. The
+/// call panics on its first poll.
+pub(crate) struct PanickingTool;
 
-impl InputPerformer for PanickingInput {
-    fn wait(
+impl ToolPerformer for PanickingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         Box::pin(std::future::poll_fn(
-            |_cx| -> Poll<Result<InputOutcome, InputError>> {
-                panic!("the input performer panics instead of answering")
+            |_cx| -> Poll<Result<ToolOutput, ToolError>> {
+                panic!("the tool performer panics instead of answering")
             },
         ))
     }
@@ -180,17 +191,18 @@ impl InputPerformer for PanickingInput {
 
 /// Closes the run's row in the log before answering, so the loop's next
 /// write is refused: the log failing under a live run.
-pub(crate) struct ClosingInput {
+pub(crate) struct ClosingTool {
     pub(crate) log: SharedLog,
     pub(crate) run_id: RunId,
 }
 
-impl InputPerformer for ClosingInput {
-    fn wait(
+impl ToolPerformer for ClosingTool {
+    fn call(
         &self,
-        _execution: String,
-        _section: String,
-    ) -> BoxFuture<Result<InputOutcome, InputError>> {
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
         let log = Arc::clone(&self.log);
         let run_id = self.run_id;
         Box::pin(async move {
@@ -199,7 +211,7 @@ impl InputPerformer for ClosingInput {
                 .end_run(run_id, RunOutcome::Cancelled)
                 .await
                 .expect("the open row closes");
-            Ok(InputOutcome::Text("late".to_owned()))
+            Ok(ToolOutput::trusted("late"))
         })
     }
 }
@@ -229,25 +241,112 @@ impl TimerPerformer for PendingTimer {
     }
 }
 
-/// Answers every store operation with the unit outcome at once.
-pub(crate) struct UnitStore;
+/// Parks every tool call until the test adds a permit to `gate`, then
+/// answers it: a tool call that stays out for exactly as long as the test
+/// says, with no timer involved.
+pub(crate) struct GatedTool {
+    pub(crate) gate: Arc<tokio::sync::Semaphore>,
+}
 
-impl StorePerformer for UnitStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        Ok(StoreOutcome::Unit)
+impl ToolPerformer for GatedTool {
+    fn call(
+        &self,
+        _tool: ToolId,
+        _alias: String,
+        _args: Value,
+    ) -> BoxFuture<Result<ToolOutput, ToolError>> {
+        let gate = Arc::clone(&self.gate);
+        Box::pin(async move {
+            gate.acquire()
+                .await
+                .expect("the gate semaphore is never closed")
+                .forget();
+            Ok(ToolOutput::trusted("opened"))
+        })
     }
 }
 
-/// Blocks for `delay` before answering, and raises `finished` when it has.
-pub(crate) struct SlowStore {
-    pub(crate) delay: Duration,
-    pub(crate) finished: Arc<AtomicBool>,
+/// A [`MemoryBackend`] that runs `on_write` as each write starts and
+/// delegates every operation to the memory backend: a test mounts it as
+/// the run's store, so a store operation reaches it through the run's
+/// real store view, and the hook sees where the operation runs or makes
+/// the backend panic in the one chosen operation.
+pub(crate) struct HookedBackend {
+    inner: MemoryBackend,
+    on_write: Arc<dyn Fn() + Send + Sync>,
 }
 
-impl StorePerformer for SlowStore {
-    fn perform(&self, _access: &Access, _op: StoreOp) -> Result<StoreOutcome, VfsError> {
-        std::thread::sleep(self.delay);
-        self.finished.store(true, Ordering::SeqCst);
-        Ok(StoreOutcome::Unit)
+impl HookedBackend {
+    pub(crate) fn new(on_write: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            inner: MemoryBackend::new(),
+            on_write: Arc::new(on_write),
+        }
+    }
+}
+
+impl Vfs for HookedBackend {
+    fn acquire(&mut self, cx: &AcquireContext) -> Result<Box<dyn VfsAccess>, VfsError> {
+        Ok(Box::new(HookedAccess {
+            inner: self.inner.acquire(cx)?,
+            on_write: Arc::clone(&self.on_write),
+        }))
+    }
+
+    fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
+        self.inner.release(id)
+    }
+}
+
+/// One session with a [`HookedBackend`].
+struct HookedAccess {
+    inner: Box<dyn VfsAccess>,
+    on_write: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl VfsAccess for HookedAccess {
+    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
+        self.inner.read(path)
+    }
+
+    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        (self.on_write)();
+        self.inner.write(path, contents)
+    }
+
+    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
+        self.inner.append(path, contents)
+    }
+
+    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner.remove(path, recursive)
+    }
+
+    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
+        self.inner.exists(path)
+    }
+
+    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
+        self.inner.glob(pattern)
+    }
+
+    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
+        self.inner.list(path)
+    }
+
+    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
+        self.inner.stat(path)
+    }
+
+    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
+        self.inner.mkdir(path, recursive)
+    }
+
+    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.rename(from, to)
+    }
+
+    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
+        self.inner.copy(from, to)
     }
 }

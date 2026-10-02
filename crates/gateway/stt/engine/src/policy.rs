@@ -24,7 +24,7 @@ impl EnginePolicy {
     /// Minimum audio the interim loop bothers to transcribe.
     pub const MIN_WINDOW_SAMPLES: usize = Self::SAMPLE_RATE / 2;
 
-    /// Validates host capture policy and applies the bounded startup deadline.
+    /// Validates capture policy and applies the bounded startup deadline.
     ///
     /// # Errors
     /// Returns [`TranscribeError::InvalidConfig`] for zero or overflowing
@@ -58,7 +58,7 @@ impl EnginePolicy {
         })
     }
 
-    /// Overrides the construction deadline for deterministic hosts and tests.
+    /// Overrides the construction deadline for deterministic callers and tests.
     #[must_use]
     pub fn with_startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;

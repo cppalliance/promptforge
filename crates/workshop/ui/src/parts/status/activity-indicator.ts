@@ -1,4 +1,4 @@
-// The activity LED: an indicator slot the status bar hosts, driven by the
+// The activity LED: an indicator slot the status bar holds, driven by the
 // observer's status frames. Thinking lights it amber and generating
 // green, with green winning while both coincide. Every thinking or
 // generating frame - debug frames included - pulses it; info and error

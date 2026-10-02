@@ -339,8 +339,8 @@ pub(crate) mod linux {
     /// defaulting to `~/.config/autostart/<name>`. An empty or relative
     /// `XDG_CONFIG_HOME` is ignored, per the basedir spec. The spec's
     /// "absolute" is Linux path semantics, a leading `/`; checked as such
-    /// (`Path::is_absolute` would ask the host OS, which under a Windows
-    /// test host rejects a drive-less path).
+    /// (`Path::is_absolute` would ask the operating system, which on a
+    /// Windows test machine rejects a drive-less path).
     pub(crate) fn autostart_path(xdg_config_home: Option<&OsStr>, home: &Path) -> PathBuf {
         let config = xdg_config_home
             .filter(|value| !value.is_empty())

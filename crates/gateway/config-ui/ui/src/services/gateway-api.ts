@@ -876,7 +876,7 @@ export class GatewayApi {
     return () => controller.abort();
   }
 
-  /** Fetches the host-metrics snapshot. */
+  /** Fetches the machine-metrics snapshot. */
   async getSystem(signal?: AbortSignal): Promise<SystemSnapshot> {
     const data = requireRecord(await this.getJson("/admin/system", signal), "system snapshot");
     const cpu = optionalRecord(data["cpu"]);

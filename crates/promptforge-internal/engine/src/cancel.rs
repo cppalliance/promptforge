@@ -1,6 +1,6 @@
-//! Cooperative cancellation for the engine.
+//! Cooperative cancellation for the Engine.
 //!
-//! The engine is a pure state machine, so instead of selecting over a
+//! The Engine is a pure state machine, so instead of selecting over a
 //! cancellation token it polls a flag between chain steps and from the Lua
 //! instruction hook. That flag is the synchronous [`CancelHandle`] from the
 //! `promptforge-types` crate, re-exported here so the crate's

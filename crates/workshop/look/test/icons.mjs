@@ -46,15 +46,15 @@ check(
   Object.keys(icons).sort().join(",") === Object.keys(expectedSizes).sort().join(","),
 );
 
-const host = dom.window.document.createElement("div");
+const container = dom.window.document.createElement("div");
 for (const [name, size] of Object.entries(expectedSizes)) {
   const value = icons[name];
   check(`${name} is a non-empty string`, typeof value === "string" && value.length > 0);
   if (typeof value !== "string") continue;
 
-  host.innerHTML = value;
-  const svg = host.firstElementChild;
-  check(`${name} parses to a single svg element`, host.children.length === 1 && svg?.tagName.toLowerCase() === "svg");
+  container.innerHTML = value;
+  const svg = container.firstElementChild;
+  check(`${name} parses to a single svg element`, container.children.length === 1 && svg?.tagName.toLowerCase() === "svg");
   if (!svg || svg.tagName.toLowerCase() !== "svg") continue;
 
   check(`${name} keeps its width of ${size}`, svg.getAttribute("width") === String(size));

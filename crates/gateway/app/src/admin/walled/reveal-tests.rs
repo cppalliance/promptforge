@@ -228,7 +228,7 @@ async fn a_missing_peer_address_fails_closed_as_non_loopback() {
     let mut state = app_state(config, Some(paths));
     state.reveal = Arc::clone(&launcher) as Arc<dyn RevealLauncher>;
 
-    // Served WITHOUT connect info, as a misassembled embedding host
+    // Served WITHOUT connect info, as a misassembled embedder
     // would: the peer-address extension is absent, and the shared wall
     // must fail closed with its bare 403 rather than admit the caller.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

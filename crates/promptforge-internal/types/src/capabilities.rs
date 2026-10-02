@@ -1,18 +1,19 @@
 //! The capability identity vocabulary: [`CapabilityId`] and its parse
-//! error.
+//! error, plus [`Prelude`], the Lua source an activated capability hands
+//! the Engine.
 //!
 //! A capability is the activation unit: code that runs at run setup and
 //! makes services available to the run. Capabilities are delivered in packs
 //! (crates now, DLLs via adapters later) and identified by a 2-segment
 //! [`GlobalName`] - kind is encoded by arity, so a capability id is
 //! `namespace/pack` and every tool it contributes sits under
-//! `namespace/pack/name`. The engine knows capabilities by identity alone:
+//! `namespace/pack/name`. The Engine knows capabilities by identity alone:
 //! a prompt declares them, an exact tool slot names one through its
 //! [`ToolId`] prefix, and a [`ToolDescriptor`](crate::tools::ToolDescriptor)
 //! records the conflicts of the capability that contributed it. The
 //! activation contract - the `Capability` trait, the services it is handed,
-//! and the contribution it returns - is the harness's, in
-//! `harness-capabilities`; the engine never activates anything.
+//! and the contribution it returns - is the Harness's, in
+//! `harness-capabilities`; the Engine never activates anything.
 
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
@@ -116,7 +117,7 @@ impl CapabilityId {
     /// contributing capability's id plus one name segment
     /// (`namespace/pack/name` for a `namespace/pack` capability), so
     /// dropping the tool's last segment must yield exactly this id.
-    /// The host enforces containment when the run's catalog is assembled.
+    /// The Harness enforces containment when the run's catalog is assembled.
     ///
     /// # Examples
     ///
@@ -164,7 +165,7 @@ impl<'de> serde::Deserialize<'de> for CapabilityId {
 /// A stable, matchable classification of a [`CapabilityIdError`].
 ///
 /// Every public error exposes a `kind()` classifier so callers can branch on
-/// the failure without matching a private representation (DESIGN-5).
+/// the failure without matching a private representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CapabilityIdErrorKind {
@@ -188,7 +189,7 @@ pub struct CapabilityIdError {
 }
 
 impl CapabilityIdError {
-    /// Returns the stable classification of this error (DESIGN-5).
+    /// Returns the stable classification of this error.
     #[must_use]
     pub fn kind(&self) -> CapabilityIdErrorKind {
         self.kind
@@ -210,5 +211,43 @@ impl CapabilityIdError {
             ),
         };
         CapabilityIdError { kind, reason }
+    }
+}
+
+/// The Lua source one activated capability contributes to every section VM
+/// of a run.
+///
+/// A prelude defines tables and functions, such as `sh.run(script)`, that
+/// reach the capability's own tools through `tools.call`. The Engine runs
+/// it as data: it never learns what the capability is, only its id, which
+/// names the prelude in tracebacks and error messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prelude {
+    /// The capability that contributed the source.
+    capability: CapabilityId,
+    /// The Lua source, compiled from text in every section VM.
+    source: String,
+}
+
+impl Prelude {
+    /// Pairs a capability's id with the prelude source it contributes.
+    #[must_use]
+    pub fn new(capability: CapabilityId, source: impl Into<String>) -> Prelude {
+        Prelude {
+            capability,
+            source: source.into(),
+        }
+    }
+
+    /// Returns the id of the capability that contributed this prelude.
+    #[must_use]
+    pub fn capability(&self) -> &CapabilityId {
+        &self.capability
+    }
+
+    /// Returns the prelude's Lua source.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
     }
 }

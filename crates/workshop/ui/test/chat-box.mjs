@@ -804,7 +804,7 @@ await assertNoLeaks(lifecycle, async () => {
         mic.disabled === false,
     );
     mic.click();
-    check("a click while blocked still emits mic-press so the host can name the blocker", sink.events.length === 3);
+    check("a click while blocked still emits mic-press so the owning part can name the blocker", sink.events.length === 3);
     input.update({ mic: "idle" });
     check(
       "idle restores the default rendering",
@@ -819,7 +819,7 @@ await assertNoLeaks(lifecycle, async () => {
 
   {
     const controls = document.createElement("div");
-    controls.className = "host-toolbar";
+    controls.className = "owner-toolbar";
     const existing = document.createElement("span");
     controls.appendChild(existing);
     const input = new ChatBox({ controls });
@@ -831,7 +831,7 @@ await assertNoLeaks(lifecycle, async () => {
       controls.parentElement === input.element && frame.nextElementSibling === controls,
     );
     check(
-      "with controls the mic and send are its last two children, after the host's own",
+      "with controls the mic and send are its last two children, after the owning part's own",
       controls.children.length === 3 &&
         controls.children[0] === existing &&
         controls.children[1] === mic &&
@@ -840,7 +840,7 @@ await assertNoLeaks(lifecycle, async () => {
     );
     input.dispose();
     check(
-      "dispose removes the box's buttons from the controls element and leaves the host's",
+      "dispose removes the box's buttons from the controls element and leaves the owning part's",
       controls.children.length === 1 && controls.children[0] === existing,
     );
   }

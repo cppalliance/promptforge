@@ -19,8 +19,8 @@ use std::sync::Arc;
 use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
-// The engine cause behind `WorkspaceFileError::Database`. A caller that
-// needs the engine error itself names `shared_error_source` directly;
+// The database cause behind `WorkspaceFileError::Database`. A caller that
+// needs the database error itself names `shared_error_source` directly;
 // this crate does not re-export the wrapper, so there is one name for
 // the cause across the workspace rather than one per crate.
 use shared_error_source::DatabaseSource;
@@ -66,7 +66,7 @@ const SUPPORTED_USER_VERSION: i64 = 1;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum WorkspaceFileError {
-    /// The path could not be handed to the database engine, or does
+    /// The path could not be handed to the database, or does
     /// not name a usable file.
     #[error("workspace file path cannot be used")]
     Io {
@@ -75,10 +75,10 @@ pub enum WorkspaceFileError {
         source: io::Error,
     },
 
-    /// The database engine refused the operation.
+    /// The database refused the operation.
     #[error("workspace database operation failed")]
     Database {
-        /// The underlying engine failure.
+        /// The underlying database failure.
         #[source]
         source: DatabaseSource,
     },
@@ -465,9 +465,9 @@ pub(crate) fn io_failure(source: io::Error) -> WorkspaceFileError {
     WorkspaceFileError::Io { source }
 }
 
-/// Whether an engine failure says the file is not a database at all.
+/// Whether a database failure says the file is not a database at all.
 fn is_not_a_database(error: &WorkspaceFileError) -> bool {
-    // The wrapper's field is private to its own crate, so the engine
+    // The wrapper's field is private to its own crate, so the database
     // error is reached through the accessor rather than by pattern.
     matches!(
         error,

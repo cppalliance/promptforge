@@ -1,5 +1,5 @@
 // Dictation on the agent session's chat box (src/parts/agent/agent-session-view.ts
-// hosting src/parts/chatbox/chat-box.ts and mounting src/parts/stt/stt.ts),
+// embedding src/parts/chatbox/chat-box.ts and mounting src/parts/stt/stt.ts),
 // driven through the real AgentSessionService over a scripted wire,
 // canonical Realtime events, production capture, and a recording status
 // sink in jsdom. The mic button is the box's: its click reaches
@@ -98,7 +98,7 @@ const bundle = await esbuild.build({
 });
 
 // pretendToBeVisual supplies the requestAnimationFrame ProseMirror
-// schedules with; the prompt input's editor mounts in every harness.
+// schedules with; the prompt input's editor mounts in every test setup.
 const { window } = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
   pretendToBeVisual: true,
@@ -384,7 +384,7 @@ function makeStatus() {
 }
 
 // Mounts a view over a fresh service and negotiated Realtime socket.
-async function harness(speechCapture) {
+async function setup(speechCapture) {
   const status = makeStatus();
   const wire = makeWire();
   const service = new AgentSessionService(wire);
@@ -438,7 +438,7 @@ await assertNoLeaks(lifecycle, async () => {
   // completion, second-take clear, local status, and capture cleanup.
 
   {
-    const { wire, status, mic, input, editable, startTake, dispose } = await harness();
+    const { wire, status, mic, input, editable, startTake, dispose } = await setup();
     wire.fire.inputRequired("fixture");
     const socket = await startTake();
     if (socket === null) {
@@ -559,7 +559,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A mismatched acknowledgment retires its provisional take and unblocks FIFO.
 
   {
-    const { wire, status, mic, input, startTake, dispose } = await harness();
+    const { wire, status, mic, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
@@ -642,7 +642,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- The pinned wait gates the mic; a dying wait discards the take -------
 
   {
-    const { wire, status, mic, input, editable, recording, startTake, dispose } = await harness();
+    const { wire, status, mic, input, editable, recording, startTake, dispose } = await setup();
     check("the mic mounts enabled beside a disabled input", !mic.disabled && !editable());
     check(
       "the mic is a push-to-talk button with an accessible name",
@@ -722,7 +722,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- A wait swapped mid-take holds the take's lock -------------------------
 
   {
-    const { wire, input, editable, recording, startTake, dispose } = await harness();
+    const { wire, input, editable, recording, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
@@ -747,7 +747,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Interims splice committed and tentative -------------------------------
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
@@ -779,7 +779,7 @@ await assertNoLeaks(lifecycle, async () => {
   // Producer-generated ownership snapshots replay through replacement verbatim.
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("producer");
     const socket = await startTake();
     if (socket === null) {
@@ -814,7 +814,7 @@ await assertNoLeaks(lifecycle, async () => {
   // Standalone producer transcripts compose only at the logical document end.
 
   {
-    const { wire, mic, input, editable, startTake, dispose } = await harness();
+    const { wire, mic, input, editable, startTake, dispose } = await setup();
     wire.fire.inputRequired("sequential");
     const socket = await startTake();
     if (socket === null) {
@@ -852,7 +852,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, mic, input, startTake, dispose } = await harness();
+    const { wire, mic, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("completion-only");
     input.setText("First test alpha");
     const socket = await startTake();
@@ -875,7 +875,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("existing-space");
     input.setText("First test alpha ");
     const socket = await startTake();
@@ -888,7 +888,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("producer-space");
     input.setText("First test alpha");
     const socket = await startTake();
@@ -901,7 +901,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("selection");
     input.setText("First test alpha");
     input.setSelection(7, 11);
@@ -915,7 +915,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("mid-word");
     input.setText("alphaBeta");
     input.setSelection(6, 6);
@@ -929,7 +929,7 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("rollback-spacing");
     input.setText("First test alpha");
     const socket = await startTake();
@@ -945,7 +945,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A take owns the selection present when delayed capture becomes usable.
 
   {
-    const { wire, status, mic, input, editable, recording, dispose } = await harness();
+    const { wire, status, mic, input, editable, recording, dispose } = await setup();
     wire.fire.inputRequired("delayed-start");
     input.setText("old target keep");
     input.setSelection(5, 11);
@@ -976,7 +976,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Takes insert at the cursor -------------------------------------------
 
   {
-    const { wire, input, editable, startTake, dispose } = await harness();
+    const { wire, input, editable, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     // ProseMirror positions: inside the first paragraph, text offset + 1.
     input.setText("ab");
@@ -1021,7 +1021,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- The input is read-only for the take's duration ------------------------
 
   {
-    const { wire, input, mic, editable, recording, startTake, dispose } = await harness();
+    const { wire, input, mic, editable, recording, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     input.setText("prefix");
     const socket = await startTake();
@@ -1051,7 +1051,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- A stopped take awaiting its final is still a take -------------------
 
   {
-    const { wire, status, mic, input, editable, recording, send, startTake, dispose } = await harness();
+    const { wire, status, mic, input, editable, recording, send, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok1");
     let socket = await startTake();
     if (socket === null) {
@@ -1107,7 +1107,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A stop keeps routing the worklet's buffered block until flush completes.
 
   {
-    const { wire, mic, startTake, dispose } = await harness();
+    const { wire, mic, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
@@ -1136,7 +1136,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- A send discards the live take -----------------------------------------
 
   {
-    const { wire, status, input, editorEl, recording, send, startTake, dispose } = await harness();
+    const { wire, status, input, editorEl, recording, send, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
@@ -1175,7 +1175,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A discarded commit keeps its FIFO place until its acknowledgment arrives.
 
   {
-    const { wire, mic, input, startTake, dispose } = await harness();
+    const { wire, mic, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
@@ -1250,7 +1250,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Overlapping items finalize independently ------------------------------
 
   {
-    const { wire, mic, input, editable, startTake, dispose } = await harness();
+    const { wire, mic, input, editable, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     input.setText("base ");
     const socket = await startTake();
@@ -1330,7 +1330,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A correlated rejection rolls back only the client event's take.
 
   {
-    const { wire, mic, input, startTake, dispose } = await harness();
+    const { wire, mic, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
@@ -1405,7 +1405,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- Recoverable Realtime errors use local wording -------------------------
 
   {
-    const { wire, status, input, startTake, dispose } = await harness();
+    const { wire, status, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     socket?.message({ type: "interim", committed: "temporary", tentative: "" });
@@ -1433,7 +1433,7 @@ await assertNoLeaks(lifecycle, async () => {
   // A real second socket may immediately reuse the first socket's item ID.
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, startTake, dispose } = await setup();
     wire.fire.inputRequired("reconnect");
     const first = await startTake();
     if (first === null) {
@@ -1498,8 +1498,8 @@ await assertNoLeaks(lifecycle, async () => {
         };
       },
     });
-    const a = await harness(capture);
-    const b = await harness(capture);
+    const a = await setup(capture);
+    const b = await setup(capture);
     a.wire.fire.inputRequired("wait-a");
     b.wire.fire.inputRequired("wait-b");
     check(

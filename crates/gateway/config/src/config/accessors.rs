@@ -467,12 +467,12 @@ impl ServerConfig {
         self.trust_loopback
     }
 
-    /// Returns the base URL a same-host client uses to reach this server,
-    /// loopback-adjusted: an unspecified bind IP (`0.0.0.0` or `::`) is not
-    /// a reachable destination, so it becomes the matching loopback address;
-    /// every other address is kept verbatim.
+    /// Returns the base URL a client on the same machine uses to reach this
+    /// server, loopback-adjusted: an unspecified bind IP (`0.0.0.0` or `::`)
+    /// is not a reachable destination, so it becomes the matching loopback
+    /// address; every other address is kept verbatim.
     ///
-    /// This is how the hosted workshop derives its gateway `base_url` from
+    /// This is how a gateway-served workshop derives its gateway `base_url` from
     /// `[server]` at boot (paired with the same `api_key`), so no credential
     /// or address is duplicated in `[workshop]`.
     ///

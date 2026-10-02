@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use promptforge_types::ids::ChainId;
 
-use crate::execute::engine::{JumpTarget, resolve_jump_target, section_position};
 use crate::execute::section_context::SectionContext;
-use crate::fanout;
+use crate::execute::walk_target::{JumpTarget, resolve_jump_target, section_position};
+use crate::heading_address;
 use crate::parser::Block;
 use crate::{Error, Result};
 
@@ -166,6 +166,7 @@ impl Scheduler {
             seed,
         )?;
         chain.frame = Some(frame);
+        slice[index].name().clone_into(&mut chain.entered);
         chain.block = 0;
         Ok(true)
     }
@@ -274,7 +275,7 @@ impl Scheduler {
     /// # Errors
     /// Returns [`Error::Lua`] when the heading is malformed, matches no
     /// visible section, or matches more than one (see
-    /// [`fanout::resolve_sibling`]).
+    /// [`heading_address::resolve_sibling`]).
     pub(super) fn resolve_chain_target(
         &self,
         id: ChainIndex,
@@ -287,7 +288,7 @@ impl Scheduler {
             // slice - it excludes nothing and has no children, so every
             // target is a flat index into that slice.
             let sections = promptforge_parser::detail::sections(prompt);
-            let target = fanout::resolve_sibling(heading, sections)?;
+            let target = heading_address::resolve_sibling(heading, sections)?;
             let index = section_position(sections, target).ok_or(Error::internal(
                 "a resolved H1 target is absent from the top-level slice",
             ))?;

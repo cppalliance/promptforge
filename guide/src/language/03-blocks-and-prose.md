@@ -134,7 +134,7 @@ An empty `lua` block, an opening line followed at once by its closing line, is v
 
 ### Fence and syntax errors
 
-Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
+Every fence needs its exact closing line. When a fence has none, the prompt fails to load with parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), and the message names the block's position:
 
 ````text
 prompt `lua shared` fence is not closed
@@ -401,15 +401,15 @@ First: one. Second: two.
 
 The first block keeps its rendered text in `var.first`. The second block's `prose` is rendered fresh from the second paragraph with the new value of `var.word`, and the kept string does not change.
 
-A block with no Markdown before it reads `prose` as the empty string `''`.
+A block with no Markdown before it reads `prose` as the empty string `''`. Code that runs before any block has started, such as the shared library while it loads ([How the shared library loads](#how-the-shared-library-loads)), reads `prose` as nil.
 
-`prose` is read-only. Assigning to it at any time, before or after the first read, raises this Lua error:
+`prose` is read-only. Assigning to it at any time, before or after the first read and in the shared library too, raises this Lua error:
 
 ````text
 prose is read-only: assign to `var` or a section global instead
 ````
 
-Put derived text in `var` or in another global.
+Put derived text in `var` or in another global. A metatable of your own on `_G` never changes how `prose` reads or refuses assignment ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)).
 
 [`models.infer(prose)`](10-models.md#running-a-round-with-modelsinfer) sends the prose written above a block to the model: the rendered text is what the model is asked, and the call returns the reply. This prompt makes one model call carrying `Say something.` and returns the reply:
 
@@ -620,7 +620,7 @@ The fence can sit anywhere after the title and before the first `##` section, wi
 
 The opening line is exactly three backticks followed by `lua shared`: lowercase, one space, at the start of the line, and nothing after it. Any other opening line is an ordinary Markdown code block in the prose, wherever it sits in the H1 body. The fence closes like a `lua` fence, at the first line that is exactly three backticks.
 
-A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
+A prompt has at most one `lua shared` fence, and it belongs in the H1 body. Both rules are checked when the prompt loads, before anything runs, and a failure of either has parse error kind `Fence` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)). Two or more fences fail with the first message below, and a fence anywhere else, such as in a section or in the [notes before the H1 title](02-file-structure.md#the-h1-title-and-its-content), fails with the second. The count is checked first.
 
 ````text
 prompt allows at most one `lua shared` fence
@@ -661,13 +661,13 @@ A prompt that needs no shared code leaves the `lua shared` fence out. Every sect
 
 ### What top-level library code can use
 
-The host installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the host are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
+The Engine installs its globals before the replay, so the library's top-level code can use them as it loads: `args`, which holds the run's argument string, `sys`, `var`, `log`, `store`, the `tools` and `models` tables, and the control globals such as `jump` and `call`. In a block, the calls that wait on the Harness are suspending calls: `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, the `tasks` functions, and `store` calls ([Calls that wait and errors that raise](05-lua-environment.md#calls-that-wait-and-errors-that-raise)). The library's top-level code runs directly rather than as a block, so it cannot make suspending calls, and its `store` calls run as direct calls instead:
 
 | In the library's top-level code | What happens |
 |---|---|
 | Reading `args`, `var`, and `sys` | Works |
 | `store` calls, `log`, and `tools.add` | Work directly |
-| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `user_input`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
+| `models.infer`, `models.loop`, `tools.call`, `call`, `fanout`, `input.ask`, or a `tasks` function | Fails with `attempt to yield from outside a coroutine` |
 | `jump` | Fails with `jump is not available during shared library load` |
 | No `return`, or a `return` of a string, number, boolean, or nil | The value is discarded |
 | A `return` of any other value | Fails with ``cannot return a {type} as a result`` |
@@ -715,20 +715,20 @@ A block can then `return ask(prose)`. Library functions look up globals when the
 
 Declaring a tool slot under `tools:` or a model role under `models:` gives the prompt a global of the same name, an alias global ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)). Alias globals install after the replay, so they are nil while the library's top-level code runs and present in every block after it, and a declared alias wins over a same-named global the library defines. The `tools` and `models` tables themselves are present at load, so a top-level `tools.add('search')` works.
 
-The library can install a metatable on `_G`:
+The library can install a metatable on `_G` ([Your own metatable on _G](05-lua-environment.md#your-own-metatable-on-_g)):
 
 ````lua
 captured = {}
 setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })
 ````
 
-The host sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read.
+The Engine sets `args` and the alias globals directly, so they never pass through the metatable's `__newindex` hook: with this library, `captured.args` stays nil in a later block while `args` works normally. The metatable keeps working in section blocks, so a block's `plain = 'x'` lands in `captured.plain`, while `prose` stays read-only and is still rendered at its first read, and `argv` stays frozen outside the H1 pass. The hook never sees `argv` or `prose`.
 
 In a fanout arm, `item` is installed before the replay, so the library's top-level code sees the arm's member and can set globals the worker section reads. With a library line `captured_by_shared = item`, a worker section that returns `tostring(captured_by_shared) .. '|' .. tostring(item)` gives `alpha|alpha` for the member `alpha`.
 
 ### When the library fails to load
 
-Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
+Any failure while the library loads, such as a runtime error or one of the failures above, fails the run with run error kind `Lua` ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)), and the message includes the error's own text. A library holding `error('shared boom')` compiles when the prompt loads and then fails the run with a message containing `shared boom`. The kind is `Lua` wherever the replay fails, including the replay before the H1 body's blocks run.
 
 ## List sections
 
@@ -781,7 +781,7 @@ A `---` break keeps commentary out of a list: only the marker lines below the la
 
 This list has the single item `beta`. A list that opens with a break, such as `---` followed by `- alpha` and `- beta`, has the items `alpha` and `beta`.
 
-Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](17-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
+Every item needs text. A marker with no text after it still counts as a marker line, so a section whose lines are all markers stays a list, and the prompt fails to load with parse error kind `List` ([Parse error kinds](16-limits-and-errors.md#parse-error-kinds)), whatever the section is named:
 
 ````text
 empty bullet item in list section `{section}`
@@ -858,4 +858,4 @@ Naming a section that has no list items, such as a prose section, fails with an 
 section `{name}` has no pre-parsed items
 ````
 
-`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified)).
+`list_from_section('## Prose')` on a prose-only `## Prose` fails with ``section `Prose` has no pre-parsed items``. Uncaught, it ends the run like any other Lua error in that block ([How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).

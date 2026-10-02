@@ -54,7 +54,7 @@ impl fmt::Display for VfsPath {
 }
 
 /// Owned canonical virtual path, for places that outlive an interned
-/// reference or arrive owned (grep roots, symlink targets). Ordered for
+/// reference or arrive owned (symlink targets). Ordered for
 /// the mount table's `BTreeMap`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VfsPathBuf(String);
@@ -82,7 +82,7 @@ impl fmt::Display for VfsPathBuf {
 /// Canonicalizes a virtual path at API receipt.
 ///
 /// The internal namespace follows POSIX: rooted, forward slashes, strict.
-/// The lexical rules are: backslashes from Windows hosts count as
+/// The lexical rules are: backslashes from Windows machines count as
 /// separators; duplicate separators collapse; `.` segments vanish; `..`
 /// pops exactly one segment and stops at the access root, never climbing
 /// above it; a trailing slash is dropped; the root canonicalizes to
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn backslashes_from_windows_hosts_are_separators() -> Result<(), VfsError> {
+    fn backslashes_from_windows_machines_are_separators() -> Result<(), VfsError> {
         assert_eq!(canonical("/a\\b/c")?, "/a/b/c");
         Ok(())
     }

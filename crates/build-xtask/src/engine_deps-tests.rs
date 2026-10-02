@@ -1,4 +1,4 @@
-//! Fixture tests for the engine manifest guard: one manifest per case,
+//! Fixture tests for the Engine manifest guard: one manifest per case,
 //! written into a temporary directory and scanned in isolation.
 
 use std::path::PathBuf;

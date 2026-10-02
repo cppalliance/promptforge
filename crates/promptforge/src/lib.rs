@@ -2,6 +2,7 @@
 
 pub use promptforge_engine::CapabilityConflict;
 pub use promptforge_engine::Environment;
+pub use promptforge_engine::MissingService;
 pub use promptforge_engine::RequirementCheck;
 pub use promptforge_engine::Requirements;
 pub use promptforge_engine::Run;
@@ -26,8 +27,9 @@ pub mod effect {
     pub use promptforge_engine::EffectAnswer;
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
-    pub use promptforge_engine::InputAnswerRecord;
     pub use promptforge_engine::ToolAnswerRecord;
+    pub use promptforge_engine::ToolCallOrigin;
+    pub use promptforge_engine::ToolCaller;
 }
 
 pub mod event {
@@ -110,6 +112,7 @@ pub mod capabilities {
     pub use promptforge_types::capabilities::CapabilityId;
     pub use promptforge_types::capabilities::CapabilityIdError;
     pub use promptforge_types::capabilities::CapabilityIdErrorKind;
+    pub use promptforge_types::capabilities::Prelude;
     pub use promptforge_types::names::GlobalName;
     pub use promptforge_types::names::GlobalNameError;
     pub use promptforge_types::names::GlobalNameErrorKind;
@@ -134,19 +137,15 @@ pub mod prompt {
 pub mod vfs {
     #![doc = include_str!("vfs.md")]
 
-    pub use promptforge_engine::perform_store_op;
-    pub use promptforge_lua::StoreOp;
-    pub use promptforge_lua::StoreOutcome;
+    pub use promptforge_engine::perform_vfs_op;
+    pub use promptforge_lua::VfsOp;
+    pub use promptforge_lua::VfsOutcome;
     pub use promptforge_vfs::Access;
     pub use promptforge_vfs::AcquireContext;
     pub use promptforge_vfs::AllowAll;
     pub use promptforge_vfs::Entry;
     pub use promptforge_vfs::ExecId;
     pub use promptforge_vfs::FileType;
-    pub use promptforge_vfs::GrepMatch;
-    pub use promptforge_vfs::GrepQuery;
-    pub use promptforge_vfs::GrepResults;
-    pub use promptforge_vfs::HostBackend;
     pub use promptforge_vfs::MemoryBackend;
     pub use promptforge_vfs::Mode;
     pub use promptforge_vfs::ModeHandle;
@@ -157,6 +156,7 @@ pub mod vfs {
     pub use promptforge_vfs::Origin;
     pub use promptforge_vfs::PathReason;
     pub use promptforge_vfs::Policy;
+    pub use promptforge_vfs::RealBackend;
     pub use promptforge_vfs::Stat;
     pub use promptforge_vfs::Verdict;
     pub use promptforge_vfs::Vfs;
@@ -190,13 +190,6 @@ pub mod metrics {
     pub use promptforge_types::metrics::ToolCallEvent;
     pub use promptforge_types::metrics::Usage;
     pub use promptforge_types::metrics::VllmMetrics;
-}
-
-pub mod input {
-    #![doc = include_str!("input.md")]
-
-    pub use promptforge_engine::input::InputError;
-    pub use promptforge_engine::input::InputOutcome;
 }
 
 pub mod replay {

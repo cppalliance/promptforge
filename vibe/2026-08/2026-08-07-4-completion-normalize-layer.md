@@ -59,7 +59,7 @@ Single new module: [`crates/promptforge-core/src/normalize.rs`](C:\Users\Vinnie\
 | `OpenAiChatNormalizer` | Default impl: today's parse + synonyms + empty-text error |
 | `Error::EmptyModelReply` | Distinct from `MalformedResponse`; message names empty content (and that reasoning was ignored if present, without pasting it) |
 
-[`GatewayClient::complete`](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\client.rs) calls the normalizer instead of private `parse_completion`. For slender drop-in without threading every host: store `Arc<dyn CompletionNormalizer>` on `GatewayClient`, defaulting to `OpenAiChatNormalizer` in `new` / `from_env`. A later host can construct with another impl; execute and RunOptions stay unchanged.
+[`GatewayClient::complete`](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\client.rs) calls the normalizer instead of private `parse_completion`. For slender drop-in without threading every Host: store `Arc<dyn CompletionNormalizer>` on `GatewayClient`, defaulting to `OpenAiChatNormalizer` in `new` / `from_env`. A later Host can construct with another impl; execute and RunOptions stay unchanged.
 
 Execute tool loop: `EmptyModelReply` from `complete` fires `MODEL_TURN_FAILED` and fails the run. Remove the soft path that observes `MODEL_REPLY_EMPTY` and continues with `reply == ""` - empty text must not reach epilogs. Truncation (`finish_reason == length`) remains an observer detail only when text is non-empty; empty+length is still `EmptyModelReply`. Retire or repurpose `MODEL_REPLY_EMPTY` in docs so it is not described as a successful-run signal.
 
@@ -93,6 +93,6 @@ Governing guides: [vibe-rulebook](C:\Users\Vinnie\src\cursor\tools-public\rulebo
 2. No path returns `Ok(Text(""))`.
 3. Reasoning never becomes answer text.
 4. Tool-call turns with empty `content` still succeed.
-5. Default normalizer is what every current host gets.
+5. Default normalizer is what every current Host gets.
 6. `design-core-orig.md` untouched.
 7. A test fails if empty+reasoning is accepted as success.

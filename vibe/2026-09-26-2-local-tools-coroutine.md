@@ -15,7 +15,7 @@ todos:
     content: Add frame local_calls stack; local branch pushes and answers Local; replace answer_local_tool with dispatch_local_tool_done; route in dispatch.rs with blocked None
     status: pending
   - id: tests
-    content: Add engine tests (store in handler via models.loop and tools.call, jump refused and restored, bad return, nested local, handler calling a bound tool on success and on failure inside a model-issued call), shim protocol walk test, lua parse/render tests
+    content: Add Engine tests (store in handler via models.loop and tools.call, jump refused and restored, bad return, nested local, handler calling a bound tool on success and on failure inside a model-issued call), shim protocol walk test, lua parse/render tests
     status: pending
   - id: docs-verify
     content: Update module docs and 07-tools.md plus aggregate guide; run nextest, doctests, clippy, fmt, docs, site gates
@@ -177,7 +177,7 @@ sequenceDiagram
   - No change to the facade or to `crates/promptforge/public-api.txt`.
 - Data, persistence, failure, security, and privacy constraints:
   - Store and bound-tool calls made inside a handler become ordinary effects, recorded in the journal. A replay answers them from the journal and runs the handler again.
-  - The handler's failure is raised again unchanged. A failure raised from a Rust callback stays in mlua's own form, so the host's runtime-error mapping keeps its source.
+  - The handler's failure is raised again unchanged. A failure raised from a Rust callback stays in mlua's own form, so the Engine's runtime-error mapping keeps its source.
   - `tool_result` reports the model turn recorded when the call was dispatched, even if the handler runs model rounds of its own.
 
 </implementation-contract>
@@ -240,7 +240,7 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
     - Rationale: it handles nested local calls, keeps each call's identity out of the fields the shim produces, and keeps the reported turn correct when a handler runs its own model rounds.
     - User's words: none; this was a design default.
   - Catch the handler's failure with `raw_pcall` and raise the same value again.
-    - Rationale: structured error tables keep their `kind`, and failures from Rust callbacks keep their source for the host's error mapping.
+    - Rationale: structured error tables keep their `kind`, and failures from Rust callbacks keep their source for the Engine's error mapping.
     - User's words: none; this was a design default.
   - Keep the `local_tool_done` parse arm in `crates/promptforge-internal/lua/src/protocol/parse.rs`, even though the file grows past 500 lines.
     - Rationale: the lua crate is not under the 500-line file ceiling. A third `parse-*` sibling file would force the protocol folder into a subdirectory layout.
@@ -286,7 +286,7 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test_name_substring>`. For `workshop`, `workshop-server`, and `workshop-server-api`, drop `--all-features`. To target only a crate's integration binary, add `--test it` (`--test suite` for the `promptforge` facade).
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, then `cargo test -p <crate> --all-features --doc` because nextest skips doctests. For the workshop trio: `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then the workshop trio separately with `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
-  - The workspace run includes `build-xtask`, the boundary and structural harness (tier graph, `## Invariants` marker, 500-line ceiling, product-boundary matrix).
+  - The workspace run includes `build-xtask`, the boundary and structural checks (tier graph, `## Invariants` marker, 500-line ceiling, product-boundary matrix).
   - UI partition, only when TypeScript changes: `npm run typecheck`, `npm run build`, `npm test` in `crates/workshop/ui` and in `crates/gateway/config-ui/ui`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop trio: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`.
   - Headless feature gate (the one allowed standalone check): `cargo check -p gateway --no-default-features`.
@@ -301,9 +301,9 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
   - Behavior changes ship with tests in the same change; existing product and behavior tests are preserved through refactors.
 - Directory map:
   - `crates/`: every Rust crate. The root holds the public layer (`promptforge`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), `build-*` tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), and `shared-ui` (a TypeScript and CSS package, not a crate).
-  - `crates/promptforge-internal/`: private engine family (`engine`, `lua`, `parser`, `store`, `vfs`, `model-client`, `types`).
+  - `crates/promptforge-internal/`: private Engine family (`engine`, `lua`, `parser`, `store`, `vfs`, `model-client`, `types`).
   - `crates/gateway/`: private gateway family (`app` is package `gateway`, plus `cloud-providers`, `config`, `config-ui` with its `ui/` SPA, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem).
-  - `crates/harness/`: private harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
+  - `crates/harness/`: private Harness family (`runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`).
   - `crates/workshop/`: private workshop family (`desktop` is the Tauri app, package `workshop`; `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`; `ui/` is the npm and esbuild SPA).
   - `guide/`: user guide sources (`src/{language,gateway,workshop}`, `books`, `landing`, `chrome`), built by `cargo xtask site`.
   - `prompts/`: sample prompt programs. `tools/`: Node scripts (gateway sidecar staging, live TTS check) with `.test.mjs` tests, plus a dokuman tool file. `images/`: README banners.
@@ -313,8 +313,8 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
   - Root files: `Cargo.toml` (workspace members, dependencies, lints), `deny.toml`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml` (stable), `dist-workspace.toml` (cargo-dist for the gateway only), `AGENTS.md` (repository policy).
   - Local only and gitignored: `local/` (operator profiles, prompts, stores, STT fixtures), `target/`, `target-msrv/`.
 - Component boundaries:
-  - PromptForge: `promptforge` is the one public crate, a facade over `crates/promptforge-internal/`. Inside, the engine (sans-I/O executor: no I/O, no clock, host interface `Run::new`, `step`, `resume`, `cancel`) depends on lua, parser, store, model-client, and types; store depends on vfs; the Lua VM boundary depends on store and the wire vocabulary only and answers every suspending author function through a yielded `Request`. The family depends on no gateway, workshop, or harness crate.
-  - Harness: `harness-api` is the only public surface over `crates/harness/`; harness crates may depend on `promptforge`, the gateway public pair, and shared-* crates, never on workshop crates or private gateway crates.
+  - PromptForge: `promptforge` is the one public crate, a facade over `crates/promptforge-internal/`. Inside, the Engine (sans-I/O executor that the Harness steps through `Run::new`, `step`, `resume`, `cancel`) depends on lua, parser, store, model-client, and types; store depends on vfs; the Lua VM boundary depends on store and the wire vocabulary only and answers every suspending author function through a yielded `Request`. The family depends on no gateway, workshop, or Harness crate.
+  - Harness: `harness-api` is the only public surface over `crates/harness/`; Harness crates may depend on `promptforge`, the gateway public pair, and shared-* crates, never on workshop crates or private gateway crates.
   - Gateway: the public pair `gateway-api-types` and `gateway-api-discovery`; everything else is private under `crates/gateway/`. Gateway crates depend on no promptforge or workshop crate.
   - Workshop: private under `crates/workshop/`; may name `promptforge`, the gateway public pair, and `harness-api` only. The desktop app depends on `workshop-server-api`, never on `workshop-server`. Internal tiers flow one way: server, then features, then services, then vocabulary.
   - Shared: shared-* crates depend on no product crate.
@@ -369,7 +369,7 @@ Lua crate unit tests pin the new protocol shapes. A shim-level walk pins the han
   - The returned text goes back verbatim and trusted. A local call never becomes an `Effect::ToolCall`. Store and bound-tool calls inside the handler are ordinary journaled effects; replay answers them from the journal and runs the handler again.
   - `jump` is nil while the handler runs and is restored on return or raise, including across nested local calls.
   - While the handler is parked on a store call, `tasks.status` reports the chain as blocked on `store`.
-  - A raising handler reports `TOOL_CALL_FAILED`, and its own value is raised again at the call site for script and model-issued calls alike, so `models.loop` ends unless the author wraps it in `pcall`. A structured error table keeps its `kind`; a failure from a Rust callback stays in mlua's form so the host's error mapping keeps its source.
+  - A raising handler reports `TOOL_CALL_FAILED`, and its own value is raised again at the call site for script and model-issued calls alike, so `models.loop` ends unless the author wraps it in `pcall`. A structured error table keeps its `kind`; a failure from a Rust callback stays in mlua's form so the Engine's error mapping keeps its source.
   - A handler's own `tools.call` is always a script call. A failing bound tool raises inside the handler as kind `tool`, is not turned into untrusted text, and fires no `tool_result` under the outer call id. A bound tool's untrusted output reaches the handler already wrapped and keeps the wrapper if the handler returns it.
   - Local-tool advertising, alias rules, and parameter schemas do not change. The facade and `crates/promptforge/public-api.txt` do not change.
 - Module docs: describe the two-yield handshake in the module docs of `tool_call.rs`, `vm.rs`, `coro.rs`, `request.rs`, and `answer.rs`. The old doc comment on `LocalTools::call` goes away with the method.

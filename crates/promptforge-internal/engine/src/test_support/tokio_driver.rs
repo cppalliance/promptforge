@@ -3,14 +3,13 @@
 //! to a caller's sink.
 //!
 //! The loop is `step -> perform -> await an answer -> resume`. Every
-//! `Chat`, `ToolCall`, and `UserInput` effect the step hands out goes to
+//! `Chat` and `ToolCall` effect the step hands out goes to
 //! the matching performer closure, whose future is spawned as one task
 //! that posts its answer on a channel under the effect's id; the loop
 //! resumes the run with each arriving answer and steps again. The
-//! driver performs the engine-internal kinds itself: a `Store` operation
-//! runs on the blocking pool (the VFS is synchronous by design), a `Timer`
-//! sleeps on tokio's timer wheel, and a `TaskEvents` read is answered at
-//! issue from the driver's own history of forwarded events.
+//! driver performs the engine-internal kinds itself: a `Vfs` operation
+//! runs on the blocking pool (the VFS is synchronous by design), and a
+//! `Timer` sleeps on tokio's timer wheel.
 //!
 //! When the run reports itself decided ([`Run::decided`]) every performer
 //! still out is aborted and joined - a blocking-pool store operation runs
@@ -25,16 +24,16 @@
 //! suspended tears down promptly. Running Lua observes the run's own flag
 //! from its instruction hook.
 //!
-//! Under a test shuffle seed ([`TokioDriver::set_shuffle_for_test`]) the
+//! Under a test shuffle seed (the test-only `set_shuffle_for_test`) the
 //! loop instead holds each wave of answers until every outstanding effect
 //! has posted one, then delivers the wave in the seed's permutation: one
 //! seed is one deterministic completion interleaving, which the
 //! determinism suites sweep across seeds. The performers all post
 //! independently of the run, so the hold cannot deadlock.
 //!
-//! This is a test host: the engine's own suites drive it in place of the
-//! scheduler they used to drive, and a companion crate's suite enables
-//! the `test-support` feature for it. The harness is the production host.
+//! This driver plays the Harness's part in tests: the Engine's own suites
+//! drive runs through it, and a companion crate's suite enables the
+//! `test-support` feature for it. In production the Harness steps the run.
 
 use std::collections::HashMap;
 #[cfg(test)]
@@ -53,26 +52,29 @@ use crate::{Error, Result};
 
 #[cfg(test)]
 use crate::execute::EffectRecord;
-use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step, task_history};
+use crate::execute::{Effect, EffectAnswer, EffectId, Run, RunResult, Step};
 #[cfg(test)]
-use crate::test_support::RunHost;
+use crate::test_support::RunHarness;
 
 #[cfg(test)]
 use crate::execute::context::RunState;
-#[cfg(test)]
-use crate::execute::scheduler::Scheduler;
 
 #[path = "tokio_driver-performers.rs"]
 mod performers;
+#[cfg(test)]
+#[path = "tokio_driver-test-hooks.rs"]
+mod test_hooks;
 
 pub(crate) use performers::refuse_tool_call;
 pub use performers::{BoxFuture, Performer, Performers};
+#[cfg(test)]
+use test_hooks::shuffle_batch;
 
 /// The sink every drained event is handed to, in step order.
 pub(crate) type EventSink<'a> = Box<dyn FnMut(Event) + Send + 'a>;
 
 /// Drives `run` to its end on the current tokio runtime, performing its
-/// `Chat`, `ToolCall`, and `UserInput` effects through `performers`,
+/// `Chat` and `ToolCall` effects through `performers`,
 /// handing every event to `sink` in order, and cancelling the run when
 /// `cancel` fires. Returns the run's result.
 ///
@@ -132,7 +134,7 @@ type AnswerSender = mpsc::UnboundedSender<(EffectId, EffectAnswer)>;
 pub(crate) struct TokioDriver<'a> {
     /// The run being driven.
     run: Run,
-    /// The host's performers for the kinds it performs.
+    /// The caller's performers for the kinds it performs.
     performers: Performers,
     /// Where every drained event goes.
     sink: EventSink<'a>,
@@ -152,11 +154,6 @@ pub(crate) struct TokioDriver<'a> {
     /// delivers answers in arrival order.
     #[cfg(test)]
     shuffle: Option<u64>,
-    /// Every event the run has reported, in step order: the history a
-    /// `TaskEvents` effect is answered from. A step's events are appended
-    /// before its effects are performed, so a task reading its own record
-    /// sees everything reported before the read.
-    history: Vec<Event>,
     /// Test-only: the record of every effect performed, in issue order.
     #[cfg(test)]
     tap: Option<Arc<Mutex<Vec<EffectRecord>>>>,
@@ -164,24 +161,29 @@ pub(crate) struct TokioDriver<'a> {
 
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
-    /// and replaying its events through the `host` the suite assembled
-    /// itself. The host supplies the observer, broker, tools, delta hook,
-    /// and debug capture; `client` is the run's mock-gateway client when
-    /// the suite supplies one, overriding any on the host.
+    /// and replaying its events through the `harness` the suite assembled
+    /// itself. The bundle supplies the observer, chat client, tools, delta
+    /// hook, and debug capture; `client` is the run's mock-gateway client
+    /// when the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
-        host: RunHost,
+        harness: RunHarness,
         client: Option<MockGatewayClient>,
     ) -> TokioDriver<'static> {
-        let mut host = host;
+        let mut harness = harness;
         if let Some(client) = client {
-            host = host.client(client);
+            harness = harness.client(client);
         }
         let run = Run::from_state(state.clone());
         let cancel = run.cancel_handle();
         let limits = state.limits();
-        TokioDriver::over(run, host.performers(limits), host.boxed_sink(), cancel)
+        TokioDriver::over(
+            run,
+            harness.performers(limits),
+            harness.boxed_sink(),
+            cancel,
+        )
     }
 
     /// Builds the driver over an assembled run.
@@ -200,7 +202,6 @@ impl<'a> TokioDriver<'a> {
             rx,
             outstanding: HashMap::new(),
             cancel,
-            history: Vec::new(),
             #[cfg(test)]
             tap: None,
             #[cfg(test)]
@@ -208,7 +209,7 @@ impl<'a> TokioDriver<'a> {
         }
     }
 
-    /// Drives the run to its end and returns its result as the engine's
+    /// Drives the run to its end and returns its result as the Engine's
     /// own error type: `Ok(text)` for a completed run, `Err(Interrupted)`
     /// for a cancelled one, and the failure's error otherwise.
     ///
@@ -248,14 +249,8 @@ impl<'a> TokioDriver<'a> {
                         self.drop_outstanding().await;
                         continue;
                     }
-                    let mut answered_inline = false;
                     for (id, _, effect) in effects {
-                        answered_inline |= !self.perform(id, effect);
-                    }
-                    if answered_inline {
-                        // An effect answered at issue re-queued its chain:
-                        // step again before waiting on anything.
-                        continue;
+                        self.perform(id, effect);
                     }
                     if self.outstanding.is_empty() {
                         // The run reports a stall itself; reaching here
@@ -303,41 +298,6 @@ impl<'a> TokioDriver<'a> {
         }
     }
 
-    /// Test-only wait under a shuffle seed: holds the current wave's
-    /// delivery until every outstanding effect has posted its answer,
-    /// then delivers the whole wave in the seed's permutation. Holding
-    /// the whole wave is what makes the shuffle exhaustive - answering
-    /// one arrival at a time would rarely permute anything - and every
-    /// performer posts independently of the run, so the hold cannot
-    /// deadlock. The cancel flag still tears the run down from the
-    /// hold.
-    #[cfg(test)]
-    async fn await_shuffled_batch(&mut self) {
-        let mut batch = Vec::new();
-        loop {
-            tokio::select! {
-                biased;
-                arrival = self.rx.recv() => {
-                    if let Some(pair) = arrival {
-                        batch.push(pair);
-                        if batch.len() >= self.outstanding.len() {
-                            self.deliver_batch(batch);
-                            return;
-                        }
-                    } else {
-                        self.deliver_batch(batch);
-                        return;
-                    }
-                }
-                () = self.cancel.cancelled() => {
-                    self.run.cancel();
-                    self.deliver_batch(batch);
-                    return;
-                }
-            }
-        }
-    }
-
     /// Delivers one wave of answers in arrival order, or - under a test
     /// shuffle seed - in the seed's permutation of the wave.
     fn deliver_batch(&mut self, batch: Vec<(EffectId, EffectAnswer)>) {
@@ -375,20 +335,16 @@ impl<'a> TokioDriver<'a> {
         while self.rx.try_recv().is_ok() {}
     }
 
-    /// Hands one step's events to the sink and appends them to the history
-    /// `TaskEvents` reads answer from.
+    /// Hands one step's events to the sink.
     fn forward(&mut self, events: Vec<Event>) {
         for event in events {
-            (self.sink)(event.clone());
-            self.history.push(event);
+            (self.sink)(event);
         }
     }
 
     /// Performs one effect: spawns the performer that will post the
-    /// effect's answer under `id` and returns `true`, or answers at once
-    /// and returns `false` for a `TaskEvents` read, which is answered from
-    /// the history.
-    fn perform(&mut self, id: EffectId, effect: Effect) -> bool {
+    /// effect's answer under `id`.
+    fn perform(&mut self, id: EffectId, effect: Effect) {
         let tx = self.tx.clone();
         let handle = match effect {
             Effect::Chat { .. } => {
@@ -399,24 +355,20 @@ impl<'a> TokioDriver<'a> {
                 let future = (self.performers.tool_call)(effect);
                 tokio::spawn(async move { post(&tx, id, future.await) })
             }
-            Effect::UserInput { .. } => {
-                let future = (self.performers.user_input)(effect);
-                tokio::spawn(async move { post(&tx, id, future.await) })
-            }
-            Effect::Store { access, op } => {
+            Effect::Vfs { access, op } => {
                 // spawn_blocking, not a plain task: the Vfs is sync by
-                // design, and the blocking pool keeps a slow host-backend
+                // design, and the blocking pool keeps a slow real-filesystem
                 // op from stalling the loop. Aborting the handle detaches
                 // rather than interrupts, so a dropped op completes before
                 // its join returns.
                 tokio::task::spawn_blocking(move || {
                     let result = run_store_op(&access, op);
-                    // Hygiene only, as in the harness's `perform_store`:
+                    // Hygiene only, as in the Harness's inline Vfs answer:
                     // the run ends its scope at `Done`, so a post-run
                     // fresh-scope read never meets the run's claims
                     // however long the view is held.
                     drop(access);
-                    post(&tx, id, EffectAnswer::Store(result));
+                    post(&tx, id, EffectAnswer::Vfs(result));
                 })
             }
             Effect::Timer { seconds } => {
@@ -428,85 +380,8 @@ impl<'a> TokioDriver<'a> {
                     post(&tx, id, EffectAnswer::Timer);
                 })
             }
-            Effect::TaskEvents { task, last } => {
-                // Answered from the driver's own history, at issue: the
-                // step's events are already appended, so the read sees
-                // everything reported before it.
-                let events = task_history(&self.history, &task, last);
-                self.run.resume(id, EffectAnswer::TaskEvents(events));
-                return false;
-            }
         };
         self.outstanding.insert(id, handle);
-        true
-    }
-
-    /// Records every issued effect's record from here on, performed or
-    /// dropped at issue.
-    #[cfg(test)]
-    pub(crate) fn record_effects_for_test(&mut self) -> Arc<Mutex<Vec<EffectRecord>>> {
-        let tap = Arc::new(Mutex::new(Vec::new()));
-        self.tap = Some(Arc::clone(&tap));
-        tap
-    }
-
-    /// Test-only: seeds the completion-order shuffle, so each seed
-    /// yields one deterministic interleaving of concurrently completed
-    /// effects.
-    #[cfg(test)]
-    pub(crate) fn set_shuffle_for_test(&mut self, seed: u64) {
-        self.shuffle = Some(seed);
-    }
-
-    /// Appends one step's issued effects to the tap, in issue order.
-    #[cfg(test)]
-    fn record(&self, effects: &[(EffectId, promptforge_types::ids::Provenance, Effect)]) {
-        if let Some(tap) = &self.tap {
-            tap.lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .extend(effects.iter().map(|(_, _, effect)| effect.record()));
-        }
-    }
-
-    /// The scheduler behind the run, for the suites that inspect its
-    /// arena.
-    #[cfg(test)]
-    pub(crate) fn scheduler_for_test(&mut self) -> &mut Scheduler {
-        self.run.scheduler_for_test()
-    }
-
-    /// The state of one task's slot, read through the scheduler.
-    #[cfg(test)]
-    pub(crate) fn task_state_for_test(
-        &mut self,
-        task: &promptforge_types::ids::TaskId,
-    ) -> Option<crate::execute::scheduler::test_hooks::TaskState> {
-        self.scheduler_for_test().task_state_for_test(task)
-    }
-
-    /// Shrinks the scheduler's chain-count bound.
-    #[cfg(test)]
-    pub(crate) fn set_max_chains_for_test(&mut self, limit: usize) {
-        self.scheduler_for_test().set_max_chains_for_test(limit);
-    }
-
-    /// The number of leaf effects the run has issued so far.
-    #[cfg(test)]
-    pub(crate) fn leaf_requests_issued(&mut self) -> u64 {
-        self.scheduler_for_test().leaf_requests_issued()
-    }
-
-    /// The run itself, for a test that answers an effect by hand.
-    #[cfg(test)]
-    pub(crate) fn run_for_test(&mut self) -> &mut Run {
-        &mut self.run
-    }
-
-    /// The driver's cancel flag, for a test that cancels from another
-    /// task.
-    #[cfg(test)]
-    pub(crate) fn cancel_handle(&self) -> CancelHandle {
-        self.cancel.clone()
     }
 }
 
@@ -520,9 +395,9 @@ impl std::fmt::Debug for TokioDriver<'_> {
 }
 
 /// Aborts every performer still out when the driver is dropped
-/// mid-run - a host tearing the run down without driving it to its end.
+/// mid-run - a suite tearing the run down without driving it to its end.
 /// Dropping a bare `JoinHandle` detaches the task, which would strand a
-/// broker wait or gateway round forever, so the drop applies the same
+/// tool call or model round forever, so the drop applies the same
 /// abort the run's end does.
 impl Drop for TokioDriver<'_> {
     fn drop(&mut self) {
@@ -536,23 +411,4 @@ impl Drop for TokioDriver<'_> {
 /// driver whose receiver closed); the answer is then moot.
 fn post(tx: &AnswerSender, id: EffectId, answer: EffectAnswer) {
     let _ = tx.send((id, answer));
-}
-
-/// Deterministically permutes `batch` under `seed`, advancing the seed
-/// so successive waves differ. xorshift64: dependency-free, and one
-/// seed always yields one order.
-#[cfg(test)]
-fn shuffle_batch(
-    mut batch: Vec<(EffectId, EffectAnswer)>,
-    seed: &mut u64,
-) -> Vec<(EffectId, EffectAnswer)> {
-    for index in (1..batch.len()).rev() {
-        *seed ^= seed.wrapping_shl(13);
-        *seed ^= *seed >> 7;
-        *seed ^= seed.wrapping_shl(17);
-        // The modulo binds the pick to the batch; the truncated-fallback
-        // arm never runs on a 64-bit target, which this suite requires.
-        batch.swap(index, usize::try_from(*seed).unwrap_or(0) % (index + 1));
-    }
-    batch
 }

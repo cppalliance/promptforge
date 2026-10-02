@@ -304,9 +304,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.91"
+version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2594,9 +2594,12 @@ dependencies = [
 name = "harness"
 version = "0.3.0"
 dependencies = [
+ "harness-capabilities",
  "harness-log",
  "harness-runner",
  "harness-sessions",
+ "promptforge",
+ "tokio",
  "workspace-hack",
 ]
 
@@ -2668,6 +2671,7 @@ dependencies = [
 name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "axum",
  "harness-capabilities",
  "harness-log",
@@ -4881,6 +4885,7 @@ dependencies = [
  "rand 0.9.5",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.19",
  "time",
  "workspace-hack",

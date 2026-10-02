@@ -68,7 +68,7 @@ prompt must contain exactly one H1 title
 prompt H1 title must not be empty
 ````
 
-The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](17-limits-and-errors.md#parse-error-kinds).
+The first message means the file has no H1, the second means it has more than one anywhere in the body, even above the title, and the third means the title is empty or only whitespace. These messages name no section and no line. Parse error kinds are explained in [Parse error kinds](16-limits-and-errors.md#parse-error-kinds).
 
 H2 headings placed after the H1 divide the body into named sections. Only headings after the H1 at level 2 or deeper become sections, and the top-level sections are the H2s, kept in file order. Each section has a name taken from its heading text, a level, and its own prose and Lua. No particular name is required; `## Main` is a common choice. The headings `## First` and `## Second` give two sections named `First` and `Second`, both at level 2. A deeper heading such as `### Author note` under `## Prepare` belongs to `Prepare` and is not another top-level section.
 
@@ -88,7 +88,7 @@ promptforge: 0
 # Header Only
 ````
 
-Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-and-its-host):
+Further keys sit alongside the three when a prompt needs them. A prompt that calls a model, for example, adds a `models:` key, one of the [contract keys](01-what-a-prompt-is.md#the-prompt-the-host-and-the-harness):
 
 ````markdown
 ---
@@ -123,7 +123,7 @@ promptforge: 0
 
 The `name:` string need not match the file name. A file saved as `research-person.md` can declare `name: research_person`, and one saved as `echo.md` can declare `name: echo`. Common values are lowercase identifiers such as `echo`, `greet`, `analyst_example`, and `vfs-end-to-end`. Every parse error found after the frontmatter reports this name, so you can tell which prompt failed.
 
-The `description:` string is a one-line, free-text sentence, kept verbatim, and hosts show it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
+The `description:` string is a one-line, free-text sentence, kept verbatim, and the Host shows it in prompt listings. A plain unquoted sentence with spaces and commas works, such as `description: Research a person from the open web and return a concise, factual summary.`
 
 Leaving out either key fails the parse with parse error kind `Frontmatter`, and the message names the missing field. The message follows the frontmatter form `invalid frontmatter: {detail}` described in [Frontmatter rules and errors](#frontmatter-rules-and-errors), with one of these details:
 
@@ -134,7 +134,7 @@ missing field `description`
 
 ## The promptforge version
 
-The `promptforge:` key declares which major version of the engine the file targets, written `promptforge: 0`. Its value is a non-negative integer, and its presence marks the file as a PromptForge prompt. `0` is the only major this build runs.
+The `promptforge:` key declares which major version of the Engine the file targets, written `promptforge: 0`. Its value is a non-negative integer, and its presence marks the file as a PromptForge prompt. `0` is the only major this build runs.
 
 ````markdown
 ---
@@ -164,7 +164,7 @@ Parsing accepts a file with or without the key, but the version is checked when 
 unsupported promptforge version: {N} (this build supports major 0)
 ````
 
-That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified).
+That failure comes before any section executes, so nothing runs and nothing is reported, and the prompt's own `return` never runs. It is not retryable, and the prompt never falls back to running as major 0. Run error kinds and retrying are explained in [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
 Every prompt needs the `promptforge:` key. A file whose frontmatter holds only `name` and `description` still parses, even with a plain prose section, but its run fails on the first step, before anything executes, with parse error kind `Structure` and this message:
 
@@ -189,7 +189,7 @@ output:
   description: The output report
 ````
 
-Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the host to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the host which store file to put in place before the run and which one to collect after it.
+Both keys are optional and stay out of prompts that do not work on files, so a frontmatter with only `name`, `description`, and `promptforge: 0` declares neither. The declarations stay with the parsed prompt for the Harness to read: `input:` with `path: paper.md` and `description: The input paper` reads back as exactly that path and description. Together they tell the Harness which store file to put in place before the run and which one to collect after it.
 
 The run itself never acts on either declaration, so the prompt writes its declared output file itself:
 
@@ -216,13 +216,13 @@ return 'copied'
 ```
 ````
 
-With a host that puts `paper.md` in the store first, its run result is:
+When the Harness puts `paper.md` in the store first, its run result is:
 
 ````text
 copied
 ````
 
-Afterwards `report.md` holds the paper's text, ready for the host to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the host goes to collect it.
+Afterwards `report.md` holds the paper's text, ready for the Harness to collect. Because the run never checks the `output:` declaration, a prompt that declares `report.md` but never writes it still runs to success; the missing file shows up only when the Harness goes to collect it.
 
 ## Frontmatter rules and errors
 
@@ -259,6 +259,15 @@ Only the recognized keys are accepted, at every level. A misspelled or unknown k
 invalid frontmatter: unknown field `{key}`, expected one of ...
 ````
 
+Two more checks run once the YAML is read, and neither reports a line or column. A `capabilities:` list names each capability once ([Declaring capabilities](12-tools.md#declaring-capabilities)), and a tool slot never names a tool of a capability declared `optional: true`, because a tool slot requires its capability ([Tool slots and Tool objects](12-tools.md#tool-slots-and-tool-objects)):
+
+````text
+invalid frontmatter: capability {id} is declared more than once under capabilities
+invalid frontmatter: tool alias '{alias}' names {path}, whose capability {id} is declared optional; a tool slot requires its capability
+````
+
+The duplicate check runs first, so a capability declared twice that also backs a slot is reported as a duplicate.
+
 ## Names for aliases, roles, and args
 
 Three of the contract keys are maps from a name to a declaration, and all three names follow one name grammar. The keys under `tools:` are tool aliases, the keys under `models:` are model role labels, and the keys under `args:` are arg names:
@@ -287,7 +296,7 @@ The names here are `search` and `fetch`, `writer` and `analyst`, and `use_mcp`. 
 
 The name grammar is `[A-Za-z][A-Za-z0-9_-]{0,63}`: 1 to 64 ASCII characters, a letter first, then letters, digits, `_`, or `-`. Letters are ASCII only. A 64-character name parses. Names such as `search`, `fetch`, `writer`, `analyst`, `use_mcp`, `limit`, and `query` all fit. An alias is the only name a model ever sees for a tool slot or a model role.
 
-Each of `tools:`, `models:`, and `args:` is a YAML map keyed by alias, role label, or arg name, and each key appears once within its map. Every name is checked when the prompt loads, the grammar first and uniqueness second. All of these failures have parse error kind `Frontmatter`, and each message is the detail inside `invalid frontmatter: {detail}`:
+Each of `tools:`, `models:`, and `args:` is a YAML map keyed by alias, role label, or arg name, and each key appears once within its map. Every name is checked when the prompt loads: the grammar first, then, for tool aliases and role labels only, the [reserved names](#reserved-names-for-aliases-and-role-labels), and uniqueness last. All of these failures have parse error kind `Frontmatter`, and each message is the detail inside `invalid frontmatter: {detail}`:
 
 ````text
 invalid tool alias `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}
@@ -312,7 +321,31 @@ An alias is a plain name from the grammar, and a tool path such as `promptforge/
 invalid alias "{alias}": expected [A-Za-z][A-Za-z0-9_-]{0,63}
 ````
 
-Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Lua code can catch this error with `pcall`, as [Catching and inspecting errors](05-lua-environment.md#catching-and-inspecting-errors) shows. Left uncaught, it fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+
+### Reserved names for aliases and role labels
+
+Every tool alias and every model role label becomes a bare Lua global of the same name in every section VM, as [Alias globals](12-tools.md#alias-globals) and [Role globals](10-models.md#role-globals) show. So neither may take a name the section VM already uses for something else. These names are reserved:
+
+- The Engine globals: `args`, `argv`, `call`, `compactors`, `fanout`, `item`, `jump`, `list_from_section`, `log`, `messages`, `models`, `prose`, `store`, `sys`, `tasks`, `tools`, `ui`, `untrusted`, and `var`. `ui` and `item` are reserved even though only some section VMs have them.
+- The Lua standard-library globals the sandbox keeps: `assert`, `error`, `getmetatable`, `ipairs`, `math`, `next`, `pairs`, `pcall`, `select`, `setmetatable`, `string`, `table`, `tonumber`, `tostring`, `type`, and `xpcall`, plus `_G` and `_VERSION`, which the name grammar already rules out.
+- The Lua 5.5 keywords: `and`, `break`, `do`, `else`, `elseif`, `end`, `false`, `for`, `function`, `global`, `goto`, `if`, `in`, `local`, `nil`, `not`, `or`, `repeat`, `return`, `then`, `true`, `until`, and `while`.
+
+These are exactly the globals of a section VM before any capability adds its own, together with the keywords. The match is exact and case-sensitive, so `Store`, `stores`, and `my_argv` are ordinary names. A reserved key fails the parse with parse error kind `Frontmatter`, reporting its line and column, and this detail:
+
+````text
+{kind} `{key}` in `{map}` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name
+````
+
+Here `{kind}` is `tool alias` or `model role label`, `{map}` is `tools` or `models`, and `{category}` is `an Engine global`, `a Lua standard-library global`, or `a Lua keyword`. So `store: promptforge/web/fetch` under `tools:` fails with ``tool alias `store` in `tools` is reserved (an Engine global): ...``. Arg names are not checked against this list, because they name fields of `argv` rather than globals: `args:` may declare `prose` or `store`.
+
+One name also cannot be both a tool alias and a model role label, because both would install the same global. Such a pair fails the parse with parse error kind `Frontmatter` and this message, which names the first shared name in sorted order. Unlike the errors above, it reports no line or column:
+
+````text
+invalid frontmatter: `{name}` is both a tool alias in `tools` and a model role label in `models`; each installs as a section VM global of its own name, so the two must differ
+````
+
+A declared capability can define globals of its own, such as the `input` table of `promptforge/user-input`. Those globals are known only once the capability's code runs, so an alias or label with the same name fails the run when its first section VM is set up, before the run does anything, as [Letting the model ask](05-lua-environment.md#letting-the-model-ask) shows.
 
 ## The H1 title and its content
 
@@ -556,4 +589,4 @@ section heading must have whitespace after the {markers} markers: {text}
 section heading has no name: {text}
 ````
 
-Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) explains.
+Left uncaught, the not-found error and each of these errors fails the run with run error kind `Lua`, unless it reaches the H1 body's own Lua, as [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) explains.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, navigate, settle } from "./harness.mjs";
+import { bootApp, gatewayStub, navigate, settle } from "./test-support.mjs";
 
 test("the tab bar uses the required order and routes Local and Remote details", async () => {
   const stub = gatewayStub();

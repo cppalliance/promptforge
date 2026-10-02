@@ -261,7 +261,7 @@ Notes:
 - **Dominions are truly shared**: one runtime queue instance per dominion, `Arc`-shared by every bound endpoint. This is NEW behavior (today nothing is shared) and is the main behavior change in this refactor.
 - **No inline `endpoint.concurrency` sugar**: one way to cap. An endpoint without `dominion` is unlimited, as today when no cap is set.
 - **Explicit `kind` on dominions** (better error messages over structural inference). Kind-incompatible payloads rejected, same spirit as CFG-004: `vram_gb` forbidden on remote, lane-style fields gone entirely.
-- **Fairness v1**: per-client round-robin (`X-PromptForge-Client`) is the only discipline, with no abstraction layer for future ones (decision 2026-08-23: a one-variant enum is ceremony; the DRR/token-cost change, if it ever unparks, is contained in queue.rs). Document that the fairness key is a self-asserted header - trusted-host callers only.
+- **Fairness v1**: per-client round-robin (`X-PromptForge-Client`) is the only discipline, with no abstraction layer for future ones (decision 2026-08-23: a one-variant enum is ceremony; the DRR/token-cost change, if it ever unparks, is contained in queue.rs). Document that the fairness key is a self-asserted header - trusted callers only.
 - **VRAM co-residency check**: at validate time, sum `local_model.vram_gb` per local dominion and reject when the sum exceeds the dominion's `vram_gb`. Runs for free at profile switch because switch loads and validates the full config before committing. Models without an estimate bound to a budgeted dominion: validation error (budgets must be complete to be meaningful).
 - **"Model packs" is not a future feature - it is profile hot-swapping, which already ships** (`POST /admin/switch-profile` swaps the whole resident set atomically). The deferred-list mention in the crate docs is stale and gets corrected in this refactor.
 - **REJECTED, not deferred: demand-driven per-model load/unload** (llama-swap-style). Decision 2026-08-23: too much mechanism (swap serialization, in-flight drain, eviction policy, co-residency solving) for too little gain. The VRAM-constrained single-GPU operator manually chooses a profile per workload; that is the supported workflow, and a demand-loaded request would eat the model's cold-start latency anyway. Do not re-propose without a new use case that profile switching cannot serve.
@@ -429,7 +429,7 @@ Once the gateway covers every dialect promptforge-core handles, delete the clien
 ### Normalization testing strategy
 
 - Per-dialect golden round-trip tests (canonical to backend-shaped, backend response to canonical, malformed-tool-call recovery).
-- Integration tests against mock upstreams per dialect, using the existing `tests/it` harness pattern.
+- Integration tests against mock upstreams per dialect, using the existing `tests/it` fixture pattern.
 - A conformance matrix doc: models x features (tools native/emulated, effort, thinking, images) with expected normalized behavior.
 
 ### Normalization exclusions

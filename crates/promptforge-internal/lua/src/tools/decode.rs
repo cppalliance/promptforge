@@ -1,4 +1,4 @@
-//! Shared value decoding for the `tools.*` host tables.
+//! Shared value decoding for the `tools.*` Engine functions.
 //!
 //! The alias-or-Tool polymorphism lives here once: `tools.add`
 //! and the `tools.call` protocol parse both accept a bare

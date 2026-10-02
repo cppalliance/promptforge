@@ -1,13 +1,18 @@
 //! Tests for `CancelHandle`: idempotence, parent-to-child propagation, and waker behavior.
 
 use std::future::Future;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 
 use super::CancelHandle;
+
+/// How many wakers wait on `handle`'s own node.
+fn registered(handle: &CancelHandle) -> usize {
+    handle.inner.wakers.lock().unwrap().len()
+}
 
 /// A waker that counts its wakes, so a test can tell a cancel woke the
 /// waiter from the waiter merely re-polling.
@@ -27,8 +32,8 @@ impl Counter {
 }
 
 /// Compile-time proof that a handle can cross thread boundaries and live for
-/// the whole program: the harness moves one into every performer task, and
-/// the engine keeps one in `RunContext` while `Run` itself is `Send`.
+/// the whole program: the Harness moves one into every performer task, and
+/// the Engine keeps one in `RunContext` while `Run` itself is `Send`.
 const fn _assert_auto_traits() {
     const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     assert_send_sync_static::<CancelHandle>();
@@ -124,7 +129,7 @@ fn a_child_of_a_cancelled_parent_is_born_cancelled() {
 
 #[test]
 fn a_cancel_on_one_thread_is_observed_on_another() {
-    // The harness cancels from its supervisor while the engine polls the
+    // The Harness cancels from its supervisor while the Engine polls the
     // flag from whichever thread `step` happens to run on.
     let parent = CancelHandle::new();
     let child = parent.child();
@@ -182,6 +187,72 @@ fn a_childs_cancel_does_not_wake_a_waiter_on_its_parent() {
     parent.cancel();
     assert_eq!(counter.wakes(), 1);
     assert_eq!(waiting.as_mut().poll(&mut cx), Poll::Ready(()));
+}
+
+#[test]
+fn a_waiter_dropped_before_cancel_leaves_no_waker_on_any_ancestor() {
+    let root = CancelHandle::new();
+    let middle = root.child();
+    let leaf = middle.child();
+    let counter = Arc::new(Counter::default());
+    let waker = Waker::from(Arc::clone(&counter));
+    let mut cx = Context::from_waker(&waker);
+    let mut waiting = leaf.cancelled();
+    assert_eq!(Pin::new(&mut waiting).poll(&mut cx), Poll::Pending);
+    assert_eq!(registered(&root), 1, "a poll registers up the chain");
+    drop(waiting);
+    for (node, handle) in [("leaf", &leaf), ("middle", &middle), ("root", &root)] {
+        assert_eq!(
+            registered(handle),
+            0,
+            "the {node} node still holds the dropped waiter's waker"
+        );
+    }
+    root.cancel();
+    assert_eq!(counter.wakes(), 0, "a dropped waiter is never woken");
+}
+
+#[test]
+fn dropping_one_of_two_waiters_polled_by_one_task_leaves_the_other_woken() {
+    let run = CancelHandle::new();
+    let task = run.child();
+    let counter = Arc::new(Counter::default());
+    let waker = Waker::from(Arc::clone(&counter));
+    let mut cx = Context::from_waker(&waker);
+    let mut first = task.cancelled();
+    let mut second = task.cancelled();
+    assert_eq!(Pin::new(&mut first).poll(&mut cx), Poll::Pending);
+    assert_eq!(Pin::new(&mut second).poll(&mut cx), Poll::Pending);
+    drop(first);
+    run.cancel();
+    assert_eq!(
+        counter.wakes(),
+        1,
+        "the surviving waiter's registration outlives its sibling's drop"
+    );
+    assert_eq!(Pin::new(&mut second).poll(&mut cx), Poll::Ready(()));
+}
+
+#[test]
+fn a_waiter_re_polled_with_a_new_waker_is_woken_through_the_new_waker_only() {
+    let run = CancelHandle::new();
+    let task = run.child();
+    let old = Arc::new(Counter::default());
+    let new = Arc::new(Counter::default());
+    let old_waker = Waker::from(Arc::clone(&old));
+    let new_waker = Waker::from(Arc::clone(&new));
+    let mut waiting = task.cancelled();
+    assert_eq!(
+        Pin::new(&mut waiting).poll(&mut Context::from_waker(&old_waker)),
+        Poll::Pending
+    );
+    assert_eq!(
+        Pin::new(&mut waiting).poll(&mut Context::from_waker(&new_waker)),
+        Poll::Pending
+    );
+    run.cancel();
+    assert_eq!(old.wakes(), 0, "the replaced waker is not woken");
+    assert_eq!(new.wakes(), 1, "the latest waker is woken once");
 }
 
 #[test]

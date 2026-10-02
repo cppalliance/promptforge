@@ -163,15 +163,15 @@ check("dispose removes the command center", secondCenter.querySelector(".ws-comm
 
 // --- No registered rows: the pill's click dispatches nothing -----------------
 
-const emptyHost = window.document.createElement("div");
-window.document.body.appendChild(emptyHost);
-const noRows = new CommandCenter(emptyHost, {
+const emptyContainer = window.document.createElement("div");
+window.document.body.appendChild(emptyContainer);
+const noRows = new CommandCenter(emptyContainer, {
   commands,
   menus: new MenuRegistry(),
   listRoots: async () => roots,
 });
 await flush();
-emptyHost.querySelector(".ws-command-center__pill").click();
+emptyContainer.querySelector(".ws-command-center__pill").click();
 await flush();
 check("an empty menu leaves the pill inert", ran.length === 3);
 noRows.dispose();

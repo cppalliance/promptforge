@@ -4,7 +4,7 @@
 //! and the axum router. Start at
 //! [`Config::load`] for configuration, `AgentSessions` for the
 //! agent-session opener behind `/agents/ws` (every session runs in the
-//! harness, reached through `harness`), and [`router`] for the HTTP
+//! Harness, reached through `harness`), and [`router`] for the HTTP
 //! API; [`spawn`] runs the whole server in-process on its own thread for
 //! embedding binaries.
 //!
@@ -20,7 +20,7 @@
 //! `workshop-registry`, `workshop-support`) are assembled in `app`
 //! (helpers in `app::compose`), where every subsystem self-registers its
 //! routes, state handles, and push channels into the registry - the
-//! harness among them.
+//! Harness among them.
 //!
 //! ## Invariants
 //!
@@ -28,8 +28,8 @@
 //!   (`workshop-protocol`, `workshop-registry`, `workshop-support`),
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-user-state`,
-//!   `workshop-workspace`), the harness's public API `harness`, and
-//!   the engine's public API `promptforge`. Read the repository-root
+//!   `workshop-workspace`), the Harness's public API `harness`, and
+//!   the Engine's public API `promptforge`. Read the repository-root
 //!   `AGENTS.md` and `crates/workshop/server/AGENTS.md` before adding
 //!   an import.
 //! - Every file in this crate stays under 500 lines; split first, then
@@ -37,12 +37,9 @@
 //! - One task owns each socket: a single `select!` loop reads inbound
 //!   frames and writes every outbound frame itself - no outbox channel,
 //!   no writer task. Agent sessions are the documented carve-out: they
-//!   outlive sockets on purpose, and the harness keeps their table.
-//! - The harness reads the server's state as data pushed through its
-//!   public API (the gateway binding, the chat catalog, the host
-//!   snapshot); the server never hands it a bus, a registry, or a
-//!   callback into itself. Status-bar reporting for a session is derived
-//!   in the server from the session's events, deltas, and error reports.
+//!   outlive sockets on purpose.
+//! - Status-bar reporting for a session is derived in the server from the
+//!   session's events, deltas, and error reports.
 //! - The workspace's granted roots are read through the registry's
 //!   `WorkspaceRoots` slot, never by naming the workspace crate's
 //!   internals: subsystems meet through the registry.
@@ -51,9 +48,8 @@
 //!   `/v1/realtime` applies a stricter same-origin check that requires a
 //!   browser `Origin` to match the request's own authority. The
 //!   cross-site guard stays the security boundary.
-//! - A dying input wait is an outcome, never silence: the harness's wait
-//!   registry pushes a cancelled frame for every unresolved wait it
-//!   drops, and the agent socket renders it as `input_cancelled`.
+//! - Every unresolved wait that is dropped yields a cancelled frame,
+//!   which the agent socket renders as `input_cancelled`.
 
 mod agents;
 mod app;

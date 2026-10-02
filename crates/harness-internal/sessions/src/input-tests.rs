@@ -2,15 +2,21 @@
 
 use super::*;
 
+use std::path::Path;
 use std::sync::Arc;
 
-use harness_runner::performers::InputPerformer;
+use harness_capabilities::{CapabilityRegistry, InputBroker, UserInput};
+use harness_log::{RunLog, RunOutcome};
+use harness_runner::effect_loop::{SharedLog, drive_run};
+use harness_runner::performers::{BoxFuture, ChatPerformer};
+use harness_runner::prepare::{Services, prepare_source};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
-use promptforge::effect::{Effect, EffectAnswer};
-use promptforge::input::InputOutcome;
-use promptforge::timestamp::Timestamp;
-use promptforge::{Prompt, Run, RunContext, RunResult, Step};
+use promptforge::cancel::CancelHandle;
+use promptforge::model::{
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+};
+use promptforge::vfs::VfsRef;
 
 /// Hostile operator text covering the bytes most likely to be mangled
 /// by an envelope or codec.
@@ -179,7 +185,7 @@ fn broker_fixture() -> (
 async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     assert_eq!(
         registry.unresolved(),
@@ -189,15 +195,11 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
     registry
         .complete(&token, GNARLY.to_owned())
         .expect("the wait completes");
-    let outcome = call
+    let text = call
         .await
         .expect("the task joins")
         .expect("the broker answers");
-    assert_eq!(
-        outcome,
-        InputOutcome::Text(GNARLY.to_owned()),
-        "the operator's text returns byte-exact"
-    );
+    assert_eq!(text, GNARLY, "the operator's text returns byte-exact");
     assert!(
         matches!(
             socket.try_recv(),
@@ -211,7 +213,7 @@ async fn the_broker_announces_the_wait_and_resolves_with_the_operator_text() {
 async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     call.abort();
     let joined = call.await;
@@ -235,7 +237,7 @@ async fn a_dropped_broker_future_removes_the_wait_and_emits_cancelled() {
 async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let call = spawn_tagged(mock_tag(), broker.wait("run".to_owned(), "chat".to_owned()));
+    let call = spawn_tagged(mock_tag(), async move { broker.wait().await });
     let token = required_token(&mut socket).await;
     registry.cancel(&token);
     let error = call
@@ -251,47 +253,80 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     );
 }
 
-#[tokio::test]
-async fn a_user_input_effect_is_answered_when_the_registry_receives_the_text() {
-    // The performer against a real engine effect: a section parked on
-    // `user_input()` issues `Effect::UserInput`, the performer opens the
-    // wait for it, the registry completes with the operator's text, and
-    // the answer resumes the run to its result.
-    let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n---\n\n\
-                  # Ask\n\n## Only\n\n```lua\nreturn user_input()\n```\n";
-    let (prompt, _parse_events) = Prompt::parse(source, "ask");
-    let prompt = prompt.expect("the fixture prompt parses");
-    let mut run = Run::new(
-        Arc::new(prompt),
-        "",
-        RunContext::new("ask", 1, Timestamp::UNIX_EPOCH),
-    );
-    let Step::Pending { mut effects, .. } = run.step() else {
-        panic!("the input wait leaves the run pending");
-    };
-    assert_eq!(effects.len(), 1, "one wait, one effect");
-    let (id, _provenance, effect) = effects.remove(0);
-    let Effect::UserInput { execution, section } = effect else {
-        panic!("a parked user_input() issues a UserInput effect, got {effect:?}");
-    };
+/// A chat performer for a run that makes no model round.
+struct NoChat;
 
+impl ChatPerformer for NoChat {
+    fn chat(
+        &self,
+        _binding: ModelBinding,
+        _messages: Vec<Message>,
+        _tools: Vec<ToolSchema>,
+        _options: CompletionOptions,
+        _stream: bool,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        unreachable!("the prompt makes no model round")
+    }
+}
+
+#[tokio::test]
+async fn an_ask_is_answered_when_the_registry_receives_the_text() {
+    // The broker behind a real run: a section parked on `input.ask()`
+    // calls the user-input capability's ask tool, the tool waits on the
+    // session's broker, the registry completes the wait with the
+    // operator's text, and the answer resumes the run to its result.
+    let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\
+                  capabilities:\n  - promptforge/user-input\n---\n\n\
+                  # Ask\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
+    let mut capabilities = CapabilityRegistry::new();
+    capabilities
+        .register(Arc::new(UserInput::new()))
+        .expect("an empty registry takes the capability");
     let (broker, registry, frames) = broker_fixture();
     let mut socket = frames.subscribe();
-    let wait = spawn_tagged(mock_tag(), broker.wait(execution, section));
-    let token = required_token(&mut socket).await;
-    registry
-        .complete(&token, "typed by the operator".to_owned())
-        .expect("the wait completes");
-    let answer = wait.await.expect("the wait task joins");
-
-    run.resume(id, EffectAnswer::UserInput(answer));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("the answered wait finishes the run");
+    let log: SharedLog = Arc::new(tokio::sync::Mutex::new(
+        RunLog::in_memory().await.expect("the log opens"),
+    ));
+    let services = Services {
+        registry: Some(Arc::new(capabilities)),
+        vfs: VfsRef::default(),
+        input_text: None,
+        cancel: CancelHandle::new(),
+        log: Arc::clone(&log),
+        chat: Arc::new(NoChat),
+        input: Some(broker),
+        session_id: "session-1".to_owned(),
+        agent: "ask".to_owned(),
+        model: None,
+        ui: None,
     };
-    let RunResult::Ok(text) = result else {
-        panic!("the operator's text is the section's return value, got {result:?}");
+    let prepared = prepare_source(source, Path::new("ask.md"), "", services)
+        .await
+        .expect("a host with a broker satisfies the declaration");
+    let answer = async {
+        let token = required_token(&mut socket).await;
+        registry
+            .complete(&token, GNARLY.to_owned())
+            .expect("the wait completes");
     };
-    assert_eq!(text, "typed by the operator");
+    let (outcome, ()) = tokio::join!(
+        drive_run(
+            prepared.run,
+            prepared.performers,
+            log,
+            prepared.run_id,
+            CancelHandle::new(),
+            |_event| {},
+        ),
+        answer,
+    );
+    assert_eq!(
+        outcome.expect("the loop reaches an outcome"),
+        RunOutcome::Completed {
+            final_text: GNARLY.to_owned()
+        },
+        "the operator's text is the section's return value, byte-exact"
+    );
     assert!(
         registry.unresolved().is_empty(),
         "the answered wait leaves nothing behind"

@@ -7,7 +7,7 @@
 //! shipped as the separate `harness-webfetch` and `harness-web-search`
 //! packs, combined under the single capability their ids already name.
 //!
-//! The harness builds the capability once at registration with the gateway's
+//! The Harness builds the capability once at registration with the gateway's
 //! API root and bearer token (the search tool proxies through the gateway so
 //! the vendor credential never leaves the server) and an optional fetch
 //! policy; the prompt never sees either. Activation clones the pre-built
@@ -15,7 +15,7 @@
 //!
 //! ## Invariants
 //!
-//! - Family: harness, private to `crates/harness-internal/`; may depend
+//! - Family: Harness, private to `crates/harness-internal/`; may depend
 //!   on: `promptforge` and container siblings only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
@@ -25,7 +25,7 @@
 //! - Both tools are built once at construction from the gateway root,
 //!   bearer token, and fetch policy; a prompt never sees any of the
 //!   three, and activation only clones the pre-built tools.
-//! - Nothing in this crate spawns a tokio task directly; the harness
+//! - Nothing in this crate spawns a tokio task directly; the Harness
 //!   spawns only through the instrumented wrapper in `harness-runner`
 //!   (enforced by this crate's `clippy.toml`).
 
@@ -45,7 +45,7 @@ pub use harness_webfetch::{ConfigError, FetchConfig};
 /// Contributes `promptforge/web/fetch` (a hardened page fetch rendering to
 /// markdown) and `promptforge/web/search` (a search proxy through the
 /// gateway). Both tools are built at construction, so a bad gateway root or
-/// an empty token fails here - at host startup - rather than at a run's
+/// an empty token fails here - at registration - rather than at a run's
 /// prepare time.
 ///
 /// # Examples
@@ -128,6 +128,7 @@ impl Capability for Web {
         }
         Ok(Contribution {
             tools: vec![Arc::new(self.fetch.clone()), Arc::new(self.search.clone())],
+            prelude: None,
         })
     }
 }

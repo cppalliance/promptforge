@@ -1,4 +1,4 @@
-//! The request vocabulary: the validated suspending host calls a shim can
+//! The request vocabulary: the validated suspending Engine calls a shim can
 //! yield, the store operations they hold, and the message-record types
 //! the chat request is built from.
 //!
@@ -14,7 +14,7 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::Error;
 
-/// A validated suspending host call, parsed from the yielded table.
+/// A validated suspending Engine call, parsed from the yielded table.
 ///
 /// The parse happens at the resume boundary while the VM handle is live: a
 /// spawn's `item` seed converts through the serde bridge and the handle
@@ -132,21 +132,8 @@ pub enum Request {
         /// The task to cancel.
         task: TaskId,
     },
-    /// `tasks.events(task, opts?)`: the events one task has reported so
-    /// far, read from the host's history. Owner-or-self, as `status` is: the
-    /// caller may read a task it owns or the task it runs inside. A leaf
-    /// request: the host answers it from its log (a test driver from its
-    /// event buffer).
-    TaskEvents {
-        /// The task whose events are read.
-        task: TaskId,
-        /// `opts.last`: the highest task sequence number the caller has
-        /// already seen; only events after it are returned. `None` reads
-        /// from the task's start.
-        last: Option<u32>,
-    },
     /// The loop shim's per-round drain of the chain's undelivered
-    /// model-task notices: the engine's sentences telling the model how
+    /// model-task notices: the Engine's sentences telling the model how
     /// the tasks it started ended, answered at once in arrival order and
     /// appended to the author's message list ahead of the round's `chat`.
     /// Shim-produced and argument-free: the shim yields it for every
@@ -201,18 +188,14 @@ pub enum Request {
         /// section's current model.
         binding: Option<ModelBinding>,
     },
-    /// `user_input()`: a direct operator-input request to the run's input
-    /// broker. The request is argument-free: the broker and its host
-    /// policy own the whole interaction.
-    UserInput,
     /// `store.*(...)`: one run-scoped store operation as a leaf yield.
     /// Section VMs and the live H1 VM run the store shims. Every operation
-    /// takes this path uniformly - memory- and host-backed alike, with no
+    /// takes this path uniformly - memory- and real-file-backed alike, with no
     /// inline fast path - so interleaving behavior never depends on the
     /// backend.
     Store {
         /// The validated operation and its author-supplied arguments.
-        op: StoreOp,
+        op: VfsOp,
     },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     Mcp {
@@ -252,18 +235,24 @@ impl Request {
     }
 }
 
-/// One validated store operation: the `store.*` call's name and its
-/// author-supplied arguments, checked once here at the protocol boundary.
+/// One validated operation on the run's store view: the `store.*` call's
+/// name and its author-supplied arguments, checked once here at the
+/// protocol boundary.
 ///
-/// The read bounds stay `i64` as the legacy callback's signature had
-/// them: a negative bound converts to 0 at execution, which the facade's
-/// range validation rejects with the same error a zero bound produces.
+/// Not the same as `vfs::Op`: that is the plain kind of file operation a
+/// policy matches on and a watcher is told about (`Read`, `Write`,
+/// `Rename`, and so on, with no path or contents), while this carries the
+/// full arguments of one of the eight `store.*` calls.
+///
+/// The read bounds are `i64`: a negative bound converts to 0 at execution,
+/// which the facade's range validation rejects with the same error a zero
+/// bound produces.
 ///
 /// Plain data, so the executor's effect record can move an operation
 /// through serde as the shim yielded it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
-pub enum StoreOp {
+pub enum VfsOp {
     /// `store.write(path, contents)`.
     Write {
         /// The author-supplied logical path.

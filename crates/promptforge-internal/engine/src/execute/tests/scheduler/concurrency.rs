@@ -2,30 +2,29 @@
 //! limit and reads the effective limit back, a queued task reads
 //! `blocked == 'queued'` until its start event fires at admission, a
 //! resumed task is admitted ahead of fresh starts, a nested fanout
-//! does not deadlock under a ceiling of one, and a queue that can never
-//! be admitted is reported as a stall.
+//! does not deadlock under a ceiling of one, two tasks' `call` children
+//! finish in any order, and a queue that can never be admitted is
+//! reported as a stall. The cases that step the run by hand sit in
+//! `stepped`.
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use super::super::serial_driver::perform_locally;
 use super::*;
-use crate::execute::RunResult;
-use crate::execute::run::{Run, Step};
 use crate::test_support::tokio_driver::TokioDriver;
 
-/// Builds the run context and its observing host under the given limits.
+/// Builds the run context and its observing Harness under the given limits.
 fn limited_context(
     prompt: &Prompt,
     store: &TestStore,
     limits: RunLimits,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     scheduler_context_from(
         prompt,
         store,
         &test_context(EXECUTION).limits(limits),
-        RunHost::new().observer(observer),
+        RunHarness::new().observer(observer),
     )
 }
 
@@ -35,8 +34,8 @@ fn ceiling(n: usize) -> RunLimits {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tasks_concurrency_clamps_to_the_host_ceiling_and_reads_the_effective_limit_back() {
-    // The main walk's parent is the host ceiling of 4: asking for 16
+async fn tasks_concurrency_clamps_to_the_harness_ceiling_and_reads_the_effective_limit_back() {
+    // The main walk's parent is the Harness's ceiling of 4: asking for 16
     // clamps to 4, a later 2 lowers it, the no-argument form reads the
     // current limit back, and a later 4 climbs back to the parent's
     // limit - the setter is `min(n, parent)`, never an error.
@@ -51,13 +50,13 @@ async fn tasks_concurrency_clamps_to_the_host_ceiling_and_reads_the_effective_li
         return a .. '|' .. b .. '|' .. c .. '|' .. d\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the run completes");
@@ -94,13 +93,13 @@ async fn tasks_concurrency_rejects_an_argument_that_is_not_a_positive_whole_numb
         return a\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the caught refusals end the run normally");
@@ -124,13 +123,13 @@ async fn tasks_concurrency_accepts_a_whole_number_float_as_a_limit() {
         return 'ok'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(4),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the run completes");
@@ -171,13 +170,13 @@ async fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admissi
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(Recorder::default());
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -232,13 +231,13 @@ async fn a_start_event_reports_the_spawning_section_not_the_admission_time_one()
         return 'done'\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the run completes");
@@ -297,13 +296,13 @@ async fn a_resumed_task_is_admitted_ahead_of_fresh_starts() {
         return models.infer('S' .. sys.index)\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the run completes");
@@ -358,13 +357,13 @@ async fn an_arm_that_lowers_its_limit_runs_its_fanout_two_arms_at_a_time() {
         return a .. b\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(8),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the limited fanout completes");
@@ -404,7 +403,7 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
         return item .. sys.index\n\
         ```\n";
     let prompt = parse(md);
-    let (ctx, host) = limited_context(
+    let (ctx, harness) = limited_context(
         &prompt,
         &TestStore::new(),
         ceiling(1),
@@ -412,7 +411,7 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
     );
     let out = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, host, None).drive(),
+        TokioDriver::new(&ctx, harness, None).drive(),
     )
     .await
     .expect("the nested fanout must not deadlock");
@@ -423,55 +422,5 @@ async fn a_nested_fanout_does_not_deadlock_under_a_ceiling_of_one() {
     );
 }
 
-#[test]
-fn a_queued_task_that_can_never_be_admitted_is_reported_as_a_stall() {
-    // The walk parks on its store write, and the test wedges the walk's
-    // limit at zero. Once the write is answered the walk spawns its child
-    // and parks on the join: nothing is ready, nothing is in flight, and
-    // no slot will ever admit the queued child. The step must end the run
-    // with a stall report rather than return Pending with nothing to
-    // answer.
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-        # Limits\n\n\
-        ## Main\n\n\
-        ```lua\n\
-        store.write('park', 'x')\n\
-        local t = tasks.spawn('## Child')\n\
-        tasks.join_any({ t })\n\
-        return 'never'\n\
-        ```\n\n\
-        ## Child\n\n\
-        ```lua\nreturn 'child'\n```\n";
-    let prompt = parse(md);
-    let (state, _host) = limited_context(
-        &prompt,
-        &TestStore::new(),
-        ceiling(1),
-        Arc::new(NullObserver::default()),
-    );
-    let mut run = Run::from_state(state);
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the walk parks on its store write");
-    };
-    run.scheduler_for_test().wedge_admission_for_test(0);
-    for (id, _, effect) in effects {
-        let answer = perform_locally(&effect, &mut |effect| {
-            panic!("the fixture issues no model round: {effect:?}")
-        });
-        run.resume(id, answer);
-    }
-    match run.step() {
-        Step::Done {
-            result: RunResult::Failure(error),
-            ..
-        } => assert!(
-            error.to_string().contains("stalled"),
-            "the run reports the stall: {error}"
-        ),
-        Step::Done { result, .. } => panic!("the stalled run must fail, got {result:?}"),
-        Step::Pending { effects, .. } => panic!(
-            "a stalled run must not return Pending, got {} effects",
-            effects.len()
-        ),
-    }
-}
+#[path = "concurrency-stepped.rs"]
+mod stepped;

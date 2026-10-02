@@ -23,7 +23,7 @@ fn wired_push() -> (
     (registry.push(), status_rx, guards)
 }
 
-/// A session event holding one engine event under the fixed test
+/// A session event holding one Engine event under the fixed test
 /// coordinates, in the persisted shape the reporter reads.
 fn session_event(event: &Event) -> SessionEvent {
     SessionEvent {

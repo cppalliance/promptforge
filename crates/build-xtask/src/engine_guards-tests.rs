@@ -1,5 +1,5 @@
-//! The live engine guards over this workspace, plus fixture tests that a
-//! reintroduced retired symbol or a forbidden dependency in an engine
+//! The live Engine guards over this workspace, plus fixture tests that a
+//! reintroduced retired symbol or a forbidden dependency in an Engine
 //! crate fails the guard.
 
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ fn write_crate(root: &Path, dir: &str, manifest: &str, lib: &str) {
     std::fs::write(src.join("lib.rs"), lib).expect("lib.rs writes");
 }
 
-/// A fake workspace whose root engine crates are clean, so a fixture can
+/// A fake workspace whose root Engine crates are clean, so a fixture can
 /// add one container crate and see only that crate's findings.
 fn clean_engine_root() -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
@@ -177,7 +177,7 @@ fn every_seed_is_caught_and_a_seed_confined_to_test_code_passes() {
             RETIRED_SEEDS
                 .iter()
                 .copied()
-                .find(|seed| v.contains(seed))
+                .find(|seed| v.contains(&format!("retired symbol {seed} ")))
                 .expect("a violation names a seed")
         })
         .collect();

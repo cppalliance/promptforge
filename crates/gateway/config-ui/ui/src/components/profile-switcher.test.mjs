@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, settle } from "../harness.mjs";
+import { bootApp, gatewayStub, modelsFixture, settle } from "../test-support.mjs";
 
 /** `[text, aria-checked]` of every row in the open switcher menu. */
 function rows(root) {

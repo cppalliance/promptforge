@@ -69,18 +69,23 @@ fn models_vm() -> (Lua, Arc<Mutex<ModelSet>>, Arc<Mutex<ModelRuntime>>) {
 
 #[test]
 fn the_models_namespace_has_no_bind() {
+    // `models.infer` suspends, so only the coroutine shim layer defines it.
     let (lua, _, _) = models_vm();
-    let (bind_is_nil, has_use, has_default, has_get, has_infer): (bool, bool, bool, bool, bool) =
+    let (bind_is_nil, has_use, has_default, has_get, infer_is_nil): (bool, bool, bool, bool, bool) =
         lua.load(
             "return models.bind == nil, \
                     type(models.use) == 'function', \
                     type(models.default) == 'function', \
                     type(models.get) == 'function', \
-                    type(models.infer) == 'function'",
+                    models.infer == nil",
         )
         .eval()
         .expect("the namespace probe evaluates");
-    assert!(bind_is_nil && has_use && has_default && has_get && has_infer);
+    assert!(bind_is_nil && has_use && has_default && has_get);
+    assert!(
+        infer_is_nil,
+        "install_models alone must not define models.infer"
+    );
 }
 
 #[test]
@@ -241,7 +246,7 @@ fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
 }
 
 /// The section's effective binding's `(temperature, max_tokens)`, read the
-/// way the engine's Chat-effect sites read it.
+/// way the Engine's Chat-effect sites read it.
 fn effective_sampling(
     set: &std::sync::Mutex<ModelSet>,
     runtime: &std::sync::Mutex<ModelRuntime>,
@@ -355,7 +360,7 @@ fn the_handle_exposes_label_and_the_full_keyword_set() {
 }
 
 /// Builds a section VM with the raw-model-id fallback set to `raw_ids`,
-/// host values injected (which installs the `models` table).
+/// Engine values injected (which installs the `models` table).
 fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     let emitter = crate::tests::recording::null_emitter();
     let mut vm = crate::SectionVm::new(
@@ -367,7 +372,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
     if raw_ids {
         vm.allow_raw_model_ids();
     }
-    vm.inject_host(
+    vm.inject_values(
         "",
         &serde_json::json!({}),
         &std::sync::Arc::new(
@@ -376,7 +381,7 @@ fn h2_vm(raw_ids: bool) -> crate::SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("host injection installs the models table");
+    .expect("value injection installs the models table");
     vm
 }
 

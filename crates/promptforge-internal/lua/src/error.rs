@@ -20,9 +20,9 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// resolver decision cache), so a non-`Clone` dependency error cannot be moved
 /// into a fresh [`Error`] each time. Wrapping it in a reference-counted
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
-/// cheaply per lookup instead of being flattened to a string (resolve F4).
-/// The compiled-program statics (the coroutine shim and the messages
-/// library) are the callers, through [`crate::detail::shared_source_new`].
+/// cheaply per lookup instead of being flattened to a string. The
+/// compiled-program statics (the coroutine shim and the messages library) are
+/// the callers, through [`crate::detail::shared_source_new`].
 #[derive(Debug, Clone)]
 pub struct SharedSource(pub(crate) std::sync::Arc<dyn std::error::Error + Send + Sync>);
 
@@ -38,27 +38,27 @@ impl std::error::Error for SharedSource {
     }
 }
 
-/// The crate's internal error type, spanning sandbox construction, host
-/// bridging, capability binding, and Lua compile/runtime failures.
+/// The crate's internal error type, spanning sandbox construction, Engine
+/// value bridging, capability binding, and Lua compile/runtime failures.
 ///
 /// Public only so `promptforge-engine` can convert it back onto its own
 /// internal type variant-for-variant; the facade does not re-export it.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A section's Lua phase failed a host contract or hit a poisoned lock: a
+    /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
     /// runtime-internal condition with no originating `mlua` error to preserve
-    /// (for example "host values have not been injected" or a poisoned mutex).
+    /// (for example "Engine values have not been injected" or a poisoned mutex).
     ///
     /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
-    /// retains that cause as a private source (F4). The message is the specific
+    /// retains that cause as a private source. The message is the specific
     /// failure as a noun phrase; the public wrapper classifies this as a Lua
-    /// failure, so no redundant `lua error:` type label is prepended (F8).
+    /// failure, so no redundant `lua error:` type label is prepended.
     #[error("{0}")]
     Lua(String),
 
-    /// A section's Lua phase failed at runtime or while bridging host values,
+    /// A section's Lua phase failed at runtime or while bridging Engine values,
     /// retaining the originating `mlua` error as the private `#[source]` cause
-    /// (F4) alongside the mapped prompt-location message.
+    /// alongside the mapped prompt-location message.
     ///
     /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
     /// from a concrete `mlua::Error` (see `Error::lua` and
@@ -77,7 +77,7 @@ pub enum Error {
     /// Lua source was not syntactically valid at its prompt location.
     ///
     /// Retains the originating `mlua` compile error as the private `#[source]`
-    /// cause (F4) alongside the location metadata, so the compiler diagnostic
+    /// cause alongside the location metadata, so the compiler diagnostic
     /// chain survives through the public wrappers' `source()` instead of being
     /// flattened into `message` alone.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
@@ -95,8 +95,8 @@ pub enum Error {
         source: BoxedSource,
     },
 
-    /// A Lua host resource quota (log events, log bytes, or instructions) was
-    /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
+    /// An Engine quota on Lua (log events, log bytes, or instructions) was
+    /// exhausted. A stable typed error rather than a bare `Lua(String)` so the Host
     /// can distinguish quota exhaustion from an authoring error.
     #[error("lua {resource} quota exceeded")]
     LuaQuota {
@@ -108,7 +108,7 @@ pub enum Error {
     /// overflowed the context window (the pre-dispatch precheck or a
     /// provider rejection) and the policy - `compactors.fail`, the only
     /// shipped one - does not compact. A stable typed error rather than a
-    /// bare [`Error::Lua`] so hosts and `pcall` sites can distinguish
+    /// bare [`Error::Lua`] so the Host and `pcall` sites can distinguish
     /// context exhaustion from an authoring error.
     #[error("context exhausted: {reason}")]
     ContextExhausted {
@@ -116,7 +116,7 @@ pub enum Error {
         reason: crate::compactors::OverflowReason,
     },
 
-    /// The host cancelled the run (for example Ctrl-C during fanout).
+    /// The Host cancelled the run (for example Ctrl-C during fanout).
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
@@ -162,7 +162,7 @@ pub enum Error {
     Raised(crate::error_value::Raised),
 }
 
-/// Stable messages emitted by Lua host-quota refusals.
+/// Stable messages emitted by Lua Engine-quota refusals.
 ///
 /// Kept as constants so [`crate`] emits them and the runtime-error boundary
 /// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].
@@ -177,7 +177,7 @@ pub(crate) mod lua_quota {
 
 impl Error {
     /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
-    /// `#[source]` cause (F4) rather than flattening it to a string.
+    /// `#[source]` cause rather than flattening it to a string.
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
             message: source.to_string(),
@@ -207,9 +207,9 @@ impl Error {
 
     /// Wraps a store operation's failure as [`Error::Store`], rendering
     /// the model-facing message with the operation for its wording.
-    pub(crate) fn store(op: &crate::protocol::StoreOp, source: promptforge_vfs::VfsError) -> Error {
+    pub(crate) fn store(op: &crate::protocol::VfsOp, source: promptforge_vfs::VfsError) -> Error {
         Error::Store {
-            message: crate::host::store_error_message(op, &source),
+            message: crate::engine_globals::store_error_message(op, &source),
             source,
         }
     }

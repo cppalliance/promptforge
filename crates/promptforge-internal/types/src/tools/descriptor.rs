@@ -1,4 +1,4 @@
-//! The [`ToolDescriptor`]: everything an engine needs to know about a tool
+//! The [`ToolDescriptor`]: everything an Engine needs to know about a tool
 //! except how to run it.
 
 use serde::{Deserialize, Serialize};
@@ -12,12 +12,12 @@ use crate::capabilities::CapabilityId;
 /// conflicts of the capability that contributed it. Never an
 /// implementation.
 ///
-/// A host assembles descriptors from its activated capabilities into a
+/// The Harness assembles descriptors from its activated capabilities into a
 /// [`ToolCatalog`](super::ToolCatalog) and keeps the implementations in a
-/// table of its own keyed by [`ToolId`]; the engine fills its tool slots
+/// table of its own keyed by [`ToolId`]; the Engine fills its tool slots
 /// against the descriptors, advertises them, and issues each call as an
-/// effect naming the id, so the host resolves the implementation and the
-/// engine never holds one.
+/// effect naming the id, so the Harness resolves the implementation and the
+/// Engine never holds one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescriptor {
@@ -34,7 +34,7 @@ pub struct ToolDescriptor {
     /// into the script as data rather than as a string.
     pub structured_output: bool,
     /// The capabilities the contributing capability cannot be activated
-    /// with; stored for the record, checked by the host before activation.
+    /// with; stored for the record, checked by the Harness before activation.
     pub conflicts: Vec<CapabilityId>,
 }
 

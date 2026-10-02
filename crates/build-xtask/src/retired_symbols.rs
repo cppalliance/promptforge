@@ -1,7 +1,7 @@
-//! Retired-symbol scan: a retired engine symbol may not reappear in live
-//! engine source.
+//! Retired-symbol scan: a retired Engine symbol may not reappear in live
+//! Engine source.
 //!
-//! The sans-I/O engine plan retires a set of identifiers (`Observer`,
+//! The sans-I/O Engine plan retires a set of identifiers (`Observer`,
 //! `GatewaySource`, `LuaFanoutResult`, ...). Once they are gone, this scan
 //! keeps them gone: it walks a source root, strips comments and string
 //! literals (a mention in prose or a message is not a reappearance), drops

@@ -1,7 +1,7 @@
 //! Embeds the program icon and an application manifest into
 //! `promptforge-gateway.exe` on Windows, so Explorer, Task Manager, and
 //! the taskbar show the orange-P shield instead of the generic executable
-//! glyph. On every other host this script only declares its input and
+//! glyph. On every other platform this script only declares its input and
 //! exits.
 //!
 //! The icon is a copy kept in `assets/icon.ico`, byte-identical to the

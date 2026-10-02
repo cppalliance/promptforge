@@ -1,15 +1,15 @@
 -- The `tasks` namespace shims for a scheduler-mode section VM: spawn, the
--- waits, the non-blocking checks, the event history read, the progress
--- note, cancel, and the admission limit.
+-- waits, the non-blocking checks, the progress note, cancel, and the
+-- admission limit.
 --
--- The host installs this after the coroutine prelude (`__impl_coro.lua`)
+-- The Engine installs this after the coroutine prelude (`__impl_coro.lua`)
 -- and installs the returned table as the `tasks` global. The chunk
 -- arguments are privileged captures, never globals: `yield` is
--- coroutine.yield, `var_snapshot` is the host helper returning the hidden
+-- coroutine.yield, `var_snapshot` is the Engine helper returning the hidden
 -- `var` data table as a plain deep copy, and `helpers` is the prelude's
 -- shared trio - `raise(kind, fields)` builds and raises the structured
 -- error table, `fail(result)` raises an envelope's failure value, and
--- `host_type(value)` names a value's type as the protocol parse would.
+-- `engine_type(value)` names a value's type as the protocol parse would.
 --
 -- A Task handle is a plain methodless table `{ task = id }` (A9): every
 -- operation here is a namespace function that accepts the handle or the
@@ -18,7 +18,7 @@
 -- itself a handle.
 local yield, var_snapshot, helpers = ...
 
-local raise, fail, host_type = helpers.raise, helpers.fail, helpers.host_type
+local raise, fail, engine_type = helpers.raise, helpers.fail, helpers.engine_type
 
 -- tasks.spawn(target, opts?): start a chain over `target` and return at
 -- once with a Task handle. `opts.input` overrides the chain's args,
@@ -29,7 +29,7 @@ local function tasks_spawn(target, opts)
   if opts == nil then
     opts = {}
   elseif type(opts) ~= "table" then
-    raise("lua", { message = "tasks.spawn opts must be a table, got " .. host_type(opts) })
+    raise("lua", { message = "tasks.spawn opts must be a table, got " .. engine_type(opts) })
   end
   local ok, result = yield({
     op = "spawn",
@@ -50,7 +50,7 @@ end
 local function task_id(value, call)
   if type(value) == "table" then value = value.task end
   if type(value) ~= "string" then
-    raise("lua", { message = call .. " expects a Task handle or task id, got " .. host_type(value) })
+    raise("lua", { message = call .. " expects a Task handle or task id, got " .. engine_type(value) })
   end
   return value
 end
@@ -58,7 +58,7 @@ end
 -- Resolves a wait's set argument to a non-empty sequence of bare ids.
 local function task_set(set, call)
   if type(set) ~= "table" then
-    raise("lua", { message = call .. " expects a set of tasks, got " .. host_type(set) })
+    raise("lua", { message = call .. " expects a set of tasks, got " .. engine_type(set) })
   end
   local ids = {}
   for index, member in ipairs(set) do
@@ -72,16 +72,16 @@ end
 
 -- Resolves a wait's opts argument to its timeout in seconds, or nil when
 -- no timeout was given. The domain check (non-negative, finite) is the
--- host's at the timer yield; the shape check is here so the message names
+-- Engine's at the timer yield; the shape check is here so the message names
 -- the call.
 local function wait_timeout(opts, call)
   if opts == nil then return nil end
   if type(opts) ~= "table" then
-    raise("lua", { message = call .. " opts must be a table, got " .. host_type(opts) })
+    raise("lua", { message = call .. " opts must be a table, got " .. engine_type(opts) })
   end
   local timeout = opts.timeout
   if timeout ~= nil and type(timeout) ~= "number" then
-    raise("lua", { message = call .. " timeout must be a number, got " .. host_type(timeout) })
+    raise("lua", { message = call .. " timeout must be a number, got " .. engine_type(timeout) })
   end
   return timeout
 end
@@ -209,36 +209,13 @@ local function tasks_status(task)
   return result
 end
 
--- tasks.events(task, opts?) -> { event, ... }: the events the task has
--- reported so far, in the task's sequence order, each a plain table in the
--- event's serialized shape (`kind`, `section`, `provenance.seq`, and the
--- kind's own fields). The caller may read a task it owns or the task it
--- runs inside (`sys.taskid`). `opts.last` is the highest `provenance.seq`
--- already seen; only later events are returned, so a poll loop reads each
--- event once.
-local function tasks_events(task, opts)
-  local last
-  if opts ~= nil then
-    if type(opts) ~= "table" then
-      raise("lua", { message = "tasks.events opts must be a table, got " .. host_type(opts) })
-    end
-    last = opts.last
-    if last ~= nil and type(last) ~= "number" then
-      raise("lua", { message = "tasks.events last must be a number, got " .. host_type(last) })
-    end
-  end
-  local ok, result = yield({ op = "task_events", task = task_id(task, "tasks.events"), last = last })
-  if not ok then fail(result) end
-  return result
-end
-
 -- tasks.pending(filter?) -> { Task, ... }: the caller's live tasks in spawn
 -- order, narrowed to `filter.origin` (`author` or `model`) when given.
 local function tasks_pending(filter)
   local origin
   if filter ~= nil then
     if type(filter) ~= "table" then
-      raise("lua", { message = "tasks.pending filter must be a table, got " .. host_type(filter) })
+      raise("lua", { message = "tasks.pending filter must be a table, got " .. engine_type(filter) })
     end
     origin = filter.origin
   end
@@ -255,7 +232,7 @@ end
 -- visible through tasks.status.
 local function tasks_note(text)
   if type(text) ~= "string" then
-    raise("lua", { message = "tasks.note text must be a string, got " .. host_type(text) })
+    raise("lua", { message = "tasks.note text must be a string, got " .. engine_type(text) })
   end
   local ok, result = yield({ op = "note", text = text })
   if not ok then fail(result) end
@@ -263,13 +240,13 @@ end
 
 -- tasks.concurrency(limit?): set the chain's admission limit for the
 -- tasks it spawns from here on (clamped to the parent chain's limit, or
--- the host's ceiling for the main walk), or read the effective limit
+-- the Harness's ceiling for the main walk), or read the effective limit
 -- back with no argument. Never preempts a running task: the limit gates
 -- future admissions only. The argument must be a positive whole number.
 local function tasks_concurrency(limit)
   if limit ~= nil then
     if type(limit) ~= "number" or limit % 1 ~= 0 or limit < 1 then
-      raise("lua", { message = "tasks.concurrency limit must be a positive whole number, got " .. host_type(limit) })
+      raise("lua", { message = "tasks.concurrency limit must be a positive whole number, got " .. engine_type(limit) })
     end
     local ok, result = yield({ op = "concurrency", limit = limit })
     if not ok then fail(result) end
@@ -293,7 +270,6 @@ return {
   join = tasks_join,
   ready = tasks_ready,
   status = tasks_status,
-  events = tasks_events,
   pending = tasks_pending,
   note = tasks_note,
   cancel = tasks_cancel,

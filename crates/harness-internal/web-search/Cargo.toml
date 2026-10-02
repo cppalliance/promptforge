@@ -14,7 +14,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 harness-capabilities.workspace = true
-# The engine's public API: tool id, output, and error vocabulary.
+# The Engine's public API: tool id, output, and error vocabulary.
 promptforge.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -26,7 +26,7 @@ workspace-hack.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-# The tests spawn their mock gateways through the harness's instrumented
+# The tests spawn their mock gateways through the Harness's instrumented
 # spawn wrapper, never `tokio::spawn` (see clippy.toml), under the tag
 # fixture `test-support` provides.
 harness-runner = { workspace = true, features = ["test-support"] }

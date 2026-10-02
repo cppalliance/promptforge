@@ -14,7 +14,7 @@ import {
   navigate,
   settle,
   systemFixture,
-} from "../harness.mjs";
+} from "../test-support.mjs";
 
 function fixtureStub(extra = {}) {
   return gatewayStub({

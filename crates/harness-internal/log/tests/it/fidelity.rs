@@ -18,11 +18,10 @@ const AWKWARD: f64 = 3.907_800_000_000_000_4;
 /// Every record of a run, in loop order.
 const ALL: RecordFilter = RecordFilter {
     kind: None,
-    task: None,
     last: None,
 };
 
-/// A run's opening row, as the harness would write it.
+/// A run's opening row, as the Harness would write it.
 fn meta() -> RunMeta {
     RunMeta {
         session_id: "session-1".to_owned(),

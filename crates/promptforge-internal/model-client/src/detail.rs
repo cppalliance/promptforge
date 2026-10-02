@@ -1,8 +1,8 @@
-//! Operations on the wire types that only the engine performs.
+//! Operations on the wire types that only the Engine performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host. Each function stands in for what would
-//! otherwise be an inherent method or a public field on a host-visible
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it. Each function stands in for what would
+//! otherwise be an inherent method or a public field on a facade-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
 //! a message holds, reading a tool schema's wire parts, reading the
 //! metadata diagnostics and taking the raw JSON bodies a completion holds,
@@ -19,7 +19,7 @@ use crate::error::Error;
 /// `role` is one of the wire roles (`system`, `user`, `assistant`, `tool`).
 /// `content` is the raw wire content value - a string for a plain message
 /// or an `OpenAI` content-parts array for a multimodal one - and serializes
-/// into the request verbatim. For each chat round the engine sends, its Lua
+/// into the request verbatim. For each chat round the Engine sends, its Lua
 /// protocol layer validates the author-built message tables once and hands
 /// the validated parts here.
 #[must_use]
@@ -57,14 +57,14 @@ pub fn message_raw_tool_calls(message: &Message) -> Option<&[Value]> {
 ///
 /// The raw [`serde_json::Value`] schema enters here only from the
 /// executor's internal tool contract, so the raw JSON never appears in a
-/// host-visible constructor.
+/// facade-visible constructor.
 ///
 /// # Errors
 /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains
 /// a character outside `[A-Za-z0-9_.-]`, and
 /// [`ToolSchemaError::NonObjectSchema`] when `parameters` is not a JSON
 /// object, so a tool can never be advertised to the model with an unusable
-/// name or a non-object JSON Schema (F7).
+/// name or a non-object JSON Schema.
 pub fn tool_schema_new(
     name: impl Into<String>,
     description: impl Into<String>,
@@ -131,7 +131,7 @@ pub fn completion_vllm_metrics(completion: &Completion) -> Option<&VllmMetrics> 
 
 /// Returns one line per response metadata section that was present but
 /// malformed and so degraded to `None` (or a body naming no string
-/// `model`), for the engine to report as `model_metadata_degraded` events.
+/// `model`), for the Engine to report as `model_metadata_degraded` events.
 #[must_use]
 pub fn completion_metadata_diagnostics(completion: &Completion) -> &[String] {
     &completion.metadata_diagnostics

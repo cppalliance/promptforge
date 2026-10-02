@@ -229,12 +229,12 @@ Add [fanout.rs](promptforge/crates/promptforge-core/src/fanout.rs):
 - Load-time bullet parser (called from parser on list H3 sections; stores `Vec<String>` on the section)
 - `### Title` heading resolution against sibling sections
 - Sequential arm execution (fresh VM per arm, shared store, `item` + `sys.taskid` injection)
-- Host `fanout` Lua function (sync callback into the executor for nested section runs)
+- Engine `fanout` Lua function (sync callback into the executor for nested section runs)
 
 Other touchpoints:
 
 - [parser.rs](promptforge/crates/promptforge-core/src/parser.rs): detect list H3 (no Lua fences), parse bullets at load, store items on `Section`
-- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs): wire `fanout` host fn into invoker VMs
+- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs): wire the `fanout` Engine function into invoker VMs
 - [subst.rs](promptforge/crates/promptforge-core/src/subst.rs): `{{ item }}` namespace (error outside arms)
 - [observe.rs](promptforge/crates/promptforge-core/src/observe.rs): `Fanout arm started` / `Fanout arm finished` (payload-free); section = worker heading; sequential so order is unambiguous
 - [lib.rs](promptforge/crates/promptforge-core/src/lib.rs): `pub mod fanout`

@@ -85,7 +85,7 @@ E1 (model kinds) landed as step 13. The `Upstream` trait has only `send` and `sh
 
 <step-16>
 
-**Step 16: local embedding launch.** `local/mod.rs`: `kind = Embedding` launches `llama-server --embeddings`. Artifact download/digest unchanged. Dominion binding unchanged. Test: launch args include `--embeddings`; route-through-child follows the existing local test harness pattern (live llama-server tests stay `#[ignore]`d). Docs: local embedding section. Verify (end of E2).
+**Step 16: local embedding launch.** `local/mod.rs`: `kind = Embedding` launches `llama-server --embeddings`. Artifact download/digest unchanged. Dominion binding unchanged. Test: launch args include `--embeddings`; route-through-child follows the existing local test-support pattern (live llama-server tests stay `#[ignore]`d). Docs: local embedding section. Verify (end of E2).
 
 </step-16>
 
@@ -97,7 +97,7 @@ E1 (model kinds) landed as step 13. The `Upstream` trait has only `send` and `sh
 
 <step-18>
 
-**Step 18: local classifier launch.** `local/mod.rs`: `kind = Classifier` launches `llama-server --reranking`. Test: launch args include `--reranking`; route-through-child follows the existing local test harness pattern (live llama-server tests stay `#[ignore]`d). Docs: local classifier section. Verify (end of E3).
+**Step 18: local classifier launch.** `local/mod.rs`: `kind = Classifier` launches `llama-server --reranking`. Test: launch args include `--reranking`; route-through-child follows the existing local test-support pattern (live llama-server tests stay `#[ignore]`d). Docs: local classifier section. Verify (end of E3).
 
 </step-18>
 

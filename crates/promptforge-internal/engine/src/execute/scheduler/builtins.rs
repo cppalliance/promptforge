@@ -1,29 +1,24 @@
-//! The model's task built-ins: `task`, `task_cancel`, `task_status`,
-//! `await_tasks` (whose arm sits in the `await_tasks` module), and
-//! `task_events` (whose arm sits in the `task_events` module), answered
+//! The model's task built-ins: `task`, `task_cancel`, `task_status`, and
+//! `await_tasks` (whose arm sits in the `await_tasks` module), answered
 //! by the scheduler over its task arena.
 //!
 //! An author opts a section in with `tools.allow_tasks(targets?)`, which
 //! records an allowlist on the section's tool runtime. While it is set,
-//! every `chat` round the section yields advertises the five built-ins
+//! every `chat` round the section yields advertises the four built-ins
 //! beside its bound and local tools ([`advertise_task_builtins`]), and the
 //! `tool_call` arm answers a model-issued call to one of them here, before
 //! alias lookup, so no bound or local tool can shadow them. Every answer is
 //! content the model reads: a started task's id, a cancel's confirmation,
 //! a status line, a wait's drained notices, or a refusal naming what was
-//! wrong - the engine's own text, so it resumes trusted and its
-//! `ToolResult` fires under the model's call id. The one exception is
-//! `task_events`, whose answer is the task's reported history - model,
-//! tool, and user text among it - and so resumes nonce-wrapped as
-//! untrusted. A refusal is observed as a failed tool call, a served answer
-//! as a succeeded one.
+//! wrong - the Engine's own text, so it resumes trusted and its
+//! `ToolResult` fires under the model's call id. A refusal is observed as
+//! a failed tool call, a served answer as a succeeded one.
 //!
-//! The model sees only its own tasks: a `task_cancel`, `task_status`, or
-//! `task_events` naming a task the author started (or one the caller does
-//! not own) is refused as unknown, so the model can neither end nor
-//! inspect the author's work through its tool surface. The author, by
-//! contrast, may adopt the model's tasks through
-//! `tasks.pending({ origin = "model" })`.
+//! The model sees only its own tasks: a `task_cancel` or `task_status`
+//! naming a task the author started (or one the caller does not own) is
+//! refused as unknown, so the model can neither end nor inspect the
+//! author's work through its tool surface. The author, by contrast, may
+//! adopt the model's tasks through `tasks.pending({ origin = "model" })`.
 //!
 //! The built-ins' fixed schemas and the function that advertises them
 //! sit in the `schemas` sibling; this file holds the arms.
@@ -50,13 +45,7 @@ pub(super) use schemas::advertise_task_builtins;
 
 /// The built-in names answered over the arena, in the order the model
 /// sees them advertised.
-const TASK_BUILTINS: [&str; 5] = [
-    "task",
-    "task_cancel",
-    "task_status",
-    "await_tasks",
-    "task_events",
-];
+const TASK_BUILTINS: [&str; 4] = ["task", "task_cancel", "task_status", "await_tasks"];
 
 /// Whether `name` is one of the built-ins answered here.
 pub(super) fn is_task_builtin(name: &str) -> bool {
@@ -79,14 +68,11 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
 /// One built-in's answer: the text the model reads, whether it served the
 /// call or refused it, and the task chain a `task` started behind the
 /// caller, which the dispatcher enqueues after the caller so the caller
-/// runs first as it does after `tasks.spawn`.
+/// runs first as it does after `tasks.spawn`. The text is the Engine's
+/// own, so it always resumes trusted.
 pub(super) struct BuiltinAnswer {
     pub(super) text: String,
     pub(super) ok: bool,
-    /// Whether `text` is the engine's own (every answer but a history
-    /// read's, whose events include model, tool, and user text and arrive
-    /// nonce-wrapped as [`OutputTrust::Untrusted`]).
-    pub(super) trust: OutputTrust,
     pub(super) started: Option<ChainIndex>,
 }
 
@@ -95,18 +81,6 @@ impl BuiltinAnswer {
         Self {
             text,
             ok: true,
-            trust: OutputTrust::Trusted,
-            started: None,
-        }
-    }
-
-    /// A served answer whose text came from outside the engine: already
-    /// nonce-wrapped by the caller, reported untrusted.
-    pub(super) fn served_untrusted(text: String) -> Self {
-        Self {
-            text,
-            ok: true,
-            trust: OutputTrust::Untrusted,
             started: None,
         }
     }
@@ -115,23 +89,20 @@ impl BuiltinAnswer {
         Self {
             text,
             ok: false,
-            trust: OutputTrust::Trusted,
             started: None,
         }
     }
 }
 
-/// How one built-in call resolved: an answer for the caller now, the
-/// caller parked (`await_tasks` on live tasks), answered when it wakes, or
-/// a leaf effect issued (`task_events`), answered when the host does.
+/// How one built-in call resolved: an answer for the caller now, or the
+/// caller parked (`await_tasks` on live tasks), answered when it wakes.
 pub(super) enum BuiltinOutcome {
     Answered(BuiltinAnswer),
     Parked,
-    Issued,
 }
 
-/// Reads the `id` argument of `task_cancel`, `task_status`, or
-/// `task_events`, or the refusal text for a missing or malformed one.
+/// Reads the `id` argument of `task_cancel` or `task_status`, or the
+/// refusal text for a missing or malformed one.
 fn task_id_argument(name: &str, args: &Value) -> std::result::Result<TaskId, String> {
     let Some(id) = args.get("id").and_then(Value::as_str) else {
         return Err(format!(
@@ -177,13 +148,12 @@ impl Scheduler {
     /// driver thread: the arm's answer, its succeeded/failed observation,
     /// and the trusted `ToolResult` report under the model's call id - or
     /// the chain parked, for an `await_tasks` whose answer comes when a
-    /// task ends, or a `TaskEvents` effect issued, for a `task_events`
-    /// whose answer comes from the host's log. Only the caller's own
-    /// bookkeeping can fail here (a lost frame, a poisoned runtime); every
-    /// model-facing fault is the answer's text. The `tool_call` arm routes
-    /// only [`is_task_builtin`] names here. `turn` is the turn the call
-    /// was dispatched under, which every report of its answer carries,
-    /// including a parked or issued answer's later one.
+    /// task ends. Only the caller's own bookkeeping can fail here (a lost
+    /// frame, a poisoned runtime); every model-facing fault is the
+    /// answer's text. The `tool_call` arm routes only [`is_task_builtin`]
+    /// names here. `turn` is the turn the call was dispatched under, which
+    /// every report of its answer carries, including a parked answer's
+    /// later one.
     ///
     /// # Errors
     /// Returns the internal fault the arm met, or [`Error::Internal`] for
@@ -201,7 +171,6 @@ impl Scheduler {
             "task_cancel" => BuiltinOutcome::Answered(self.builtin_task_cancel(id, args)),
             "task_status" => BuiltinOutcome::Answered(self.builtin_task_status(id, args)),
             "await_tasks" => self.builtin_await_tasks(id, args, call_id, turn),
-            "task_events" => self.builtin_task_events(id, args, call_id, turn),
             _ => {
                 return Err(Error::internal(
                     "the tool_call arm routes only the answered task built-ins here",
@@ -211,7 +180,6 @@ impl Scheduler {
         let answer = match outcome {
             BuiltinOutcome::Answered(answer) => answer,
             BuiltinOutcome::Parked => return Ok(ToolCallDispatch::Parked),
-            BuiltinOutcome::Issued => return Ok(ToolCallDispatch::Issued),
         };
         let started = answer.started;
         let answer = self.report_builtin_answer(id, name, call_id, turn, answer);
@@ -223,9 +191,8 @@ impl Scheduler {
 
     /// Reports one built-in's answer - the succeeded/failed observation and
     /// the `ToolResult` under the model's call id and the `turn` the call
-    /// was dispatched under, trusted unless the answer says otherwise - and
-    /// renders it as the tool call's answer. Shared by the immediate
-    /// answers, the `await_tasks` wake, and the `task_events` answer.
+    /// was dispatched under, trusted - and renders it as the tool call's
+    /// answer. Shared by the immediate answers and the `await_tasks` wake.
     pub(super) fn report_builtin_answer(
         &self,
         id: ChainIndex,
@@ -245,7 +212,14 @@ impl Scheduler {
                 lifecycle::TOOL_CALL_FAILED
             },
         );
-        emitter.tool_result(section, turn, call_id, name, &answer.text, answer.trust);
+        emitter.tool_result(
+            section,
+            turn,
+            call_id,
+            name,
+            &answer.text,
+            OutputTrust::Trusted,
+        );
         Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(answer.text)))
     }
 
@@ -302,7 +276,6 @@ impl Scheduler {
             Ok((task, child)) => Ok(BuiltinAnswer {
                 text: format!("Task id={task} started"),
                 ok: true,
-                trust: OutputTrust::Trusted,
                 started: Some(child),
             }),
             Err(error) => Ok(BuiltinAnswer::refused(format!("task: {error}"))),

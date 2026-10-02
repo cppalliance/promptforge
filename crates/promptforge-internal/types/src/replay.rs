@@ -8,7 +8,7 @@
 //! not built yet; these types are defined now so the log schema and the run
 //! record have their columns from the first run written.
 //!
-//! [`Flags`] is how a future engine change that alters a recorded run's
+//! [`Flags`] is how a future Engine change that alters a recorded run's
 //! behavior stays replayable: it runs the new behavior live and sets its
 //! flag, and a later replay honors the flag only if the original run
 //! recorded it. [`ReplayError`] keeps "the code under replay diverged" apart
@@ -30,7 +30,7 @@ mod tests;
 /// never reused or renumbered, even after the behavior it gated becomes
 /// the only behavior. No flag is defined yet. Bits this build does not name
 /// are preserved through [`from_bits`](Self::from_bits) and
-/// [`bits`](Self::bits), so a record written by a newer engine keeps its
+/// [`bits`](Self::bits), so a record written by a newer Engine keeps its
 /// flags through an older reader.
 ///
 /// # Examples
@@ -95,7 +95,7 @@ impl BitOrAssign for Flags {
 /// The two kinds are properties of different things. `Nondeterminism` is a
 /// property of the code under replay: re-executed against its record, a run
 /// or a task issued an effect or event that disagrees with what the record
-/// holds at that [`Provenance`](crate::ids::Provenance), so the engine (or
+/// holds at that [`Provenance`](crate::ids::Provenance), so the Engine (or
 /// the prompt) is not deterministic where it must be. `Fatal` is a property
 /// of the record: the log is malformed or internally inconsistent (an
 /// effect with two answers, a sequence gap, an unparseable payload), so

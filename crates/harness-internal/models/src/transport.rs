@@ -2,7 +2,7 @@
 //! and environment loading.
 //!
 //! The request body, the stream reassembly, and the read loop that applies
-//! the byte cap and measures the timing are the engine's shared protocol
+//! the byte cap and measures the timing are the Engine's shared protocol
 //! seams (`promptforge::transport`); this file owns only what touches the
 //! wire: sending, the per-receive timeout, the response as a chunk source,
 //! and the clock the read loop is handed.
@@ -176,7 +176,7 @@ impl GatewayClient {
         }
     }
 
-    /// Builds an explicit sentinel client that hosts use for hermetic
+    /// Builds an explicit sentinel client that the Harness uses for hermetic
     /// execution paths.
     ///
     /// Any attempted model call fails with a `Disabled`-kind

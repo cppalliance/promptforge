@@ -5,8 +5,8 @@
    order. */
 
 @layer components {
-	/* Dimmed full-host overlay centering the card. The host defaults to
-	   the viewport; a consumer overlaying a panel re-declares position. */
+	/* Dimmed full-container overlay centering the card. The container
+	   defaults to the viewport; a panel overlay re-declares position. */
 	.modal-overlay {
 		position: fixed;
 		inset: 0;

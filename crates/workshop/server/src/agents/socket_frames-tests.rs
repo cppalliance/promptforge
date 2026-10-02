@@ -1,5 +1,5 @@
 //! Table-driven tests for the agent socket's framing helpers: the pure
-//! render functions that map harness vocabulary onto Workshop wire
+//! render functions that map Harness vocabulary onto Workshop wire
 //! shapes, and the cursor and wire-index bookkeeping behind every
 //! durable `agent_event` frame.
 
@@ -74,13 +74,18 @@ fn provenance() -> Provenance {
     }
 }
 
-/// A user-input event, which has a wire shape.
-fn user_input(text: &str) -> Event {
-    Event::UserInput {
+/// The operator's message as a script's ask result, which has a wire
+/// shape.
+fn operator_message(text: &str) -> Event {
+    Event::ToolResult {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
         provenance: provenance(),
-        text: text.to_owned(),
+        turn: 0,
+        tool_call_id: String::new(),
+        alias: harness::USER_INPUT_ASK_TOOL.to_owned(),
+        content: text.to_owned(),
+        trusted: true,
     }
 }
 
@@ -95,13 +100,13 @@ fn entry(index: u64, reply: Option<u64>, event: &Event) -> SessionEvent {
 
 /// The frame `event` renders at wire index `index`.
 fn frame(index: u64, reply: Option<u64>, event: &Event) -> AgentEventFrame {
-    AgentEventFrame::new(index, reply, event).expect("a user-input event frames")
+    AgentEventFrame::new(index, reply, event).expect("an operator message frames")
 }
 
 #[test]
 fn framed_entries_take_gap_free_wire_indices_past_unframed_ones() {
-    let hello = user_input("hello");
-    let again = user_input("again");
+    let hello = operator_message("hello");
+    let again = operator_message("again");
     let lifecycle = Event::SectionStarted {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
@@ -145,7 +150,7 @@ fn an_entry_below_the_cursor_moves_neither_cursor() {
     let replayed = advance(
         &mut cursor,
         &mut framed,
-        &entry(4, None, &user_input("seen")),
+        &entry(4, None, &operator_message("seen")),
     );
 
     assert_eq!(replayed, None, "an entry already read never frames twice");
@@ -154,7 +159,7 @@ fn an_entry_below_the_cursor_moves_neither_cursor() {
 
 #[test]
 fn a_live_entry_past_a_gap_moves_the_cursor_beyond_it() {
-    let late = user_input("late");
+    let late = operator_message("late");
     let (mut cursor, mut framed) = (2, 1);
 
     let live = advance(&mut cursor, &mut framed, &entry(6, None, &late));

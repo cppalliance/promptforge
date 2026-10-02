@@ -1,4 +1,4 @@
-//! Shared admin-route test harness: serves `build_router` over a state
+//! Shared admin-route test support: serves `build_router` over a state
 //! assembled from one fixture profile.
 
 use std::net::SocketAddr;
@@ -84,7 +84,7 @@ pub(crate) async fn serve_with_paths(config: Config, paths: AdminPaths) -> Socke
     serve_with(config, None, Some(paths)).await
 }
 
-/// The shared harness body behind [`serve`], [`serve_with_hf`], and
+/// The shared test-server body behind [`serve`], [`serve_with_hf`], and
 /// [`serve_with_paths`].
 async fn serve_with(
     config: Config,
@@ -98,7 +98,7 @@ async fn serve_with(
     serve_state(state).await
 }
 
-/// Builds the state the harness serves, so a test can override an
+/// Builds the state the test server serves, so a test can override an
 /// injected collaborator (the HF proxy, the reveal launcher) or drive a
 /// handler directly.
 pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {

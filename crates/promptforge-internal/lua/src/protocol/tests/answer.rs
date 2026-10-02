@@ -51,68 +51,6 @@ fn an_ok_spawn_answer_resumes_the_task_id_as_its_path_text() {
 }
 
 #[test]
-fn a_task_events_answer_resumes_event_tables_with_absent_fields_nil() {
-    // Two events, one lifecycle and one content: the sequence keeps their
-    // order, each table holds the event's serialized shape, and an
-    // absent optional field (`finish_reason`, `metrics`) is nil rather
-    // than the serde bridge's NULL sentinel, so an author's truth test
-    // works. An empty answer is still a sequence.
-    use promptforge_types::event::Event;
-    use promptforge_types::ids::Provenance;
-    let lua = Lua::new();
-    let task: TaskId = "0.1".parse().expect("a task id parses");
-    let events = vec![
-        Event::SectionStarted {
-            execution: "run".to_owned(),
-            section: "Child".to_owned(),
-            provenance: Provenance {
-                task: task.clone(),
-                seq: 0,
-            },
-        },
-        Event::AssistantReply {
-            execution: "run".to_owned(),
-            section: "Child".to_owned(),
-            provenance: Provenance { task, seq: 3 },
-            turn: 1,
-            text: "hi".to_owned(),
-            finish_reason: None,
-            model: "m".to_owned(),
-            metrics: None,
-            origin: promptforge_types::event::ReplyOrigin::Chat,
-        },
-    ];
-    let (envelope, retained) = Answer::<Error>::TaskEvents(Ok(events))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, result) = echo_through_lua(&lua, envelope);
-    assert!(ok);
-    let summary: String = lua
-        .load(
-            "local events = ...\n\
-             assert(#events == 2)\n\
-             assert(events[2].finish_reason == nil, 'an absent field is nil')\n\
-             assert(events[2].metrics == nil, 'an absent field is nil')\n\
-             return events[1].kind .. '|' .. events[1].provenance.seq .. '|' \
-             .. events[2].kind .. '|' .. events[2].provenance.seq .. '|' .. events[2].text",
-        )
-        .call(result)
-        .expect("the event tables read back through Lua");
-    assert_eq!(summary, "section_started|0|assistant_reply|3|hi");
-
-    let (envelope, _) = Answer::<Error>::TaskEvents(Ok(Vec::new()))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    let (ok, result) = echo_through_lua(&lua, envelope);
-    assert!(ok);
-    assert!(
-        matches!(&result, Value::Table(table) if table.raw_len() == 0),
-        "an empty answer is an empty sequence, got {result:?}"
-    );
-}
-
-#[test]
 fn an_err_answer_round_trips_and_retains_the_typed_error() {
     let lua = Lua::new();
     let (envelope, retained) = Answer::Call(Err(Error::LuaQuota {
@@ -340,48 +278,6 @@ fn from_dispatch_classifies_by_the_declared_output_kind() {
 }
 
 #[test]
-fn an_ok_user_input_answer_round_trips_text_and_availability() {
-    let lua = Lua::new();
-    let outcome = UserInputOutcome {
-        text: "the operator's answer".to_owned(),
-        available: true,
-    };
-    let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, text, available): (bool, String, bool) = lua
-        .load("local ok, text, available = ...; return ok, text, available")
-        .call(envelope)
-        .expect("the three resume values read back through Lua");
-    assert!(ok);
-    assert_eq!(text, "the operator's answer");
-    assert!(available, "operator text resumes as available");
-}
-
-#[test]
-fn an_unavailable_user_input_answer_resumes_the_fallback_as_unavailable() {
-    let lua = Lua::new();
-    let outcome = UserInputOutcome {
-        text: "User input is unavailable in this host; continue without it.".to_owned(),
-        available: false,
-    };
-    let (envelope, retained) = Answer::<Error>::UserInput(Ok(outcome))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    assert!(retained.is_none());
-    let (ok, available): (bool, bool) = lua
-        .load("local ok, text, available = ...; return ok, available")
-        .call(envelope)
-        .expect("the resume values read back through Lua");
-    assert!(ok);
-    assert!(
-        !available,
-        "the fallback sentence resumes with available false, so identical human text cannot spoof it"
-    );
-}
-
-#[test]
 fn an_ok_drain_task_notices_answer_resumes_the_texts_as_a_sequence() {
     let lua = Lua::new();
     let notices = vec![
@@ -424,21 +320,4 @@ fn an_empty_drain_task_notices_answer_resumes_an_empty_sequence() {
         .expect("the sequence reads back through Lua");
     assert!(ok);
     assert_eq!(len, 0, "no notices resume as an empty sequence, never nil");
-}
-
-#[test]
-fn an_err_user_input_answer_round_trips_and_retains_the_typed_error() {
-    let lua = Lua::new();
-    let (envelope, retained) = Answer::UserInput(Err(Error::Lua("broker down".to_owned())))
-        .into_envelope(&lua)
-        .expect("the envelope renders");
-    match retained {
-        Some(Error::Lua(message)) => assert_eq!(message, "broker down"),
-        other => panic!("expected the retained Lua error, got {other:?}"),
-    }
-    let (ok, result) = echo_through_lua(&lua, envelope);
-    assert!(!ok);
-    let (kind, message) = failure_parts(&lua, result);
-    assert_eq!(kind, "lua");
-    assert_eq!(message, "broker down");
 }

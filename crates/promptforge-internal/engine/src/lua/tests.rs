@@ -1,9 +1,10 @@
 //! Tests for the scheduler-mode section VM built through the executor's
 //! real `section_vm` setup path: the yield shims (`shims`), the error
 //! table and failure envelope contract (`errors`), the coroutine
-//! mechanics the shims rely on (`coroutine`), and the Lua loop's
-//! instruction cost (`quota`). This file holds the fixtures every sibling
-//! drives: the test model and tool sets, the VM builder, and the
+//! mechanics the shims rely on (`coroutine`), the Lua loop's
+//! instruction cost (`quota`), and the reserved-name list against the
+//! globals setup installs (`globals`). This file holds the fixtures every
+//! sibling drives: the test model and tool sets, the VM builder, and the
 //! start-and-parse helpers.
 //!
 //! These sit in `promptforge-engine` (not in `promptforge-lua`)
@@ -13,6 +14,7 @@
 
 mod coroutine;
 mod errors;
+mod globals;
 mod quota;
 mod shims;
 
@@ -72,7 +74,7 @@ fn test_tools() -> ToolSet {
     )
 }
 
-/// Builds a section VM through the real setup path: construction, host
+/// Builds a section VM through the real setup path: construction, Engine
 /// injection, the control surface with the yield shims, the shared
 /// replay, and the captured alias bindings.
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
@@ -114,6 +116,8 @@ fn scheduler_vm_with_tools(
         shared: &shared,
         max_tool_iterations: 24,
         ui: None,
+        preludes: &[],
+        frontmatter_aliases: &[],
         raw_shims: false,
     };
     let list_callback =

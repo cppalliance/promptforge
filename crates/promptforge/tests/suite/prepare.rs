@@ -1,22 +1,22 @@
-//! Prepare-pass integration tests: host-file claims through a shared base
-//! VFS, slot filling by identity against the host-supplied catalog, and
+//! Prepare-pass integration tests: real-file claims through a shared base
+//! VFS, slot filling by identity against the Harness-supplied catalog, and
 //! model satisfaction - the trivial fill binding every declared role to
 //! the context's current model, and the hard-keyword and context-minimum
 //! checks against its descriptor. The store-mount isolation case and the
-//! prepare-run refusals drive the engine's test host, so they sit in the
-//! engine's own suite.
+//! prepare-run refusals drive the Harness in `promptforge-engine`'s test
+//! support, so they sit in that crate's own suite.
 //!
 //! Capability activation - resolving a prompt's declarations against a
-//! registry, conflict checking, and catalog assembly - is the harness's,
-//! and its suite lives with it in `harness-capabilities`; the engine's
-//! prepare only ever sees the catalog the host hands it.
+//! registry, conflict checking, and catalog assembly - is the Harness's,
+//! and its suite lives with it in `harness-capabilities`; the Engine's
+//! prepare only ever sees the catalog the Harness hands it.
 
 use std::num::NonZeroU32;
 
 use promptforge::capabilities::CapabilityId;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
-use promptforge::vfs::{HostBackend, Origin, VfsError, VfsRef};
+use promptforge::vfs::{Origin, RealBackend, VfsError, VfsRef};
 use promptforge::{Environment, Prompt, RequirementCheck};
 
 use super::support::context;
@@ -51,7 +51,7 @@ impl TempDir {
             .expect("the clock is after the epoch")
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "promptforge-api-prepare-{}-{unique}-{name}",
+            "promptforge-prepare-{}-{unique}-{name}",
             std::process::id(),
         ));
         std::fs::create_dir_all(&dir).expect("the temp dir creates");
@@ -66,14 +66,14 @@ impl Drop for TempDir {
 }
 
 #[test]
-fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
+fn two_runs_writing_the_same_real_file_through_the_shared_base_conflict() {
     let temp = TempDir::new("shared-base");
-    // The host's handle: its base at `/` beside a declared store at
-    // `/my/store` - the plan's host shape - shared by every run.
+    // The Host's handle: its base at `/` beside a declared store at
+    // `/my/store` - the plan's Host shape - shared by every run.
     let vfs = VfsRef::builder()
         .mount(
             "/",
-            HostBackend::rooted(&temp.0).expect("the temp dir roots the host backend"),
+            RealBackend::rooted(&temp.0).expect("the temp dir roots the real backend"),
         )
         .store("/my/store", promptforge::vfs::MemoryBackend::new())
         .build();
@@ -87,7 +87,7 @@ fn two_runs_writing_the_same_host_file_through_the_shared_base_conflict() {
         .expect("run a acquires");
     access_a
         .write("/shared.txt", b"from a")
-        .expect("run a writes the host file");
+        .expect("run a writes the real file");
     let access_b = ctx_b
         .vfs_handle()
         .acquire(Origin::new("run-b"))
@@ -164,7 +164,7 @@ const DECLARES_NO_THINKING: &str = concat!(
     "```\n",
 );
 
-/// Builds the host's one current model with the given context window and
+/// Builds the Host's one current model with the given context window and
 /// thinking capability.
 fn current_model(context: u32, thinking: ThinkingMode) -> ModelDescriptor {
     ModelDescriptor::new(
@@ -258,7 +258,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() {
 }
 
 // ToolBindings and slot filling: exact slots fill by identity against
-// the host-supplied catalog (an exact path's first two segments name its
+// the Harness-supplied catalog (an exact path's first two segments name its
 // capability, so a slot whose capability contributed nothing to the
 // catalog is reported as missing), with every fill journaled into the
 // run's tool bindings as descriptors, never implementations.
@@ -294,7 +294,7 @@ const DECLARES_ORPHAN_SLOT: &str = concat!(
     "Done.\n",
 );
 
-/// A host-supplied descriptor for one `promptforge/web` tool.
+/// A Harness-supplied descriptor for one `promptforge/web` tool.
 fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
     let id = ToolId::parse(id).expect("the fixture tool id is valid");
     ToolDescriptor::new(
@@ -306,11 +306,11 @@ fn web_descriptor(id: &str, description: &str) -> ToolDescriptor {
 }
 
 /// The step's first test: `prepare` fills a slot by identity against a
-/// catalog the host supplied directly - no registry, no activation, no
-/// implementation anywhere near the engine - and the binding journals the
+/// catalog the Harness supplied directly - no registry, no activation, no
+/// implementation anywhere near the Engine - and the binding journals the
 /// descriptor's data.
 #[test]
-fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
+fn prepare_fills_a_slot_by_id_against_a_harness_supplied_catalog() {
     let prompt = parse(DECLARES_EXACT_SLOT, "declares-exact-slot");
     let id = ToolId::parse("promptforge/web/fetch").expect("the id is valid");
     let descriptor = ToolDescriptor::new(
@@ -335,7 +335,7 @@ fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
     assert_eq!(bindings.resolve("fetch"), Some(&descriptor));
     assert_eq!(bindings.tool(&id), Some(&descriptor));
     assert!(bindings.resolve("undeclared").is_none());
-    // The context's catalog is the environment's, so the host can read
+    // The context's catalog is the environment's, so the Harness can read
     // back what the run was prepared against.
     assert_eq!(ctx.tools().tools(), [descriptor]);
 }
@@ -344,7 +344,7 @@ fn prepare_fills_a_slot_by_id_against_a_host_supplied_catalog() {
 fn an_exact_slot_whose_capability_is_inactive_is_reported() {
     let prompt = parse(DECLARES_ORPHAN_SLOT, "declares-orphan-slot");
     // An empty catalog and no declaration: the slot's capability
-    // contributed nothing the engine can fill against.
+    // contributed nothing the Engine can fill against.
     let (ctx, requirements) = Environment::new().prepare(&prompt, context("fill-orphan"));
     // The exact path's first two segments name its capability.
     assert_eq!(
@@ -372,6 +372,6 @@ fn an_exact_slot_absent_from_an_active_capability_is_not_reported_missing() {
     );
     assert!(requirements.is_satisfied());
     // The alias stays unbound; advertising it fails at run time with the
-    // alias named. The engine reaches no logger, so nothing else records it.
+    // alias named. The Engine reaches no logger, so nothing else records it.
     assert!(ctx.tool_bindings().is_empty());
 }

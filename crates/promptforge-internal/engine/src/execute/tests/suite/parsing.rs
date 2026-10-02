@@ -4,9 +4,10 @@
 
 use std::num::NonZeroU32;
 
+use promptforge_lua::LuaProgram;
 use promptforge_parser::detail;
 
-use crate::parser::{LuaProgram, Prompt};
+use crate::parser::Prompt;
 
 struct ValidFixture {
     name: &'static str,

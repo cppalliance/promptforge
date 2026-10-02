@@ -16,7 +16,7 @@ fn lua_with_compactors() -> Lua {
 }
 
 /// Extracts the typed crate error a `compactors.fail` raise brought across
-/// the Lua boundary (LUA-012: the typed error, never its flattened text).
+/// the Lua boundary (the typed error, never its flattened text).
 /// mlua wraps a callback's error in `CallbackError` for the traceback; the
 /// original external error is kept as its cause.
 fn raised_crate_error_ref(error: &mlua::Error) -> &Error {

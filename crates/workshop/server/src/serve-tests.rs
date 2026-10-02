@@ -69,7 +69,7 @@ async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
     server.shutdown().expect("graceful shutdown succeeds");
 }
 
-/// The `-wal` sidecar the workspace file's engine keeps beside `path`
+/// The `-wal` sidecar the workspace file's database keeps beside `path`
 /// while the file is open.
 fn wal_of(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
@@ -395,7 +395,7 @@ async fn a_non_loopback_bind_fails_spawn_before_state_is_composed() {
 }
 
 /// The server may only ever bind to loopback: a wildcard or LAN address
-/// would expose the workshop to other hosts. `reuse_bind` refuses those
+/// would expose the workshop to other machines. `reuse_bind` refuses those
 /// before it creates a socket, so the error is `InvalidInput` rather than
 /// a late bind failure.
 #[tokio::test]

@@ -46,7 +46,7 @@ fn tool_output_has_mandatory_trust() {
 fn tool_catalog_is_send_and_sync() {
     // The public catalog must stay `Send + Sync` so downstream callers can
     // share it across tasks; a representation change that dropped either
-    // auto trait would fail to compile here (tools.rs F6).
+    // auto trait would fail to compile here.
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<ToolCatalog>();
 }

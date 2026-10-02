@@ -1,7 +1,7 @@
 //! The desktop app's workshop-server configuration: `workshop.toml` discovery
 //! and the forced ephemeral loopback bind.
 //!
-//! The desktop app hosts the workshop server in-process, so the listener
+//! The desktop app runs the workshop server in-process, so the listener
 //! settings are the desktop app's own: the bind is always `127.0.0.1:0` (an
 //! OS-assigned port - a fixed port is a conflict class the
 //! single-instance handoff cannot close). A discovered `workshop.toml` still

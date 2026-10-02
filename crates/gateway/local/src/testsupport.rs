@@ -43,12 +43,12 @@ fn parse_range_start(request: &[u8]) -> Option<u64> {
 
 impl FakeServer {
     /// A server that ignores `Range` headers and always answers 200 with the
-    /// full body, like a bare static host.
+    /// full body, like a bare file server.
     pub(crate) fn new(body: &[u8]) -> Self {
         Self::serve(body, false)
     }
 
-    /// A server that honors `Range: bytes=<start>-` like a real static host:
+    /// A server that honors `Range: bytes=<start>-` like a real file server:
     /// 206 with the tail and a `Content-Range` header, 416 when the start is
     /// at or past the end of the body.
     pub(crate) fn new_range_aware(body: &[u8]) -> Self {

@@ -12,11 +12,11 @@ The gateway discovery seam: the `gateway.json` discovery file, the launch lock, 
 
 ## promptforge
 
-The PromptForge API: the one promptforge crate outside crates may name. A facade of single-item re-exports grouped into documented role modules - prompt parsing, the sans-IO `Run` state machine that executes sections as effects a host performs, and the effect, event, model, transport, tool, capability, and vfs vocabulary those effects carry. The harness and the workshop crates reach the engine only through it. Its surface is committed as `public-api.txt` and checked by `cargo xtask api --check`. Depends on the crates in `promptforge-internal/` that define what it re-exports. The first-party capabilities and the tool implementations behind a run live in the harness, not here.
+The PromptForge API: the one promptforge crate outside crates may name. A facade of single-item re-exports grouped into documented role modules - prompt parsing, the sans-IO `Run` state machine that executes sections as effects the Harness performs, and the effect, event, model, transport, tool, capability, and vfs vocabulary those effects carry. The Harness and the workshop crates reach the Engine only through it. Its surface is committed as `public-api.txt` and checked by `cargo xtask api --check`. Depends on the crates in `promptforge-internal/` that define what it re-exports. The first-party capabilities and the tool implementations behind a run live in the Harness, not here.
 
 ## shared-error-source
 
-The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSource`, one crate-owned newtype per third-party error (`serde_json`, `reqwest`, `turso`) a public error surface would otherwise name. Each sits behind its own feature (`json`, `http`, `database`) so a consumer takes only the third-party dependency it already has. The workshop and gateway families wrap their causes through it; the harness owns its own wrappers so `promptforge` stays its only outside dependency. No workspace dependencies - that independence is what keeps it off the cross-family edge.
+The shared error-source wrappers: `JsonSource`, `HttpSource`, and `DatabaseSource`, one crate-owned newtype per third-party error (`serde_json`, `reqwest`, `turso`) a public error surface would otherwise name. Each sits behind its own feature (`json`, `http`, `database`) so a consumer takes only the third-party dependency it already has. The workshop and gateway families wrap their causes through it; the Harness owns its own wrappers so `promptforge` stays its only outside dependency. No workspace dependencies - that independence is what keeps it off the cross-family edge.
 
 ## shared-loopback
 
@@ -44,6 +44,6 @@ The desktop release orchestrator: builds the gateway, stages the sidecar, builds
 
 ## build-xtask
 
-Workspace automation: the new-crate scaffolder, the tidy checks (tier graph, lint inheritance, file ceiling), and the product-boundary matrix. `cargo test -p build-xtask` is the structural harness every change runs. No workspace dependencies.
+Workspace automation: the new-crate scaffolder, the tidy checks (tier graph, lint inheritance, file ceiling), and the product-boundary matrix. `cargo test -p build-xtask` runs the structural checks every change must pass. No workspace dependencies.
 
 Note: `shared-ui` is not a Rust crate - it is the TypeScript+CSS package the Gateway config UI consumes (the Workshop uses its fork, `workshop/look`), so the `crates/*` member glob skips it.

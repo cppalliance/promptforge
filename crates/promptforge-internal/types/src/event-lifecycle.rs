@@ -6,8 +6,8 @@
 //! of the matching [`Event`] variant, declared once from one list so a
 //! boundary cannot gain a constant without gaining a variant.
 //!
-//! An emit-site vocabulary for the engine crates; the facade does not
-//! re-export it. A host reads the events themselves.
+//! An emit-site vocabulary for the Engine crates; the facade does not
+//! re-export it. The Harness reads the events themselves.
 
 use super::Event;
 use crate::ids::Provenance;
@@ -72,23 +72,22 @@ lifecycle_constants! {
     MODEL_CATALOG_VALIDATION_STARTED => ModelCatalogValidationStarted,
     MODEL_CATALOG_VALIDATION_SUCCEEDED => ModelCatalogValidationSucceeded,
     MODEL_CATALOG_VALIDATION_FAILED => ModelCatalogValidationFailed,
-    STORE_WRITE_SUCCEEDED => StoreWriteSucceeded,
-    STORE_WRITE_FAILED => StoreWriteFailed,
-    STORE_APPEND_SUCCEEDED => StoreAppendSucceeded,
-    STORE_APPEND_FAILED => StoreAppendFailed,
-    STORE_READ_SUCCEEDED => StoreReadSucceeded,
-    STORE_READ_FAILED => StoreReadFailed,
-    STORE_READ_NUMBERED_SUCCEEDED => StoreReadNumberedSucceeded,
-    STORE_READ_NUMBERED_FAILED => StoreReadNumberedFailed,
-    STORE_REPLACE_SUCCEEDED => StoreReplaceSucceeded,
-    STORE_REPLACE_FAILED => StoreReplaceFailed,
-    STORE_DELETE_SUCCEEDED => StoreDeleteSucceeded,
-    STORE_DELETE_FAILED => StoreDeleteFailed,
-    STORE_GLOB_SUCCEEDED => StoreGlobSucceeded,
-    STORE_GLOB_FAILED => StoreGlobFailed,
-    STORE_EXISTS_SUCCEEDED => StoreExistsSucceeded,
-    STORE_EXISTS_FAILED => StoreExistsFailed,
-    USER_INPUT_WAIT_STARTED => UserInputWaitStarted,
+    VFS_WRITE_SUCCEEDED => VfsWriteSucceeded,
+    VFS_WRITE_FAILED => VfsWriteFailed,
+    VFS_APPEND_SUCCEEDED => VfsAppendSucceeded,
+    VFS_APPEND_FAILED => VfsAppendFailed,
+    VFS_READ_SUCCEEDED => VfsReadSucceeded,
+    VFS_READ_FAILED => VfsReadFailed,
+    VFS_READ_NUMBERED_SUCCEEDED => VfsReadNumberedSucceeded,
+    VFS_READ_NUMBERED_FAILED => VfsReadNumberedFailed,
+    VFS_REPLACE_SUCCEEDED => VfsReplaceSucceeded,
+    VFS_REPLACE_FAILED => VfsReplaceFailed,
+    VFS_DELETE_SUCCEEDED => VfsDeleteSucceeded,
+    VFS_DELETE_FAILED => VfsDeleteFailed,
+    VFS_GLOB_SUCCEEDED => VfsGlobSucceeded,
+    VFS_GLOB_FAILED => VfsGlobFailed,
+    VFS_EXISTS_SUCCEEDED => VfsExistsSucceeded,
+    VFS_EXISTS_FAILED => VfsExistsFailed,
 }
 
 #[cfg(test)]

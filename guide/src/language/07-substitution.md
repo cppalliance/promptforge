@@ -695,7 +695,7 @@ caught
 
 Here `ok` is `false`, `err.kind` is `lua`, and `tostring(err)` is `missing {{ var.missing }} [MissingKey at byte 9]`, so a block can also inspect the text before deciding what to do. The bracketed part is explained under Reading the error text below.
 
-Left uncaught, the failure ends the run with the run error kind `Lua`, and the run's message names the failing placeholder, such as `missing {{ var.missing }}`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), the run ends as `RequirementsUnmet` instead, with that message as its notice. Substitution has no run error kind of its own; [How a failed run is classified](17-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
+Left uncaught, the failure ends the run with the run error kind `Lua`, and the run's message names the failing placeholder, such as `missing {{ var.missing }}`. In the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), the run ends as `RequirementsUnmet` instead, with that message as its notice. Substitution has no run error kind of its own; [How a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified) lists every run error kind.
 
 `prose` is not a substitution source. A `{{ prose }}` placeholder inside the prose makes the read fail, catchable with `pcall`, with substitution kind `Serialize` and the message `global 'prose' in {{ prose }} is not JSON data`.
 

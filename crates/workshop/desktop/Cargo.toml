@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop desktop app: hosts the workshop server in-process and opens the workshop window"
+description = "PromptForge Workshop desktop app: runs the workshop server in-process and opens the workshop window"
 
 [[bin]]
 name = "promptforge-workshop"
@@ -90,5 +90,6 @@ unwrap_used = "deny"
 expect_used = "deny"
 dbg_macro = "warn"
 doc_markdown = "allow"
+assert_is_empty = "allow"
 undocumented_unsafe_blocks = "deny"
 missing_safety_doc = "deny"

@@ -380,7 +380,7 @@ export function createCloudModelsPage(deps: CloudModelsPageDeps): CloudModelsPag
    * from the sheet and is required when the sheet lacks it, description
    * shows and edits). Submit merges and stages via PUT /admin/config;
    * shadow-save validation errors surface verbatim and the dialog stays
-   * open. Hosted in `main`; a re-render replaces it.
+   * open. Mounted in `main`; a re-render replaces it.
    */
   const openAddDialog = (
     providerName: string,

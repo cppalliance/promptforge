@@ -68,7 +68,7 @@ pub(crate) fn routes(state: SessionsState) -> Router {
     .with_state(state)
 }
 
-/// The sessions subsystem's registration guards: its routes, the harness
+/// The sessions subsystem's registration guards: its routes, the Harness
 /// every agent session runs in, and the agent-session opener. Dropping
 /// them deregisters the subsystem.
 #[derive(Debug)]
@@ -76,14 +76,14 @@ pub(crate) fn routes(state: SessionsState) -> Router {
 pub(crate) struct SessionsRegistrations {
     /// The `/v1/models` and `/agents/ws` route registrar.
     pub(crate) routes: Registration,
-    /// The harness as a state handle.
+    /// The Harness as a state handle.
     pub(crate) harness: Registration,
     /// The agent-session opener as a state handle.
     pub(crate) agents: Registration,
 }
 
 /// Registers the sessions subsystem into the registry: its routes, merged
-/// into the server's API router, the harness every agent session runs in,
+/// into the server's API router, the Harness every agent session runs in,
 /// and the agent-session opener, both as state handles. The returned
 /// guards keep the registrations alive; the composition root holds them
 /// for the process lifetime.
@@ -108,7 +108,7 @@ pub(crate) fn register(
 
 /// Registers the sessions subsystem's background task: the bindings
 /// forwarder that pushes the server's gateway binding, chat catalog, and
-/// host snapshot into the registered harness again on every replacement.
+/// Host snapshot into the registered Harness again on every replacement.
 /// The task spawns when the server starts serving and stops inside the
 /// graceful-shutdown signal. The returned guard keeps the registration
 /// alive; the composition root holds it for the process lifetime.

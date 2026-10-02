@@ -72,7 +72,7 @@ pub(crate) fn prepare_scoped_tools(
             .model_description()
             .unwrap_or_else(|| binding.description())
             .to_owned();
-        // F7: build every advertised schema through the validated constructor,
+        // Build every advertised schema through the validated constructor,
         // so an unusable wire name or a non-object JSON Schema is refused here
         // rather than sent to the model.
         let schema = tool_schema_new(

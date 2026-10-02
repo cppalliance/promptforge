@@ -125,7 +125,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 The plan grew out of a code review of `promptforge-core-support`, followed by a dedicated public-API review. The reviews judged the crate high-quality (strong docs, property tests, a pinned lost-wakeup regression) and surfaced the four actions the plan carries. Two review judgments explain the shape of the changes:
 
-- The `GuardNonce` secrecy argument only justifies hiding *construction*, not *reading*: the nonce's hex digits already appear verbatim in every envelope and preface, so exposing them "weakens nothing" (paraphrase of the review). The concrete cost of hiding was that hosts could not correlate a suspicious envelope back to a run in logs, and downstream tests had to parse the nonce out of the envelope. Hence `Display` (chosen over a public `as_str`) plus trivially derivable `Eq`/`Hash`.
+- The `GuardNonce` secrecy argument only justifies hiding *construction*, not *reading*: the nonce's hex digits already appear verbatim in every envelope and preface, so exposing them "weakens nothing" (paraphrase of the review). The concrete cost of hiding was that Hosts could not correlate a suspicious envelope back to a run in logs, and downstream tests had to parse the nonce out of the envelope. Hence `Display` (chosen over a public `as_str`) plus trivially derivable `Eq`/`Hash`.
 - The free `wrap` was soft-deprecated rather than deleted because the crate carries crates.io publish metadata; only two production call sites existed, so migration was cheap.
 
 ## The decisive user inputs (verbatim)

@@ -12,7 +12,7 @@
 //! with nothing deployed yields an empty list. Cataloguing what Foundry
 //! offers is anonymous, so the descriptor leaves `env_vars` empty.
 //!
-//! Two filters keep the response to the models Azure hosts itself:
+//! Two filters keep the response to the models Azure serves itself:
 //! `Labels=latest` drops superseded versions and
 //! `AzureOffers=standard-paygo` drops the mirrored HuggingFace registry,
 //! the bulk of the 15k-row unfiltered catalog. Ordering is by name, not
@@ -56,9 +56,9 @@ const MODELS_PATH: &str = "/asset-gallery/v1.0/models";
 /// so this bounds a full fetch to a handful of pages.
 const PAGE_SIZE: u32 = 100;
 
-/// The offer label marking a model Azure hosts and bills itself, as
+/// The offer label marking a model Azure serves and bills itself, as
 /// opposed to a mirrored registry entry that is merely listed.
-const HOSTED_OFFER: &str = "standard-paygo";
+const SERVED_OFFER: &str = "standard-paygo";
 
 /// Fetches and normalizes Foundry's catalog, following the continuation
 /// token until the final page; the endpoint is keyless, so no
@@ -97,7 +97,7 @@ fn request_body(continuation_token: Option<&str>) -> serde_json::Value {
     let mut body = serde_json::json!({
         "filters": [
             { "field": "Labels", "values": ["latest"], "operator": "eq" },
-            { "field": "AzureOffers", "values": [HOSTED_OFFER], "operator": "eq" }
+            { "field": "AzureOffers", "values": [SERVED_OFFER], "operator": "eq" }
         ],
         "order": [{ "field": "Name", "direction": "asc" }],
         "pageSize": PAGE_SIZE
@@ -365,8 +365,8 @@ mod tests {
         assert_eq!(first["pageSize"], serde_json::json!(PAGE_SIZE));
         assert_eq!(
             first["filters"][1]["values"][0],
-            serde_json::json!(HOSTED_OFFER),
-            "the hosted-offer filter drops the mirrored registry"
+            serde_json::json!(SERVED_OFFER),
+            "the served-offer filter drops the mirrored registry"
         );
         assert_eq!(
             first["order"][0]["field"], "Name",

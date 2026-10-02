@@ -12,7 +12,7 @@ todos:
     content: Remove unused prompt version metadata
     status: completed
   - id: core-tests-crate
-    content: Create the promptforge-core-tests fixture harness
+    content: Create the promptforge-core-tests fixtures
     status: completed
   - id: execution-fixtures
     content: Add offline execution prompt fixtures
@@ -42,7 +42,7 @@ isProject: false
 1. **Observer correlation.** Execution IDs must exist before Lua logs or fixture traces can be correlated.
 2. **Lua diagnostics.** `log()` depends on the correlated observer seam and supplies checkpoints consumed by execution fixtures.
 3. **Prompt metadata cleanup.** Removing author `version` establishes the final grammar before canonical fixture files are accepted.
-4. **Model-test fixture harness.** The new crate depends on the final parser API and grammar.
+4. **Model-test fixtures.** The new crate depends on the final parser API and grammar.
 5. **Offline execution fixture catalog.** Deterministic fixtures depend on observer IDs, Lua logging, final metadata, and the new crate.
 6. **Artifact provisioner.** Cached llama-server and model downloads depend on a stable test-crate boundary but remain outside normal `cargo test`.
 7. **Real-model runner.** Tool-call tests depend on the provisioner, fixtures, and a healthy local llama-server.
@@ -157,7 +157,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
    - Update parser, catalog, result, registry, server, CLI, MCP, README, STATUS, and design documentation.
    - Complete when author `version` has no Rust or wire representation and every engine-version test still passes.
 
-4. **Create the core-tests crate and prompt-file harness**
+4. **Create the core-tests crate and prompt-file fixtures**
    - Add unpublished workspace member `crates/promptforge-core-tests` with an explicit binary entry point and offline unit tests.
    - Move `promptforge-core/tests/valid/1.md` to `promptforge-core-tests/prompts/valid/minimal.md`.
    - Register fixtures explicitly with `include_str!`.
@@ -237,7 +237,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 <project-review>
 1. Does the commit implement only its numbered step?
 2. Does every behavior have a regression test that fails without it?
-3. Is `promptforge:` engine gating unchanged and fully tested?
+3. Is `promptforge:` Engine gating unchanged and fully tested?
 4. Is author `version` absent after step 3 without removing unrelated protocol or package versions?
 5. Does every observer report carry the correct execution ID without changing execution decisions?
 6. Does observer synchronization remain inside each concrete observer, with no core-global logging mutex?
@@ -267,4 +267,4 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 7. Continue immediately to the next step without asking the user. A bug discovered from an earlier completed commit gets its own fix commit.
 8. After ten failed code-and-test attempts on one problem, dispatch external research and change direction only when evidence supports it; ask only for a hard-to-reverse unresolved choice.
 
-Confidence: high - the current code inventory shows author `version` has no behavioral consumer, observer plumbing is the only concurrency seam, Lua phases already support scoped host callbacks, and the existing inline tests leave a clear author-document integration gap.
+Confidence: high - the current code inventory shows author `version` has no behavioral consumer, observer plumbing is the only concurrency seam, Lua phases already support scoped Engine functions, and the existing inline tests leave a clear author-document integration gap.

@@ -58,7 +58,7 @@ impl RunLifecycle {
 
     /// Arms the cancellation handle for `run` and returns it: the handle
     /// is the only way the armed run observes a later cancel. It is the
-    /// engine's own flag, so the run's context polls it and the effect
+    /// Engine's own flag, so the run's context polls it and the effect
     /// loop awaits it with no bridge between.
     #[must_use]
     pub fn arm(&self, run: RunId) -> CancelHandle {

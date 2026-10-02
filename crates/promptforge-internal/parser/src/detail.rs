@@ -1,15 +1,15 @@
-//! Operations on the parser's host-visible types that only the engine
-//! performs.
+//! Operations on the parser's facade-visible types that only
+//! `promptforge-engine` performs.
 //!
-//! The `promptforge` facade never re-exports this module, so nothing here
-//! is reachable from a host.
+//! The `promptforge` facade never re-exports this module, so only Engine
+//! crates reach it.
 
 use crate::{
     Block, Error, Frontmatter, LuaProgram, MaxToolIterations, ParseError, Prompt, Section,
 };
 
 /// Unwraps a parse failure into the internal error it classifies, so the
-/// engine can map it onto its own internal error type variant for variant.
+/// Engine can map it onto its own internal error type variant for variant.
 #[must_use]
 pub fn parse_error_into_inner(error: ParseError) -> Error {
     error.into_inner()
@@ -39,7 +39,7 @@ pub fn entry(prompt: &Prompt) -> Option<&Section> {
     prompt.entry()
 }
 
-/// Returns the frontmatter's tool-loop cap in the form the engine resolves
+/// Returns the frontmatter's tool-loop cap in the form the Engine resolves
 /// against its own default.
 #[must_use]
 pub fn max_tool_iterations(frontmatter: &Frontmatter) -> MaxToolIterations {

@@ -1,6 +1,6 @@
 //! `{{ }}` prose substitution.
 //!
-//! When a section's Lua first reads the lazy `prose` value, the harness
+//! When a section's Lua first reads the lazy `prose` value, the Engine
 //! resolves `{{ path }}` placeholders in the pending Markdown template. Lua
 //! source is never substituted. Five sources are available:
 //! `args` (the single raw input string), `argv` (its parsed JSON form, nil
@@ -9,7 +9,7 @@
 //! and `sys`
 //! (runtime-provided metadata). An unknown first segment resolves as a bare
 //! global: a section-local Lua global (`x = 42` without `local`) read through
-//! a host-supplied lookup, with dotted paths indexing into its JSON form.
+//! a caller-supplied lookup, with dotted paths indexing into its JSON form.
 //! Resolution is a single pass with no recursion:
 //! scalars render as strings, tables/arrays as JSON, and a missing path is a
 //! hard error. `{{ item }}` outside a fanout arm is a hard error. A missing
@@ -235,7 +235,7 @@ fn nil_argv<'a>(argv: Option<&'a Value>, path: &str, offset: usize) -> SubstResu
     })
 }
 
-/// Resolves an unknown first segment as a bare global: the host lookup
+/// Resolves an unknown first segment as a bare global: the caller's lookup
 /// reads the section-local Lua global and converts it to JSON.
 fn bare_global_root(
     name: &str,
@@ -309,7 +309,7 @@ fn resolve(path: &str, offset: usize, sources: &Sources<'_>) -> SubstResult<Stri
         None => (path, None),
     };
 
-    // An unknown first segment resolves as a bare global: the host lookup
+    // An unknown first segment resolves as a bare global: the caller's lookup
     // reads the section-local Lua global and converts it to JSON.
     let global_value;
     let root = match namespace {

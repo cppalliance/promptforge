@@ -35,7 +35,7 @@ fn emitter() -> Emitter {
     Emitter::root(EventSink::default(), "bench", DebugMode::Off)
 }
 
-/// A section VM with host values injected, so the `messages` namespace is
+/// A section VM with Engine values injected, so the `messages` namespace is
 /// installed as the executor installs it.
 fn builder_vm() -> SectionVm {
     let mut vm = SectionVm::new_for_section(
@@ -46,7 +46,7 @@ fn builder_vm() -> SectionVm {
         SECTION,
     )
     .expect("the bench VM builds");
-    vm.inject_host(
+    vm.inject_values(
         "",
         &json!({}),
         &std::sync::Arc::new(
@@ -55,7 +55,7 @@ fn builder_vm() -> SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("host injection installs the messages namespace");
+    .expect("value injection installs the messages namespace");
     vm
 }
 

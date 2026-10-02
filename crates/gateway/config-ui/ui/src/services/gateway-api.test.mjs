@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { jsonResponse, loadApp } from "../harness.mjs";
+import { jsonResponse, loadApp } from "../test-support.mjs";
 
 /** A minimal Storage stand-in holding one verified key. */
 function storageShim() {

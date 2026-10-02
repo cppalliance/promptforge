@@ -311,7 +311,7 @@ fn speech_fallback_mime(
     })
 }
 
-/// Bearer-authed union of the active profile's speech voices for host
+/// Bearer-authed union of the active profile's speech voices for catalog
 /// bind: every `kind = "speech"` model's configured `voices`, deduplicated
 /// and sorted, as id-first `{"id", "name"}` entries under
 /// `{"voices": [...]}`.

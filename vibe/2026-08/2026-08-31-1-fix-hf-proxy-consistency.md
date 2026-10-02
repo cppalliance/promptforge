@@ -96,7 +96,7 @@ GET /admin/hf/model/{owner}/{name}/readme  (new)
 - `hf.rs`: existing `admin_hf_model` tests updated for `{owner}/{name}` extraction (behavior unchanged)
 - UI: chip-input blur-commit and filtered-blur-rejection
 - UI: secret field toggle button renders and toggles `input.type`
-- UI: discover README renders through the proxy (harness returns markdown for the stub repo)
+- UI: discover README renders through the proxy (the test double returns markdown for the stub repo)
 
 ## Bug 4: whisper stderr corrupts indicatif progress bars
 

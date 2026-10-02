@@ -5,13 +5,12 @@
 //! `records` holds, per run, every effect, answer, and event in effect-loop
 //! order. `seq` is the loop's order, not the clock's; `at` is the wall
 //! clock at append, kept for display only. `(task_id, task_seq)` is the
-//! record's `Provenance`, so a run can be sliced by task and ordered within
-//! one without inspecting the payload.
+//! record's `Provenance`, stored beside the payload.
 //!
 //! Every integer that is a `u64` in Rust (`seed`, `effect_id`) is stored
 //! as its two's-complement `i64` reinterpretation, since SQLite integers
 //! are signed; see `append::signed` and `append::unsigned`. `task_id` is
-//! the engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
+//! the Engine's hierarchical task path (`0`, `0.2`, `0.2.1`) stored as
 //! text, since a path of unbounded depth has no integer form. Timestamps
 //! are UTC milliseconds since the Unix epoch.
 
@@ -43,8 +42,6 @@ CREATE TABLE IF NOT EXISTS records (
     at        INTEGER NOT NULL,
     PRIMARY KEY (run_id, seq)
 );
-
-CREATE INDEX IF NOT EXISTS records_by_task ON records (run_id, task_id, task_seq);
 ";
 
 /// Opens a run: every column of `runs` that `begin_run` knows.
@@ -84,11 +81,3 @@ pub(crate) const SELECT_RECORDS: &str = "SELECT \
     seq, task_id, task_seq, kind, effect_id, payload, at \
     FROM records WHERE run_id = ?1 AND (?2 IS NULL OR kind = ?2) \
     ORDER BY seq DESC LIMIT ?3";
-
-/// One task's records, newest first by `task_seq`, with the same kind
-/// (`?3`) and count (`?4`) parameters as [`SELECT_RECORDS`]. Served by
-/// `records_by_task`. Columns in [`crate::read`]'s order.
-pub(crate) const SELECT_TASK_RECORDS: &str = "SELECT \
-    seq, task_id, task_seq, kind, effect_id, payload, at \
-    FROM records WHERE run_id = ?1 AND task_id = ?2 AND (?3 IS NULL OR kind = ?3) \
-    ORDER BY task_seq DESC, seq DESC LIMIT ?4";

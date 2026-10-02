@@ -29,7 +29,7 @@ const PARKED: Duration = Duration::from_secs(1);
 
 /// Every task observation the recorder saw, as `(label, task id)` pairs in
 /// order, so a test can pair each started arm with its terminals.
-fn task_events(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
+fn task_lifecycle(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
     recorder
         .records()
         .into_iter()
@@ -48,7 +48,7 @@ fn task_events(recorder: &TaskRecorder) -> Vec<(&'static str, TaskId)> {
 /// task appears (with an empty list when it has no terminal); a terminal
 /// for a task that never started fails the test.
 fn terminals_per_started_task(recorder: &TaskRecorder) -> BTreeMap<TaskId, Vec<&'static str>> {
-    let events = task_events(recorder);
+    let events = task_lifecycle(recorder);
     let mut terminals: BTreeMap<TaskId, Vec<&'static str>> = BTreeMap::new();
     for (label, task) in &events {
         if *label == "started" {
@@ -75,13 +75,13 @@ fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// A scheduler context and its observing host with the run's concurrency
+/// A scheduler context and its observing Harness with the run's concurrency
 /// ceiling narrowed to `ceiling` admitted tasks.
 fn ceiling_context(
     prompt: &Prompt,
     ceiling: usize,
     observer: Arc<dyn Observer>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     scheduler_context_from(
         prompt,
         &TestStore::new(),
@@ -89,7 +89,7 @@ fn ceiling_context(
             RunLimits::new()
                 .max_concurrency(NonZeroUsize::new(ceiling).expect("the ceiling is non-zero")),
         ),
-        RunHost::new().observer(observer),
+        RunHarness::new().observer(observer),
     )
 }
 
@@ -123,8 +123,8 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the ceilinged fanout completes");
@@ -173,10 +173,10 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
+    let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr()))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -199,7 +199,7 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
             (task("0.1"), vec!["cancelled"]),
         ]),
         "each started arm has exactly one terminal and the queued arm never started: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }
 
@@ -228,12 +228,12 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = scheduler_context_on(
+    let (ctx, harness) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, None)
+    let out = TokioDriver::new(&ctx, harness, None)
         .drive()
         .await
         .expect("the nested fanout completes");
@@ -254,7 +254,7 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
             (task("0.1.1"), vec!["succeeded"]),
         ]),
         "two outer and four inner arms each start and succeed once: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }
 
@@ -281,16 +281,16 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         ```lua\nreturn sys.id\n```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = scheduler_context_on(
+    let (ctx, harness) = scheduler_context_on(
         &prompt,
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the identity prompt completes");
-    let succeeded = task_events(&recorder)
+    let succeeded = task_lifecycle(&recorder)
         .into_iter()
         .filter(|(label, _)| *label == "succeeded")
         .map(|(_, task)| task)
@@ -385,12 +385,12 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         ```\n";
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = loop_context_observed(
+    let (ctx, harness) = loop_context_observed(
         &prompt,
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("three looping arms complete");
@@ -441,6 +441,6 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
             (task("0.2"), vec!["succeeded"]),
         ]),
         "three arms each succeed once: {:?}",
-        task_events(&recorder)
+        task_lifecycle(&recorder)
     );
 }

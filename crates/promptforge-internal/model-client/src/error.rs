@@ -6,8 +6,9 @@
 //! preserve it as their source. It is public so a transport can build the
 //! [`CompletionError`](crate::model::CompletionError) it answers with, and
 //! so `promptforge-engine` can map every variant back onto its own
-//! internal type verbatim. It is not marked `#[non_exhaustive]`, so that
-//! mapping stays total.
+//! internal type verbatim. It is `#[non_exhaustive]`, so a variant can be
+//! added without breaking a transport; a `match` over it outside this
+//! crate ends in a wildcard arm.
 
 /// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -26,7 +27,7 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// - while reading its configuration: [`MissingEnv`](Error::MissingEnv),
 ///   [`InvalidEnv`](Error::InvalidEnv), [`Config`](Error::Config), and
 ///   [`InvalidConfig`](Error::InvalidConfig)
-/// - when the host turned gateway access off:
+/// - when the Host turned gateway access off:
 ///   [`GatewayDisabled`](Error::GatewayDisabled)
 /// - when a send or a read fails: [`Http`](Error::Http), wrapping a
 ///   timeout in [`ClientTimeout`](Timeout) first
@@ -37,10 +38,11 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 ///   [`MalformedResponse`](Error::MalformedResponse) or
 ///   [`MalformedResponseSource`](Error::MalformedResponseSource)
 ///
-/// The read loop and the engine raise the rest. The engine maps every
-/// variant onto its own error type, so the enum is not
-/// `#[non_exhaustive]`.
+/// The read loop, the completion constructors, and the Engine raise the
+/// rest. The enum is `#[non_exhaustive]`: a `match` over it outside this
+/// crate needs a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A required environment variable was missing.
     #[error("missing environment variable: {0}")]
@@ -56,8 +58,7 @@ pub enum Error {
 
     /// A client or endpoint configuration input was invalid, retaining the
     /// concrete cause (a secret or URL validation failure) as a private
-    /// `#[source]` (client F13 / AUDIT-DISCARDED-SOURCE) instead of flattening
-    /// it into the message.
+    /// `#[source]` instead of flattening it into the message.
     #[error("{message}")]
     Config {
         /// The human-readable configuration diagnostic (no raw source dump).
@@ -68,7 +69,7 @@ pub enum Error {
         source: BoxedSource,
     },
 
-    /// Gateway access was explicitly disabled by the host.
+    /// Gateway access was explicitly disabled by the Host.
     #[error("gateway access is disabled")]
     GatewayDisabled,
 
@@ -78,7 +79,7 @@ pub enum Error {
 
     /// The backend returned a non-success status.
     ///
-    /// The `Display` is deliberately body-free (F5): the bounded,
+    /// The `Display` is deliberately body-free: the bounded,
     /// control-escaped body is stored only in the private `body` field,
     /// reachable through the explicit
     /// [`crate::model::CompletionError::backend_body`] opt-in, so a raw or
@@ -99,8 +100,8 @@ pub enum Error {
     ///
     /// Like [`Error::MalformedResponse`] but retains the underlying decode
     /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
-    /// rather than flattening it into the message (MODEL-009 / client F11), so
-    /// the error chain survives through the public wrappers' `source()`.
+    /// rather than flattening it into the message, so the error chain
+    /// survives through the public wrappers' `source()`.
     #[error("malformed response: {message}")]
     MalformedResponseSource {
         /// The human-readable diagnostic (no raw body).
@@ -114,10 +115,9 @@ pub enum Error {
     /// layer.
     ///
     /// Retains the transport's own read error as the `#[source]` cause
-    /// (MODEL-010) rather than flattening the read failure into display
-    /// text, so the error chain (timeout, connection reset) survives. The
-    /// status the backend had already returned is preserved for
-    /// classification.
+    /// rather than flattening the read failure into display text, so the
+    /// error chain (timeout, connection reset) survives. The status the
+    /// backend had already returned is preserved for classification.
     #[error("unreadable backend error body (status {status})")]
     BackendBodyRead {
         /// The non-success HTTP status whose body could not be read.
@@ -144,7 +144,7 @@ pub enum Error {
 
     /// A lock on the shared model set was poisoned.
     ///
-    /// `Display` is the bare message so the engine can reclassify the
+    /// `Display` is the bare message so the Engine can reclassify the
     /// failure onto its own Lua-layer variant without a wording change.
     #[error("{0}")]
     ModelSetLock(String),

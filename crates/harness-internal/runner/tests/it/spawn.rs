@@ -6,14 +6,14 @@ use promptforge::Step;
 use promptforge::effect::EffectId;
 use promptforge::ids::Provenance;
 
-use crate::support::run;
+use crate::support::{WAITS, run};
 
-/// The id and provenance of a real issued effect: the one input wait a
-/// `user_input()` section parks on.
+/// The id and provenance of a real issued effect: the one tool call a
+/// section parks on.
 fn tag() -> (EffectId, Provenance) {
-    let mut run = run("return user_input()");
+    let mut run = run(WAITS);
     let Step::Pending { mut effects, .. } = run.step() else {
-        panic!("the input wait leaves the run pending");
+        panic!("the tool call leaves the run pending");
     };
     let (id, provenance, _effect) = effects.remove(0);
     (id, provenance)

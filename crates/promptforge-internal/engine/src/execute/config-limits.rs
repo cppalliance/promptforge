@@ -67,11 +67,11 @@ impl RunLimits {
     #[must_use]
     pub fn new() -> RunLimits {
         RunLimits {
-            max_tool_iterations: nz_u32(24),
-            concurrency: nz_usize(8),
-            max_response_bytes: nz_u64(16 * 1024 * 1024),
-            lua_memory_bytes: nz_usize(64 * 1024 * 1024),
-            lua_log_events: nz_u32(1024),
+            max_tool_iterations: const { nz_u32(24) },
+            concurrency: const { nz_usize(8) },
+            max_response_bytes: const { nz_u64(16 * 1024 * 1024) },
+            lua_memory_bytes: const { nz_usize(64 * 1024 * 1024) },
+            lua_log_events: const { nz_u32(1024) },
             request_timeout: Duration::from_secs(120),
         }
     }
@@ -183,8 +183,8 @@ mod tests {
         assert_eq!(defaults.timeout(), Duration::from_secs(120));
 
         let built = RunLimits::new()
-            .max_response_bytes(nz_u64(4 * 1024))
-            .lua_log_events(nz_u32(7))
+            .max_response_bytes(const { nz_u64(4 * 1024) })
+            .lua_log_events(const { nz_u32(7) })
             .request_timeout(Duration::from_secs(5));
         assert_eq!(built.response_bytes().get(), 4 * 1024);
         assert_eq!(built.lua_logs().get(), 7);

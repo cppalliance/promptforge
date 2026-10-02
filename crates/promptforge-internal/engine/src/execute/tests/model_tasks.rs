@@ -14,62 +14,55 @@ use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;
-use crate::input::{InputError, InputOutcome};
 use crate::lua::ToolSet;
-use crate::test_support::TestBroker;
 
-/// A broker that never answers, so a child parked on `user_input()` stays
-/// live until its owner ends or cancels it.
-pub(super) struct NeverBroker;
-
-#[async_trait::async_trait]
-impl TestBroker for NeverBroker {
-    async fn user_input(
-        &self,
-        _execution: &str,
-        _section: &str,
-    ) -> std::result::Result<InputOutcome, InputError> {
-        std::future::pending().await
-    }
-}
-
-/// A child body that parks on operator input the never-answering broker
-/// never gives, so the task stays live until something ends it.
-pub(super) const PARKED_CHILD: &str = "user_input()\nreturn 'never'";
+/// A child body that parks on a call to the never-completing tool, by its
+/// full id, so the task stays live until something ends it.
+pub(super) const PARKED_CHILD: &str = "tools.call('test/tools/slow')\nreturn 'never'";
 
 pub(super) fn task(id: &str) -> TaskId {
     id.parse().expect("a task id parses")
 }
 
-/// The run context and host for a model-task test: the parsed prompt, the
+/// The run context and Harness for a model-task test: the parsed prompt, the
 /// shared model set pre-filled, no bound tools, the recorder as observer,
-/// and the never-answering broker so a parked child stays parked.
+/// and the never-completing tool in the catalog so a parked child stays
+/// parked.
 pub(super) fn model_task_context(
     prompt: &Prompt,
     recorder: &Arc<TaskRecorder>,
-) -> (RunState, RunHost) {
+) -> (RunState, RunHarness) {
     model_task_context_with(
         prompt,
         Arc::clone(recorder) as Arc<dyn Observer>,
-        Arc::new(NeverBroker),
+        Arc::new(SlowTool),
     )
 }
 
-/// [`model_task_context`] under a caller-chosen observer and input broker,
-/// for the suites that time a parked child's release or record content
-/// reports.
+/// [`model_task_context`] under a caller-chosen observer and the tool a
+/// child parks on, for the suites that time a parked child's release or
+/// record content reports. The tool is the run's whole catalog, so a
+/// section calls it by its full id without binding an alias.
 pub(super) fn model_task_context_with(
     prompt: &Prompt,
     observer: Arc<dyn Observer>,
-    broker: Arc<dyn TestBroker>,
-) -> (RunState, RunHost) {
-    let host = RunHost::new().observer(observer).input_broker(broker);
+    park: Arc<dyn TestTool>,
+) -> (RunState, RunHarness) {
+    let (catalog, table) = fixture_tools(&[park]);
+    let (prepared, requirements) = Environment::new()
+        .tools(catalog)
+        .prepare(prompt, test_context(EXECUTION));
+    assert!(
+        requirements.is_satisfied(),
+        "the model-task prompt declares nothing the host must supply: {requirements:?}"
+    );
+    let harness = RunHarness::new().observer(observer).tools(table);
     let ctx = RunState::new(
         Arc::new(prompt.clone()),
         "",
         &TestStore::new().vfs(),
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &test_context(EXECUTION),
+        &prepared,
     );
     *ctx.model_set()
         .lock()
@@ -77,7 +70,7 @@ pub(super) fn model_task_context_with(
     *ctx.tool_set()
         .lock()
         .expect("the tool set mutex is not poisoned") = ToolSet::default();
-    (ctx, host)
+    (ctx, harness)
 }
 
 /// A two-section prompt: `Only` runs the model loop under `frontmatter`
@@ -127,8 +120,8 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the model starts and inspects its task");
@@ -139,13 +132,7 @@ async fn a_scripted_model_starts_a_task_and_reads_its_status() {
     let bodies = gateway.requests();
     assert_eq!(
         advertised(&bodies[0]),
-        vec![
-            "task",
-            "task_cancel",
-            "task_status",
-            "await_tasks",
-            "task_events"
-        ],
+        vec!["task", "task_cancel", "task_status", "await_tasks"],
         "allow_tasks advertises exactly the answered built-ins: {bodies:?}"
     );
     let records = recorder.records();
@@ -182,8 +169,8 @@ async fn a_target_outside_the_allowlist_is_refused_naming_the_allowed_targets() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the refusal is the call's content, not a raise");
@@ -222,8 +209,8 @@ async fn an_owner_that_ends_first_leaves_a_model_task_abandoned_not_cancelled() 
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -278,8 +265,8 @@ async fn an_ending_owner_leaks_its_author_task_and_never_its_model_task() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -352,8 +339,8 @@ async fn an_exhausted_tool_loop_abandons_the_queued_model_task() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let error = scheduler
         .drive()
         .await
@@ -404,8 +391,8 @@ async fn task_cancel_ends_a_model_task_and_reports_it_cancelled() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let mut scheduler = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())));
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
     let out = scheduler
         .drive()
         .await
@@ -451,8 +438,8 @@ async fn the_model_sees_only_its_own_tasks() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    let out = TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("the author's cancel ends its task before the chain ends");
@@ -475,8 +462,8 @@ async fn without_allow_tasks_the_built_ins_are_not_advertised() {
     );
     let prompt = parse(&md);
     let recorder = Arc::new(TaskRecorder::default());
-    let (ctx, host) = model_task_context(&prompt, &recorder);
-    TokioDriver::new(&ctx, host, Some(gateway_client(gateway.addr())))
+    let (ctx, harness) = model_task_context(&prompt, &recorder);
+    TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
         .drive()
         .await
         .expect("a tool-free round completes");

@@ -1,6 +1,6 @@
 # Models
 
-A prompt never names a concrete model. It declares the roles it needs, such as a writer or an analyst, and the host fills each role with its current model before the run starts, so the same prompt runs on whatever model the host provides. This chapter shows you how to declare roles and their requirements, choose the role each section uses, inspect a role through its model handle, set sampling options, and send text to the model with `models.infer`.
+A prompt never names a concrete model. It declares the roles it needs, such as a writer or an analyst, and the Harness fills each role with the model the Host chose before the run starts, so the same prompt runs on whatever model the Host selects. This chapter shows you how to declare roles and their requirements, choose the role each section uses, inspect a role through its model handle, set sampling options, and send text to the model with `models.infer`.
 
 ## Model roles at a glance
 
@@ -32,7 +32,7 @@ return models.infer(prose)
 
 The `models:` frontmatter key declares the model roles the prompt needs. Its value is a map from a role label, a name local to the prompt, to that role's declaration, and `writer: {}` declares a role labeled `writer` with no settings. Lua refers to a role by its label.
 
-At [prepare](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles), the step before the run, the host fills every declared role with its one current model, the model the host chose from its model catalog. A prompt names roles, never a concrete model, and it can declare as many roles as it needs. The host has one current model, so every role is bound to that same model, and what sets roles apart is their settings, which the rest of this chapter covers.
+At [prepare](04-how-a-prompt-runs.md#filling-tool-slots-and-model-roles), the step before the run, the Harness fills every declared role with the Host's one current model, the model the Host chose from its model catalog. A prompt names roles, never a concrete model, and it can declare as many roles as it needs. The Host has one current model, so every role is bound to that same model, and what sets roles apart is their settings, which the rest of this chapter covers.
 
 The block in the H1 body runs in the [H1 pass](04-how-a-prompt-runs.md#the-h1-pass), before any section, and `models.default('writer')` there makes `writer` the prompt-wide default role. Every section that makes no selection of its own uses the default, and so does every model call there that names no model. By convention you call `models.default` from the H1 body, but it works from any section, because the whole run shares one set of roles and one default.
 
@@ -99,15 +99,18 @@ models:
 
 Flow style works too, so a role fits on one line, as in `analyst: { keywords: [no-thinking, creative, chat], min_context: 32000, description: deep reasoning }`. Leave `models:` out of the frontmatter to declare no roles at all.
 
-Give every role under `models:` a distinct label, written in the [name grammar](02-file-structure.md#names-for-aliases-roles-and-args) that every prompt-local name follows: an ASCII letter followed by up to 63 ASCII letters, digits, `_`, or `-`.
+Give every role under `models:` a distinct label, written in the [name grammar](02-file-structure.md#names-for-aliases-roles-and-args) that every prompt-local name follows: an ASCII letter followed by up to 63 ASCII letters, digits, `_`, or `-`. Because each label becomes a Lua global of its own name, a label may not be one of the [reserved names](02-file-structure.md#reserved-names-for-aliases-and-role-labels), such as `models`, `tools`, or `string`, nor an alias under `tools:`.
 
 ### Declaration errors
 
-A mistake inside `models:` fails the parse with a [`Frontmatter`](17-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
+A mistake inside `models:` fails the parse with a [`Frontmatter`](16-limits-and-errors.md#parse-error-kinds) parse error that reports the line and column of the mistake:
 
 - A label used twice fails with ``duplicate model role label `{key}`: contract map keys must be unique``, which names the label.
 - A label outside the name grammar fails with ``invalid model role label `{key}`: expected [A-Za-z][A-Za-z0-9_-]{0,63}``, which names the label and the grammar.
+- A reserved label fails with ``model role label `{key}` in `models` is reserved ({category}): tool aliases and model role labels install as section VM globals, so none may take a reserved name``, which names the label and whether it is an Engine global, a Lua standard-library global, or a Lua keyword.
 - Any other key inside a role, a keyword outside the seven, or a `min_context` of zero also fails the parse, with a message from the YAML reader.
+
+A label that is also a key under `tools:` fails the parse with a `Frontmatter` error too, one that names the label and both maps but reports no line or column, as [Reserved names for aliases and role labels](02-file-structure.md#reserved-names-for-aliases-and-role-labels) shows.
 
 ## Keywords and the thinking switch
 
@@ -141,24 +144,24 @@ return models.infer(prose)
 ```
 ````
 
-`thinking` asks for thinking on, `no-thinking` asks for thinking off, and a role with neither leaves the model's own default. Every model in the host's catalog has one of three thinking modes: it never thinks, it always thinks, or it can switch thinking on and off per request. The switch takes effect on a model that can switch, and there every round under `responder` asks for thinking off, including rounds in sections that reach the role only through the prompt-wide default. If a role lists both hard keywords, the later one in the list sets the switch. Here `fast` records intent and changes nothing.
+`thinking` asks for thinking on, `no-thinking` asks for thinking off, and a role with neither leaves the model's own default. Every model in the Host's catalog has one of three thinking modes: it never thinks, it always thinks, or it can switch thinking on and off per request. The switch takes effect on a model that can switch, and there every round under `responder` asks for thinking off, including rounds in sections that reach the role only through the prompt-wide default. If a role lists both hard keywords, the later one in the list sets the switch. Here `fast` records intent and changes nothing.
 
 ## Requirements at prepare
 
-Hard keywords and `min_context` are requirements. At prepare, the host checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](17-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
+Hard keywords and `min_context` are requirements. At prepare, the Harness checks each role against the model it is bound to, and each unmet requirement becomes one line of the [requirements notice](04-how-a-prompt-runs.md#when-a-run-cannot-start), the text prepare writes when it refuses to start the run. A refused run fails before any of the prompt's blocks run, with run error kind [`RequirementsUnmet`](16-limits-and-errors.md#how-a-failed-run-is-classified). Each line names the role by its label:
 
 - `thinking` needs a model that can think. It is unmet only when the bound model never thinks, and its line is `role '{role}': requires 'thinking'; the current model's thinking capability is Never`.
 - `no-thinking` needs a model that can reply without thinking. It is unmet only when the bound model always thinks, and its line is `role '{role}': requires 'no-thinking'; the current model's thinking capability is Always`.
 - `min_context` is unmet when the bound model's context window is smaller than the minimum, and its line is `role '{role}': requires a context of at least {required} tokens; the current model provides {actual}`. A window equal to the minimum passes.
 
-For example, a role labeled `analyst` with `min_context: 200000`, on a host whose current model has a 32000-token context window, stops the run with this notice:
+For example, a role labeled `analyst` with `min_context: 200000`, on a Host whose current model has a 32000-token context window, stops the run with this notice:
 
 ````text
 the environment cannot satisfy this prompt:
 - role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000
 ````
 
-Both thinking lines have the form `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`, where `{required}` is the keyword and `{actual}` is `Never` or `Always`. A model that can switch thinking satisfies both hard keywords, so a role that lists both still passes on it, and its rounds follow the later keyword. Soft keywords are never checked. Prepare checks only hard keywords and `min_context`, and only when the host provides a current model.
+Both thinking lines have the form `role '{role}': requires '{required}'; the current model's thinking capability is {actual}`, where `{required}` is the keyword and `{actual}` is `Never` or `Always`. A model that can switch thinking satisfies both hard keywords, so a role that lists both still passes on it, and its rounds follow the later keyword. Soft keywords are never checked. Prepare checks only hard keywords and `min_context`, and only when the Host provides a current model.
 
 ## Choosing a section's model
 
@@ -187,7 +190,7 @@ Give a section a selection or a prompt-wide default before it runs a round. A ro
 model binding required for section Only
 ````
 
-Left uncaught, the missing-model error fails the run with run error kind [`Binding`](17-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
+Left uncaught, the missing-model error fails the run with run error kind [`Binding`](16-limits-and-errors.md#how-a-failed-run-is-classified), in the H1 pass as everywhere else. [`pcall`](05-lua-environment.md#catching-and-inspecting-errors) catches it as an error value of kind `internal`:
 
 ````lua
 local ok, result = pcall(models.infer, prose)
@@ -197,7 +200,7 @@ end
 return 'skipped (' .. result.kind .. ')'
 ````
 
-In a section with no selection and no default, this block returns `skipped (internal)`. A conversation run with [`models.loop`](11-conversations.md#a-first-conversation) picks its model in the same order and raises the same error. Prose that is never sent to a model needs no model, and a prompt that makes no round runs even when the host provides no model at all.
+In a section with no selection and no default, this block returns `skipped (internal)`. A conversation run with [`models.loop`](11-conversations.md#a-first-conversation) picks its model in the same order and raises the same error. Prose that is never sent to a model needs no model, and a prompt that makes no round runs even when the Host provides no model at all.
 
 ### One default for the whole run
 
@@ -218,9 +221,9 @@ Roles come only from the frontmatter, and Lua never creates one. `models.use` an
 - `models.use label "{label}" is not a bound model role` from `models.use`, naming the label.
 - `models.default label "{label}" is not a bound model role` from `models.default`, naming the label. The default stays unchanged.
 
-When the host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
+When the Host runs a prompt with no current model, prepare has nothing to fill or check and refuses nothing, so the declared roles stay unbound. Selecting any of them at run time, with `models.use` or `models.default`, then fails with the not-a-bound-role error that names the label.
 
-These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
+These errors, like the `models.default is already` error, are error values of kind `lua`. Left uncaught, they end the run like any other Lua failure, with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified), except in a `lua` fence of the H1 body, where [the H1 pass](04-how-a-prompt-runs.md#the-h1-pass) turns an uncaught Lua failure into a `RequirementsUnmet` refusal whose notice is the error text.
 
 ## Model handles
 
@@ -243,7 +246,7 @@ Each bound role is also a role global: a bare Lua global named after the role's 
 return models.infer(analyst, prose)
 ````
 
-Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. When a role label is also a key under `tools:`, the bare global with that name holds the model handle.
+Role globals are set after the shared library loads, so a declared label wins over a same-named global that shared code defines. For the same reason, top-level code in the shared library cannot read role globals yet, while a function it defines can read them when a section calls it. No role global ever replaces an Engine global, a sandbox library global, or a tool alias's global, because the parse refuses a label that would.
 
 ### Keeping the default's handle
 
@@ -260,9 +263,9 @@ The shared library can keep the handle in a global the same way. Called as a sta
 
 A handle is a frozen snapshot. Its field values are fixed when the handle is made and stay the same for as long as you hold it, whatever the section selects afterwards. Every field is read-only, and assigning to one raises a Lua runtime error.
 
-### Model ids from the host
+### Model ids from the Host
 
-When the host runs the prompt with a host-state snapshot, the one [`ui()`](05-lua-environment.md#host-state-with-ui) reads, `models.get` also accepts a model id from the host's catalog, as in `models.get(ui().selected_model)`, and returns a handle for a model the prompt never declared. The `ui` global exists only when the host gives a snapshot, so this block tests for it first:
+When the Host runs the prompt with a Host-state snapshot, the one [`ui()`](05-lua-environment.md#host-state-with-ui) reads, `models.get` also accepts a model id from the Host's catalog, as in `models.get(ui().selected_model)`, and returns a handle for a model the prompt never declared. The `ui` global exists only when the Host gives a snapshot, so this block tests for it first:
 
 ````lua
 local id = ui and ui().selected_model
@@ -272,13 +275,13 @@ end
 return models.infer(prose)
 ````
 
-This is the only way a prompt reaches a model other than the host's current model. A declared role whose label matches the id still wins. The handle's `name`, `label`, `model_id`, and `description` are all the id, its `capabilities` is empty, its `context` is 8192, and it has no sampling or thinking settings. It passes to `models.infer` like any other handle. Only `models.get` has this fallback, and `models.use` and `models.default` always need a bound role.
+This is the only way a prompt reaches a model other than the Host's current model. A declared role whose label matches the id still wins. The handle's `name`, `label`, `model_id`, and `description` are all the id, its `capabilities` is empty, its `context` is 8192, and it has no sampling or thinking settings. It passes to `models.infer` like any other handle. Only `models.get` has this fallback, and `models.use` and `models.default` always need a bound role.
 
 A model id is any non-empty text with no control characters, and it may contain `/`, `.`, `:`, and non-ASCII letters, as in `qwen/qwen3-8b`. An empty id, or one with a control character, fails with `models.get model id "{id}" is invalid: {reason}`, which names the id and the reason.
 
 ### Label errors
 
-A label passed to `models.use` or `models.default`, or to `models.get` outside the model id fallback, follows the same grammar as a role label, 1 to 64 bytes in all. `models.use` and `models.default` check the grammar and then look for the bound role. `models.get` looks for a declared role first, and when none matches it treats the name as a model id if the host gave a snapshot, or otherwise checks the grammar and then reports the missing role. These calls fail with:
+A label passed to `models.use` or `models.default`, or to `models.get` outside the model id fallback, follows the same grammar as a role label, 1 to 64 bytes in all. `models.use` and `models.default` check the grammar and then look for the bound role. `models.get` looks for a declared role first, and when none matches it treats the name as a model id if the Host gave a snapshot, or otherwise checks the grammar and then reports the missing role. These calls fail with:
 
 - `invalid alias "{name}": expected [A-Za-z][A-Za-z0-9_-]{0,63}` for a name outside the grammar, which names the rejected name and the grammar.
 - `models.get alias "{alias}" is not a bound model role` for a `models.get` label that names no bound role, naming the label. The error is the same wherever the call runs, including a run with no current model, where no role is bound.
@@ -387,13 +390,13 @@ return h.label .. '|' .. h.model_id .. '|' .. table.concat(h.capabilities, ',')
 ```
 ````
 
-On a host whose current model is `claude-sonnet-4-6`, the run result is:
+On a Host whose current model is `claude-sonnet-4-6`, the run result is:
 
 ````text
 analyst|claude-sonnet-4-6|frontier,thinking
 ````
 
-`model_id` is the model's id, distinct from the role label. Every declared role is bound to the host's one current model, so `model_id` reads the same on every role's handle, while fields such as `description`, `capabilities`, and `thinking` show how the roles differ.
+`model_id` is the model's id, distinct from the role label. Every declared role is bound to the Host's one current model, so `model_id` reads the same on every role's handle, while fields such as `description`, `capabilities`, and `thinking` show how the roles differ.
 
 Each read of `capabilities` builds a fresh table, so changing the table you get back leaves the handle unchanged. `temperature` and `max_tokens` read `nil` on every handle for a declared role, except a handle that `models.use` returned with options, because a role declares no sampling settings of its own. Reading any key other than the nine raises a Lua runtime error that names the key: `attempt to get an unknown field '{key}'`.
 
@@ -433,9 +436,9 @@ Bad arguments fail the call with an error value of kind `lua`:
 
 If the model replies with tool calls anyway, the call fails with an error value of kind `lua` whose message is `model inference received tool calls but no tools were advertised`. The text is the same for both forms and does not name `models.infer`.
 
-A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](17-limits-and-errors.md#how-a-failed-run-is-classified).
+A round that fails raises the round's own error. `pcall` sees it with kind `internal`, and left uncaught it fails the run with run error kind [`Completion`](16-limits-and-errors.md#how-a-failed-run-is-classified).
 
-A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point. The run records every round as round events under the current section, marking a failed round as failed and a cut-off round as truncated, and [Task Events](16-task-events.md#model-round-events) describes those events.
+A round cut off at the generation cap, such as a `max_tokens` option, still returns the text the model produced up to that point.
 
 ## The bound model in sys.model
 
@@ -470,11 +473,11 @@ return prose
 ```
 ````
 
-The first block makes the section's first tool call, here to a small tool written in Lua, and [Tools](12-tools.md#calling-tools-from-lua) teaches both parts. On a host whose current model is `claude-sonnet-4-6`, the run result is `Model in use: claude-sonnet-4-6.`
+The first block makes the section's first tool call, here to a small tool written in Lua, and [Tools](12-tools.md#calling-tools-from-lua) teaches both parts. On a Host whose current model is `claude-sonnet-4-6`, the run result is `Model in use: claude-sonnet-4-6.`
 
 The field appears at the section's first tool call, made either from a Lua block or at the model's request during a conversation; whichever tool the first call runs, it counts. At that moment `sys.model` takes the section's model, its selection or else the prompt-wide default, and it stays fixed for the rest of the section. A round by itself never sets it, and a section that makes no tool call, or has no model when its first tool call runs, never gets the field.
 
-Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](17-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
+Reading `sys.model` before the section's first tool call fails with `unknown sys field 'model'`, even when the H1 pass set a prompt-wide default. That covers a read in the section's first Lua block ahead of any tool call and a read inside a shared-library function called from there, and the read fails the same way anywhere in a section that makes no tool call or had no model at its first tool call. Left uncaught in a section, the error fails the run with run error kind [`Lua`](16-limits-and-errors.md#how-a-failed-run-is-classified). To read the field only when it is there, wrap the read in `pcall`:
 
 ````lua
 local ok, id = pcall(function() return sys.model end)

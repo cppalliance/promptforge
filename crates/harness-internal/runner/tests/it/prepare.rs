@@ -1,9 +1,14 @@
 //! Run preparation: a prompt whose requirements the environment cannot
-//! meet is refused with the engine's own notice and its row closed as
+//! meet is refused with the Engine's own notice and its row closed as
 //! failed; a prompt that does not parse fails the same way under the
 //! `Parse` kind; each preparation draws a fresh seed and start, both
 //! written to `runs`; and the prepared tool performer resolves a
-//! `ToolCall` effect's id in the activated table.
+//! `ToolCall` effect's id in the activated table. The Host's optional
+//! input broker - handed to every activated capability and behind the
+//! `promptforge/user-input` capability - sits in the `input` child
+//! module, a capability's prelude reaching the prepared run sits in
+//! the `prelude` child module, and the prompt's declared input and output
+//! files sit in the `files` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,6 +27,13 @@ use promptforge::cancel::CancelHandle;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
 use crate::support::Unused;
+
+#[path = "prepare-files.rs"]
+mod files;
+#[path = "prepare-input.rs"]
+mod input;
+#[path = "prepare-prelude.rs"]
+mod prelude;
 
 /// A prompt declaring `promptforge/web` as a required capability that no
 /// registry here provides.
@@ -58,10 +70,11 @@ fn services(log: &SharedLog, registry: Option<Arc<CapabilityRegistry>>) -> Servi
     Services {
         registry,
         vfs: promptforge::vfs::VfsRef::default(),
+        input_text: None,
         cancel: CancelHandle::new(),
         log: Arc::clone(log),
         chat: Arc::new(Unused),
-        input: Arc::new(Unused),
+        input: None,
         session_id: "session-1".to_owned(),
         agent: "prepare-test".to_owned(),
         model: None,
@@ -128,6 +141,7 @@ impl Capability for Tools {
             tools: vec![Arc::new(Echo {
                 id: ToolId::parse("tests/tools/echo").unwrap(),
             })],
+            prelude: None,
         })
     }
 }

@@ -1,11 +1,12 @@
-//! The engine's setup half: one section VM's lifecycle from host injection
+//! The Engine's setup half: one section VM's lifecycle from Engine injection
 //! through the captured alias bindings.
 //!
-//! Every driver of the shared engine - the walk's section entry and the
-//! fanout arm - runs the identical setup sequence: inject the host values,
-//! install the persistent host APIs, install the control globals, replay the
-//! shared library as the section's first chunk, then install the captured
-//! alias bindings (so a declared alias wins over a same-named shared global).
+//! Every section driver - the walk's section entry and the
+//! fanout arm - runs the identical setup sequence: inject the Engine values,
+//! install the persistent Engine globals, install the control globals, install
+//! the capability preludes, replay the shared library as the section's first
+//! chunk, then install the captured alias bindings (so a declared alias wins
+//! over a same-named shared global).
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (both drivers take the next run-global `id`; the arm adds its
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
@@ -23,17 +24,18 @@
 
 use std::sync::Arc;
 
+use promptforge_types::capabilities::Prelude;
 use promptforge_types::emitter::Emitter;
 
 use crate::lua::{LuaProgram, SectionVm};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
-/// What a section VM is seeded with beyond the shared host contract.
+/// What a section VM is seeded with beyond the shared Engine values.
 ///
 /// Both fields install through the same serde bridge: `var` seeds the hidden
 /// data table behind the guarded `var` proxy, and `item` installs as the
-/// `item` global after the host APIs so [`SectionVm::replay_shared`] - whose
+/// `item` global after the Engine globals so [`SectionVm::replay_shared`] - whose
 /// top-level code may read `item` - sees it.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VmSeed<'a> {
@@ -67,7 +69,7 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
-    /// The chain's emitter: the persistent host APIs (`log`, `store`)
+    /// The chain's emitter: the persistent Engine globals (`log`, `store`)
     /// capture a clone, and the shared-library replay reports through it.
     pub(crate) emitter: &'a Emitter,
     /// The section name used in observations and error messages.
@@ -77,11 +79,18 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The run's resolved per-section tool-loop cap, captured by the
     /// `models.loop` shim as its round cap.
     pub(crate) max_tool_iterations: usize,
-    /// The run's host-state snapshot, when the host supplied one: its
+    /// The run's Host-state snapshot, when the Host supplied one: its
     /// presence gives the section VM the `ui()` global and the
     /// raw-model-id `models.get` fallback. Shared through the run's `Arc`,
     /// so every section VM serializes the one tree.
     pub(crate) ui: Option<&'a Arc<serde_json::Value>>,
+    /// The run's capability preludes, installed in order after the yield
+    /// shims and before the shared replay.
+    pub(crate) preludes: &'a [Prelude],
+    /// Every tool and model alias the prompt's frontmatter declares: the
+    /// captured bindings install these as globals after the preludes, so a
+    /// prelude global may not take one.
+    pub(crate) frontmatter_aliases: &'a [String],
     /// Test-only: installs the raw `tools.call_as_model` shim, so a fixture
     /// section can yield one model-issued `tool_call`.
     #[cfg(test)]
@@ -90,13 +99,13 @@ pub(crate) struct SectionVmSetup<'a> {
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
-/// The sequence is fixed and shared: host injection with the driver's
-/// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
+/// The sequence is fixed and shared: Engine injection with the driver's
+/// [`VmSeed`], [`SectionVm::install_engine_globals`], the `item` global when the
 /// seed includes one, the control surface
 /// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
 /// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
-/// suspending calls, which the scheduler drives as yield shims),
-/// [`SectionVm::replay_shared`], and
+/// suspending calls, which the scheduler drives as yield shims), the run's
+/// capability preludes, [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
 /// limits itself before calling, so a limits failure propagates without
 /// touching the VM's teardown observation path.
@@ -105,9 +114,10 @@ pub(crate) struct SectionVmSetup<'a> {
 /// own teardown boundary stays the one place a teardown happens.
 ///
 /// # Errors
-/// Returns the [`Error`] of whichever step failed: host injection, host API
-/// install, `item` install, control-global install, the shared replay, or
-/// the captured-binding install.
+/// Returns the [`Error`] of whichever step failed: Engine injection, Engine
+/// global install, `item` install, control-global install, the prelude install (a
+/// prelude that fails to load, or whose global collides), the shared
+/// replay, or the captured-binding install.
 pub(crate) fn setup_section_vm<L>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
@@ -116,7 +126,7 @@ pub(crate) fn setup_section_vm<L>(
 where
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
-    // The raw-model-id fallback reads its flag during host injection, so
+    // The raw-model-id fallback reads its flag during Engine injection, so
     // the snapshot's opt-in lands first.
     if setup.ui.is_some() {
         vm.allow_raw_model_ids();
@@ -126,8 +136,8 @@ where
     } else {
         crate::lua::Argv::Frozen(setup.argv)
     };
-    vm.inject_host_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
-    vm.install_host_apis(setup.emitter, setup.section_name)?;
+    vm.inject_values_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
+    vm.install_engine_globals(setup.emitter, setup.section_name)?;
     if let Some(snapshot) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(snapshot))?;
     }
@@ -137,7 +147,15 @@ where
     vm.install_scheduler_control_globals(list_callback)?;
     vm.install_coro_shims(setup.max_tool_iterations)?;
     crate::lua::install_section_loop_shim(vm.lua())?;
-    crate::lua::install_section_user_input_shim(vm.lua())?;
+    // The preludes read `tools` and `store` from `_G` as they install, so
+    // they follow the yield shims, and they precede the shared replay so
+    // the shared library can call what they define.
+    let aliases: Vec<&str> = setup
+        .frontmatter_aliases
+        .iter()
+        .map(String::as_str)
+        .collect();
+    crate::lua::install_preludes(vm.lua(), setup.preludes, &aliases)?;
     #[cfg(test)]
     if setup.raw_shims {
         promptforge_lua::install_model_tool_call_shim(vm.lua())?;

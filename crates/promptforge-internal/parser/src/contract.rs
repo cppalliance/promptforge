@@ -2,22 +2,25 @@
 //!
 //! The YAML is the whole contract: capabilities install, tools bind, models
 //! declare, args type. Parsing validates the static shape - capability id
-//! arity, the alias grammar on slot keys, the closed model-keyword
+//! arity, each capability declared once, the alias grammar on slot keys,
+//! the reserved names no tool alias or model role label may take, no tool
+//! slot backed by an optional capability, the closed model-keyword
 //! vocabulary, arg name and type sanity - and exposes the FULL declaration
 //! on the parsed [`Prompt`](crate::Prompt); satisfying the declaration
-//! against the host environment is prepare's job, never the parser's.
+//! against the Harness's environment is prepare's job, never the parser's.
 //!
 //! `args` and `models` are defined in submodules; this root owns the
 //! capability and tool-slot shapes plus the map deserializer all four keys
 //! share.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::marker::PhantomData;
 
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
+use promptforge_types::capabilities::CapabilityId;
 use promptforge_types::names::GlobalName;
 use promptforge_types::tools::ToolId;
 
@@ -45,26 +48,35 @@ fn is_valid_alias(alias: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+/// How one contract map's keys are checked beyond the alias grammar.
+#[derive(Clone, Copy)]
+pub(crate) struct ContractKeys {
+    /// The frontmatter key the map sits under (`tools`), for error
+    /// messages.
+    pub(crate) map: &'static str,
+    /// The key kind (`tool alias`), for error messages.
+    pub(crate) what: &'static str,
+    /// A key that satisfies the grammar but is rejected because its
+    /// posture is deferred (the open toolset's `open`).
+    pub(crate) deferred: Option<&'static str>,
+    /// Whether each key installs as a section VM global of its own name,
+    /// so a reserved name ([`promptforge_lua::RESERVED_NAMES`]) is refused.
+    pub(crate) installs_global: bool,
+}
+
 /// Deserializes a contract map (`tools`, `models`, `args`): string keys
-/// validated against the alias grammar, values deserialized as `T`,
-/// duplicates rejected.
-///
-/// `what` names the key kind in error messages ("tool alias", "model role
-/// label", "arg name"); `reserved` names a key that satisfies the grammar
-/// but is rejected because its posture is deferred (the open toolset's
-/// `open`).
+/// validated against the alias grammar and `keys`, values deserialized as
+/// `T`, duplicates rejected.
 pub(crate) fn deserialize_contract_map<'de, D, T>(
     deserializer: D,
-    what: &'static str,
-    reserved: Option<&'static str>,
+    keys: ContractKeys,
 ) -> Result<BTreeMap<String, T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
     deserializer.deserialize_map(MapVisitor {
-        what,
-        reserved,
+        keys,
         _marker: PhantomData,
     })
 }
@@ -72,10 +84,8 @@ where
 /// The visitor behind [`deserialize_contract_map`]: a streaming map walk so
 /// rejections keep their source position.
 struct MapVisitor<T> {
-    /// The key kind, for error messages.
-    what: &'static str,
-    /// A grammatically valid key that is rejected as reserved.
-    reserved: Option<&'static str>,
+    /// The checks the map's keys get.
+    keys: ContractKeys,
     /// The value type, without ownership or variance claims.
     _marker: PhantomData<fn() -> T>,
 }
@@ -87,31 +97,44 @@ where
     type Value = BTreeMap<String, T>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a map of {} keys to declarations", self.what)
+        write!(
+            formatter,
+            "a map of {} keys to declarations",
+            self.keys.what
+        )
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: MapAccess<'de>,
     {
+        let ContractKeys {
+            map: map_key,
+            what,
+            deferred,
+            installs_global,
+        } = self.keys;
         let mut entries: BTreeMap<String, T> = BTreeMap::new();
         while let Some(key) = map.next_key::<String>()? {
-            if self.reserved == Some(key.as_str()) {
+            if deferred == Some(key.as_str()) {
                 return Err(de::Error::custom(format!(
-                    "the `{key}` key is reserved for the deferred open toolset posture; it is not a usable {}",
-                    self.what
+                    "the `{key}` key is reserved for the deferred open toolset posture; it is not a usable {what}"
                 )));
             }
             if !is_valid_alias(&key) {
                 return Err(de::Error::custom(format!(
-                    "invalid {} `{key}`: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}",
-                    self.what
+                    "invalid {what} `{key}`: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}"
+                )));
+            }
+            if installs_global && let Some(kind) = promptforge_lua::reserved_name(&key) {
+                return Err(de::Error::custom(format!(
+                    "{what} `{key}` in `{map_key}` is reserved ({kind}): tool aliases and model \
+                     role labels install as section VM globals, so none may take a reserved name"
                 )));
             }
             if entries.contains_key(&key) {
                 return Err(de::Error::custom(format!(
-                    "duplicate {} `{key}`: contract map keys must be unique",
-                    self.what
+                    "duplicate {what} `{key}`: contract map keys must be unique"
                 )));
             }
             entries.insert(key, map.next_value::<T>()?);
@@ -140,7 +163,7 @@ fn parse_capability_id(text: &str) -> Result<GlobalName, String> {
 /// A capability declaration: a plain id string (a required capability) or a
 /// `ref` map holding the `optional` flag and prompt-side `config` data.
 ///
-/// User-specific configuration (credentials, server lists) is host-supplied
+/// User-specific configuration (credentials, server lists) is Host-supplied
 /// through the run services and never named in the prompt; `config` is
 /// prompt-side data only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,7 +278,7 @@ impl<'de> Visitor<'de> for CapabilityDeclVisitor {
 /// One tool slot's filling posture: an exact global path filled by identity
 /// against the assembled catalog (every fill is journaled).
 ///
-/// `#[non_exhaustive]`: the open host-offered posture is deferred and joins
+/// `#[non_exhaustive]`: the open Harness-offered posture is deferred and joins
 /// this enum when it lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -299,7 +322,10 @@ impl Visitor<'_> for ToolSlotVisitor {
 /// Aliases are prompt-local (the alias grammar); the model only ever sees
 /// the alias, never the global path. The reserved `open` key (the deferred
 /// open toolset posture) is rejected at parse, so a prompt cannot silently
-/// half-declare the posture.
+/// half-declare the posture. Each alias installs as a section VM global,
+/// so an alias that names an Engine global, a Lua standard-library global the
+/// sandbox keeps, or a Lua keyword is rejected too, as is an alias that is
+/// also a model role label.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolSlots {
@@ -339,7 +365,74 @@ impl<'de> Deserialize<'de> for ToolSlots {
     where
         D: Deserializer<'de>,
     {
-        let slots = deserialize_contract_map(deserializer, "tool alias", Some("open"))?;
+        let slots = deserialize_contract_map(
+            deserializer,
+            ContractKeys {
+                map: "tools",
+                what: "tool alias",
+                deferred: Some("open"),
+                installs_global: true,
+            },
+        )?;
         Ok(ToolSlots { slots })
     }
+}
+
+/// Refuses a name declared both as a tool alias and as a model role label:
+/// both install as section VM globals of their own name, so the model
+/// handle would silently replace the tool handle. Returns the refusal's
+/// message, naming the first shared name in sorted order.
+pub(crate) fn check_distinct_aliases(tools: &ToolSlots, models: &ModelRoles) -> Result<(), String> {
+    match tools.iter().find(|(alias, _)| models.get(alias).is_some()) {
+        Some((alias, _)) => Err(format!(
+            "invalid frontmatter: `{alias}` is both a tool alias in `tools` and a model role \
+             label in `models`; each installs as a section VM global of its own name, so the \
+             two must differ"
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Refuses a `capabilities:` list that names one capability id twice,
+/// whatever each entry's form, `optional` flag, and `config`. Returns the
+/// refusal's message, naming the first id declared again.
+pub(crate) fn check_distinct_capabilities(capabilities: &[CapabilityDecl]) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    match capabilities.iter().find(|decl| !seen.insert(decl.id())) {
+        Some(decl) => Err(format!(
+            "invalid frontmatter: capability {} is declared more than once under capabilities",
+            decl.id()
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Refuses a tool slot whose capability is declared optional: a slot
+/// requires its capability, so an absent optional one would fail the run
+/// anyway. Returns the refusal's message, naming the first offending alias
+/// in sorted order.
+pub(crate) fn check_slot_capabilities(
+    tools: &ToolSlots,
+    capabilities: &[CapabilityDecl],
+) -> Result<(), String> {
+    for (alias, slot) in tools.iter() {
+        let ToolSlot::Exact(tool) = slot;
+        let capability = tool.capability();
+        if capabilities
+            .iter()
+            .any(|decl| decl.is_optional() && declares(decl, &capability))
+        {
+            return Err(format!(
+                "invalid frontmatter: tool alias '{alias}' names {tool}, whose capability \
+                 {capability} is declared optional; a tool slot requires its capability"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `decl` declares `capability`. Both ids have exactly two
+/// segments, so equal namespace and pack segments are equal ids.
+fn declares(decl: &CapabilityDecl, capability: &CapabilityId) -> bool {
+    decl.id().namespace() == capability.namespace() && decl.id().pack() == capability.pack()
 }

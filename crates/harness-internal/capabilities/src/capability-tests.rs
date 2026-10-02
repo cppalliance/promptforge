@@ -5,7 +5,8 @@ use std::sync::Arc;
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 
-use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices, Service};
+use crate::{InputBroker, InputError};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
@@ -58,6 +59,17 @@ fn a_capability_declares_no_conflicts_by_default() {
 }
 
 #[test]
+fn a_capability_needs_no_host_service_by_default() {
+    let capability = StubCapability::web();
+    assert!(capability.needs().is_empty());
+}
+
+#[test]
+fn the_input_service_is_named_for_a_model_reader() {
+    assert_eq!(Service::Input.description(), "an input broker");
+}
+
+#[test]
 fn a_capability_is_object_safe_and_exposes_its_identity() {
     let capability: Arc<dyn Capability> = Arc::new(StubCapability::web());
     assert_eq!(capability.id().to_string(), "promptforge/web");
@@ -65,9 +77,32 @@ fn a_capability_is_object_safe_and_exposes_its_identity() {
 }
 
 #[test]
-fn a_default_contribution_has_no_tools() {
+fn a_default_contribution_has_no_tools_and_no_prelude() {
     let contribution = Contribution::default();
     assert!(contribution.tools.is_empty());
+    assert!(contribution.prelude.is_none());
+}
+
+#[test]
+fn contribution_debug_says_whether_a_prelude_is_present_without_showing_it() {
+    let absent = Contribution::default();
+    assert!(
+        format!("{absent:?}").contains("prelude: false"),
+        "Debug says no prelude is present: {absent:?}"
+    );
+    let present = Contribution {
+        tools: Vec::new(),
+        prelude: Some("secret_table = {}".to_owned()),
+    };
+    let shown = format!("{present:?}");
+    assert!(
+        shown.contains("prelude: true"),
+        "Debug says a prelude is present: {shown}"
+    );
+    assert!(
+        !shown.contains("secret_table"),
+        "Debug leaves the prelude's source out: {shown}"
+    );
 }
 
 #[test]
@@ -86,6 +121,48 @@ fn create_receives_the_run_services() {
         .create(&services)
         .expect_err("a cancelled run fails activation");
     assert!(error.is_cancelled());
+}
+
+/// A broker whose operator always types the same text.
+struct Scripted(&'static str);
+
+#[async_trait::async_trait]
+impl InputBroker for Scripted {
+    async fn wait(&self) -> Result<String, InputError> {
+        Ok(self.0.to_owned())
+    }
+}
+
+#[tokio::test]
+async fn new_services_have_no_input_broker_and_with_input_supplies_one() {
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    assert!(
+        services.input.is_none(),
+        "a host that supplies no broker leaves the run without one"
+    );
+    assert!(
+        format!("{services:?}").contains("input: false"),
+        "Debug says whether a broker is present: {services:?}"
+    );
+
+    let services = services.with_input(Arc::new(Scripted("typed")));
+    let broker = services
+        .input
+        .as_ref()
+        .expect("with_input supplies the broker");
+    assert_eq!(broker.wait().await.expect("the broker answers"), "typed");
+    assert!(
+        format!("{services:?}").contains("input: true"),
+        "Debug says whether a broker is present: {services:?}"
+    );
+}
+
+#[test]
+fn the_input_service_is_provided_exactly_when_a_broker_is_present() {
+    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    assert!(!services.provides(Service::Input));
+    let services = services.with_input(Arc::new(Scripted("typed")));
+    assert!(services.provides(Service::Input));
 }
 
 #[test]

@@ -25,7 +25,7 @@ use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{RunHost, TestTool, TestToolTable};
+use crate::test_support::{RunHarness, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
@@ -72,8 +72,8 @@ fn tool_description_override_appears_in_model_schema() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     // tools.add(alias) with no override keeps the bound tool's catalog text.
     let add_default = LuaProgram::compile(
@@ -146,8 +146,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     .expect("captured bindings must install");
     vm.install_captured_bindings()
         .expect("alias globals must install");
-    vm.inject_host("", &json!({}), &fresh_access())
-        .expect("host must inject");
+    vm.inject_values("", &json!({}), &fresh_access())
+        .expect("values must inject");
 
     let add_plain = LuaProgram::compile(
         "tools.add('echo')",
@@ -192,7 +192,8 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
 }
 
 /// A tool whose call never completes, so the test can prove the tool-call
-/// loop honors cancellation mid-call rather than waiting the call out.
+/// loop honors cancellation mid-call rather than waiting the call out, and
+/// a task parked on it stays live until its owner ends or cancels it.
 struct SlowTool;
 
 #[async_trait::async_trait]
@@ -239,7 +240,7 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 ## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
     let handle = CancelHandle::new();
     handle.cancel();
-    let error = run_with_context(&fixture(md), |ctx, host| (ctx.cancel(handle), host))
+    let error = run_with_context(&fixture(md), |ctx, harness| (ctx.cancel(handle), harness))
         .await
         .expect_err("a pre-cancelled handle must fail the run");
     assert!(
@@ -290,9 +291,9 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
 #[tokio::test]
 async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
     // The nonce is the run seed's: two runs of the same prompt under
-    // different host-drawn seeds wrap the same untrusted tool result under
+    // different Harness-drawn seeds wrap the same untrusted tool result under
     // different nonces, so an envelope's tag stays unguessable from one run
-    // to the next as long as the host draws each seed afresh. (Under one
+    // to the next as long as the Harness draws each seed afresh. (Under one
     // seed the two runs agree byte for byte, which `run_inputs` pins.)
     let md = "---\nname: t\ndescription: d\npromptforge: 0\ncapabilities:\n  - tests/tools\ntools:\n  echo: tests/tools/untrusted_echo\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
@@ -305,11 +306,12 @@ async fn untrusted_nonce_differs_across_runs_under_different_seeds() {
         let (catalog, table) = fixture_tools(&[Arc::new(UntrustedEchoTool) as Arc<dyn TestTool>]);
         let env = Environment::new().tools(catalog);
         let mut ctx = RunContext::new(EXECUTION, seed, TEST_STARTED_AT);
-        let host = RunHost::new().tools(table);
+        let harness = RunHarness::new().tools(table);
         if let Some(model) = test.models.models().first() {
             ctx = ctx.model(model.clone());
         }
-        let out = match crate::test_support::run_with_host(&env, &test.prompt, "", ctx, host).await
+        let out = match crate::test_support::run_with_harness(&env, &test.prompt, "", ctx, harness)
+            .await
         {
             RunResult::Ok(out) => out,
             other => panic!("the echo run succeeds: {other:?}"),
@@ -394,8 +396,8 @@ mod effects;
 mod exec_flow;
 mod exit_rules;
 mod fanout_acceptance;
+mod full_id_calls;
 mod happens_before;
-mod input;
 mod live_infer;
 mod local_tools;
 mod model_and_reply;
@@ -409,13 +411,13 @@ mod model_tasks;
 mod models_loop;
 mod models_loop_compactors;
 mod observations;
+mod preludes;
 mod provenance;
 mod run_inputs;
 mod run_termination;
 mod scheduler;
 mod serial_driver;
 mod suite;
-mod task_events;
 mod tasks;
 mod timeouts;
 mod tool_call_arm;
