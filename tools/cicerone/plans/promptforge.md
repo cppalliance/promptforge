@@ -262,39 +262,6 @@ Owns:
 
 </page-model>
 
-<page-transport>
-
-Purpose: Teach a developer who writes their own model connection to build request bodies, read streamed replies, and report failed rounds.
-Core idea: Your program owns the connection; these helpers turn a chat effect into a request body and a reply stream into a completion.
-Need this when: you connect to a model server yourself instead of using a ready-made client.
-Builds on: model.md
-Primer sources: none
-
-### Tour: Read a streamed reply
-- How: How do I read a model's streamed reply into a completion while showing its text as it arrives?
-- What if: What happens when the reply grows past the size limit?
-- Why: Why does the reader take a clock from me instead of reading the time itself?
-- Example: build the request body for one round, feed a canned stream through a chunk source, print each piece of text, and assert the finished reply.
-- Diagram: one round, from request body to chunks to text pieces to the finished completion.
-
-### Tour: Report a failed round
-- How: How do I turn a failed server response into the error a chat answer carries?
-- What if: What happens when the server's error body is too large to read?
-- Why: Why is an error body escaped and cut short before it is kept?
-- Example: read a canned error body under a size cap, escape it, and answer a chat effect with the resulting error.
-- Diagram: none
-
-Owns:
-- item: promptforge::transport::ChunkSource
-- item: promptforge::transport::build_request_body
-- item: promptforge::transport::classify_http_failure
-- item: promptforge::transport::classify_stream_error
-- item: promptforge::transport::escape_controls
-- item: promptforge::transport::read_body_capped
-- item: promptforge::transport::read_completion_stream
-
-</page-transport>
-
 <page-tools>
 
 Purpose: Teach a Rust developer to offer tools to a run and to answer the tool calls it makes.

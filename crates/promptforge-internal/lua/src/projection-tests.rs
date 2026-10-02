@@ -238,9 +238,10 @@ fn a_complete_tool_exchange_projects_verbatim() {
 fn a_two_call_assistant_turn_renders_the_openai_wire_shape() {
     // The bug report's captured shape: a replayed assistant turn carrying
     // two calls must be the OpenAI function-call shape, the exact inverse
-    // of `parse_openai_tool_calls`. Arguments are asserted by re-decoding
-    // the wire string, never by raw string equality, so a future
-    // `preserve_order` feature cannot make this brittle.
+    // of the reply parser in `harness-gateway-client`. Arguments are
+    // asserted by re-decoding the wire string, never by raw string
+    // equality, so a future `preserve_order` feature cannot make this
+    // brittle.
     let records = vec![
         user("reproduce the bug"),
         assistant_calls(
