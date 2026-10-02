@@ -437,7 +437,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
 
 <step-5>
 
-### Step 5: Open the facade rule to the client and run the exit criteria
+### Step 5: Open the facade rule to the client and run the exit criteria [completed]
 
 - Component: Boundary rules and records
 - Placement: last. The widened rule matters only once the crate exists, the fixture renames follow the `harness-models` deletion, and the full verification list runs once, on the final step.

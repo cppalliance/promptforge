@@ -261,8 +261,8 @@ fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/models",
-        "harness-models",
+        "harness-internal/capabilities",
+        "harness-capabilities",
         "[dependencies]\n\
          harness-runner = { workspace = true, features = [\"test-support\"] }\n",
     );
@@ -271,7 +271,7 @@ fn a_dependencies_table_enabling_a_harness_test_support_feature_is_reported() {
     assert!(
         violations[0].contains("[dependencies]")
             && violations[0].contains("harness-runner/test-support")
-            && violations[0].contains("models"),
+            && violations[0].contains("capabilities"),
         "the leak names the table, the feature, and the consuming crate: {violations:?}"
     );
 }
@@ -281,8 +281,8 @@ fn a_dev_dependencies_table_enabling_a_harness_test_support_feature_passes() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/models",
-        "harness-models",
+        "harness-internal/capabilities",
+        "harness-capabilities",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [dev-dependencies]\n\
          harness-runner = { workspace = true, features = [\"test-support\"] }\n",
@@ -316,8 +316,8 @@ fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported()
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/models",
-        "harness-models",
+        "harness-internal/capabilities",
+        "harness-capabilities",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [features]\ndefault = [\"harness-runner/test-support\"]\n\
          test-support = [\"harness-runner/test-support\"]\n",
@@ -327,7 +327,7 @@ fn a_harness_crate_default_feature_enabling_a_sibling_test_support_is_reported()
     assert!(
         violations[0].contains("[features] default")
             && violations[0].contains("harness-runner/test-support")
-            && violations[0].contains("models"),
+            && violations[0].contains("capabilities"),
         "only a crate's own test-support feature is exempt when forwarding a sibling's: {violations:?}"
     );
 }
@@ -337,8 +337,8 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     let root = guarded_root();
     write_crate(
         root.path(),
-        "harness-internal/models",
-        "harness-models",
+        "harness-internal/capabilities",
+        "harness-capabilities",
         "[dependencies]\npromptforge-lua = { workspace = true }\n\
          [features]\ntest-support = [\"promptforge-lua/test-support\"]\n",
     );
@@ -354,7 +354,7 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("models") && v.contains("promptforge-lua/test-support")),
+            .any(|v| v.contains("capabilities") && v.contains("promptforge-lua/test-support")),
         "a harness crate forwarding a promptforge crate's test-support is reported: {violations:?}"
     );
     assert!(

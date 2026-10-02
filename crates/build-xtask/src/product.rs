@@ -18,8 +18,9 @@
 //! - `shared-*` crates must not depend on any product crate.
 //! - Public API: a crate outside the promptforge family may depend on
 //!   the family only through `promptforge`, and a crate outside the
-//!   Harness family on that family only through `harness`. The `build-*`
-//!   crates are bound too.
+//!   Harness family on that family only through its two public crates,
+//!   `harness` and `harness-gateway-client`. The `build-*` crates are
+//!   bound too.
 //! - Container privacy: the manifestless `crates/promptforge-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
@@ -134,10 +135,12 @@ const PUBLIC_PROMPTFORGE: [&str; 1] = ["promptforge"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
-/// The Harness family's facade: the only Harness crate outside crates may
-/// name, and the one outside crate permitted into
+/// The Harness family's facade: the one outside crate permitted into
 /// `crates/harness-internal/`.
-const PUBLIC_HARNESS: &str = "harness";
+const HARNESS_FACADE: &str = "harness";
+/// The Harness family's two public root crates, the facade and the gateway
+/// client: the only Harness crates outside crates may name.
+const PUBLIC_HARNESS: [&str; 2] = [HARNESS_FACADE, "harness-gateway-client"];
 /// The hakari feature-unification crate: the one unaffiliated crate Harness
 /// crates may name.
 const WORKSPACE_HACK: &str = "workspace-hack";
@@ -228,9 +231,14 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
                 "outside crates may depend on the promptforge family only through promptforge"
                     .to_owned(),
             )
-        } else if from != Family::Harness && to == Family::Harness && dep.package != PUBLIC_HARNESS
+        } else if from != Family::Harness
+            && to == Family::Harness
+            && !PUBLIC_HARNESS.contains(&dep.package.as_str())
         {
-            Some("outside crates may depend on the harness family only through harness".to_owned())
+            Some(
+                "outside crates may depend on the harness family only through harness or harness-gateway-client"
+                    .to_owned(),
+            )
         } else {
             None
         }
@@ -277,7 +285,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 fn container_named_exception(container: &str) -> Option<&'static str> {
     match container {
         "promptforge-internal" => Some("promptforge"),
-        "harness-internal" => Some(PUBLIC_HARNESS),
+        "harness-internal" => Some(HARNESS_FACADE),
         _ => None,
     }
 }
