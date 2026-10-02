@@ -322,7 +322,6 @@ derives promptforge::vfs::VfsRef: Clone, Debug, Default
 derives promptforge::vfs::VfsRefBuilder: Debug
 impl core::convert::From<&promptforge::model::Completion> for promptforge::effect::ChatAnswerRecord
 impl core::convert::From<promptforge::ids::ChainId> for promptforge::ids::TaskId
-impl core::convert::From<promptforge::model::CompletionError> for promptforge::transport::ClientError
 impl core::convert::From<promptforge::transport::ClientError> for promptforge::model::CompletionError
 impl core::convert::From<promptforge::vfs::VfsPath> for promptforge::vfs::VfsPathBuf
 impl core::convert::TryFrom<f64> for promptforge::model::Temperature
@@ -507,11 +506,19 @@ pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option:
 pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::CompletionResult
 pub fn promptforge::model::Completion::usage(&self) -> core::option::Option<&promptforge::metrics::Usage>
 pub fn promptforge::model::CompletionError::backend_body(&self) -> core::option::Option<&str>
+pub fn promptforge::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
+pub fn promptforge::model::CompletionError::detail(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::is_retryable(&self) -> bool
 pub fn promptforge::model::CompletionError::is_timeout(&self) -> bool
 pub fn promptforge::model::CompletionError::kind(&self) -> promptforge::model::CompletionErrorKind
+pub fn promptforge::model::CompletionError::message(&self) -> &str
+pub fn promptforge::model::CompletionError::new(kind: promptforge::model::CompletionErrorKind, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
+pub fn promptforge::model::CompletionError::overflow(&self) -> (core::option::Option<u32>, core::option::Option<u32>)
 pub fn promptforge::model::CompletionError::status(&self) -> core::option::Option<u16>
+pub fn promptforge::model::CompletionError::with_detail(self, text: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
+pub fn promptforge::model::CompletionError::with_finish_reason(self, reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
+pub fn promptforge::model::CompletionError::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionOptions::new(model: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionOptions
 pub fn promptforge::model::CompletionOptions::with_max_tokens(self, max_tokens: core::num::nonzero::NonZeroU32) -> promptforge::model::CompletionOptions
 pub fn promptforge::model::CompletionOptions::with_temperature(self, temperature: f64) -> core::result::Result<promptforge::model::CompletionOptions, promptforge::model::TemperatureError>
@@ -627,6 +634,8 @@ pub fn promptforge::tools::ToolOutput::trusted(text: impl core::convert::Into<al
 pub fn promptforge::tools::ToolOutput::untrusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
 pub fn promptforge::transport::ChunkSource::next_chunk(&mut self) -> impl core::future::future::Future<Output = core::result::Result<core::option::Option<<Self as promptforge::transport::ChunkSource>::Chunk>, promptforge::model::CompletionError>> + core::marker::Send
 pub fn promptforge::transport::build_request_body(messages: &[promptforge::model::Message], tools: core::option::Option<&[promptforge::model::ToolSchema]>, options: &promptforge::model::CompletionOptions) -> serde_json::value::Value
+pub fn promptforge::transport::classify_http_failure(status: u16, body: &str) -> promptforge::model::CompletionError
+pub fn promptforge::transport::classify_stream_error(body: &str) -> promptforge::model::CompletionError
 pub fn promptforge::transport::escape_controls(body: &str, max: usize) -> alloc::string::String
 pub fn promptforge::vfs::Access::append(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
@@ -1167,12 +1176,18 @@ pub promptforge::metrics::VllmMetrics::mean_itl_ms: core::option::Option<f64>
 pub promptforge::metrics::VllmMetrics::queue_time_ms: core::option::Option<f64>
 pub promptforge::metrics::VllmMetrics::time_to_first_token_ms: core::option::Option<f64>
 pub promptforge::metrics::VllmMetrics::tokens_per_second: core::option::Option<f64>
-pub promptforge::model::CompletionErrorKind::Backend
-pub promptforge::model::CompletionErrorKind::Config
-pub promptforge::model::CompletionErrorKind::Disabled
+pub promptforge::model::CompletionErrorKind::ContextOverflow
 pub promptforge::model::CompletionErrorKind::EmptyReply
 pub promptforge::model::CompletionErrorKind::MalformedResponse
+pub promptforge::model::CompletionErrorKind::Overloaded
+pub promptforge::model::CompletionErrorKind::QuotaExhausted
+pub promptforge::model::CompletionErrorKind::RateLimited
+pub promptforge::model::CompletionErrorKind::Refused
+pub promptforge::model::CompletionErrorKind::Rejected
+pub promptforge::model::CompletionErrorKind::ServerError
+pub promptforge::model::CompletionErrorKind::Timeout
 pub promptforge::model::CompletionErrorKind::Transport
+pub promptforge::model::CompletionErrorKind::Unavailable
 pub promptforge::model::CompletionResult::Text(..)
 pub promptforge::model::CompletionResult::Text::0: alloc::string::String
 pub promptforge::model::CompletionResult::ToolCalls(..)

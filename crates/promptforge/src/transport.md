@@ -162,9 +162,9 @@ Build the body once, feed the bytes through your chunk source, and let your cloc
 
 Your server answered a chat request with a non-success status, or the connection broke. You want the run to see that failure as the chat effect's answer.
 
-Reporting a failed round feels like mapping an HTTP client's error into your own enum with `From`. Unlike a plain mapping, you first cap and escape the server's error body, because the error type keeps whatever string you give it.
+Reporting a failed round feels like mapping an HTTP client's error into your own enum with `From`. Unlike a plain mapping, you first cap and escape the server's error body, because the error keeps whatever string you give it, and then you hand the status and that text to a classifier that picks the failure's kind.
 
-You build a [`ClientError`] variant that says what went wrong, convert it into a [`CompletionError`](crate::model::CompletionError), and answer the chat effect with it.
+You call [`classify_http_failure`] with the status and the escaped body, and answer the chat effect with the [`CompletionError`](crate::model::CompletionError) it returns.
 
 ````
 # use std::collections::VecDeque;
@@ -220,7 +220,7 @@ You build a [`ClientError`] variant that says what went wrong, convert it into a
 #         }
 #     }
 # }
-use promptforge::transport::{ClientError, escape_controls, read_body_capped};
+use promptforge::transport::{classify_http_failure, escape_controls, read_body_capped};
 
 // 1. The server answered 503, so read its whole error body under a byte cap.
 fn failed_round(chunks: &[&'static str], cap: u64) -> CompletionError {
@@ -229,9 +229,9 @@ fn failed_round(chunks: &[&'static str], cap: u64) -> CompletionError {
         Ok(raw) => raw,
         Err(refused) => return refused,
     };
-    // 2. Decode and escape the body, then build the Backend error from the status and that text.
+    // 2. Decode and escape the body, then let the classifier turn the status and that text into the error.
     let body = escape_controls(&String::from_utf8_lossy(&raw), 2000);
-    CompletionError::from(ClientError::Backend { status: 503, body })
+    classify_http_failure(503, &body)
 }
 
 // 3. Answer the greeter's chat effect with that error, and step the run to its end.
@@ -243,8 +243,9 @@ let result = loop {
                     Effect::Vfs { access, op } => EffectAnswer::Vfs(perform_vfs_op(&access, op)),
                     Effect::Chat { .. } => {
                         let error = failed_round(&["overloaded\nretry later"], 4096);
-                        assert_eq!(error.status(), Some(503));
-                        assert_eq!(error.backend_body(), Some("overloaded\\nretry later"));
+                        assert_eq!(error.kind(), CompletionErrorKind::Overloaded);
+                        assert!(error.is_retryable());
+                        assert_eq!(error.detail(), Some("overloaded\\nretry later"));
                         EffectAnswer::Chat(Err(error))
                     }
                     _ => EffectAnswer::Dropped,
@@ -258,36 +259,30 @@ let result = loop {
 
 // 4. The run ends with that failure.
 let RunResult::Failure(error) = result else { panic!("a failed round fails the greeter") };
-assert!(error.to_string().contains("non-success backend status 503"));
+assert_eq!(error.to_string(), "the model backend is overloaded (status 503)");
 
 // 5. An error body over its cap fails the read itself, as a malformed response without the status.
 let error = failed_round(&["overloaded, ", "retry later"], 16);
 assert_eq!(error.kind(), CompletionErrorKind::MalformedResponse);
-assert_eq!(error.status(), None);
+assert_eq!(error.to_string(), "the model backend sent a reply that could not be understood");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
 1. `failed_round` reads the whole 503 error body with [`read_body_capped`] under a 4096-byte cap. It passes `None` for the advertised length, and you pass yours when you have one. An advertised length over the cap fails at once, and the running total stops at the cap either way.
-2. It decodes the bytes and runs them through [`escape_controls`] with a `max` of 2000 input characters. Then it converts [`ClientError::Backend`] into a `CompletionError` with `From`. Escaping turns control characters such as newline, tab, and ESC into their escaped form, so a server's text cannot forge log lines or send terminal control sequences.
-3. The chat arm checks that [`status`](crate::model::CompletionError::status) is 503 and that [`backend_body`](crate::model::CompletionError::backend_body) shows the newline as a backslash and an `n`. A `Backend` error is retryable only for a status of 500 or above, so a 429 is not. Add your own backoff for rate limits.
-4. The run ends in [`RunResult::Failure`](crate::RunResult::Failure), whose message holds the status but never the body. A 400 or 413 whose body names a context limit, such as "context length" or "too many tokens" in any case, is not a failed round. The run hands it to the prompt's compactor as a context overflow. So always store the real escaped body, and never pass a `max` of 0.
+2. It decodes the bytes and runs them through [`escape_controls`] with a `max` of 2000 input characters. Then it passes the status and the escaped text to [`classify_http_failure`]. Escaping turns control characters such as newline, tab, and ESC into their escaped form, so a server's text cannot forge log lines or send terminal control sequences.
+3. The chat arm checks that the kind is [`Overloaded`](crate::model::CompletionErrorKind::Overloaded) and that [`detail`](crate::model::CompletionError::detail) shows the newline as a backslash and an `n`. The kind fixes whether resending may help: `RateLimited`, `Overloaded`, `Timeout`, `Transport`, `ServerError`, and `MalformedResponse` are retryable, so a 429 is retryable too. This crate never resends, so your retry loop backs off on those kinds.
+4. The run ends in [`RunResult::Failure`](crate::RunResult::Failure), whose message is the kind's fixed phrase with the status, and never the body. A 400 or 413 whose body names a context limit, such as "context length" or "too many tokens" in any case, is classified as `ContextOverflow`. That is not a failed round. The run hands it to the prompt's compactor as a context overflow. So always pass the real escaped body, and never pass a `max` of 0.
 5. A 23-byte body under a 16-byte cap fails on its second chunk, as a `MalformedResponse`-kind error with no status. So log the status before you read. The refusal leaves the source partly read, so drop the connection.
 
 When the connection breaks, box your error into [`ClientError::Http`], convert it with `From`, and return it from `next_chunk`. The reader returns it unchanged, as a retryable transport failure. When the send itself fails, build the error the same way and answer the chat effect with it directly.
 
-For a timeout, wrap your timeout error in [`ClientTimeout`] and put that wrapper straight into `Http`: `CompletionError::from(ClientError::Http(Box::new(ClientTimeout(Box::new(your_error)))))`. For an error body that timed out, the wrapper goes in the `source` field of `BackendBodyRead` instead. [`CompletionError::is_timeout`](crate::model::CompletionError::is_timeout) looks only at the error directly inside those two variants.
+For a timeout, wrap your timeout error in [`ClientTimeout`] and put that wrapper straight into `Http`: `CompletionError::from(ClientError::Http(Box::new(ClientTimeout(Box::new(your_error)))))`. The result is `Timeout` kind. For an error body that timed out, the wrapper goes in the `source` field of `BackendBodyRead` instead. The conversion looks only at the error directly inside those two variants.
 
-When reading an error body fails, its error has no status. To keep it, rebuild the error as [`ClientError::BackendBodyRead`], whose `source` holds the same boxed type as `Http`:
+When reading an error body fails, its error has no status. To keep it, build the error as [`ClientError::BackendBodyRead`], whose `source` holds the same boxed type as `Http`: box the `CompletionError` that `read_body_capped` returned, and pass the status you logged. In code: `CompletionError::from(ClientError::BackendBodyRead { status, source: Box::new(read_error) })`. A read error of `Timeout` kind moves with it, so the result is `Timeout` kind too.
 
-1. Convert the `CompletionError` that `read_body_capped` returns back into a `ClientError` with `From`, which gives the variant it was built from.
-2. Match `ClientError::Http(source)` and build `BackendBodyRead` from that `source` and the status you logged.
-3. Add a wildcard arm that keeps any other variant, because the enum is `#[non_exhaustive]`.
+The result is `Transport` kind, or `Timeout` kind for a timed-out read. It keeps the status, and it is always retryable.
 
-In code: `let error = match ClientError::from(read_error) { ClientError::Http(source) => ClientError::BackendBodyRead { status, source }, other => other };`, then answer with `CompletionError::from(error)`. A `ClientTimeout` inside `source` moves with it, so `is_timeout` still reports `true`.
-
-The result is `Transport` kind, keeps the status, and is always retryable.
-
-You might expect `ClientError::Backend` to clean up the body you store in it. Instead, it keeps the string exactly as given, so you cap and escape it yourself.
+You might expect the classifier to clean up the body you give it. Instead, it keeps the string exactly as given as the error's detail, so you cap and escape it yourself.
 
 Cap the error body, escape it, then build the error the round carries. The [models page](crate::model) shows how a chat effect takes a finished completion or its error.
 
@@ -295,32 +290,32 @@ Cap the error body, escape it, then build the error the round carries. The [mode
 
 ## ClientTimeout
 
-[`ClientTimeout`] marks a transport failure as a timeout, so [`CompletionError::is_timeout`](crate::model::CompletionError::is_timeout) still answers after your transport's own error type is erased. When a send, a receive, or a receive deadline times out, wrap that error in `ClientTimeout`. Then box it straight into [`ClientError::Http`] or [`ClientError::BackendBodyRead`]. A marker nested one level deeper, or placed under any other variant, reports `false`. So does a timeout boxed into `Http` without the marker, which stays `Transport` kind.
+[`ClientTimeout`] marks a transport failure as a timeout, so the conversion into a [`CompletionError`](crate::model::CompletionError) can give it `Timeout` kind after your transport's own error type is erased. When a send, a receive, or a receive deadline times out, wrap that error in `ClientTimeout`. Then box it straight into [`ClientError::Http`] or [`ClientError::BackendBodyRead`]. A marker nested one level deeper, or placed under any other variant, is not seen. Neither is a timeout boxed into `Http` without the marker, which stays `Transport` kind.
 
 - `ClientTimeout.0`: your transport's own error, which stays reachable as the error's source.
 
 ## ClientError
 
-[`ClientError`] says why a model round or a model-list fetch failed, in the form your transport builds. A model-list fetch reads the gateway's list of models whole with [`read_body_capped`]. Build the variant that fits and convert it with `From` into a [`CompletionError`](crate::model::CompletionError), which classifies it into a [`CompletionErrorKind`](crate::model::CompletionErrorKind) and keeps it as the source, and `From` converts it back unchanged. The enum is `#[non_exhaustive]`, so a `match` outside this crate needs a wildcard arm. [Report a failed round](#report-a-failed-round) teaches it.
+[`ClientError`] says why a model round or a model-list fetch failed, in the form your transport builds. A model-list fetch reads the gateway's list of models whole with [`read_body_capped`]. Build the variant that fits and convert it with `From` into a [`CompletionError`](crate::model::CompletionError), which classifies it into a [`CompletionErrorKind`](crate::model::CompletionErrorKind) and keeps the variant's text as its [`detail`](crate::model::CompletionError::detail). Nothing converts a `CompletionError` back. The enum is `#[non_exhaustive]`, so a `match` outside this crate needs a wildcard arm. [Report a failed round](#report-a-failed-round) teaches it.
 
 | Variant | Meaning |
 |---|---|
-| `MissingEnv` | A required environment variable is unset. It holds the variable name, is `Config` kind, and is not retryable. |
-| `InvalidEnv` | The environment variable is set but is not valid Unicode. It is `Config` kind. |
-| `InvalidConfig` | A configuration value failed validation. It is `Config` kind. |
-| `Config` | An invalid configuration input that keeps its cause as the error source. It is `Config` kind. |
-| `GatewayDisabled` | Your program turned gateway access off. The gateway is the model server whose models [`ModelId::gateway`](crate::model::ModelId::gateway) names, as the [models page](crate::model) explains. Answer every chat effect with it when your program lets its user switch that access off. It is `Disabled` kind and not retryable. |
-| `Http` | A transport send or read failure. The cause is only in the error source, never in the message. It is `Transport` kind and always retryable. |
-| `Backend` | A non-success status. The message never includes the body. It is retryable only for a status of 500 or above, so a 429 is not. |
-| `MalformedResponse` | A response that could not be understood. It is `MalformedResponse` kind and retryable. |
+| `MissingEnv` | A required environment variable is unset. It holds the variable name, is `Unavailable` kind, and is not retryable. |
+| `InvalidEnv` | The environment variable is set but is not valid Unicode. It is `Unavailable` kind. |
+| `InvalidConfig` | A configuration value failed validation. It is `Unavailable` kind. |
+| `Config` | An invalid configuration input that keeps its cause as the error source. It is `Unavailable` kind. |
+| `GatewayDisabled` | Your program turned gateway access off. The gateway is the model server whose models [`ModelId::gateway`](crate::model::ModelId::gateway) names, as the [models page](crate::model) explains. Answer every chat effect with it when your program lets its user switch that access off. It is `Unavailable` kind and not retryable. |
+| `Http` | A transport send or read failure. The cause is only in the error source, never in the message. It is `Transport` kind, or `Timeout` kind when the cause is wrapped in [`ClientTimeout`], and always retryable. |
+| `Backend` | A non-success status. The conversion passes the status and body to [`classify_http_failure`], so the kind follows the status and the body text, and the message never includes the body. A 429 is `RateLimited` kind and retryable, unless the body names a spent quota. |
+| `MalformedResponse` | A response that could not be understood. It is `MalformedResponse` kind and retryable, and its text is the error's detail. |
 | `MalformedResponseSource` | A decode failure that keeps the decoder's error as the error source. |
-| `BackendBodyRead` | Reading a non-success response's body failed, and the read error is the source. It is `Transport` kind and always retryable, even for a 4xx status. |
+| `BackendBodyRead` | Reading a non-success response's body failed, and the read error is the source. It is `Transport` kind, or `Timeout` kind for a timed-out read, and always retryable, even for a 4xx status. |
 | `EmptyModelReply` | A turn with neither non-empty tool calls nor non-empty text. It is `EmptyReply` kind and not retryable. The reader raises it, so you never build it. |
 | `ModelSetLock` | A poisoned lock on the shared model set, the run's own list of models. The run raises it, so you never build it. |
 
 - `Backend.body`: nothing bounds or escapes it, so run the body through [`escape_controls`] first. Read it back through [`CompletionError::backend_body`](crate::model::CompletionError::backend_body).
-- `BackendBodyRead.status`: still returned by [`CompletionError::status`](crate::model::CompletionError::status), even though the variant is `Transport` kind.
-- `Config.source`: the boxed cause, reachable as the error's source while the message shows `message` alone.
+- `BackendBodyRead.status`: still returned by [`CompletionError::status`](crate::model::CompletionError::status), even though the variant is `Transport` or `Timeout` kind.
+- `Config.source`: the boxed cause, reachable as the error's source while the message shows only the kind's fixed phrase.
 - `MalformedResponseSource.source`: the decoder's error, such as a [`serde_json::Error`](https://docs.rs/serde_json/latest/serde_json/struct.Error.html), reachable as the error's source.
 - `EmptyModelReply.finish_reason`: read back through [`CompletionError::finish_reason`](crate::model::CompletionError::finish_reason).
 
@@ -339,16 +334,41 @@ Wrap your HTTP client's response body in a [`ChunkSource`], the only I/O the rea
 - `options`: unset options add no `temperature`, `max_tokens`, or `chat_template_kwargs` field, so the server chooses them.
 - `options` thinking switch: sent as `chat_template_kwargs.enable_thinking`, a vLLM and llama.cpp field. `Some(false)` still sends it, and only `None` leaves it out.
 
+## classify_http_failure
+
+[`classify_http_failure`] turns a non-success status and its response body into the [`CompletionError`](crate::model::CompletionError) a failed round carries. Pass a body you already capped and escaped with [`escape_controls`]. The message is the kind's fixed phrase with ` (status N)` appended, and the body is kept as the error's [`detail`](crate::model::CompletionError::detail). It never reaches `Display`. [Report a failed round](#report-a-failed-round) teaches it.
+
+The rules run in this order, and the first match wins:
+
+| Status and body | Kind |
+|---|---|
+| 400 or 413, and the body names a context limit | `ContextOverflow` |
+| 429, and the body names `quota`, `billing`, `insufficient_quota`, or `credit` | `QuotaExhausted` |
+| any other 429 | `RateLimited` |
+| 503 or 529, or any 5xx whose body names `overloaded` | `Overloaded` |
+| any other 5xx | `ServerError` |
+| 401 or 403 | `Unavailable` |
+| 400, and the body names `content_filter`, `content policy`, `safety`, or `refus` | `Refused` |
+| any other status | `Rejected` |
+
+- `body`: matched case-insensitively. A context limit is one of `context length`, `context window`, `context size`, `context_length_exceeded`, `maximum context length`, `prompt is too long`, `too many tokens`, `exceeds the available context size`, `exceed_context_size`, `input is too long`, `exceeds the maximum number of tokens`, or `too large for model`. A body that matches no rule is `Rejected` (or `ServerError` for a 5xx), never a success.
+- `ContextOverflow` counts: filled in when the text says "maximum context length is N tokens ... M tokens" or "N tokens > M maximum", and left unset otherwise. Read them back through [`CompletionError::overflow`](crate::model::CompletionError::overflow).
+- 401 and 403: the message says `the model backend did not accept the credentials`.
+
+## classify_stream_error
+
+[`classify_stream_error`] applies the same body-text rules to an error that arrives inside a 200 stream, where there is no status. [`read_completion_stream`] calls it for you when a payload is an `error` envelope. Text that matches no rule is `Transport`, because the stream died in flight. The message is the kind's fixed phrase with no status, and the text is kept as the error's detail.
+
 ## escape_controls
 
-[`escape_controls`] escapes control characters in a server's error body, so the body cannot forge log lines or send terminal control sequences. It also keeps at most `max` input characters, so every connection stores a backend body by one shared rule. Call it on the decoded body before you build [`ClientError::Backend`]. Only Unicode `Cc` control characters are escaped, into their `escape_default` form, so escape again for quoted or bidi-sensitive output. [Report a failed round](#report-a-failed-round) teaches it.
+[`escape_controls`] escapes control characters in a server's error body, so the body cannot forge log lines or send terminal control sequences. It also keeps at most `max` input characters, so every connection stores a backend body by one shared rule. Call it on the decoded body before you pass it to [`classify_http_failure`]. Only Unicode `Cc` control characters are escaped, into their `escape_default` form, so escape again for quoted or bidi-sensitive output. [Report a failed round](#report-a-failed-round) teaches it.
 
 - `max`: counts input `char`s before escaping, so the output can be longer than `max`. Truncation adds no marker.
 - `body`: an empty body returns the fixed text `(empty body)`, but a non-empty body with `max` of 0 returns an empty string.
 
 ## read_body_capped
 
-[`read_body_capped`] reads a whole response body from a [`ChunkSource`], refusing it once it would pass `cap` bytes. Use it when you decode a body whole, such as a non-success status's error body or a model list. A refusal fails with a `MalformedResponse`-kind error, not a `Backend` one, so keep the status yourself. Raise `cap` when a body is legitimately larger. [Report a failed round](#report-a-failed-round) teaches it.
+[`read_body_capped`] reads a whole response body from a [`ChunkSource`], refusing it once it would pass `cap` bytes. Use it when you decode a body whole, such as a non-success status's error body or a model list. A refusal fails with a `MalformedResponse`-kind error, not a classified HTTP failure, so keep the status yourself. Raise `cap` when a body is legitimately larger. [Report a failed round](#report-a-failed-round) teaches it.
 
 - `content_length`: an advertised length over `cap` fails before any chunk is read. A smaller one is not trusted: the running total still stops at `cap`.
 - `cap`: inclusive, so a body of exactly `cap` bytes, or an advertised length equal to it, is accepted.
@@ -356,7 +376,7 @@ Wrap your HTTP client's response body in a [`ChunkSource`], the only I/O the rea
 
 ## read_completion_stream
 
-[`read_completion_stream`] reads a streamed chat-completions reply to its `[DONE]` sentinel into a [`Completion`](crate::model::Completion), forwarding live text to your callback. Call it on a success status, then answer the `Chat` effect with the result. Too many bytes, a missing `[DONE]`, invalid JSON, or a cut-off tool-call batch fails as `MalformedResponse`. An in-stream `error` fails as `Transport`, and an empty turn as `EmptyReply`. [Read a streamed reply](#read-a-streamed-reply) teaches it.
+[`read_completion_stream`] reads a streamed chat-completions reply to its `[DONE]` sentinel into a [`Completion`](crate::model::Completion), forwarding live text to your callback. Call it on a success status, then answer the `Chat` effect with the result. Too many bytes, a missing `[DONE]`, invalid JSON, or a cut-off tool-call batch fails as `MalformedResponse`. An in-stream `error` fails as [`classify_stream_error`] reads it, which is `Transport` unless its text names a known cause, and an empty turn as `EmptyReply`. [Read a streamed reply](#read-a-streamed-reply) teaches it.
 
 - `max_bytes`: counts raw received bytes, event framing included, and a stream of exactly `max_bytes` passes.
 - `on_delta`: gets [`StreamDelta::Text`](crate::model::StreamDelta::Text) for `content`, and [`StreamDelta::Reasoning`](crate::model::StreamDelta::Reasoning) for `reasoning_content`, `reasoning`, or `thinking`.

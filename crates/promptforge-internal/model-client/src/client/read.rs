@@ -29,8 +29,8 @@ use crate::model::CompletionError;
 /// `ChunkSource`. On a non-success status it reads the error body whole
 /// with [`read_body_capped`], bounds and escapes it with
 /// [`escape_controls`](super::escape_controls), and fails the round with
-/// [`ClientError::Backend`](crate::Error::Backend). Otherwise it hands the
-/// source to [`read_completion_stream`], whose [`Completion`] answers the
+/// [`classify_http_failure`](super::classify_http_failure). Otherwise it
+/// hands the source to [`read_completion_stream`], whose [`Completion`] answers the
 /// effect. The codec never opens a connection or reads a clock: the
 /// source is the only I/O it touches.
 pub trait ChunkSource {

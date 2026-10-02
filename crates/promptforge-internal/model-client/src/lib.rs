@@ -38,6 +38,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 
+mod classify;
 pub mod client;
 pub mod detail;
 mod error;

@@ -176,8 +176,10 @@ fn finish_fails_a_tool_call_batch_truncated_by_length_or_content_filter() {
             "finish_reason {reason:?}"
         );
         assert!(
-            error.to_string().contains("truncated"),
-            "the error names the truncation: {error}"
+            error
+                .detail()
+                .is_some_and(|detail| detail.contains("truncated")),
+            "the error's detail names the truncation: {error:?}"
         );
     }
 }
@@ -219,7 +221,15 @@ fn finish_hard_fails_on_an_empty_model_reply() {
         Some("stop"),
         "the finish_reason must survive the conversion into CompletionError"
     );
-    assert!(matches!(Error::from(error), Error::EmptyModelReply { .. }));
+    assert_eq!(
+        error.detail(),
+        Some("empty model reply: reasoning content was present but ignored"),
+        "the ignored-reasoning note stays in the detail"
+    );
+    assert_eq!(
+        error.to_string(),
+        "the model replied with no text and no tool calls"
+    );
 }
 
 #[test]
@@ -316,7 +326,7 @@ fn empty_choices_usage_chunk_is_metadata_not_a_turn() {
 }
 
 #[test]
-fn error_envelope_fails_the_stream_with_the_escaped_message() {
+fn error_envelope_fails_the_stream_with_the_escaped_message_as_detail() {
     let mut accumulator = StreamAccumulator::new();
     let error = accumulator
         .apply(
@@ -326,10 +336,31 @@ fn error_envelope_fails_the_stream_with_the_escaped_message() {
         )
         .expect_err("an error envelope must fail the stream");
     assert_eq!(error.kind(), CompletionErrorKind::Transport);
-    let source = std::error::Error::source(&error)
-        .expect("the envelope message is the cause")
-        .to_string();
-    assert!(source.contains("upstream\\ndied"), "escaped: {source}");
+    assert_eq!(
+        error.to_string(),
+        "the connection to the model backend failed"
+    );
+    assert_eq!(error.detail(), Some("upstream\\ndied"));
+    assert_eq!(error.status(), None);
+}
+
+#[test]
+fn error_envelope_naming_a_context_limit_is_a_context_overflow() {
+    let mut accumulator = StreamAccumulator::new();
+    let error = accumulator
+        .apply(
+            &serde_json::json!({ "error": {
+                "message": "This model's maximum context length is 4096 tokens, \
+                            however you requested 5000 tokens",
+                "type": "invalid_request_error"
+            } })
+            .to_string(),
+            &no_delta,
+        )
+        .expect_err("an error envelope must fail the stream");
+    assert_eq!(error.kind(), CompletionErrorKind::ContextOverflow);
+    assert_eq!(error.overflow(), (Some(5000), Some(4096)));
+    assert!(!error.is_retryable());
 }
 
 #[test]

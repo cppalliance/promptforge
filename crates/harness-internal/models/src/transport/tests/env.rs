@@ -223,12 +223,12 @@ fn secret_string_construction_rejects_an_empty_credential() {
 }
 
 #[test]
-fn an_unusable_secret_classifies_as_config_and_keeps_its_cause() {
+fn an_unusable_secret_classifies_as_unavailable_and_keeps_its_cause() {
     // AUDIT-DISCARDED-SOURCE: the SecretError survives as the public
-    // CompletionError's source, classified as Config.
+    // CompletionError's source, classified as Unavailable.
     let secret_error = SecretString::new("").expect_err("blank key is rejected");
     let completion = crate::CompletionError::from(secret_error);
-    assert_eq!(completion.kind(), CompletionErrorKind::Config);
+    assert_eq!(completion.kind(), CompletionErrorKind::Unavailable);
     assert!(
         std::error::Error::source(&completion).is_some(),
         "the SecretError cause must survive"
@@ -239,7 +239,7 @@ fn an_unusable_secret_classifies_as_config_and_keeps_its_cause() {
 fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
     for url in ["ftp://example.com/v1", "not-a-url", "http://", ""] {
         let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
-        assert_eq!(error.kind(), CompletionErrorKind::Config);
+        assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
         assert!(!error.to_string().contains("missing environment variable"));
     }
 }
@@ -248,7 +248,7 @@ fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
 fn gateway_endpoint_keeps_the_url_parse_cause() {
     // AUDIT-DISCARDED-SOURCE: the url::ParseError survives as the source.
     let url_error = GatewayEndpoint::new("not a url").expect_err("malformed URL is rejected");
-    assert_eq!(url_error.kind(), CompletionErrorKind::Config);
+    assert_eq!(url_error.kind(), CompletionErrorKind::Unavailable);
     assert!(
         std::error::Error::source(&url_error).is_some(),
         "the url::ParseError cause must survive"
@@ -266,7 +266,7 @@ fn gateway_endpoint_rejects_credentials_query_and_fragment() {
         "http://host/v1#frag",
     ] {
         let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
-        assert_eq!(error.kind(), CompletionErrorKind::Config);
+        assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
         assert!(!error.to_string().contains("missing environment variable"));
     }
     // A clean http(s) API root is still accepted and normalized.

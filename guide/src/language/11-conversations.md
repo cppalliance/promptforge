@@ -389,7 +389,7 @@ The clean exit: after at least one tool call in the loop has been answered, the 
 
 Every other empty reply raises `empty_model_reply`: an empty `"stop"` reply when no tool call was made in the loop, whether or not the model had tools to call; any empty `"length"` reply; and an empty reply with no finish reason, even after tool calls.
 
-`pcall` catches it as an error value whose `kind` is `"empty_model_reply"`, whose `finish_reason` field holds the finish reason when the provider sent one, and whose message is a detail phrase about the empty reply, or plain `empty model reply` when there is none. The rejected round appends nothing to the list:
+`pcall` catches it as an error value whose `kind` is `"empty_model_reply"`, whose `finish_reason` field holds the finish reason when the provider sent one, and whose message is `the model replied with no text and no tool calls`. The rejected round appends nothing to the list:
 
 ````lua
 local msgs = messages.new()
@@ -401,15 +401,15 @@ end
 return msgs[#msgs].content
 ````
 
-When the model's first reply is empty, with finish reason `"stop"` and no detail phrase, `#msgs` stays 1 and the result is:
+When the model's first reply is empty, with finish reason `"stop"`, `#msgs` stays 1 and the result is:
 
 ````text
-empty_model_reply|stop|empty model reply
+empty_model_reply|stop|the model replied with no text and no tool calls
 ````
 
-Reasoning text from the model is never used as the reply; the detail may say it was ignored, as in `empty model reply: reasoning content was present but ignored`. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
+Reasoning text from the model is never used as the reply, even when it is all the model sent. Left uncaught, `empty_model_reply` ends the run with run error kind `Completion` (see [how a failed run is classified](16-limits-and-errors.md#how-a-failed-run-is-classified)).
 
-An empty reply still completes its round: it advances the round count, and the loop then either takes the clean exit or raises `empty_model_reply` with the reply's detail as the message and, when the provider sent one, the finish reason in `finish_reason`. A text reply that the provider cut short for length, with finish reason `"length"`, is accepted as the terminal record.
+An empty reply still completes its round: it advances the round count, and the loop then either takes the clean exit or raises `empty_model_reply` with that same message and, when the provider sent one, the finish reason in `finish_reason`. A text reply that the provider cut short for length, with finish reason `"length"`, is accepted as the terminal record.
 
 ## Compactors and context exhaustion
 
@@ -483,9 +483,9 @@ The estimate counts a record's plain string content, the `text` of each text par
 
 ### Provider rejections
 
-A rejection from the provider counts as reason `"provider"` when it has HTTP status 400 or 413 and its body contains, ignoring case, one of these phrases: `context length`, `context window`, `context size`, `context_length_exceeded`, `too many tokens`, or `prompt is too long`. The loop then calls the compactor with reason `"provider"`, after that one request.
+A rejection from the provider counts as reason `"provider"` when the Harness's model client classifies the failure as a context overflow. The model client makes that call, not the Engine: the Engine acts only on the failure's kind. The Harness's HTTP client classifies a response with HTTP status 400 or 413 whose body contains, ignoring case, one of these phrases: `context length`, `context window`, `context size`, `context_length_exceeded`, `maximum context length`, `prompt is too long`, `too many tokens`, `exceeds the available context size`, `exceed_context_size`, `input is too long`, `exceeds the maximum number of tokens`, or `too large for model`. An error the provider sends inside an already started reply stream is read by the same phrases. The loop then calls the compactor with reason `"provider"`, after that one request.
 
-Every other backend failure, such as any 5xx status, any status other than 400 or 413, or a 400 or 413 whose body has none of those phrases, stays an ordinary backend failure with no compactor call: `models.loop` raises it at the call as an `internal`-kind error.
+Every other model failure, such as any 5xx status, any status other than 400 or 413, or a 400 or 413 whose body has none of those phrases, stays an ordinary model failure with no compactor call: `models.loop` raises it at the call as an `internal`-kind error.
 
 ## The round cap
 

@@ -71,7 +71,10 @@ async fn complete_hard_fails_on_empty_model_reply() {
         Some("stop"),
         "the finish_reason must survive the conversion into CompletionError"
     );
-    assert!(matches!(Error::from(err), Error::EmptyModelReply { .. }));
+    assert_eq!(
+        err.to_string(),
+        "the model replied with no text and no tool calls"
+    );
 }
 
 #[tokio::test]
@@ -238,8 +241,9 @@ async fn truncated_tool_call_batch_fails_the_completion() {
             "finish_reason {reason:?}"
         );
         assert!(
-            err.to_string().contains("truncated"),
-            "the error names the truncation: {err}"
+            err.detail()
+                .is_some_and(|detail| detail.contains("truncated")),
+            "the error's detail names the truncation: {err:?}"
         );
     }
 }
@@ -283,8 +287,5 @@ async fn mid_stream_error_envelope_is_a_transport_failure() {
         .await
         .expect_err("an error envelope must fail the completion");
     assert_eq!(err.kind(), CompletionErrorKind::Transport);
-    let source = std::error::Error::source(&err)
-        .expect("the envelope message must be the cause")
-        .to_string();
-    assert!(source.contains("upstream died"), "cause: {source}");
+    assert_eq!(err.detail(), Some("upstream died"));
 }

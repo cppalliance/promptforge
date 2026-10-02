@@ -28,6 +28,7 @@ use promptforge_types::wire::StreamDelta;
 use serde_json::{Map, Value};
 
 use super::Completion;
+use crate::classify::classify_stream_error;
 use crate::model::CompletionError;
 use crate::{Error, Result};
 
@@ -148,18 +149,14 @@ impl StreamAccumulator {
     /// # Errors
     /// Returns a `MalformedResponse`-kind [`CompletionError`] when the
     /// payload is not valid JSON or a recognized field has the wrong
-    /// shape, and a `Transport`-kind one when the payload is a mid-stream
-    /// error envelope.
+    /// shape, and the [`classify_stream_error`] result when the payload is
+    /// a mid-stream error envelope (`Transport` unless its text names a
+    /// known cause).
     pub fn apply(
         &mut self,
         data: &str,
         on_delta: &impl Fn(StreamDelta),
     ) -> std::result::Result<Applied, CompletionError> {
-        self.apply_inner(data, on_delta)
-            .map_err(CompletionError::from)
-    }
-
-    fn apply_inner(&mut self, data: &str, on_delta: &impl Fn(StreamDelta)) -> Result<Applied> {
         if data == "[DONE]" {
             return Ok(Applied::Done);
         }
@@ -170,17 +167,14 @@ impl StreamAccumulator {
             })?;
         // A mid-stream `error` envelope is how the gateway (and llama.cpp)
         // report a failure after the 200 has already been sent: the
-        // completion died in flight, so it classifies as a transport
-        // failure, with the bounded, control-escaped message as the cause.
+        // completion died in flight, so it is a transport failure unless
+        // the bounded, control-escaped message names a known cause.
         if let Some(envelope) = chunk.get("error").filter(|error| !error.is_null()) {
             let message = envelope
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("stream error envelope omitted its message");
-            return Err(Error::Http(Box::new(std::io::Error::other(format!(
-                "completion stream reported an error: {}",
-                escape_controls(message, 2000)
-            )))));
+            return Err(classify_stream_error(&escape_controls(message, 2000)));
         }
         if let Some(Value::String(model)) = chunk.get("model")
             && !model.is_empty()
@@ -200,9 +194,9 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(Applied::Chunk { delta: false }),
             Some(Value::Array(choices)) => choices,
             Some(_) => {
-                return Err(Error::MalformedResponse(
+                return Err(CompletionError::from(Error::MalformedResponse(
                     "stream chunk `choices` was present but not an array".into(),
-                ));
+                )));
             }
         };
         let mut held_delta = false;
@@ -453,8 +447,8 @@ fn append_string_fragment(
 /// reported as a fixed marker.
 ///
 /// A transport runs a non-success status's error body through here before
-/// storing it in [`ClientError::Backend`](crate::Error::Backend), so every
-/// transport bounds and escapes a backend body by the same rule.
+/// handing it to [`classify_http_failure`](super::classify_http_failure), so
+/// every transport bounds and escapes a backend body by the same rule.
 #[must_use]
 pub fn escape_controls(body: &str, max: usize) -> String {
     if body.is_empty() {

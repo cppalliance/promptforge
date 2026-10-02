@@ -11,6 +11,7 @@ use super::models_loop::{
 };
 use super::*;
 use crate::lua::ToolSet;
+use crate::model::CompletionErrorKind;
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// The one-section prompt shell with an explicit frontmatter round cap.
@@ -254,9 +255,10 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         .drive()
         .await
         .expect_err("the backend failure must propagate");
-    assert!(
-        matches!(error, Error::Backend { status: 500, .. }),
-        "got {error:?}"
+    assert_model_failure(
+        &error,
+        CompletionErrorKind::ServerError,
+        "the model backend reported a fault of its own (status 500)",
     );
     assert_eq!(
         loop_events(&recorder),
@@ -273,9 +275,9 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_client_rejection_without_overflow_signatures_stays_a_backend_error() {
+async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
     // Same status class as a provider overflow, unrelated body: not context
-    // overflow, so the bare backend failure propagates and no compactor is
+    // overflow, so the bare rejection propagates and no compactor is
     // invoked.
     let gateway =
         ScriptedGateway::start(vec![resp_status(400, "invalid request: unknown field")]).await;
@@ -285,9 +287,10 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_backend_error() 
         .drive()
         .await
         .expect_err("an ordinary backend rejection must propagate unchanged");
-    assert!(
-        matches!(error, Error::Backend { status: 400, .. }),
-        "a non-overflow 400 stays a backend error, got {error:?}"
+    assert_model_failure(
+        &error,
+        CompletionErrorKind::Rejected,
+        "the model backend rejected the request (status 400)",
     );
 }
 

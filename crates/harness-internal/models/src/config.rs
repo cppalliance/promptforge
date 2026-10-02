@@ -60,7 +60,7 @@ pub enum SecretError {
 
 impl From<SecretError> for CompletionError {
     fn from(error: SecretError) -> CompletionError {
-        // Classifies as `Config`: an unusable credential is a client
+        // Classifies as `Unavailable`: an unusable credential is a client
         // configuration problem, not a transport or backend failure. The
         // concrete `SecretError` is preserved as the private source rather than
         // flattened into a string (AUDIT-DISCARDED-SOURCE).
@@ -101,7 +101,7 @@ impl GatewayEndpoint {
     /// Validates and normalizes a gateway base URL.
     ///
     /// # Errors
-    /// Returns a `Config`-kind [`CompletionError`] when `url` is not a valid
+    /// Returns an `Unavailable`-kind [`CompletionError`] when `url` is not a valid
     /// absolute URL, does not use an `http`/`https` scheme, names no host,
     /// embeds credentials (a `user:pass@` component), or has a query or
     /// fragment (an API root is a bare path). Parsing goes through a strict URL
@@ -119,15 +119,19 @@ impl GatewayEndpoint {
     /// # Ok::<(), harness_models::CompletionError>(())
     /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
-        let reject = |detail: String| CompletionError::from(Error::InvalidConfig(detail));
+        GatewayEndpoint::parse(url).map_err(CompletionError::from)
+    }
+
+    /// The validation behind [`GatewayEndpoint::new`], in the client error
+    /// type the environment constructor reports.
+    pub(crate) fn parse(url: &str) -> std::result::Result<GatewayEndpoint, Error> {
+        let reject = |detail: String| Error::InvalidConfig(detail);
         let trimmed = url.trim();
         // Preserve the concrete `url::ParseError` as a private source rather than
         // flattening it into the message (AUDIT-DISCARDED-SOURCE).
-        let parsed = url::Url::parse(trimmed).map_err(|error| {
-            CompletionError::from(Error::Config {
-                message: format!("gateway URL is not a valid URL: {trimmed:?}"),
-                source: Box::new(error),
-            })
+        let parsed = url::Url::parse(trimmed).map_err(|error| Error::Config {
+            message: format!("gateway URL is not a valid URL: {trimmed:?}"),
+            source: Box::new(error),
         })?;
         if !matches!(parsed.scheme(), "http" | "https") {
             return Err(reject(format!(

@@ -119,7 +119,7 @@ fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
     // bad endpoint URL) arrives as the client error type's `Config`
     // variant with its concrete cause attached; the cause survives both
     // the public CompletionError::source and the mapping onto this
-    // crate's error type, classified as Config.
+    // crate's error type, classified as Unavailable.
     use crate::model::CompletionError;
     use promptforge_model_client::Error as ClientError;
     use promptforge_model_client::model::CompletionErrorKind;
@@ -129,15 +129,15 @@ fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
         message: "gateway endpoint is unusable".to_owned(),
         source: Box::new(cause),
     });
-    assert_eq!(completion.kind(), CompletionErrorKind::Config);
+    assert_eq!(completion.kind(), CompletionErrorKind::Unavailable);
     assert!(
         std::error::Error::source(&completion).is_some(),
         "the configuration cause must survive the public wrapper"
     );
     let bridged = Error::from(completion);
     assert!(
-        matches!(bridged, Error::Config { .. }),
-        "the error type maps Config onto Config, got {bridged:?}"
+        matches!(&bridged, Error::Completion(error) if error.kind() == CompletionErrorKind::Unavailable),
+        "the error type holds the completion error whole, got {bridged:?}"
     );
     assert!(
         std::error::Error::source(&bridged).is_some(),

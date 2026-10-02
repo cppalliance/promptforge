@@ -28,11 +28,11 @@ use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
 use crate::lua::{
-    MessageRecord, OverflowReason, current_tool_bindings, is_context_overflow, precheck,
-    project_messages, resolve_model_binding,
+    MessageRecord, OverflowReason, current_tool_bindings, precheck, project_messages,
+    resolve_model_binding,
 };
 use crate::model::ModelBinding;
-use crate::model::{Completion, CompletionResult, ToolCall};
+use crate::model::{Completion, CompletionErrorKind, CompletionResult, ToolCall};
 use crate::{Error, Result};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
@@ -167,8 +167,8 @@ impl Scheduler {
     /// Classifies one arrived chat round into the chain's answer, emitting
     /// the round's events through the chain's task-scoped emitter.
     ///
-    /// A provider context rejection is the overflow answer under a failed
-    /// turn. An empty reply is a completed round with the reply absent -
+    /// A `ContextOverflow` failure is the overflow answer under a failed
+    /// turn. An `EmptyReply` is a completed round with the reply absent -
     /// the turn advances and completes - so the shim applies its exit
     /// rules against `finish_reason`. Every other failure is a failed turn
     /// and the call's error. A served completion advances the turn, fires
@@ -240,8 +240,8 @@ struct Round {
 }
 
 impl Round {
-    /// Classifies a round that produced no completion. A provider context
-    /// rejection is the overflow answer under a failed turn. An empty reply
+    /// Classifies a round that produced no completion. A `ContextOverflow`
+    /// failure is the overflow answer under a failed turn. An `EmptyReply`
     /// is a completed round with the reply absent - the turn advances and
     /// completes - because whether it is the model's clean exit or a
     /// failure depends on the rounds before it, which only the shim knows;
@@ -250,7 +250,7 @@ impl Round {
     /// turn and the call's error.
     fn failed(&self, error: Error) -> std::result::Result<Box<ChatResult>, Error> {
         match error {
-            Error::Backend { status, body } if is_context_overflow(status, &body) => {
+            Error::Completion(error) if error.kind() == CompletionErrorKind::ContextOverflow => {
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_FAILED);
                 Ok(Box::new(overflow_result(
@@ -258,11 +258,7 @@ impl Round {
                     self.turns.load(Ordering::Relaxed),
                 )))
             }
-            Error::EmptyModelReply {
-                detail: phrase,
-                finish_reason,
-                ..
-            } => {
+            Error::Completion(error) if error.kind() == CompletionErrorKind::EmptyReply => {
                 let turn = advance_turn(&self.turns);
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
@@ -270,9 +266,9 @@ impl Round {
                     overflow: false,
                     overflow_reason: None,
                     reply: None,
-                    empty_detail: Some(phrase.into_owned()),
+                    empty_detail: Some(error.message().to_owned()),
                     tool_calls: None,
-                    finish_reason,
+                    finish_reason: error.finish_reason().map(str::to_owned),
                     model: String::new(),
                     metrics: None,
                     turn,

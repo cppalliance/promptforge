@@ -1,11 +1,11 @@
-//! Tests for the `compactors` namespace, the context-window precheck, and provider overflow detection.
+//! Tests for the `compactors` namespace and the context-window precheck.
 
 use mlua::Lua;
 use promptforge_model_client::client::Message;
 use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::{Value, json};
 
-use super::{Compactor, OverflowReason, install_compactors, is_context_overflow, precheck};
+use super::{Compactor, OverflowReason, install_compactors, precheck};
 use crate::Error;
 
 fn lua_with_compactors() -> Lua {
@@ -195,32 +195,4 @@ fn precheck_counts_tool_call_arguments_and_part_text() {
     )];
     let reason = precheck(&parts, context).expect_err("part text counts toward the estimate");
     assert_eq!(reason, OverflowReason::Precheck);
-}
-
-#[test]
-fn provider_overflow_detection_matches_known_signatures() {
-    let cases: &[(u16, &str, bool)] = &[
-        (
-            400,
-            "This model's maximum context length is 4096 tokens.",
-            true,
-        ),
-        (400, "context_length_exceeded", true),
-        (400, "the request exceeds the available context size", true),
-        (413, "prompt is too long", true),
-        (400, "CONTEXT WINDOW exceeded", true),
-        (400, "too many tokens in prompt", true),
-        // A server fault never classifies, even with overflow wording.
-        (500, "maximum context length is 4096 tokens", false),
-        // A client rejection without overflow wording stays a plain error.
-        (400, "invalid request: unknown field `stream`", false),
-        (401, "context length", false),
-    ];
-    for (status, body, expected) in cases {
-        assert_eq!(
-            is_context_overflow(*status, body),
-            *expected,
-            "status {status} with body {body:?}"
-        );
-    }
 }

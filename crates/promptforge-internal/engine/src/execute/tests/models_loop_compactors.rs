@@ -139,11 +139,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     // A compactor that returns a replacement instead of raising is the
     // deferred framework's shape: the loop refuses it as a `lua`-kind error
     // naming the deferral and the one shipped policy, and appends nothing.
-    let gateway = ScriptedGateway::start(vec![resp_status(
-        400,
-        "This model's maximum context length is 4096 tokens.",
-    )])
-    .await;
+    let client = OverflowClient::default();
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('a small prompt')\n\
@@ -159,7 +155,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness.client(client.clone()), None)
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -171,7 +167,11 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
         message.contains("deferred") && message.contains("compactors.fail"),
         "a returned replacement names the deferred framework, got: {message}"
     );
-    assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
+    assert_eq!(
+        client.calls.load(Ordering::SeqCst),
+        1,
+        "the request left and was rejected"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -215,11 +215,7 @@ async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag()
     // raised: a bare string passes through the normalizer untouched and
     // fails the section as the ordinary Lua runtime error holding the
     // reason tag the compactor was invoked with.
-    let gateway = ScriptedGateway::start(vec![resp_status(
-        400,
-        "This model's maximum context length is 4096 tokens.",
-    )])
-    .await;
+    let client = OverflowClient::default();
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('a small prompt')\n\
@@ -228,7 +224,7 @@ async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag()
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness.client(client.clone()), None)
         .drive()
         .await
         .expect_err("the compactor's own raise fails the section");
@@ -239,5 +235,9 @@ async fn a_compactors_own_string_raise_reaches_the_harness_with_the_reason_tag()
         ),
         other => panic!("expected the compactor's own runtime error, got {other:?}"),
     }
-    assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
+    assert_eq!(
+        client.calls.load(Ordering::SeqCst),
+        1,
+        "the request left and was rejected"
+    );
 }

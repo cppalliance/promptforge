@@ -3,7 +3,7 @@
 use std::num::NonZeroU32;
 
 use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::transport::ClientError as Error;
+use promptforge::transport::{ClientError as Error, classify_http_failure};
 use serde::Deserialize;
 
 use crate::transport::{http, transport_source};
@@ -123,11 +123,12 @@ fn catalog_client() -> reqwest::Client {
 
 /// Sends a bearer-authed GET through the shared client (MODEL-018) and
 /// returns the success response, classifying every failure the same way for
-/// each gateway endpoint: `Transport` when the send fails, `Backend` with a
-/// bounded, control-escaped body on a non-success status (MODEL-010: no
-/// unbounded buffering), and `BackendBodyRead` when that error body cannot be
-/// read, keeping the [`reqwest::Error`] as a typed source under the same
-/// timeout marking as a send failure, so `is_timeout` holds on both.
+/// each gateway endpoint: `Transport` (or `Timeout`) when the send fails, the
+/// classified kind with a bounded, control-escaped body as its detail on a
+/// non-success status (MODEL-010: no unbounded buffering), and `Transport`
+/// (or `Timeout`) when that error body cannot be read, keeping the
+/// [`reqwest::Error`] as a typed source under the same timeout marking as a
+/// send failure.
 async fn get_authed(
     url: String,
     token: &str,
@@ -151,10 +152,7 @@ async fn get_authed(
             }));
         }
     };
-    Err(CompletionError::from(Error::Backend {
-        status: status.as_u16(),
-        body,
-    }))
+    Err(classify_http_failure(status.as_u16(), &body))
 }
 
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
@@ -164,7 +162,8 @@ async fn get_authed(
 ///
 /// # Errors
 /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
-/// `Transport` on transport failure, `Backend` on a non-success status, and
+/// `Transport` or `Timeout` on transport failure, the kind
+/// [`classify_http_failure`] reads from a non-success status, and
 /// `MalformedResponse` when the body is not a model list.
 ///
 /// # Examples
@@ -270,12 +269,16 @@ mod tests {
         let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
             .await
             .expect_err("a 500 response must surface as an error");
-        assert_eq!(err.kind(), CompletionErrorKind::Backend);
-        let msg = err.to_string();
+        assert_eq!(err.kind(), CompletionErrorKind::ServerError);
+        assert_eq!(
+            err.to_string(),
+            "the model backend reported a fault of its own (status 500)"
+        );
+        let detail = err.detail().expect("the bounded body is the detail");
         assert!(
-            msg.len() < MAX_CATALOG_ERROR_BODY + 128,
+            detail.len() < MAX_CATALOG_ERROR_BODY + 128,
             "the error-path body must be bounded, got {} bytes",
-            msg.len()
+            detail.len()
         );
     }
 
@@ -299,8 +302,9 @@ mod tests {
             .expect_err("an oversized success body must be refused");
         assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
         assert!(
-            err.to_string().contains("exceeds"),
-            "the bound must report the size limit, got {err}"
+            err.detail()
+                .is_some_and(|detail| detail.contains("exceeds")),
+            "the bound must report the size limit, got {err:?}"
         );
     }
 
@@ -396,7 +400,11 @@ mod tests {
             .await
             .expect_err("a zero context window is malformed");
         assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-        assert!(err.to_string().contains("zero-token"), "got {err}");
+        assert!(
+            err.detail()
+                .is_some_and(|detail| detail.contains("zero-token")),
+            "got {err:?}"
+        );
     }
 
     #[tokio::test]

@@ -107,17 +107,7 @@ impl RunError {
             | Error::TaskCancelled { .. } => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::RequirementsUnmet { .. } => RunErrorKind::RequirementsUnmet,
-            Error::MissingEnv(_)
-            | Error::InvalidEnv(_)
-            | Error::InvalidConfig(_)
-            | Error::Config { .. }
-            | Error::GatewayDisabled
-            | Error::Http(_)
-            | Error::Backend { .. }
-            | Error::BackendBodyRead { .. }
-            | Error::MalformedResponse(_)
-            | Error::MalformedResponseSource { .. }
-            | Error::EmptyModelReply { .. } => RunErrorKind::Completion,
+            Error::Completion(_) => RunErrorKind::Completion,
             Error::Interrupted => RunErrorKind::Cancelled,
             Error::Substitution(_) => RunErrorKind::Substitution,
             Error::ToolLoopExhausted
@@ -149,11 +139,7 @@ impl RunError {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match &self.inner {
-            Error::Http(_)
-            | Error::MalformedResponse(_)
-            | Error::MalformedResponseSource { .. }
-            | Error::BackendBodyRead { .. } => true,
-            Error::Backend { status, .. } => *status >= 500,
+            Error::Completion(error) => error.is_retryable(),
             _ => false,
         }
     }

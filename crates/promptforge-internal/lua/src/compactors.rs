@@ -1,10 +1,11 @@
 //! The minimum compactor surface: overflow reasons, the one shipped policy,
-//! the pre-dispatch precheck, and provider-overflow detection.
+//! and the pre-dispatch precheck.
 //!
 //! A model request can fail to fit the model's context window twice: the
 //! pre-dispatch [`precheck`] can estimate the projected conversation past
-//! the window before anything leaves, and the provider can reject the
-//! request as too large ([`is_context_overflow`]). Either path invokes the
+//! the window before anything leaves, and the broker can report the request
+//! as too large (a `ContextOverflow` failure, which the `chat` arm turns
+//! into the provider overflow). Either path invokes the
 //! selected [`Compactor`] with the [`OverflowReason`]. `compactors.fail` is
 //! the only shipped policy and the omitted-compactor default; it always
 //! raises typed context exhaustion ([`Error::ContextExhausted`]).
@@ -157,34 +158,6 @@ fn message_chars(message: &Message) -> u64 {
         calls.iter().map(|call| call.to_string().len() as u64).sum()
     });
     content + calls
-}
-
-/// Body signatures the known backends emit when a request exceeds the
-/// model's context window (OpenAI and compatible gateways, llama.cpp,
-/// vLLM), matched case-insensitively against the bounded, escaped body the
-/// client retained.
-const OVERFLOW_SIGNATURES: &[&str] = &[
-    "context length",
-    "context window",
-    "context size",
-    "context_length_exceeded",
-    "too many tokens",
-    "prompt is too long",
-];
-
-/// Provider-overflow detection: true when a non-success status is a client
-/// rejection (400 or 413) whose body names a context-window limit. A 5xx
-/// never classifies: an overflow the backend reports as its own error is
-/// indistinguishable from a fault, so it stays a plain backend failure.
-#[must_use]
-pub fn is_context_overflow(status: u16, body: &str) -> bool {
-    if status != 400 && status != 413 {
-        return false;
-    }
-    let body = body.to_lowercase();
-    OVERFLOW_SIGNATURES
-        .iter()
-        .any(|signature| body.contains(signature))
 }
 
 /// Installs the `compactors` global holding the shipped policies.

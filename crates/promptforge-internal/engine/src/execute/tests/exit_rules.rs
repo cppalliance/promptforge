@@ -10,6 +10,7 @@ use super::models_loop::{
 use super::run;
 use super::*;
 use crate::lua::ToolSet;
+use crate::model::CompletionErrorKind;
 use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test]
@@ -260,17 +261,16 @@ async fn empty_stop_turn_without_tool_calls_fails() {
     for tools in [FixtureTools::default(), echo_tools()] {
         let (out, events, turns) = drive_loop(vec![resp_text_finish("", "stop")], tools).await;
         match out {
-            Err(Error::EmptyModelReply {
-                finish_reason,
-                detail: phrase,
-            }) => {
-                assert_eq!(finish_reason.as_deref(), Some("stop"));
+            Err(Error::Completion(error)) => {
+                assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+                assert_eq!(error.finish_reason(), Some("stop"));
                 assert_eq!(
-                    phrase, "empty model reply",
-                    "the client's phrase is the message"
+                    error.message(),
+                    "the model replied with no text and no tool calls",
+                    "the fixed phrase for the kind is the message"
                 );
             }
-            other => panic!("expected EmptyModelReply, got {other:?}"),
+            other => panic!("expected an EmptyReply failure, got {other:?}"),
         }
         assert_eq!(turns, 1, "the empty round is a completed turn");
         assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
@@ -285,10 +285,11 @@ async fn empty_truncated_final_text_fails_without_truncation_detail() {
     let (out, events, _) =
         drive_loop(vec![resp_text_finish("", "length")], ToolSet::default()).await;
     match out {
-        Err(Error::EmptyModelReply { finish_reason, .. }) => {
-            assert_eq!(finish_reason.as_deref(), Some("length"));
+        Err(Error::Completion(error)) => {
+            assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+            assert_eq!(error.finish_reason(), Some("length"));
         }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
+        other => panic!("expected an EmptyReply failure, got {other:?}"),
     }
     assert_eq!(events, vec![detail::MODEL_TURN_COMPLETED.to_string()]);
 }
@@ -306,10 +307,11 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
     )
     .await;
     match out {
-        Err(Error::EmptyModelReply { finish_reason, .. }) => {
-            assert_eq!(finish_reason, None);
+        Err(Error::Completion(error)) => {
+            assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+            assert_eq!(error.finish_reason(), None);
         }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
+        other => panic!("expected an EmptyReply failure, got {other:?}"),
     }
     assert_eq!(turns, 2, "the tool-call turn and the completed empty round");
     assert_eq!(
@@ -342,5 +344,8 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
-    assert_eq!(out, "empty_model_reply|stop|empty model reply");
+    assert_eq!(
+        out,
+        "empty_model_reply|stop|the model replied with no text and no tool calls"
+    );
 }

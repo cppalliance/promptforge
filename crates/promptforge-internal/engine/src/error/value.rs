@@ -2,6 +2,7 @@
 //! on and the kind's fields.
 
 use super::{Error, join_task_ids};
+use crate::model::CompletionErrorKind;
 
 /// The internal type's rendering into the Lua error table: the kind an author
 /// branches on and the kind's fields. Failures outside the prompt
@@ -19,7 +20,9 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::LuaQuota { .. }
             | Error::Substitution(_) => ErrorKind::Lua,
             Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
-            Error::EmptyModelReply { .. } => ErrorKind::EmptyModelReply,
+            Error::Completion(error) if error.kind() == CompletionErrorKind::EmptyReply => {
+                ErrorKind::EmptyModelReply
+            }
             Error::Interrupted | Error::TaskCancelled { .. } => ErrorKind::Cancelled,
             Error::ToolLoopExhausted => ErrorKind::ToolLoopExhausted,
             Error::TasksLive { .. } => ErrorKind::TasksLive,
@@ -31,16 +34,7 @@ impl promptforge_lua::ErrorValue for Error {
             Error::Store { .. } => ErrorKind::Store,
             Error::ParseFrontmatter { .. }
             | Error::ParseStructured { .. }
-            | Error::MissingEnv(_)
-            | Error::InvalidEnv(_)
-            | Error::InvalidConfig(_)
-            | Error::Config { .. }
-            | Error::GatewayDisabled
-            | Error::Http(_)
-            | Error::Backend { .. }
-            | Error::MalformedResponse(_)
-            | Error::MalformedResponseSource { .. }
-            | Error::BackendBodyRead { .. }
+            | Error::Completion(_)
             | Error::BindSchema { .. }
             | Error::ModelRequired { .. }
             | Error::UnsupportedVersion(_)
@@ -59,13 +53,15 @@ impl promptforge_lua::ErrorValue for Error {
                     ErrorField::String(reason.tag().to_owned()),
                 )]
             }
-            Error::EmptyModelReply {
-                finish_reason: Some(finish_reason),
-                ..
-            } => vec![(
-                "finish_reason".to_owned(),
-                ErrorField::String(finish_reason.clone()),
-            )],
+            Error::Completion(error) if error.kind() == CompletionErrorKind::EmptyReply => error
+                .finish_reason()
+                .map(|reason| {
+                    vec![(
+                        "finish_reason".to_owned(),
+                        ErrorField::String(reason.to_owned()),
+                    )]
+                })
+                .unwrap_or_default(),
             Error::OutOfScopeToolCall { name, .. } | Error::UnboundToolCall { name, .. } => {
                 vec![("name".to_owned(), ErrorField::String(name.clone()))]
             }

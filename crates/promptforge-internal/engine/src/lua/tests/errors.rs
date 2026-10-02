@@ -301,7 +301,7 @@ fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
         crate::Error::from(Error::Raised(cancelled)),
         crate::Error::Interrupted
     ));
-    // The empty-reply arm keeps the message the author saw as `detail`
+    // The empty-reply arm keeps the message the author saw as the message
     // and copies the `finish_reason` field across.
     let empty = promptforge_lua::Raised {
         kind: ErrorKind::EmptyModelReply,
@@ -314,14 +314,12 @@ fn a_raised_table_maps_onto_the_executor_error_type_by_kind() {
         .collect(),
     };
     match crate::Error::from(Error::Raised(empty)) {
-        crate::Error::EmptyModelReply {
-            detail,
-            finish_reason,
-        } => {
-            assert_eq!(detail, "the model returned an empty turn");
-            assert_eq!(finish_reason.as_deref(), Some("length"));
+        crate::Error::Completion(error) => {
+            assert_eq!(error.kind(), crate::model::CompletionErrorKind::EmptyReply);
+            assert_eq!(error.message(), "the model returned an empty turn");
+            assert_eq!(error.finish_reason(), Some("length"));
         }
-        other => panic!("expected the empty-reply variant, got {other:?}"),
+        other => panic!("expected the empty-reply failure, got {other:?}"),
     }
 }
 

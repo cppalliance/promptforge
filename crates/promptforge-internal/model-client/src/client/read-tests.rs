@@ -71,7 +71,15 @@ fn read_body_capped_refuses_an_advertised_oversize_length_before_reading() {
     let err = block_on(read_body_capped(&mut source, Some(100), 8))
         .expect_err("an advertised length over the cap is refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(err.to_string().contains("100 bytes"), "got {err}");
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood"
+    );
+    assert!(
+        err.detail()
+            .is_some_and(|detail| detail.contains("100 bytes")),
+        "got {err:?}"
+    );
     assert_eq!(source.0.len(), 1, "nothing was read");
 }
 
@@ -81,7 +89,10 @@ fn read_body_capped_refuses_streamed_chunks_over_the_cap() {
     let err = block_on(read_body_capped(&mut source, None, 8))
         .expect_err("chunks past the cap are refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(err.to_string().contains("8-byte"), "got {err}");
+    assert!(
+        err.detail().is_some_and(|detail| detail.contains("8-byte")),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -200,7 +211,10 @@ fn read_completion_stream_refuses_a_stream_over_the_byte_cap() {
     ))
     .expect_err("an oversize stream is refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(err.to_string().contains("8-byte"), "got {err}");
+    assert!(
+        err.detail().is_some_and(|detail| detail.contains("8-byte")),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -218,7 +232,10 @@ fn read_completion_stream_refuses_a_stream_without_the_sentinel() {
     ))
     .expect_err("a cut-off stream is refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(err.to_string().contains("[DONE]"), "got {err}");
+    assert!(
+        err.detail().is_some_and(|detail| detail.contains("[DONE]")),
+        "got {err:?}"
+    );
 }
 
 #[test]
@@ -240,6 +257,6 @@ fn read_completion_stream_returns_the_source_failure_as_is() {
         || started,
     ))
     .expect_err("a read failure fails the round");
-    assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    assert_eq!(err.kind(), CompletionErrorKind::Timeout);
     assert!(err.is_timeout(), "the marker survives: {err:?}");
 }

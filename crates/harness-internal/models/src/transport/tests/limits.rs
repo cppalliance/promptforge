@@ -10,14 +10,14 @@ use super::*;
 use crate::CompletionErrorKind;
 
 #[tokio::test]
-async fn complete_on_a_disabled_client_is_a_disabled_error() {
+async fn complete_on_a_disabled_client_is_an_unavailable_error() {
     // F14: a disabled client never touches the network.
     let client = GatewayClient::disabled();
     let err = client
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("a disabled client cannot complete");
-    assert_eq!(err.kind(), CompletionErrorKind::Disabled);
+    assert_eq!(err.kind(), CompletionErrorKind::Unavailable);
 }
 
 #[tokio::test]
@@ -37,19 +37,22 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     let err = client
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
-        .expect_err("a 502 must surface as a backend error");
+        .expect_err("a 502 must surface as a classified failure");
 
-    // F5: the public Display names only the status, never the raw body.
+    // F5: the public Display names only the kind and the status, never the
+    // raw body.
+    assert_eq!(err.kind(), CompletionErrorKind::ServerError);
     let shown = err.to_string();
-    assert!(shown.contains("502"), "status must appear, got {shown}");
+    assert_eq!(
+        shown,
+        "the model backend reported a fault of its own (status 502)"
+    );
     assert!(
         !shown.contains("super-secret") && !shown.contains('\n'),
         "the raw body must not appear in Display, got {shown}"
     );
     // The bounded, control-escaped body is available only via the opt-in.
-    let body = err
-        .backend_body()
-        .expect("backend body is available opt-in");
+    let body = err.detail().expect("the body is available opt-in");
     assert!(
         body.contains("\\n"),
         "control chars must be escaped, got {body}"
@@ -101,13 +104,12 @@ async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
 }
 
 #[tokio::test]
-async fn a_request_past_the_timeout_is_a_timeout_transport_failure() {
+async fn a_request_past_the_timeout_is_a_timeout_failure() {
     use axum::Router;
     use axum::routing::post;
 
     // The timeout bounds the wait for the response headers; a gateway that
-    // never answers within it fails as Transport, and the timeout survives
-    // the type erasure so `is_timeout` holds.
+    // never answers within it fails as Timeout.
     async fn stall() -> (axum::http::StatusCode, String) {
         std::future::pending().await
     }
@@ -120,9 +122,9 @@ async fn a_request_past_the_timeout_is_a_timeout_transport_failure() {
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("a stalled gateway must time out");
-    assert_eq!(err.kind(), CompletionErrorKind::Transport);
-    assert!(
-        err.is_timeout(),
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
         "the timeout must be recognizable: {err:?}"
     );
     assert!(err.is_retryable());
@@ -242,7 +244,7 @@ async fn a_single_event_trickled_past_the_timeout_completes() {
 }
 
 #[tokio::test]
-async fn a_stream_that_stalls_after_the_headers_is_a_timeout_transport_failure() {
+async fn a_stream_that_stalls_after_the_headers_is_a_timeout_failure() {
     let pieces = vec![(
         Duration::ZERO,
         format!("data: {}\n\n", content_chunk("half")),
@@ -252,9 +254,9 @@ async fn a_stream_that_stalls_after_the_headers_is_a_timeout_transport_failure()
         .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("a stream that stops arriving must time out");
-    assert_eq!(err.kind(), CompletionErrorKind::Transport);
-    assert!(
-        err.is_timeout(),
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
         "the timeout must be recognizable: {err:?}"
     );
     assert!(err.is_retryable());
@@ -266,7 +268,7 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
 
     // The catalog fetch boxes a failed error-body read as `BackendBodyRead`
     // through the same marking as a send failure, so a timeout during that
-    // read still reports `is_timeout`, as the marker's contract promises.
+    // read still classifies as `Timeout`, as the marker's contract promises.
     // The server answers a 500 with a large promised body, then stalls.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -299,12 +301,12 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
         status: 500,
         source: transport_source(read),
     });
-    assert_eq!(err.kind(), CompletionErrorKind::Transport);
-    assert_eq!(err.status(), Some(500));
-    assert!(
-        err.is_timeout(),
+    assert_eq!(
+        err.kind(),
+        CompletionErrorKind::Timeout,
         "the marker must survive under BackendBodyRead: {err:?}"
     );
+    assert_eq!(err.status(), Some(500));
 }
 
 #[tokio::test]
@@ -361,7 +363,7 @@ async fn stream_without_done_sentinel_is_malformed() {
         .expect_err("a truncated stream must fail");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
     assert!(
-        err.to_string().contains("[DONE]"),
-        "the error names the missing sentinel: {err}"
+        err.detail().is_some_and(|detail| detail.contains("[DONE]")),
+        "the error's detail names the missing sentinel: {err:?}"
     );
 }

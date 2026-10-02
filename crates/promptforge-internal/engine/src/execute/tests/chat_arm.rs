@@ -131,11 +131,6 @@ fn rich_text_reply(content: &str) -> GatewayReply {
     }))
 }
 
-/// The provider's context-window rejection.
-fn context_rejection() -> GatewayReply {
-    resp_status(400, "This model's maximum context length is 4096 tokens.")
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     let gateway = ScriptedGateway::start(vec![rich_text_reply("final answer")]).await;
@@ -367,9 +362,9 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
         "the precheck fires before dispatch"
     );
 
-    // The provider's rejection is the same flag after one request, and a
-    // failed turn.
-    let gateway = ScriptedGateway::start(vec![context_rejection()]).await;
+    // A broker-reported context overflow is the same flag after one
+    // request, and a failed turn.
+    let client = OverflowClient::default();
     let md = loop_prompt(&format!(
         "local msgs = messages.new()\n\
          msgs:user('a small prompt')\n\
@@ -382,12 +377,16 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness.client(client.clone()), None)
         .drive()
         .await
         .expect("the compactor's raise is pcall-able");
     assert_eq!(out, "provider");
-    assert_eq!(gateway.call_count(), 1, "the request left and was refused");
+    assert_eq!(
+        client.calls.load(Ordering::SeqCst),
+        1,
+        "the request left and was refused"
+    );
     let lines = recorder.lines();
     assert!(
         lines

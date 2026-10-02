@@ -24,8 +24,8 @@ pub(crate) use promptforge_model_client::client::{
     Completion, CompletionResult, Message, ToolCall, ToolSchema,
 };
 pub(crate) use promptforge_model_client::model::{
-    CompletionError, CompletionOptions, ModelBinding, ModelInvocation, ModelSet, ModelView,
-    Temperature,
+    CompletionError, CompletionErrorKind, CompletionOptions, ModelBinding, ModelInvocation,
+    ModelSet, ModelView, Temperature,
 };
 pub(crate) use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 

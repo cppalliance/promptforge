@@ -15,8 +15,8 @@ use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
 };
 use promptforge::transport::{
-    ChunkSource, ClientError as Error, ClientTimeout, build_request_body, escape_controls,
-    read_body_capped, read_completion_stream,
+    ChunkSource, ClientError as Error, ClientTimeout, build_request_body, classify_http_failure,
+    escape_controls, read_body_capped, read_completion_stream,
 };
 
 use crate::config::{GatewayEndpoint, SecretString};
@@ -179,7 +179,7 @@ impl GatewayClient {
     /// Builds an explicit sentinel client that the Harness uses for hermetic
     /// execution paths.
     ///
-    /// Any attempted model call fails with a `Disabled`-kind
+    /// Any attempted model call fails with an `Unavailable`-kind
     /// [`CompletionError`]; the client reads no gateway configuration and
     /// sends no HTTP.
     ///
@@ -196,7 +196,7 @@ impl GatewayClient {
     ///     .complete(&[Message::user("hi")], None, &options, |_delta| {})
     ///     .await
     ///     .expect_err("a disabled client cannot complete");
-    /// assert_eq!(error.kind(), CompletionErrorKind::Disabled);
+    /// assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
     /// # }
     /// ```
     #[must_use]
@@ -259,11 +259,11 @@ impl GatewayClient {
     ///   by default, so the client is then built keyless. An empty value
     ///   counts as unset. That trust also admits every other OS account on a
     ///   shared machine, so an operator there sets `trust_loopback = false`;
-    ///   then set the key, or a keyless client's requests fail with a
-    ///   `Backend` 401.
+    ///   then set the key, or a keyless client's requests fail with an
+    ///   `Unavailable` 401.
     ///
     /// # Errors
-    /// Returns a [`CompletionError`] with `Config` kind when
+    /// Returns a [`CompletionError`] with `Unavailable` kind when
     /// `PROMPTFORGE_GATEWAY_URL` is unset or invalid, when either variable is
     /// set to a non-Unicode value, or when the URL's host is not loopback (a
     /// LAN or remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is unset or
@@ -302,11 +302,15 @@ impl GatewayClient {
     /// # Errors
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
     /// (F11 - the full reachable set):
-    /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
-    /// - `Transport` on a transport-layer failure (connection, or no headers
-    ///   or next chunk within the timeout) or when the stream contains a
-    ///   mid-flight error envelope;
-    /// - `Backend` when the gateway responds with a non-success status;
+    /// - `Unavailable` when this client was built with [`GatewayClient::disabled`],
+    ///   or the gateway answers 401 or 403;
+    /// - `Timeout` when no headers or next chunk arrive within the timeout;
+    /// - `Transport` on any other transport-layer failure (connection) or
+    ///   when the stream contains a mid-flight error envelope that names no
+    ///   known cause;
+    /// - `ContextOverflow`, `RateLimited`, `QuotaExhausted`, `Overloaded`,
+    ///   `Refused`, `ServerError`, or `Rejected` when the gateway responds
+    ///   with a non-success status, as [`classify_http_failure`] reads it;
     /// - `MalformedResponse` when the stream exceeds the size cap, a chunk's
     ///   shape is unusable (the JSON decode failure is retained as a private
     ///   `#[source]`), the stream ends without the `[DONE]` sentinel, or a
@@ -352,15 +356,12 @@ impl GatewayClient {
             let raw_body =
                 read_body_capped(&mut chunks, content_length, self.max_response_bytes).await?;
             // F5: bound the body, then escape control characters so a hostile
-            // payload cannot forge log lines. The escaped body is kept only for
-            // the opt-in `CompletionError::backend_body` accessor, never the
+            // payload cannot forge log lines. The classifier keeps the escaped
+            // body only as the opt-in `CompletionError::detail`, never in the
             // public `Display`.
             let body = String::from_utf8_lossy(&raw_body);
             let body = escape_controls(&body, 2000);
-            return Err(CompletionError::from(Error::Backend {
-                status: status.as_u16(),
-                body,
-            }));
+            return Err(classify_http_failure(status.as_u16(), &body));
         }
 
         // The byte cap, the `[DONE]` rule, the truncation rule, the strict
@@ -391,7 +392,7 @@ pub(crate) fn from_env_with(
 ) -> Result<GatewayClient, Error> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
-    let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
+    let endpoint = GatewayEndpoint::parse(&base_url)?;
     let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
         .map(SecretString::new)
         .and_then(Result::ok);

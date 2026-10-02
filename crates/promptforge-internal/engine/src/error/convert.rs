@@ -3,8 +3,6 @@
 //! for variant, and the rebuild of a raised Lua error table into the
 //! variant it stands in for.
 
-use std::borrow::Cow;
-
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::Error as GatewayClientError;
 use promptforge_parser::Error as ParserError;
@@ -88,48 +86,23 @@ impl From<crate::subst::SubstitutionError> for Error {
     }
 }
 
-/// Maps the gateway-client error type back onto this one variant for
-/// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
-/// classification are unchanged by the extraction. The client crate's
-/// error type is `#[non_exhaustive]`; a variant this match does not name
-/// becomes [`Error::Config`] with its display text and itself as the source,
-/// so it classifies as a completion failure that is not retryable.
+/// Maps the gateway-client error type onto this one. `ModelSetLock` is the
+/// run's own mutex failing, not a model failure, so it flattens to
+/// [`Error::Lua`]; every other variant is classified into a
+/// [`CompletionError`](crate::model::CompletionError) and becomes
+/// [`Error::Completion`].
 impl From<GatewayClientError> for Error {
     fn from(error: GatewayClientError) -> Error {
         match error {
-            GatewayClientError::MissingEnv(name) => Error::MissingEnv(name),
-            GatewayClientError::InvalidEnv(name) => Error::InvalidEnv(name),
-            GatewayClientError::InvalidConfig(detail) => Error::InvalidConfig(detail),
-            GatewayClientError::Config { message, source } => Error::Config { message, source },
-            GatewayClientError::GatewayDisabled => Error::GatewayDisabled,
-            GatewayClientError::Http(source) => Error::Http(source),
-            GatewayClientError::Backend { status, body } => Error::Backend { status, body },
-            GatewayClientError::MalformedResponse(message) => Error::MalformedResponse(message),
-            GatewayClientError::MalformedResponseSource { message, source } => {
-                Error::MalformedResponseSource { message, source }
-            }
-            GatewayClientError::BackendBodyRead { status, source } => {
-                Error::BackendBodyRead { status, source }
-            }
-            GatewayClientError::EmptyModelReply {
-                detail,
-                finish_reason,
-            } => Error::EmptyModelReply {
-                detail: Cow::Borrowed(detail),
-                finish_reason,
-            },
             GatewayClientError::ModelSetLock(message) => Error::Lua(message),
-            other => Error::Config {
-                message: other.to_string(),
-                source: Box::new(other),
-            },
+            other => Error::Completion(crate::model::CompletionError::from(other)),
         }
     }
 }
 
 impl From<crate::model::CompletionError> for Error {
     fn from(error: crate::model::CompletionError) -> Error {
-        Error::from(GatewayClientError::from(error))
+        Error::Completion(error)
     }
 }
 
@@ -296,14 +269,22 @@ impl Error {
                 Some(reason) => Error::ContextExhausted { reason },
                 None => Error::Lua(raised.message),
             },
-            promptforge_lua::ErrorKind::EmptyModelReply => Error::EmptyModelReply {
-                finish_reason: raised
-                    .fields
-                    .get("finish_reason")
-                    .and_then(promptforge_lua::ErrorField::as_str)
-                    .map(str::to_owned),
-                detail: Cow::Owned(raised.message),
-            },
+            promptforge_lua::ErrorKind::EmptyModelReply => {
+                let error = crate::model::CompletionError::new(
+                    crate::model::CompletionErrorKind::EmptyReply,
+                    raised.message,
+                );
+                Error::Completion(
+                    match raised
+                        .fields
+                        .get("finish_reason")
+                        .and_then(promptforge_lua::ErrorField::as_str)
+                    {
+                        Some(reason) => error.with_finish_reason(reason),
+                        None => error,
+                    },
+                )
+            }
             promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
             promptforge_lua::ErrorKind::Tool => Error::Tool {
                 message: raised.message.clone(),

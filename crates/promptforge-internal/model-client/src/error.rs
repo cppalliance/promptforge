@@ -2,13 +2,12 @@
 //!
 //! [`Error`] is what a failed model round is built from. Every public
 //! boundary returns its own typed error ([`crate::model::CompletionError`],
-//! [`crate::model::ModelIdError`]); those wrappers classify this type and
-//! preserve it as their source. It is public so a transport can build the
+//! [`crate::model::ModelIdError`]); the first classifies this type into a
+//! closed kind. It is public so a transport can build the
 //! [`CompletionError`](crate::model::CompletionError) it answers with, and
-//! so `promptforge-engine` can map every variant back onto its own
-//! internal type verbatim. It is `#[non_exhaustive]`, so a variant can be
-//! added without breaking a transport; a `match` over it outside this
-//! crate ends in a wildcard arm.
+//! so `promptforge-engine` can match the run's own lock failure. It is
+//! `#[non_exhaustive]`, so a variant can be added without breaking a
+//! transport; a `match` over it outside this crate ends in a wildcard arm.
 
 /// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -20,8 +19,8 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// [`CompletionError::from`](crate::model::CompletionError) into the
 /// [`CompletionError`](crate::model::CompletionError) its round fails
 /// with, which classifies it into a
-/// [`CompletionErrorKind`](crate::model::CompletionErrorKind) and keeps it
-/// as the error's source.
+/// [`CompletionErrorKind`](crate::model::CompletionErrorKind) and keeps the
+/// variant's text as its detail.
 ///
 /// A transport builds these variants:
 /// - while reading its configuration: [`MissingEnv`](Error::MissingEnv),

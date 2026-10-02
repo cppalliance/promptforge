@@ -220,7 +220,7 @@ assert_eq!(error.kind(), RunErrorKind::Completion);
 
 When the model asks for tools instead, build each call with [`ToolCall::from_parts`]. Pass its arguments as a parsed JSON object, not the encoded string the wire carries, and wrap the calls in [`CompletionResult::ToolCalls`]. `from_result` refuses an empty batch and two calls that share an id, but not an empty text reply. A live reply whose text is empty or only whitespace is an `EmptyReply` failure, and `from_result` accepts both, so check `text.trim().is_empty()` yourself when your backend can return one.
 
-To decide on a retry, read [`is_retryable()`](CompletionError::is_retryable). It is true for transport failures, 5xx statuses, and malformed responses, and false for every status below 500, including 429, so add your own backoff for rate limits. A `CompletionError`'s `Display` never shows the backend's error body. Read [`backend_body()`](CompletionError::backend_body) when you want it, so you choose whether that body reaches your logs.
+To decide on a retry, read [`is_retryable()`](CompletionError::is_retryable). The failure's kind fixes the answer: it is true for `RateLimited`, `Overloaded`, `Timeout`, `Transport`, `ServerError`, and `MalformedResponse`, and false for the rest. A 429 is retryable, so your retry loop backs off on it; this crate never resends. A `CompletionError`'s `Display` never shows the backend's error body. Read [`detail()`](CompletionError::detail) when you want it, so you choose whether that body reaches your logs.
 
 You might expect to answer a chat effect with the reply text. Instead, the answer is a boxed `Completion` built with `Completion::from_result`, which carries whether the model replied or asked for tools, and which model served the round.
 
@@ -239,11 +239,17 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 
 ## CompletionError
 
-[`CompletionError`] reports why a model round or a catalog fetch failed. Answer a chat effect with one to fail the round, and match [`kind()`](CompletionError::kind) for the cause. Retry only when [`is_retryable()`](CompletionError::is_retryable) is true: for transport failures, 5xx statuses, and malformed responses, but never for a status below 500, including 429, so rate limits need your own backoff. A transport builds one only by converting a [`ClientError`](crate::transport::ClientError) through `From`, which is what step 4's `into()` does. [Answer a model round](#answer-a-model-round) teaches it.
+[`CompletionError`] reports why a model round or a catalog fetch failed. Answer a chat effect with one to fail the round, and match [`kind()`](CompletionError::kind) for the cause. Retry only when [`is_retryable()`](CompletionError::is_retryable) is true, which the kind fixes. A broker builds one with [`new`](CompletionError::new) or [`context_overflow`](CompletionError::context_overflow), or from an HTTP status with [`classify_http_failure`](crate::transport::classify_http_failure). Converting a [`ClientError`](crate::transport::ClientError) through `From` builds one the same way, which is what step 4's `into()` does. [Answer a model round](#answer-a-model-round) teaches it.
 
-- [`backend_body`](CompletionError::backend_body): the backend's error body for a non-success status; the error's `Display` never includes it.
-- [`status`](CompletionError::status): the HTTP status from a status failure or a failed body read, which is still `Transport`; do not infer the kind from it.
-- [`is_timeout`](CompletionError::is_timeout): true only when the transport wrapped its error in the crate's `Timeout` marker; a custom transport must mark its timeouts.
+- [`new`](CompletionError::new): builds a failure from a kind and its message. Use the kind's fixed phrase from the table below, and put provider text in the detail.
+- [`context_overflow`](CompletionError::context_overflow): builds a `ContextOverflow` failure with the prompt and window token counts, each `None` when the provider did not state it.
+- [`with_source`](CompletionError::with_source), [`with_finish_reason`](CompletionError::with_finish_reason), and [`with_detail`](CompletionError::with_detail): add the underlying cause, an empty reply's finish reason, and the provider text.
+- [`message`](CompletionError::message): the text `Display` shows, never the detail.
+- [`detail`](CompletionError::detail): the provider's bounded, escaped text behind the failure, such as the body of a non-success status; the error's `Display` never includes it.
+- [`overflow`](CompletionError::overflow): the `(prompt_tokens, window)` counts of a context overflow, each `None` when unknown.
+- [`backend_body`](CompletionError::backend_body): the same text as `detail`, for a non-success status only.
+- [`status`](CompletionError::status): the HTTP status from a status failure or a failed body read; do not infer the kind from it.
+- [`is_timeout`](CompletionError::is_timeout): true only for `Timeout` kind.
 - [`finish_reason`](CompletionError::finish_reason): `Some` only for an empty reply; after successful tool calls, `Some("stop")` exits cleanly, and a missing or `"length"` reason fails hard.
 
 ## CompletionOptions
@@ -335,17 +341,39 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 
 ## CompletionErrorKind
 
-[`CompletionErrorKind`] classifies a [`CompletionError`] into a stable kind you can match. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm. A failed read of a non-success body counts as a transport failure, so a transport failure can still carry a status. [Answer a model round](#answer-a-model-round) teaches the errors it classifies.
+[`CompletionErrorKind`] classifies a [`CompletionError`] into a closed set of kinds you can match. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm. Every broker maps its failures into these kinds, and the Engine branches on them alone: a `ContextOverflow` failure from a section's chat round takes the provider overflow path, and an `EmptyReply` takes the empty-answer path. [Answer a model round](#answer-a-model-round) teaches the errors it classifies.
 
-| Variant | Meaning |
+| Variant | Meaning | Retryable |
+|---|---|---|
+| [`ContextOverflow`](CompletionErrorKind::ContextOverflow) | The request is larger than the model's context window. | no |
+| [`RateLimited`](CompletionErrorKind::RateLimited) | The backend is limiting the request rate. | yes |
+| [`QuotaExhausted`](CompletionErrorKind::QuotaExhausted) | The billing or usage quota is spent. | no |
+| [`Overloaded`](CompletionErrorKind::Overloaded) | The backend is temporarily at capacity. | yes |
+| [`Refused`](CompletionErrorKind::Refused) | The provider declined the content on policy grounds. | no |
+| [`Timeout`](CompletionErrorKind::Timeout) | No reply or next chunk arrived in time. | yes |
+| [`Transport`](CompletionErrorKind::Transport) | The connection failed or the stream broke. | yes |
+| [`ServerError`](CompletionErrorKind::ServerError) | The backend reported a fault of its own. | yes |
+| [`Rejected`](CompletionErrorKind::Rejected) | The backend refused the request for any other reason. | no |
+| [`MalformedResponse`](CompletionErrorKind::MalformedResponse) | The reply could not be understood, or it passed the byte limit. | yes |
+| [`EmptyReply`](CompletionErrorKind::EmptyReply) | The model returned no tool calls and no text other than whitespace. | no |
+| [`Unavailable`](CompletionErrorKind::Unavailable) | Model access is turned off or not configured. | no |
+
+Each kind has one fixed message, written for a model reader, and an HTTP failure appends ` (status N)`:
+
+| Kind | Message |
 |---|---|
-| [`Transport`](CompletionErrorKind::Transport) | The request failed at the transport layer, such as a connection failure or a timeout, including a failed read of a non-success body. |
-| [`Backend`](CompletionErrorKind::Backend) | The backend returned a non-success status. |
-| [`MalformedResponse`](CompletionErrorKind::MalformedResponse) | The response could not be decoded or was structurally invalid, including an oversized or undecodable catalog body. |
-| [`EmptyReply`](CompletionErrorKind::EmptyReply) | The model returned no tool calls and no text other than whitespace. |
-| [`Disabled`](CompletionErrorKind::Disabled) | The Host explicitly disabled gateway access. |
-| [`Config`](CompletionErrorKind::Config) | The client could not be configured, from missing environment, invalid environment, or invalid config. |
-
+| `ContextOverflow` | `the request is larger than the model's context window` |
+| `RateLimited` | `the model backend is limiting the request rate` |
+| `QuotaExhausted` | `the model backend says the usage quota is spent` |
+| `Overloaded` | `the model backend is overloaded` |
+| `Refused` | `the model backend refused the request on content policy grounds` |
+| `Timeout` | `the model backend did not answer in time` |
+| `Transport` | `the connection to the model backend failed` |
+| `ServerError` | `the model backend reported a fault of its own` |
+| `Rejected` | `the model backend rejected the request` |
+| `MalformedResponse` | `the model backend sent a reply that could not be understood` |
+| `EmptyReply` | `the model replied with no text and no tool calls` |
+| `Unavailable` | `model access is turned off or not configured`, or `the model backend did not accept the credentials` for a 401 or 403 |
 ## CompletionResult
 
 [`CompletionResult`] holds the outcome of a model round: [`Text`](CompletionResult::Text), a final text reply, or [`ToolCalls`](CompletionResult::ToolCalls), a batch of tool calls the model asked for. You build one to answer a chat effect, or read one from a [`Completion`]. It is `#[non_exhaustive]`, so a `match` needs a `_` arm. [`Completion::from_result`] rejects an empty `ToolCalls` batch but accepts an empty `Text`. [Answer a model round](#answer-a-model-round) teaches it.

@@ -222,7 +222,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
         .expect_err("handle infer in an arm with no client must surface the disabled gateway");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("gateway access is disabled"),
+        rendered.contains("model access is turned off or not configured"),
         "an arm's models.infer must surface the disabled-gateway completion error: {rendered}"
     );
 }
