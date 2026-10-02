@@ -1,9 +1,14 @@
 //! What the machine reports for runtime selection: the NVIDIA probe, the
 //! CUDA environment, the C++ runtime, and the CPU's x86 extensions.
 
-use super::super::assets::NvidiaProbe;
+#[cfg(target_os = "linux")]
+use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::Path;
+
 #[cfg(target_arch = "x86_64")]
 use super::super::assets::X86_BASELINE;
+use super::super::assets::{CudaHost, NvidiaProbe};
 
 /// Queries the machine's NVIDIA GPUs and driver version through `nvidia-smi`.
 /// Returns `None` when the driver or the tool is absent or fails, or it
@@ -55,6 +60,47 @@ fn parse_nvidia_probe(stdout: &str) -> Option<NvidiaProbe> {
         // `None` orders below every `Some`.
         driver_major: driver_majors.into_iter().min().flatten(),
     })
+}
+
+/// Where Linux distributions install the C++ runtime, in the order
+/// [`host_libstdcxx`] tries them: the Debian multiarch and Fedora paths
+/// under `/usr`, then under an unmerged `/`, then Arch's.
+#[cfg(target_os = "linux")]
+const LIBSTDCXX_PATHS: &[&str] = &[
+    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/usr/lib64/libstdc++.so.6",
+    "/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/lib64/libstdc++.so.6",
+    "/usr/lib/libstdc++.so.6",
+];
+
+/// What the whisper `auto` pick reads from the host beside the NVIDIA
+/// probe. `CUDA_VISIBLE_DEVICES` is read lossily, so a value that is not
+/// UTF-8 reads as an invalid entry.
+pub(super) fn host_cuda() -> CudaHost {
+    CudaHost {
+        visible_devices: std::env::var_os("CUDA_VISIBLE_DEVICES")
+            .map(|value| value.to_string_lossy().into_owned()),
+        libstdcxx: host_libstdcxx(),
+    }
+}
+
+/// The bytes of the first file among [`LIBSTDCXX_PATHS`] that exists,
+/// `None` when none does or the read fails, and always `None` off Linux,
+/// where no whisper row names a C++ runtime version.
+fn host_libstdcxx() -> Option<Vec<u8>> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = LIBSTDCXX_PATHS
+            .iter()
+            .map(Path::new)
+            .find(|path| path.is_file())?;
+        fs::read(path).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }
 
 /// The [`X86_BASELINE`] extensions this CPU reports, in baseline
