@@ -2,6 +2,8 @@
 
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gateway_progress::Activity;
 use gateway_stt_engine::{
@@ -132,6 +134,7 @@ impl Decoder for WhisperDecoder {
             request.samples(),
             prompt.as_deref(),
             !final_pass,
+            request.cancellation(),
         )
     }
 }
@@ -194,12 +197,23 @@ fn prewarm(path: &Path, role: &str, progress: Option<&Activity>) -> Result<(), T
     Ok(())
 }
 
+/// Runs one whisper pass, which `cancellation` ends early once it reads true.
+///
+/// whisper first reads the flag after an encoder pass, and on the CPU build
+/// one pass takes seconds, so a decode whose flag is already set when its
+/// worker takes it fails before whisper starts.
 fn transcribe_blocking(
     state: &mut WhisperState,
     samples: &[f32],
     prompt: Option<&str>,
     single_segment: bool,
+    cancellation: Option<&Arc<AtomicBool>>,
 ) -> Result<String, TranscribeError> {
+    if cancellation.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+        return Err(inference_error(std::io::Error::other(
+            "decode cancelled before whisper started: its cancellation flag is set",
+        )));
+    }
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en")).map_err(inference_error)?;
     params.set_translate(false);
@@ -212,6 +226,9 @@ fn transcribe_blocking(
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
+    if let Some(flag) = cancellation {
+        params.set_abort_flag(Arc::clone(flag));
+    }
     if let Some(prompt) = prompt {
         let prompt = sanitize_prompt(prompt);
         if !prompt.is_empty() {
