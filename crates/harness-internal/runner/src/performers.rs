@@ -1,5 +1,5 @@
-//! One performer trait per effect kind, and the bundle the effect loop
-//! performs a run's effects through.
+//! One performer trait for each chat, tool-call, and timer effect, and the
+//! bundle the effect loop performs a run's effects through.
 //!
 //! The Engine issues an [`Effect`](promptforge::effect::Effect) as a
 //! value and waits for its
@@ -10,16 +10,15 @@
 //! effect loop owns the correlation: it hands each result back to the run
 //! under the effect's id and writes the answer's record.
 //!
-//! The asynchronous performers return a boxed `'static` future the loop
-//! spawns as its own task, so a performer must move what its future needs
-//! into it. The store performer is synchronous: the VFS is synchronous by
-//! design, and the loop runs the call on tokio's blocking pool.
+//! Each performer returns a boxed `'static` future the loop spawns as its
+//! own task, so a performer must move what its future needs into it. A
+//! `Vfs` effect has no performer: the VFS is synchronous by design, so the
+//! loop answers it inline through the Engine's store operation.
 //!
-//! The runner supplies three performers itself - [`TokioTimer`],
-//! [`VfsStore`], and [`ActivatedTools`] - because each is machinery it
-//! already holds: tokio's timer wheel, the Engine's store operation, and
-//! the tool table run preparation activated. The chat performer lives
-//! with what it reaches, the gateway client.
+//! The runner supplies two performers itself - [`TokioTimer`] and
+//! [`ActivatedTools`] - because each is machinery it already holds:
+//! tokio's timer wheel and the tool table run preparation activated. The
+//! chat performer lives with what it reaches, the gateway client.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,8 +28,6 @@ use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
-use promptforge::vfs::Access;
-use promptforge::vfs::{VfsError, VfsOp, VfsOutcome};
 use serde_json::Value;
 
 #[path = "performers-builtin.rs"]
@@ -38,7 +35,7 @@ mod builtin;
 #[path = "performers-tools.rs"]
 mod tools;
 
-pub use builtin::{TokioTimer, VfsStore};
+pub use builtin::TokioTimer;
 pub use tools::ActivatedTools;
 
 /// A boxed, sendable, owning future: what an asynchronous performer
@@ -75,31 +72,15 @@ pub trait ToolPerformer: Send + Sync {
     ) -> BoxFuture<Result<ToolOutput, ToolError>>;
 }
 
-/// Performs a `Vfs` effect: one store operation through the store
-/// view the effect carries.
-///
-/// Synchronous: the loop runs it on the blocking pool. Dropping the
-/// access when the operation completes is good hygiene, but when it
-/// drops never affects correctness: claims follow happens-before within
-/// the run's scope, and the run ends that scope at `Done`.
-pub trait StorePerformer: Send + Sync {
-    /// Performs `op` through `access`, the store view the effect
-    /// carries. The performer uses the capability as given and never
-    /// derives, widens, or retains store scope from it.
-    ///
-    /// # Errors
-    /// Returns the store's own structured failure, which the Engine
-    /// raises at the author's call site as a store error.
-    fn perform(&self, access: &Access, op: VfsOp) -> Result<VfsOutcome, VfsError>;
-}
-
 /// Performs a `Timer` effect: one sleep.
 pub trait TimerPerformer: Send + Sync {
     /// Resolves once `seconds` have passed.
     fn sleep(&self, seconds: f64) -> BoxFuture<()>;
 }
 
-/// The Harness's performers, one per effect kind.
+/// The Harness's performers: one for each chat, tool-call, and timer
+/// effect. The loop answers a `Vfs` effect inline and has no performer
+/// for it.
 ///
 /// Shared handles, so the loop can move a performer into the task it
 /// spawns for each effect while the bundle stays whole.
@@ -109,8 +90,6 @@ pub struct Performers {
     pub chat: Arc<dyn ChatPerformer>,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
-    /// Performs `Vfs` effects.
-    pub store: Arc<dyn StorePerformer>,
     /// Performs `Timer` effects.
     pub timer: Arc<dyn TimerPerformer>,
 }

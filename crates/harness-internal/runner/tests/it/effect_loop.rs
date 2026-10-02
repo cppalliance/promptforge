@@ -1,10 +1,10 @@
 //! The effect loop against fake performers and an in-memory log: the
 //! record stream is events, then effects, then answers per step; a cancel
 //! drops every outstanding effect with one `Dropped` answer each; a
-//! blocking store operation is awaited before the run reaches `Done`; a
 //! performer that panics drops its effect rather than stranding the run;
 //! and a refused log write ends the drive with the log's error and aborts
-//! the performers still out.
+//! the performers still out. The Vfs effect the loop answers inline has
+//! its own module, `vfs`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,12 +16,16 @@ use harness_log::{
 use harness_runner::effect_loop::{DriveError, SharedLog, drive_run};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
+use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
 use serde_json::json;
 
 use crate::support::{
-    ClosingTool, PanickingTool, PendingTimer, PendingTool, SlowStore, TIMED_MAIN, TextTool,
-    UnitStore, WAITS, run, run_with_child, unused,
+    ClosingTool, PanickingTool, PendingTimer, PendingTool, TIMED_MAIN, TextTool, WAITS, run,
+    run_over, run_with_child, unused,
 };
+
+#[path = "effect_loop-vfs.rs"]
+mod vfs;
 
 /// A run's opening row; the loop closes it.
 fn meta() -> RunMeta {
@@ -100,13 +104,16 @@ fn assert_one_answer_per_effect(records: &[StoredRecord]) {
 async fn records_are_events_then_effects_then_answers_per_step() {
     let (log, run_id) = begun_log().await;
     let mut performers = unused();
-    performers.store = Arc::new(UnitStore);
     performers.tool = Arc::new(TextTool("hi"));
     let seen: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
+    let vfs = VfsRef::builder().store("/", MemoryBackend::new()).build();
 
     let outcome = drive_run(
-        run(&format!("store.write('notes.md', 'kept')\n{WAITS}")),
+        run_over(
+            &format!("store.write('notes.md', 'kept')\n{WAITS}"),
+            vfs.clone(),
+        ),
         performers,
         Arc::clone(&log),
         run_id,
@@ -120,6 +127,12 @@ async fn records_are_events_then_effects_then_answers_per_step() {
         RunOutcome::Completed {
             final_text: "hi".to_owned()
         }
+    );
+    let store = vfs.acquire_store(Origin::new("effect loop test")).unwrap();
+    assert_eq!(
+        store.read("notes.md").unwrap(),
+        b"kept",
+        "the inline answer performed the write on the run's store"
     );
 
     let records = records(&log, run_id).await;
@@ -389,46 +402,4 @@ async fn a_closed_run_refuses_the_first_write_before_any_performer_starts() {
         "got {error:?}"
     );
     assert!(records(&log, run_id).await.is_empty());
-}
-
-#[tokio::test]
-async fn a_slow_store_operation_is_awaited_before_done() {
-    let (log, run_id) = begun_log().await;
-    let finished = Arc::new(AtomicBool::new(false));
-    let mut performers = unused();
-    performers.store = Arc::new(SlowStore {
-        delay: Duration::from_millis(300),
-        finished: Arc::clone(&finished),
-    });
-    let cancel = CancelHandle::new();
-    cancel_after(&cancel, Duration::from_millis(30));
-
-    let outcome = drive_run(
-        run("store.write('a.md', 'b')\nreturn 'ok'"),
-        performers,
-        Arc::clone(&log),
-        run_id,
-        cancel,
-        |_event| {},
-    )
-    .await
-    .unwrap();
-    assert_eq!(outcome, RunOutcome::Cancelled);
-    assert!(
-        finished.load(Ordering::SeqCst),
-        "the blocking store operation ran to completion before the run ended"
-    );
-
-    let records = records(&log, run_id).await;
-    assert_one_answer_per_effect(&records);
-    let answers: Vec<&StoredRecord> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Answer)
-        .collect();
-    assert_eq!(answers.len(), 1);
-    assert_eq!(
-        answers[0].record.payload,
-        json!("Dropped"),
-        "the store's late outcome is discarded; its one answer is the drop"
-    );
 }

@@ -2,7 +2,8 @@
 //! from a prompt file (drawing the inputs the Engine refuses to draw
 //! itself, putting the declared input file in place, activating
 //! capabilities, opening the run's row), steps it,
-//! performs each effect on tokio through one performer per effect kind,
+//! performs each chat, tool-call, and timer effect on tokio through its
+//! performer and answers each Vfs effect inline in the loop,
 //! feeds the answers back, records every event, effect, and answer in the
 //! run log, and owns cancellation.
 //!

@@ -1,15 +1,15 @@
-//! What a performer task owes the loop: exactly one answer for its
-//! effect, posted when the performer completes or, failing that, when the
-//! task is torn down.
+//! What an effect owes the loop: exactly one answer. A performer task
+//! posts its answer when the performer completes or, failing that, when
+//! the task is torn down; a Vfs effect is answered inline by
+//! [`answer_vfs`].
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use promptforge::effect::{EffectAnswer, EffectId};
-use promptforge::vfs::Access;
-use promptforge::vfs::{VfsError, VfsOp, VfsOutcome};
+use promptforge::ids::Provenance;
+use promptforge::vfs::{Access, VfsOp, perform_vfs_op};
 use tokio::sync::mpsc;
-
-use crate::performers::StorePerformer;
 
 /// The send half every performer task posts its answer to.
 pub(super) type AnswerSender = mpsc::UnboundedSender<(EffectId, EffectAnswer)>;
@@ -56,19 +56,37 @@ impl Drop for Answering {
     }
 }
 
-/// Performs one store operation on the loop's behalf.
+/// Answers one Vfs effect on the loop's own thread: performs `op`
+/// through the store view the effect carries and returns the answer to
+/// record and resume the run with.
+///
+/// The operation is synchronous by design, so no task, guard, or channel
+/// is involved: the answer is the return value, and an [`Answering`] is
+/// never made for a Vfs effect. A panic out of the backend is caught
+/// here, logged against `id` and `provenance`, and answered `Dropped`, so
+/// it ends the run as a cancelled one and never unwinds the loop.
 ///
 /// The access is this function's own parameter, so it drops when the
-/// function returns - after the operation, before the caller's
-/// [`Answering`] guard posts. The early drop is hygiene only: claims
-/// follow happens-before within the run's scope, and the run ends that
-/// scope at `Done` however long any access is held.
-pub(super) fn perform_store(
-    store: &dyn StorePerformer,
+/// function returns. The drop is hygiene only: claims follow
+/// happens-before within the run's scope, and the run ends that scope at
+/// `Done` however long any access is held.
+pub(super) fn answer_vfs(
+    id: EffectId,
+    provenance: &Provenance,
     access: Arc<Access>,
     op: VfsOp,
-) -> Result<VfsOutcome, VfsError> {
-    let result = store.perform(&access, op);
+) -> EffectAnswer {
+    let result = catch_unwind(AssertUnwindSafe(|| perform_vfs_op(&access, op)));
     drop(access);
-    result
+    match result {
+        Ok(outcome) => EffectAnswer::Vfs(outcome),
+        Err(_panic) => {
+            tracing::error!(
+                effect = %id,
+                task = %provenance.task,
+                "a Vfs operation panicked; its effect is dropped"
+            );
+            EffectAnswer::Dropped
+        }
+    }
 }

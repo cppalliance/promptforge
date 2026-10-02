@@ -1,13 +1,13 @@
-//! The runner's own performers under the effect loop: a tokio timer fires
-//! after its duration and is torn down by a cancel, a store operation
-//! runs through the Engine's store facade.
+//! The runner's own performer and the inline Vfs answer under the effect
+//! loop: a tokio timer fires after its duration and is torn down by a
+//! cancel, a store operation runs through the Engine's store facade.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use harness_log::{RecordKind, RunLog, RunMeta, RunOutcome};
 use harness_runner::effect_loop::{SharedLog, drive_run};
-use harness_runner::performers::{BoxFuture, TokioTimer, ToolPerformer, VfsStore};
+use harness_runner::performers::{BoxFuture, TokioTimer, ToolPerformer};
 use promptforge::cancel::CancelHandle;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::{Value, json};
@@ -185,10 +185,9 @@ async fn a_pending_timer_is_torn_down_by_a_cancel() {
 }
 
 #[tokio::test]
-async fn the_vfs_store_performs_the_operation_the_effect_names() {
+async fn an_inline_vfs_answer_performs_the_operation_the_effect_names() {
     let (log, run_id) = begun_log().await;
-    let mut performers = unused();
-    performers.store = Arc::new(VfsStore);
+    let performers = unused();
 
     let outcome = drive_run(
         run("store.write('notes.md', 'kept')\n\
