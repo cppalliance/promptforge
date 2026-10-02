@@ -46,7 +46,7 @@ const FEATURES: &[Tiered] = &[
 /// Tier 3: the server. May depend on every lower tier.
 const SERVER: &[Tiered] = &[("workshop-server", "server")];
 
-/// File-line ceiling from the `AGENTS.md` structural rules.
+/// File-line ceiling that `file_ceiling_violations` enforces.
 const MAX_FILE_LINES: usize = 500;
 
 /// Marker in a crate's `lib.rs` (or `main.rs`) crate docs. Mandatory for

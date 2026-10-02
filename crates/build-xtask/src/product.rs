@@ -1,4 +1,5 @@
-//! Product-boundary check: codifies the AGENTS.md dependency matrix.
+//! Product-boundary check: the dependency matrix between product
+//! families, their public crates, and their private containers.
 //!
 //! Every workspace crate is classified by package name into a product
 //! family, and its dependencies of every kind (normal, dev, build, and
