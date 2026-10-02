@@ -149,7 +149,7 @@ fn an_unparseable_clippy_toml_is_reported() {
 }
 
 #[test]
-fn the_harness_crates_are_the_six_container_crates_and_the_facade() {
+fn the_harness_crates_are_the_three_container_crates_and_the_facade() {
     let root = crate::product::test_support::workspace_root();
     let internal = root.join("crates").join("harness-internal");
     let covered = harness_crates(&internal, &root.join("crates").join("harness"));
@@ -157,17 +157,12 @@ fn the_harness_crates_are_the_six_container_crates_and_the_facade() {
         internal.join("runner"),
         internal.join("capabilities"),
         internal.join("sessions"),
-        // The first-party capabilities, moved in from the Engine's
-        // container with the traits they implement.
-        internal.join("web"),
-        internal.join("webfetch"),
-        internal.join("web-search"),
         root.join("crates").join("harness"),
     ];
     assert_eq!(
         covered.len(),
         expected.len(),
-        "the harness family is exactly seven crates; covered: {covered:?}"
+        "the harness container holds three crates beside the facade; covered: {covered:?}"
     );
     for dir in &expected {
         assert!(

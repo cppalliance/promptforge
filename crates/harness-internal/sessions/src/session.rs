@@ -37,7 +37,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use harness_capabilities::HostServices;
+use harness_capabilities::{CapabilityRegistry, HostServices};
 use harness_runner::recorder::{RunId as RecordedRun, RunRecorder};
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
@@ -297,6 +297,8 @@ pub(crate) struct SessionCore {
     state: watch::Sender<SessionState>,
     /// The Host's recorder every run of the session is written to.
     pub(crate) recorder: Arc<dyn RunRecorder>,
+    /// The Host's capabilities every run resolves its declarations against.
+    pub(crate) capabilities: Arc<CapabilityRegistry>,
     /// The Host's services every run's capabilities read.
     pub(crate) services: HostServices,
 }
@@ -311,6 +313,7 @@ pub(crate) struct SessionSeed {
     pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
     pub(crate) recorder: Arc<dyn RunRecorder>,
+    pub(crate) capabilities: Arc<CapabilityRegistry>,
     pub(crate) services: HostServices,
 }
 
@@ -341,6 +344,7 @@ impl SessionCore {
             runs: Mutex::new(Vec::new()),
             state: watch::Sender::new(SessionState::Alive),
             recorder: seed.recorder,
+            capabilities: seed.capabilities,
             services: seed.services,
         });
         (core, raw_deltas)

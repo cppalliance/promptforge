@@ -15,7 +15,7 @@ async fn slow_server_past_total_timeout_yields_timeout() {
         .timeout(std::time::Duration::from_millis(200))
         .build()
         .expect("valid config");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/slow");
     let result = tool
@@ -144,7 +144,7 @@ async fn redirect_to_internal_via_injected_lookup_never_contacts_target() {
             }),
         )
         .with_state(redir_state);
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(redir_listener, app)
             .await
             .expect("the redirect server must serve");
@@ -156,7 +156,7 @@ async fn redirect_to_internal_via_injected_lookup_never_contacts_target() {
         .allow_host_address("allowed.test", loopback)
         .build()
         .expect("valid config");
-    let tool = WebFetch::with_lookup(config, lookup);
+    let tool = on_this_runtime(&FetchClient::with_lookup(config, lookup));
 
     let url = format!("http://allowed.test:{redir_port}/go");
     // The outcome may be a hard error (the redirect address is blocked) or a
@@ -177,7 +177,7 @@ async fn redirect_to_internal_via_injected_lookup_never_contacts_target() {
 
 #[tokio::test]
 async fn call_rejects_bad_urls_before_network() {
-    let tool = WebFetch::new();
+    let tool = on_this_runtime(&FetchClient::new());
 
     let hard_cases = [
         (
@@ -252,7 +252,7 @@ async fn soft_return_on_500() {
 
 #[tokio::test]
 async fn blocked_url_still_hard_fails() {
-    let tool = WebFetch::new();
+    let tool = on_this_runtime(&FetchClient::new());
 
     let err = tool
         .call(serde_json::json!({ "url": "https://1.2.3.4/secret" }))

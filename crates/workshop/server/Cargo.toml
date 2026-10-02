@@ -9,11 +9,20 @@ publish = false
 description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop app"
 
 [dependencies]
+# `SearchProvider`, which the agent sessions' Gateway search implements,
+# is an `async_trait` trait.
+async-trait.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 # The Harness public API: the composition root constructs and registers
 # the Harness that runs the agent sessions.
 harness.workspace = true
+# The Gateway web search client the agent sessions' search provider
+# sends each search through.
+harness-gateway-client.workspace = true
+# The `promptforge/web` capability the Harness's registry holds, and the
+# search-provider and runtime services it reads.
+harness-web.workspace = true
 # The Engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.

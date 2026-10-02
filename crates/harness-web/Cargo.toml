@@ -1,22 +1,25 @@
 [package]
-name = "harness-webfetch"
+name = "harness-web"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
+description = "PromptForge promptforge/web capability: the web fetch tool and a search tool over the Host's search provider, in one pack a Host registers"
 readme = "README.md"
-keywords = ["http", "fetch", "web", "ssrf", "readability"]
-categories = ["web-programming::http-client"]
+keywords = ["promptforge", "llm", "tools", "web", "ssrf"]
+categories = ["web-programming::http-client", "api-bindings"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-harness-capabilities.workspace = true
+# The Harness public API: the capability, tool, and service vocabulary.
+harness.workspace = true
 # The Engine's public API: tool id, output, and error vocabulary.
 promptforge.workspace = true
+# `Tool` and `SearchProvider` are `async_trait` traits.
 async-trait.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["gzip", "brotli"] }
 readabilityrs.workspace = true
@@ -27,18 +30,17 @@ url.workspace = true
 ipnet.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+# The Host's runtime handle every fetch is spawned onto.
 tokio = { workspace = true }
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The tests spawn their mock servers through the Harness's instrumented
-# spawn wrapper, never `tokio::spawn` (see clippy.toml), under the tag
-# fixture `test-support` provides.
-harness-runner = { workspace = true, features = ["test-support"] }
-tokio.workspace = true
 axum.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
+# `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock reads
+# its request and watches for the client's hang-up with.
+tokio = { workspace = true, features = ["io-util"] }
 
 [lints]
 workspace = true

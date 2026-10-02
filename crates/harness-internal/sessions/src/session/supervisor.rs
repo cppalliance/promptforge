@@ -327,7 +327,6 @@ impl Supervisor {
                 "the replacement Gateway credentials cannot make a model client",
             );
         };
-        let registry = Arc::clone(gateway.registry());
         match relaunch.history {
             HistoryEffect::Preserve => {}
         }
@@ -337,7 +336,6 @@ impl Supervisor {
             run: relaunch.run,
             gateway,
             client,
-            registry,
             catalog: Some(catalog),
             host: self.bindings.host(),
         };

@@ -424,7 +424,8 @@ fn a_workshop_crate_depending_on_a_harness_crate_other_than_the_facade_is_report
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].starts_with("workshop-server depends on harness-runner:")
-            && violations[0].ends_with("only through harness or harness-gateway-client"),
+            && violations[0]
+                .ends_with("only through harness, harness-gateway-client, or harness-web"),
         "the violation names the workshop crate and the harness facade: {violations:?}"
     );
 }

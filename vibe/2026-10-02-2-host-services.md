@@ -527,7 +527,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-5>
 
-### Step 5: Root harness-web crate replaces the internal web crates, and Workshop wires it
+### Step 5: Root harness-web crate replaces the internal web crates, and Workshop wires it [completed]
 
 - Component: harness-web crate and Workshop web wiring
 - Depends on: steps 2, 3, and 4.
@@ -590,6 +590,8 @@ Each step is one commit holding its code and its tests. Each step runs only its 
   - Guide chapter 13, `13-web-fetch-and-search.md`: `:79` drops the built-in claim, `:465-471` stops saying every field is kept, and `:535` describes the Gateway provider that Workshop supplies.
   - Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`.
   - `crates/harness-internal/capabilities/README.md:9` and the public-surface section of `crates/harness-gateway-client/README.md`.
+  - The facade pages `crates/harness/src/capability.md` and `crates/harness/src/lib.md`: drop the temporary built-in web that step 3 described and step 5 removed, so they say the Host registers every capability, `promptforge/web` included.
+  - `crates/promptforge-internal/README.md:11`: stop pointing at the root `AGENTS.md` dev-dependency exception that step 1 cut.
 - Tests:
   - Exit criteria, run once here: every command in the Testing Plan's exit criteria, including `node --test crates/workshop/ui/test/docs-claims.mjs`; `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`; and a manual Workshop agent run of a prompt that declares `promptforge/web` that searches and fetches.
 

@@ -24,6 +24,7 @@
 
 mod bindings;
 pub(crate) mod relay;
+mod search;
 pub(crate) mod socket;
 pub(crate) mod socket_frames;
 pub(crate) mod state;
@@ -35,6 +36,7 @@ use std::sync::Arc;
 
 use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 use harness::{Harness, HarnessConfig, LaunchError, LaunchRequest, Session, SessionId};
+use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME, Web};
 use workshop_registry::Registry;
 use workshop_run_log::TursoRecorder;
 use workshop_support::{Config, ReconnectBackoff};
@@ -42,6 +44,7 @@ use workshop_support::{Config, ReconnectBackoff};
 #[cfg(feature = "test-fixtures")]
 pub(crate) use bindings::forward as forward_bindings;
 use bindings::push_bindings;
+use search::GatewaySearchProvider;
 pub(crate) use state::{SessionsState, register, register_tasks};
 
 /// The directory under the server's state directory the run log sits in:
@@ -52,18 +55,13 @@ const HARNESS_STATE_DIR: &str = "harness";
 /// server's current state already pushed through its public API: the
 /// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
 /// each read through `registry` from the subsystems registered before it.
-/// Its capability registry holds `promptforge/user-input`, so agents can
-/// ask the operator, and it is given no services; `promptforge/web` is
-/// the Harness's built-in, built from each gateway pushed. The
-/// composition root registers the returned handle and the forwarder task
-/// ([`register_tasks`]) that keeps the bindings current from the buses
-/// once the server serves. Nothing touches the filesystem here: the run
-/// log opens under the state directory when the first run starts.
+/// Its capabilities are [`capabilities`] and its services
+/// [`services`]. The composition root registers the returned handle and
+/// the forwarder task ([`register_tasks`]) that keeps the bindings current
+/// from the buses once the server serves. Nothing touches the filesystem
+/// here: the run log opens under the state directory when the first run
+/// starts.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
-    let mut capabilities = CapabilityRegistry::new();
-    // An empty registry takes any one capability, so the error is
-    // unreachable here.
-    let _ = capabilities.register(Arc::new(UserInput::new()));
     let harness = Arc::new(Harness::new(
         HarnessConfig {
             agents_path: config.agents.path.clone(),
@@ -71,11 +69,40 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
         Arc::new(TursoRecorder::new(
             config.server.state_dir.join(HARNESS_STATE_DIR),
         )),
-        capabilities,
-        HostServices::new(),
+        capabilities(),
+        services(registry),
     ));
     push_bindings(registry, &harness);
     harness
+}
+
+/// The capabilities agents may declare: `promptforge/user-input`, so they
+/// can ask the operator, and `promptforge/web`.
+fn capabilities() -> CapabilityRegistry {
+    let mut capabilities = CapabilityRegistry::new();
+    // Two unrelated ids into an empty registry, so neither registration
+    // can be refused.
+    let _ = capabilities.register(Arc::new(UserInput::new()));
+    let _ = capabilities.register(Arc::new(Web::new()));
+    capabilities
+}
+
+/// The services `promptforge/web` reads: the search provider over the
+/// gateway `registry` holds, and the runtime the server runs on. Built
+/// outside a runtime, as a synchronous test does, the runtime is left
+/// out, and a run that requires web is refused.
+fn services(registry: &Registry) -> HostServices {
+    let mut services = HostServices::new();
+    // Two valid, distinct literals into an empty map, so neither call
+    // can be refused.
+    let _ = services.provide(
+        &SEARCH_PROVIDER,
+        Arc::new(GatewaySearchProvider::new(registry.clone())),
+    );
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        let _ = services.provide(&TOKIO_RUNTIME, Arc::new(runtime));
+    }
+    services
 }
 
 /// The server's opener of agent sessions: discovery, launch, and lookup
@@ -221,3 +248,6 @@ pub(crate) enum LaunchRefusal {
     #[error(transparent)]
     Refused(#[from] LaunchError),
 }
+
+#[cfg(test)]
+mod tests;

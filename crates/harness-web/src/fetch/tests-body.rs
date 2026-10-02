@@ -14,7 +14,7 @@ async fn oversized_html_is_refused() {
         .max_bytes(4096)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/large");
     let result = tool
@@ -37,7 +37,7 @@ async fn declared_content_length_over_cap_is_refused_before_read() {
         .max_bytes(4096)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/liar");
     let result = tool
@@ -60,7 +60,7 @@ async fn gzip_bomb_refused_on_decompressed_count() {
         .max_bytes(4096)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/gzip");
     let result = tool
@@ -102,7 +102,7 @@ async fn per_call_max_chars_is_clamped_to_the_configured_ceiling() {
     let (port, _hits) = spawn_server().await;
     // A tiny ceiling: a huge per-call request must be clamped to it.
     let config = loopback_builder(port).max_chars(10).build().expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/plainbig");
     let out = tool
@@ -129,7 +129,7 @@ async fn body_one_byte_under_cap_succeeds_untruncated() {
         .max_bytes(ARTICLE_HTML.len() + 1)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/");
     let out = tool
@@ -208,7 +208,7 @@ async fn oversized_json_is_hard_refused_not_truncated() {
         .max_bytes(4096)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/jsonbig");
     let result = tool
@@ -339,7 +339,7 @@ async fn plain_text_over_cap_is_truncated_not_refused() {
         .max_bytes(4096)
         .build()
         .expect("valid");
-    let tool = WebFetch::try_with_config(config).expect("client builds");
+    let tool = on_this_runtime(&FetchClient::try_with_config(config).expect("client builds"));
 
     let url = format!("http://localhost:{port}/plainbig");
     let out = tool

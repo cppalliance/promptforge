@@ -1,71 +1,44 @@
-//! The validated search request: the closed freshness and SafeSearch
-//! enums, the `deny_unknown_fields` argument shape, and the bounds the type
-//! alone cannot express. Only a value that passed [`SearchRequest::from_args`]
-//! is serialized onto the wire to the gateway.
+//! The validated search request: the `deny_unknown_fields` argument shape,
+//! the closed freshness and SafeSearch enums, and the bounds the type alone
+//! cannot express. Only a value that passed [`SearchRequest::from_args`]
+//! becomes the provider's [`SearchQuery`].
 
 use promptforge::tools::{ToolError, ToolErrorKind};
 
 use super::{MAX_COUNT, MAX_DOMAINS, MAX_QUERY_LEN, MAX_STRING_LEN};
+use crate::provider::{Freshness, SafeSearch, SearchQuery};
 
-/// The freshness filter, deserialized as a closed enum so an unknown token is
-/// rejected as an invalid argument rather than forwarded.
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-enum Freshness {
-    /// Past day.
-    Pd,
-    /// Past week.
-    Pw,
-    /// Past month.
-    Pm,
-    /// Past year.
-    Py,
-}
-
-/// The SafeSearch level, deserialized as a closed enum.
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-enum SafeSearch {
-    /// No filtering.
-    Off,
-    /// Moderate filtering.
-    Moderate,
-    /// Strict filtering.
-    Strict,
-}
-
-/// The validated search request forwarded to the gateway.
+/// The search request as the model sent it, once it deserialized.
 ///
 /// `deny_unknown_fields` means an argument the tool does not model is rejected
 /// (rather than silently forwarded), and the typed optional fields reject a
 /// wrong JSON type at deserialization. [`SearchRequest::validate`] then enforces
-/// the string, count, and domain bounds. Only this validated value is
-/// serialized onto the wire.
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+/// the string, count, and domain bounds.
+#[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SearchRequest {
     /// The search query.
     query: String,
     /// Maximum number of results.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     count: Option<u32>,
     /// Freshness filter.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     freshness: Option<Freshness>,
     /// Country code for the search.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     country: Option<String>,
     /// Search language code.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     search_lang: Option<String>,
     /// SafeSearch level.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     safesearch: Option<SafeSearch>,
     /// Only keep results from these hostnames.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     include_domains: Option<Vec<String>>,
     /// Drops results from these hostnames.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     exclude_domains: Option<Vec<String>>,
 }
 
@@ -78,6 +51,21 @@ impl SearchRequest {
         })?;
         request.validate()?;
         Ok(request)
+    }
+
+    /// The validated request as the provider's query. `validate` bounded
+    /// `count` to `1..=MAX_COUNT`, so it fits a `u8`.
+    pub(super) fn into_query(self) -> SearchQuery {
+        SearchQuery {
+            query: self.query,
+            count: self.count.and_then(|count| u8::try_from(count).ok()),
+            freshness: self.freshness,
+            country: self.country,
+            search_lang: self.search_lang,
+            safesearch: self.safesearch,
+            include_domains: self.include_domains.unwrap_or_default(),
+            exclude_domains: self.exclude_domains.unwrap_or_default(),
+        }
     }
 
     /// Enforces the bounds the type alone cannot express.

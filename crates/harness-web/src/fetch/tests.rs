@@ -1,14 +1,16 @@
 //! Fixtures and descriptor tests for [`WebFetch`]: the loopback article,
 //! table, and JSON pages, the injected [`Lookup`] map, the mock servers
-//! and their routes, and the loopback policy builders. The policy tests
-//! (redirects, credentials, URL admission, status codes) and the body
-//! tests (size caps, truncation, content types, charsets) sit in the
-//! child modules and share these fixtures.
+//! and their routes, and the loopback policy builders, plus the abort of
+//! a dropped call's fetch. The policy tests (redirects, credentials, URL
+//! admission, status codes) and the body tests (size caps, truncation,
+//! content types, charsets) sit in the child modules and share these
+//! fixtures.
 
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -19,12 +21,12 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use harness_capabilities::Tool;
-use harness_runner::spawn::spawn_tagged;
-use harness_runner::test_support::mock_tag;
+use harness::capability::Tool;
 use promptforge::tools::ToolId;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::runtime::Handle;
 
-use super::WebFetch;
+use super::{FetchClient, WebFetch};
 use crate::config::{FetchConfig, FetchConfigBuilder};
 use crate::resolver::{Lookup, LookupFuture};
 
@@ -86,9 +88,14 @@ impl Lookup for MapLookup {
     }
 }
 
-#[test]
-fn descriptor_is_stable_and_faithful() {
-    let tool = WebFetch::new();
+/// Binds `client` to the test's own runtime.
+fn on_this_runtime(client: &FetchClient) -> WebFetch {
+    client.tool(Handle::current())
+}
+
+#[tokio::test]
+async fn descriptor_is_stable_and_faithful() {
+    let tool = on_this_runtime(&FetchClient::new());
 
     assert_eq!(
         tool.id(),
@@ -105,11 +112,11 @@ fn descriptor_is_stable_and_faithful() {
     assert_eq!(schema["properties"]["url"]["type"], "string");
 }
 
-#[test]
-fn the_migrated_id_names_its_contributing_capability() {
+#[tokio::test]
+async fn the_migrated_id_names_its_contributing_capability() {
     // promptforge/web_fetch migrated to promptforge/web/fetch: dropping the
     // last segment must yield the contributing capability's id.
-    let id = WebFetch::new().id();
+    let id = on_this_runtime(&FetchClient::new()).id();
     assert_eq!(id.name(), "fetch");
     assert_eq!(
         id.capability(),
@@ -313,7 +320,7 @@ async fn spawn_server() -> (u16, Arc<AtomicUsize>) {
         .route("/plainbig", get(plainbig_route))
         .route("/plainbroken", get(plain_broken_route))
         .with_state(state);
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(listener, app)
             .await
             .expect("the loopback server must serve");
@@ -338,9 +345,11 @@ fn loopback_config(port: u16) -> FetchConfig {
         .expect("loopback config is valid")
 }
 
-/// Builds a `WebFetch` over the loopback policy.
+/// Builds a `WebFetch` over the loopback policy, on the test's runtime.
 fn loopback_tool(port: u16) -> WebFetch {
-    WebFetch::try_with_config(loopback_config(port)).expect("the loopback client builds")
+    on_this_runtime(
+        &FetchClient::try_with_config(loopback_config(port)).expect("the loopback client builds"),
+    )
 }
 
 #[derive(Clone)]
@@ -389,7 +398,7 @@ async fn spawn_recording_server() -> (u16, Arc<Mutex<Vec<HeaderMap>>>) {
         .route("/redir-record", get(redirect_to_record))
         .route("/slow", get(hang))
         .with_state(state);
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(listener, app)
             .await
             .expect("the loopback recording server must serve");
@@ -402,7 +411,42 @@ fn split_header(out: &str) -> (&str, &str) {
         .expect("the return must include a header and a blank-line separator")
 }
 
-#[path = "tool-tests-body.rs"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fetch_whose_call_is_dropped_aborts_its_spawned_task() {
+    // A raw TCP server that reads the request, never answers, and reports
+    // when the client hangs up: only the fetch task's own drop closes the
+    // connection before the policy's 20-second timeout.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binding a loopback listener must succeed");
+    let port = listener.local_addr().expect("local addr").port();
+    let (requested_tx, requested_rx) = tokio::sync::oneshot::channel();
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("the fetch connects");
+        let mut buf = [0u8; 4096];
+        let _ = socket.read(&mut buf).await;
+        let _ = requested_tx.send(());
+        while socket.read(&mut buf).await.is_ok_and(|read| read > 0) {}
+        let _ = socket.shutdown().await;
+        let _ = closed_tx.send(());
+    });
+    let tool = loopback_tool(port);
+    let url = format!("http://localhost:{port}/hold");
+
+    let call = tool.call(serde_json::json!({ "url": url }));
+    tokio::select! {
+        result = call => panic!("the held fetch must not finish: {result:?}"),
+        requested = requested_rx => requested.expect("the server saw the request"),
+    }
+
+    tokio::time::timeout(Duration::from_secs(5), closed_rx)
+        .await
+        .expect("dropping the call aborts the fetch task, which closes its connection")
+        .expect("the server reports the hang-up");
+}
+
+#[path = "tests-body.rs"]
 mod body;
-#[path = "tool-tests-policy.rs"]
+#[path = "tests-policy.rs"]
 mod policy;

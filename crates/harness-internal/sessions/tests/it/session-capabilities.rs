@@ -1,6 +1,6 @@
 //! The capabilities a session's runs resolve against: the Host's
-//! registry, which alone supplies `promptforge/user-input`, plus the
-//! built-in web each gateway builds when the Host registered none.
+//! registry alone, which supplies `promptforge/user-input` and
+//! `promptforge/web` only when the Host registered them.
 
 use std::sync::Arc;
 
@@ -42,7 +42,7 @@ const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 
     # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n";
 
 #[tokio::test]
-async fn a_harness_whose_registry_lacks_web_runs_an_agent_requiring_it_on_the_built_in_web() {
+async fn a_harness_whose_registry_lacks_web_refuses_an_agent_requiring_it() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
     let harness = unbound_harness_over(dir.path(), recorder.clone(), CapabilityRegistry::new());
@@ -54,12 +54,15 @@ async fn a_harness_whose_registry_lacks_web_runs_an_agent_requiring_it_on_the_bu
     let session = launch_agent(&harness, "browses").await;
     wait_for(&session, SessionState::Closed).await;
     let runs = session.run_ids();
-    assert_eq!(runs.len(), 1, "one run completes the session");
+    assert_eq!(runs.len(), 1, "the refused preparation began one run");
     assert_eq!(
         recorder.outcome(runs[0]),
-        Some(RunOutcome::Completed {
-            final_text: "browsed".to_owned(),
+        Some(RunOutcome::Failed {
+            kind: "RequirementsUnmet".to_owned(),
+            message: "the environment cannot satisfy this prompt:\n\
+                - missing required capability: promptforge/web"
+                .to_owned(),
         }),
-        "the gateway's built-in web meets the requirement the Host left open"
+        "a gateway binding adds no web of its own to the Host's registry"
     );
 }

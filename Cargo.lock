@@ -2658,7 +2658,6 @@ dependencies = [
  "harness-capabilities",
  "harness-gateway-client",
  "harness-runner",
- "harness-web",
  "promptforge",
  "rand 0.9.5",
  "serde",
@@ -2674,48 +2673,19 @@ dependencies = [
 name = "harness-web"
 version = "0.3.0"
 dependencies = [
- "harness-capabilities",
- "harness-web-search",
- "harness-webfetch",
- "promptforge",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-web-search"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "axum",
- "harness-capabilities",
- "harness-runner",
- "promptforge",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "url",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-webfetch"
-version = "0.3.0"
-dependencies = [
  "async-trait",
  "axum",
  "encoding_rs",
  "flate2",
  "futures-util",
- "harness-capabilities",
- "harness-runner",
+ "harness",
  "htmd",
  "ipnet",
  "mime",
  "promptforge",
  "readabilityrs",
  "reqwest",
+ "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
@@ -8551,11 +8521,14 @@ dependencies = [
 name = "workshop-server"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "axum",
  "build-ui",
  "futures-util",
  "gateway-api-discovery",
  "harness",
+ "harness-gateway-client",
+ "harness-web",
  "promptforge",
  "reqwest",
  "rust-embed",

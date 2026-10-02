@@ -13,7 +13,6 @@
 
 use std::sync::Arc;
 
-use harness_capabilities::CapabilityRegistry;
 use harness_gateway_client::GatewayClient;
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
@@ -58,8 +57,6 @@ pub(crate) struct RunInputs {
     pub(crate) gateway: Arc<GatewayResources>,
     /// The model client built for that generation.
     pub(crate) client: GatewayClient,
-    /// The capability registry built for that generation.
-    pub(crate) registry: Arc<CapabilityRegistry>,
     /// The catalog generation the run is frozen to.
     pub(crate) catalog: Option<CatalogBinding>,
     /// The Host snapshot read at launch.
@@ -76,7 +73,6 @@ pub(crate) async fn run_once(
         run,
         gateway,
         client,
-        registry,
         catalog,
         host,
     } = inputs;
@@ -89,7 +85,7 @@ pub(crate) async fn run_once(
     let vfs = core.files.run_vfs();
     let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);
     let services = Services {
-        registry: Some(registry),
+        registry: Some(Arc::clone(&core.capabilities)),
         services: core.services.clone(),
         vfs: vfs.clone(),
         input_text: core.files.input_text(),

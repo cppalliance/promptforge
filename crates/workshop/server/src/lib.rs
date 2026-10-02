@@ -30,7 +30,7 @@
 //!   the service crates (`workshop-gateway`, `workshop-menu`,
 //!   `workshop-status`), the feature crates (`workshop-run-log`,
 //!   `workshop-user-state`, `workshop-workspace`), the Harness's public
-//!   API `harness`, and
+//!   crates `harness`, `harness-gateway-client`, and `harness-web`, and
 //!   the Engine's public API `promptforge`. Read the repository-root
 //!   `AGENTS.md` and `crates/workshop/server/AGENTS.md` before adding
 //!   an import.

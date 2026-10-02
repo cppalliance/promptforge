@@ -127,12 +127,12 @@ fn canonical_host(host: &str) -> String {
 ///
 /// # Examples
 /// ```
-/// use harness_webfetch::FetchConfig;
+/// use harness_web::FetchConfig;
 ///
 /// let policy = FetchConfig::default();
 /// let custom = FetchConfig::builder().allow_http(true).build()?;
 /// assert_ne!(policy, custom);
-/// # Ok::<(), harness_webfetch::ConfigError>(())
+/// # Ok::<(), harness_web::ConfigError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchConfig {
@@ -167,10 +167,10 @@ impl FetchConfig {
     ///
     /// # Examples
     /// ```
-    /// use harness_webfetch::FetchConfig;
+    /// use harness_web::FetchConfig;
     ///
     /// let policy = FetchConfig::builder().max_chars(10_000).build()?;
-    /// # Ok::<(), harness_webfetch::ConfigError>(())
+    /// # Ok::<(), harness_web::ConfigError>(())
     /// ```
     #[must_use]
     pub fn builder() -> FetchConfigBuilder {
@@ -409,13 +409,13 @@ impl FetchConfigBuilder {
     ///
     /// # Examples
     /// ```
-    /// use harness_webfetch::FetchConfig;
+    /// use harness_web::FetchConfig;
     ///
     /// let policy = FetchConfig::builder()
     ///     .deny_cidr("203.0.114.0/24")
     ///     .max_bytes(1024)
     ///     .build()?;
-    /// # Ok::<(), harness_webfetch::ConfigError>(())
+    /// # Ok::<(), harness_web::ConfigError>(())
     /// ```
     pub fn build(self) -> Result<FetchConfig, ConfigError> {
         let user_agent = validate_user_agent(self.user_agent)?;

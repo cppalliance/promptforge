@@ -70,7 +70,7 @@ fn catalog_binding(catalog: &CatalogBus) -> CatalogBinding {
 
 /// The gateway binding for one published generation: its base URL, its
 /// bearer, and the generation the server assigned before publishing it.
-fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
+pub(super) fn gateway_binding(snapshot: &GatewaySnapshot) -> GatewayBinding {
     GatewayBinding {
         base_url: snapshot.base_url().to_owned(),
         key: snapshot.api_key().to_owned(),
