@@ -376,8 +376,6 @@ impl promptforge::vfs::Vfs for promptforge::vfs::MemoryBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::RealBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::VfsRef
 impl<'a> promptforge::vfs::OpEvent<'a>
-pub async fn promptforge::transport::read_body_capped<S: promptforge::transport::ChunkSource>(source: &mut S, content_length: core::option::Option<u64>, cap: u64) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::model::CompletionError>
-pub async fn promptforge::transport::read_completion_stream<S: promptforge::transport::ChunkSource>(source: &mut S, request_body: serde_json::value::Value, max_bytes: u64, on_delta: impl core::ops::function::Fn(promptforge::model::StreamDelta), started: std::time::Instant, now: impl core::ops::function::Fn() -> std::time::Instant) -> core::result::Result<promptforge::model::Completion, promptforge::model::CompletionError>
 pub const fn promptforge::effect::EffectId::get(self) -> u64
 pub const fn promptforge::replay::Flags::bits(self) -> u32
 pub const fn promptforge::replay::Flags::contains(self, other: promptforge::replay::Flags) -> bool
@@ -638,11 +636,6 @@ pub fn promptforge::tools::ToolOutput::text(&self) -> &str
 pub fn promptforge::tools::ToolOutput::trust(&self) -> promptforge::tools::OutputTrust
 pub fn promptforge::tools::ToolOutput::trusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
 pub fn promptforge::tools::ToolOutput::untrusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
-pub fn promptforge::transport::ChunkSource::next_chunk(&mut self) -> impl core::future::future::Future<Output = core::result::Result<core::option::Option<<Self as promptforge::transport::ChunkSource>::Chunk>, promptforge::model::CompletionError>> + core::marker::Send
-pub fn promptforge::transport::build_request_body(messages: &[promptforge::model::Message], tools: core::option::Option<&[promptforge::model::ToolSchema]>, options: &promptforge::model::CompletionOptions) -> serde_json::value::Value
-pub fn promptforge::transport::classify_http_failure(status: u16, body: &str) -> promptforge::model::CompletionError
-pub fn promptforge::transport::classify_stream_error(body: &str) -> promptforge::model::CompletionError
-pub fn promptforge::transport::escape_controls(body: &str, max: usize) -> alloc::string::String
 pub fn promptforge::vfs::Access::append(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::exists(&self, path: &str) -> core::result::Result<bool, promptforge::vfs::VfsError>
@@ -721,7 +714,6 @@ pub mod promptforge::prompt
 pub mod promptforge::replay
 pub mod promptforge::timestamp
 pub mod promptforge::tools
-pub mod promptforge::transport
 pub mod promptforge::vfs
 pub promptforge::CapabilityConflict::first: promptforge::capabilities::CapabilityId
 pub promptforge::CapabilityConflict::second: promptforge::capabilities::CapabilityId
@@ -1398,9 +1390,7 @@ pub struct promptforge::vfs::VfsPath { /* private fields */ }
 pub struct promptforge::vfs::VfsPathBuf(/* private fields */)
 pub struct promptforge::vfs::VfsRef { /* private fields */ }
 pub struct promptforge::vfs::VfsRefBuilder { /* private fields */ }
-pub trait promptforge::transport::ChunkSource
 pub trait promptforge::vfs::Policy: core::marker::Send
 pub trait promptforge::vfs::Vfs: core::marker::Send
 pub trait promptforge::vfs::VfsAccess: core::marker::Send
-pub type promptforge::transport::ChunkSource::Chunk: core::convert::AsRef<[u8]>
 pub type promptforge::vfs::OpSink = alloc::sync::Arc<dyn core::ops::function::Fn(promptforge::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync>

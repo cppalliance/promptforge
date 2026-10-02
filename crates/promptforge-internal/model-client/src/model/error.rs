@@ -125,8 +125,8 @@ impl CompletionErrorKind {
 ///
 /// A broker builds one with [`new`](CompletionError::new) or
 /// [`context_overflow`](CompletionError::context_overflow) and adds the
-/// extras with the `with_` methods. For an HTTP failure, build it with
-/// [`classify_http_failure`](crate::client::classify_http_failure) instead.
+/// extras with the `with_` methods. For an HTTP failure, the
+/// `harness-gateway-client` crate's `classify_http_failure` builds it.
 /// `#[non_exhaustive]`.
 ///
 /// The message is the kind's fixed phrase. `MalformedResponse`,

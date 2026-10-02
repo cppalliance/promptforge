@@ -2,8 +2,8 @@
 
 use std::num::NonZeroU32;
 
+use harness_gateway_client::classify_http_failure;
 use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::transport::classify_http_failure;
 use serde::Deserialize;
 
 use crate::failure::{malformed, transport_failure};

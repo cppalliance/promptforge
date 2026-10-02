@@ -6,7 +6,8 @@
 //! shape to one gateway URL with, usually, the gateway's shared bearer
 //! key: [`GatewayClient::complete`] sends the wire vocabulary's request
 //! body, reads the stream under the run's byte cap and timeout, hands each
-//! `data:` payload to the Engine's shared SSE reassembly, invokes the
+//! `data:` payload to the shared SSE reassembly in
+//! `harness-gateway-client`, invokes the
 //! caller's delta callback live, and returns the one
 //! [`Completion`](promptforge::model::Completion) the round
 //! produced. [`fetch_model_catalog`] reads the gateway's typed model
@@ -23,7 +24,8 @@
 //! ## Invariants
 //!
 //! - Family: Harness, private to `crates/harness-internal/`; may depend
-//!   on: `promptforge` and container siblings only.
+//!   on: `promptforge`, `harness-gateway-client`, and container siblings
+//!   only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.

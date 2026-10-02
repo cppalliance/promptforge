@@ -18,7 +18,7 @@
 //! 5. A 400 whose body names a content policy term is `Refused`.
 //! 6. Every other status is `Rejected`.
 
-use crate::model::{CompletionError, CompletionErrorKind};
+use promptforge::model::{CompletionError, CompletionErrorKind};
 
 /// Body phrases the known backends emit when a request exceeds the model's
 /// context window (OpenAI and compatible gateways, Anthropic, llama.cpp,
@@ -51,7 +51,7 @@ const CREDENTIALS_PHRASE: &str = "the model backend did not accept the credentia
 /// Classifies a non-success HTTP response into a [`CompletionError`].
 ///
 /// `body` must already be bounded and passed through
-/// [`escape_controls`](crate::client::escape_controls); the classifier keeps
+/// [`escape_controls`](crate::escape_controls); the classifier keeps
 /// exactly that text as the error's [`detail`](CompletionError::detail) and
 /// never puts it in the message. The message is the kind's fixed phrase
 /// with ` (status N)` appended. A body that matches no rule is `Rejected`
@@ -60,8 +60,8 @@ const CREDENTIALS_PHRASE: &str = "the model backend did not accept the credentia
 /// # Examples
 ///
 /// ```
+/// use harness_gateway_client::classify_http_failure;
 /// use promptforge::model::CompletionErrorKind;
-/// use promptforge::transport::classify_http_failure;
 ///
 /// let error = classify_http_failure(503, "upstream is busy");
 /// assert_eq!(error.kind(), CompletionErrorKind::Overloaded);
@@ -121,8 +121,8 @@ pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
 /// # Examples
 ///
 /// ```
+/// use harness_gateway_client::classify_stream_error;
 /// use promptforge::model::CompletionErrorKind;
-/// use promptforge::transport::classify_stream_error;
 ///
 /// let dropped = classify_stream_error("upstream closed the connection");
 /// assert_eq!(dropped.kind(), CompletionErrorKind::Transport);

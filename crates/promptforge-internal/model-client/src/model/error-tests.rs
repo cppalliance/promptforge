@@ -2,7 +2,6 @@
 //! phrases, the specifics that extend them, and the detail channel.
 
 use super::*;
-use crate::client::classify_http_failure;
 
 const ALL_KINDS: [CompletionErrorKind; 12] = [
     CompletionErrorKind::ContextOverflow,
@@ -37,12 +36,6 @@ fn retryability_is_fixed_per_kind() {
             "retryability of {kind:?}"
         );
     }
-}
-
-#[test]
-fn a_429_is_retryable_now() {
-    assert!(classify_http_failure(429, "slow down").is_retryable());
-    assert!(!classify_http_failure(429, "insufficient_quota").is_retryable());
 }
 
 #[test]
@@ -215,16 +208,4 @@ fn a_specific_extends_the_phrase_after_a_colon_and_never_adds_detail() {
     );
     assert_eq!(empty.finish_reason(), Some("stop"));
     assert!(!empty.is_retryable());
-}
-
-#[test]
-fn provider_text_stays_in_the_detail_and_out_of_the_message() {
-    let error = classify_http_failure(503, "upstream <busy>");
-    assert!(
-        error
-            .to_string()
-            .starts_with(CompletionErrorKind::Overloaded.phrase())
-    );
-    assert!(!error.to_string().contains("upstream"));
-    assert_eq!(error.detail(), Some("upstream <busy>"));
 }

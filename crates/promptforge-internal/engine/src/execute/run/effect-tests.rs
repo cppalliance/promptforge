@@ -4,7 +4,7 @@
 //! failure projects to its display text. Each record round-trips through
 //! serde, as a run log and a replay depend on.
 
-use promptforge_model_client::client::StreamAccumulator;
+use promptforge_model_client::client::{RawExchange, ToolCall};
 use promptforge_model_client::model::CompletionErrorKind;
 use serde_json::json;
 
@@ -17,29 +17,22 @@ fn round_trip(record: &AnswerRecord) -> AnswerRecord {
 }
 
 /// A completion with `finish_reason` and both bodies set: what a
-/// transport hands the loop, as opposed to the bare canned one. `delta`
-/// is the one streamed chunk's delta.
-fn completion(delta: &serde_json::Value, finish_reason: &str) -> Completion {
-    let chunk = json!({
-        "model": "test-model",
-        "choices": [{ "index": 0, "delta": delta, "finish_reason": finish_reason }],
-    });
-    let mut accumulator = StreamAccumulator::new();
-    accumulator
-        .apply(&chunk.to_string(), &|_| {})
-        .expect("a well-formed chunk applies");
-    accumulator
-        .finish(
-            json!({ "messages": [{ "role": "user", "content": "ask" }] }),
-            None,
-        )
-        .expect("a complete turn finishes")
+/// transport hands the loop, as opposed to the bare canned one.
+fn completion(result: CompletionResult, finish_reason: &str) -> Completion {
+    let raw = RawExchange::new(
+        json!({ "messages": [{ "role": "user", "content": "ask" }] }),
+        json!({ "model": "test-model", "choices": [{ "index": 0, "finish_reason": finish_reason }] }),
+    );
+    Completion::from_result(result, "test-model")
+        .expect("a whole result is accepted")
+        .with_finish_reason(finish_reason)
+        .with_raw(raw)
 }
 
 #[test]
 fn a_chat_answer_records_the_reply_model_and_finish_reason_without_the_bodies() {
     let answer = EffectAnswer::Chat(Ok(Box::new(completion(
-        &json!({ "content": "the reply" }),
+        CompletionResult::Text("the reply".to_owned()),
         "stop",
     ))));
     let record = answer.record();
@@ -62,13 +55,11 @@ fn a_chat_answer_records_the_reply_model_and_finish_reason_without_the_bodies() 
 
 #[test]
 fn a_chat_answer_with_tool_calls_records_their_names_in_call_order_and_no_reply() {
-    let calls = json!({ "tool_calls": [
-        { "index": 0, "id": "call-1", "type": "function",
-          "function": { "name": "grab", "arguments": "{\"value\":\"hi\"}" } },
-        { "index": 1, "id": "call-2", "type": "function",
-          "function": { "name": "echo", "arguments": "{}" } },
-    ] });
-    let answer = EffectAnswer::Chat(Ok(Box::new(completion(&calls, "tool_calls"))));
+    let calls = CompletionResult::ToolCalls(vec![
+        ToolCall::from_parts("call-1", "grab", json!({ "value": "hi" })).expect("a whole call"),
+        ToolCall::from_parts("call-2", "echo", json!({})).expect("a whole call"),
+    ]);
+    let answer = EffectAnswer::Chat(Ok(Box::new(completion(calls, "tool_calls"))));
     let record = answer.record();
     assert_eq!(
         record,

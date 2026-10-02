@@ -42,6 +42,7 @@ shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
 gateway-protocol = { path = "crates/gateway/protocol", version = "0.3.0" }
 gateway-api-discovery = { path = "crates/gateway-api-discovery", version = "0.3.0" }
 harness = { path = "crates/harness", version = "0.3.0" }
+harness-gateway-client = { path = "crates/harness-gateway-client", version = "0.3.0" }
 harness-runner = { path = "crates/harness-internal/runner", version = "0.3.0" }
 harness-models = { path = "crates/harness-internal/models", version = "0.3.0" }
 harness-capabilities = { path = "crates/harness-internal/capabilities", version = "0.3.0" }

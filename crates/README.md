@@ -12,7 +12,11 @@ The gateway discovery seam: the `gateway.json` discovery file, the launch lock, 
 
 ## promptforge
 
-The PromptForge API: the one promptforge crate outside crates may name. A facade of single-item re-exports grouped into documented role modules - prompt parsing, the sans-IO `Run` state machine that executes sections as effects the Harness performs, and the effect, event, model, transport, tool, capability, and vfs vocabulary those effects carry. The Harness and the workshop crates reach the Engine only through it. Its surface is committed as `public-api.txt` and checked by `cargo xtask api --check`. Depends on the crates in `promptforge-internal/` that define what it re-exports. The first-party capabilities and the tool implementations behind a run live in the Harness, not here.
+The PromptForge API: the one promptforge crate outside crates may name. A facade of single-item re-exports grouped into documented role modules - prompt parsing, the sans-IO `Run` state machine that executes sections as effects the Harness performs, and the effect, event, model, tool, capability, and vfs vocabulary those effects carry. The Harness and the workshop crates reach the Engine only through it. Its surface is committed as `public-api.txt` and checked by `cargo xtask api --check`. Depends on the crates in `promptforge-internal/` that define what it re-exports. The first-party capabilities and the tool implementations behind a run live in the Harness, not here.
+
+## harness-gateway-client
+
+The standard way a Host talks to the PromptForge Gateway: the OpenAI chat-completions wire code that turns a `Chat` effect into the one request body every round sends, reads the streamed reply over a caller's `ChunkSource` into a `Completion` under the byte cap and the `[DONE]` rule, and classifies a failed response into a `CompletionError`. It opens no connection and reads no clock. A root Harness crate beside `harness`; like every Harness crate it depends only on `promptforge`.
 
 ## shared-error-source
 

@@ -2,8 +2,9 @@
 //! phrase, per token-count form, the in-stream envelope, and a body that
 //! matches nothing.
 
+use promptforge::model::CompletionErrorKind;
+
 use super::{classify_http_failure, classify_stream_error};
-use crate::model::CompletionErrorKind;
 
 fn kind_of(status: u16, body: &str) -> CompletionErrorKind {
     classify_http_failure(status, body).kind()
@@ -336,6 +337,24 @@ fn each_http_kind_carries_its_fixed_phrase_and_the_status_suffix() {
         assert_eq!(error.to_string(), *message, "status {status}, {body:?}");
         assert_eq!(error.message(), *message);
     }
+}
+
+#[test]
+fn a_429_is_retryable_now() {
+    assert!(classify_http_failure(429, "slow down").is_retryable());
+    assert!(!classify_http_failure(429, "insufficient_quota").is_retryable());
+}
+
+#[test]
+fn provider_text_stays_in_the_detail_and_out_of_the_message() {
+    let error = classify_http_failure(503, "upstream <busy>");
+    assert!(
+        error
+            .to_string()
+            .starts_with(CompletionErrorKind::Overloaded.phrase())
+    );
+    assert!(!error.to_string().contains("upstream"));
+    assert_eq!(error.detail(), Some("upstream <busy>"));
 }
 
 #[test]

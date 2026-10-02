@@ -3,26 +3,52 @@
 //! their fixed place after `model_turn_completed`; its metrics ride the
 //! reply event; and its raw exchange feeds the debug capture.
 
-use promptforge_model_client::client::{RawExchange, StreamAccumulator};
+use promptforge_model_client::client::RawExchange;
 use promptforge_types::emitter::{DebugMode, EventSink};
 use promptforge_types::metrics::{CallMetrics, Usage};
 use serde_json::{Value, json};
 
 use super::*;
 
-/// A text completion streamed as one chunk whose top level is `metadata`
-/// (the `model` and any metrics sections) beside one text choice.
-fn completion(metadata: Value) -> Completion {
-    let mut chunk = metadata;
-    chunk["choices"] =
-        json!([{ "index": 0, "delta": { "content": "hi" }, "finish_reason": "stop" }]);
-    let mut accumulator = StreamAccumulator::new();
-    accumulator
-        .apply(&chunk.to_string(), &|_| {})
-        .expect("a well-formed chunk applies");
-    accumulator
-        .finish(json!({ "messages": [] }), None)
-        .expect("a complete turn finishes")
+/// A text completion `hi` as a wire client hands it over: served by
+/// `model` and finished by `stop`, holding one diagnostic line per
+/// metadata section it degraded and `metrics` when it measured any, with
+/// the request it sent and the response it rebuilt as the raw exchange.
+fn completion(model: &str, metrics: Option<CallMetrics>, diagnostics: &[&str]) -> Completion {
+    let response = json!({
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": { "role": "assistant", "content": "hi" },
+            "finish_reason": "stop",
+        }],
+    });
+    let completion = Completion::from_result(CompletionResult::Text("hi".to_owned()), model)
+        .expect("a text result is accepted")
+        .with_finish_reason("stop")
+        .with_metadata_diagnostics(diagnostics.iter().map(|&line| line.to_owned()).collect())
+        .with_raw(RawExchange::new(json!({ "messages": [] }), response));
+    match metrics {
+        Some(metrics) => completion.with_metrics(metrics),
+        None => completion,
+    }
+}
+
+/// Metrics holding only the token accounting of a round that sent
+/// `prompt_tokens` and got `completion_tokens` back.
+fn usage_metrics(prompt_tokens: u32, completion_tokens: u32) -> CallMetrics {
+    CallMetrics {
+        usage: Some(Usage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+            cached_tokens: None,
+            reasoning_tokens: None,
+        }),
+        llama: None,
+        vllm: None,
+        client: None,
+    }
 }
 
 /// Reports `completion` as chat turn 3 and returns the events it pushed.
@@ -108,10 +134,11 @@ fn degraded(events: &[Event]) -> Vec<(u32, &str)> {
 
 #[test]
 fn a_malformed_metadata_section_reports_a_degraded_event_after_the_completed_turn() {
-    let events = report(completion(json!({
-        "model": "test-model",
-        "usage": { "prompt_tokens": "lots", "completion_tokens": 1, "total_tokens": 2 },
-    })));
+    let events = report(completion(
+        "test-model",
+        None,
+        &["malformed `usage` in completion response ignored: invalid type: string \"lots\""],
+    ));
 
     let found = degraded(&events);
     assert_eq!(
@@ -140,10 +167,15 @@ fn a_malformed_metadata_section_reports_a_degraded_event_after_the_completed_tur
 
 #[test]
 fn each_malformed_section_and_a_missing_model_report_once_each() {
-    let events = report(completion(json!({
-        "usage": "not an object",
-        "metrics": ["not", "an", "object"],
-    })));
+    let events = report(completion(
+        "",
+        None,
+        &[
+            "completion response named no string `model`; recorded as empty",
+            "malformed `usage` in completion response ignored: not an object",
+            "malformed `metrics` in completion response ignored: not an object",
+        ],
+    ));
     let messages: Vec<&str> = degraded(&events)
         .into_iter()
         .map(|(_, message)| message)
@@ -162,27 +194,13 @@ fn each_malformed_section_and_a_missing_model_report_once_each() {
 
 #[test]
 fn well_formed_metadata_reports_no_degraded_event() {
-    let events = report(completion(json!({
-        "model": "test-model",
-        "usage": { "prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6 },
-    })));
+    let events = report(completion("test-model", Some(usage_metrics(5, 1)), &[]));
     assert!(degraded(&events).is_empty(), "{events:?}");
 }
 
 #[test]
 fn the_reply_event_carries_the_metrics_the_completion_holds() {
-    let metrics = CallMetrics {
-        usage: Some(Usage {
-            prompt_tokens: 7,
-            completion_tokens: 3,
-            total_tokens: 10,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        }),
-        llama: None,
-        vllm: None,
-        client: None,
-    };
+    let metrics = usage_metrics(7, 3);
     let events = report(canned().with_metrics(metrics.clone()));
     assert_eq!(reply_metrics(&events), vec![Some(metrics)]);
 }
@@ -195,20 +213,6 @@ fn a_completion_with_no_metrics_reports_none_on_the_reply_event() {
         vec![None],
         "the Engine adds no metrics of its own: {events:?}"
     );
-}
-
-#[test]
-fn a_streamed_completion_reports_its_usage_on_the_reply_event() {
-    let events = report(completion(json!({
-        "model": "test-model",
-        "usage": { "prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6 },
-    })));
-    let usage = reply_metrics(&events)
-        .into_iter()
-        .flatten()
-        .find_map(|metrics| metrics.usage)
-        .expect("the usage chunk reaches the reply event");
-    assert_eq!(usage.total_tokens, 6);
 }
 
 #[test]
@@ -240,16 +244,6 @@ fn debug_capture_emits_the_request_and_response_from_the_raw_exchange() {
         ),
         "the pair comes first, before the completed-turn report: {events:?}"
     );
-}
-
-#[test]
-fn debug_capture_of_a_streamed_completion_holds_the_bodies_the_reader_built() {
-    let events = report_with(completion(json!({ "model": "test-model" })), DebugMode::On);
-    assert_eq!(requests(&events), vec![json!({ "messages": [] })]);
-    let captured = responses(&events);
-    assert_eq!(captured.len(), 1, "{events:?}");
-    assert_eq!(captured[0].body["choices"][0]["message"]["content"], "hi");
-    assert_eq!(captured[0].finish_reason.as_deref(), Some("stop"));
 }
 
 #[test]

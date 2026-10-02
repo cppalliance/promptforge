@@ -2,21 +2,21 @@
 //! and environment loading.
 //!
 //! The request body, the stream reassembly, and the read loop that applies
-//! the byte cap and measures the timing are the Engine's shared protocol
-//! seams (`promptforge::transport`); this file owns only what touches the
-//! wire: sending, the per-receive timeout, the response as a chunk source,
-//! and the clock the read loop is handed.
+//! the byte cap and measures the timing are the shared wire code in
+//! `harness-gateway-client`; this file owns only what touches the wire:
+//! sending, the per-receive timeout, the response as a chunk source, and
+//! the clock the read loop is handed.
 
 use std::fmt;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
-};
-use promptforge::transport::{
+use harness_gateway_client::{
     ChunkSource, build_request_body, classify_http_failure, escape_controls, read_body_capped,
     read_completion_stream,
+};
+use promptforge::model::{
+    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
 };
 
 use crate::config::{GatewayConfigError, GatewayEndpoint, SecretString};

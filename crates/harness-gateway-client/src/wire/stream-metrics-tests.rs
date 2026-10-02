@@ -2,7 +2,7 @@
 //! backend sections and the client clock merge into one `CallMetrics`, and
 //! the request and reassembled response bodies travel as the raw exchange.
 
-use promptforge_types::metrics::{CallMetrics, LlamaTimings, Usage, VllmMetrics};
+use promptforge::metrics::{LlamaTimings, Usage, VllmMetrics};
 use serde_json::{Value, json};
 
 use super::*;
@@ -132,7 +132,7 @@ fn a_malformed_usage_section_degrades_and_leaves_the_other_sections() {
     let metrics = completion.metrics().expect("the timings were measured");
     assert_eq!(metrics.usage, None, "a malformed usage degrades");
     assert!(metrics.llama.is_some(), "its sibling section survives");
-    assert_eq!(completion.metadata_diagnostics.len(), 1);
+    assert_eq!(completion.metadata_diagnostics().len(), 1);
 }
 
 #[test]

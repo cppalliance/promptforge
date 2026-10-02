@@ -342,7 +342,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
 
 <step-3>
 
-### Step 3: Create harness-gateway-client with the wire code and drop promptforge::transport
+### Step 3: Create harness-gateway-client with the wire code and drop promptforge::transport [completed]
 
 - Component: harness-gateway-client
 - Placement: third. It needs step 1's public accessors and builders, and step 2 removed the last engine import of the wire code.
@@ -375,7 +375,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
     - Drop the dependencies the move leaves unused. Update the `Cargo.toml` description, which still mentions SSE reassembly. Also update `README.md:12`, `AGENTS.md:5`, `src/lib.rs:29`, and `src/client.rs:20` so they say the wire code lives in `harness-gateway-client`.
   - Facade `crates/promptforge`:
     - Remove `pub mod transport` and its 7 re-exports (`src/lib.rs:81-91`), and delete `src/transport.md`.
-    - `src/model.md`: the "Answer a model round" example drops the `transport::classify_http_failure` import (line 171). Step 4 of the example (lines 207-210) builds its failure with `CompletionError::new` from `CompletionErrorKind::Overloaded` and its `phrase()`. Lines 218, 219, and 246 lose their `crate::transport` links and describe the new step 4.
+    - `src/model.md`: the "Answer a model round" example drops the `transport::classify_http_failure` import (line 171). Step 4 of the example (lines 207-210) builds its failure with `CompletionError::new` from `CompletionErrorKind::Overloaded` and its `phrase()`. Lines 218, 219, and 246 lose their `crate::transport` links and describe the new step 4. Also correct the two statements step 1 made false: that `CompletionOptions` has no public getters, and that a `ToolSchema` cannot be inspected. Name the new readers instead.
     - `src/event.md:289` and `:297`: replace the `crate::transport` links with plain text naming the `harness-gateway-client` crate.
     - `src/lib.md:711`: remove the `transport` line from "Where to go next".
     - Bless `public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless`. Do not run `tools/cicerone.md`, and do not edit anything under `tools/cicerone/`.

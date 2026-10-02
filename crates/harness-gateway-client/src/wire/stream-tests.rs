@@ -1,10 +1,9 @@
 //! Tests for the streaming accumulator and the SSE data-line scanner.
 
+use promptforge::model::{CompletionErrorKind, CompletionResult};
 use serde_json::Value;
 
 use super::*;
-use crate::client::CompletionResult;
-use crate::model::CompletionErrorKind;
 
 fn no_delta(_: StreamDelta) {}
 

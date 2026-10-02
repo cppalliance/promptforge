@@ -78,18 +78,6 @@ pub mod model {
     pub use promptforge_types::wire::StreamDelta;
 }
 
-pub mod transport {
-    #![doc = include_str!("transport.md")]
-
-    pub use promptforge_model_client::client::ChunkSource;
-    pub use promptforge_model_client::client::build_request_body;
-    pub use promptforge_model_client::client::classify_http_failure;
-    pub use promptforge_model_client::client::classify_stream_error;
-    pub use promptforge_model_client::client::escape_controls;
-    pub use promptforge_model_client::client::read_body_capped;
-    pub use promptforge_model_client::client::read_completion_stream;
-}
-
 pub mod tools {
     #![doc = include_str!("tools.md")]
 

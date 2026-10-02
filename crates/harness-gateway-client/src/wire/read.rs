@@ -11,23 +11,23 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use promptforge_types::metrics::ClientTiming;
-use promptforge_types::wire::StreamDelta;
+use promptforge::metrics::ClientTiming;
+use promptforge::model::{Completion, CompletionError, StreamDelta};
 use serde_json::Value;
 
-use super::{Applied, Completion, SseScanner, StreamAccumulator};
-use crate::model::CompletionError;
+use super::stream::{Applied, SseScanner, StreamAccumulator};
+use crate::failure::malformed;
 
 /// A response body read one chunk at a time: the part of a model round a
 /// transport supplies.
 ///
 /// A transport performs a `Chat` effect in four moves. It builds the body
-/// with [`build_request_body`](super::build_request_body) and sends it,
+/// with [`build_request_body`](crate::build_request_body) and sends it,
 /// noting its clock just before. It wraps the response body in a
 /// `ChunkSource`. On a non-success status it reads the error body whole
 /// with [`read_body_capped`], bounds and escapes it with
-/// [`escape_controls`](super::escape_controls), and fails the round with
-/// [`classify_http_failure`](super::classify_http_failure). Otherwise it
+/// [`escape_controls`](crate::escape_controls), and fails the round with
+/// [`classify_http_failure`](crate::classify_http_failure). Otherwise it
 /// hands the source to [`read_completion_stream`], whose [`Completion`] answers the
 /// effect. The codec never opens a connection or reads a clock: the
 /// source is the only I/O it touches.
@@ -69,7 +69,7 @@ pub async fn read_body_capped<S: ChunkSource>(
     if let Some(len) = content_length
         && len > cap
     {
-        return Err(CompletionError::malformed(format!(
+        return Err(malformed(format!(
             "response body of {len} bytes exceeds the {cap}-byte limit"
         )));
     }
@@ -77,7 +77,7 @@ pub async fn read_body_capped<S: ChunkSource>(
     while let Some(chunk) = source.next_chunk().await? {
         let bytes = chunk.as_ref();
         if body.len() as u64 + bytes.len() as u64 > cap {
-            return Err(CompletionError::malformed(format!(
+            return Err(malformed(format!(
                 "response body exceeds the {cap}-byte limit"
             )));
         }
@@ -91,7 +91,7 @@ pub async fn read_body_capped<S: ChunkSource>(
 /// finishes the accumulation into the [`Completion`].
 ///
 /// `request_body` is the body the transport sent, as
-/// [`build_request_body`](super::build_request_body) returned it; the
+/// [`build_request_body`](crate::build_request_body) returned it; the
 /// completion carries it back, so a run's debug capture records exactly
 /// what was sent. `on_delta` receives each
 /// [`StreamDelta`] as it is decoded, for a Host that shows the reply as it
@@ -128,7 +128,7 @@ pub async fn read_completion_stream<S: ChunkSource>(
         let bytes = chunk.as_ref();
         received += bytes.len() as u64;
         if received > max_bytes {
-            return Err(CompletionError::malformed(format!(
+            return Err(malformed(format!(
                 "response stream exceeds the {max_bytes}-byte limit"
             )));
         }
@@ -153,7 +153,7 @@ pub async fn read_completion_stream<S: ChunkSource>(
     // accumulation may be missing the tail, so it must never pass for a
     // complete turn.
     if !done {
-        return Err(CompletionError::malformed(
+        return Err(malformed(
             "completion stream ended without the [DONE] sentinel",
         ));
     }

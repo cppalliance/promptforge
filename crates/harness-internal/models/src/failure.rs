@@ -2,7 +2,7 @@
 //! [`CompletionError`] made from a kind and that kind's fixed phrase.
 //!
 //! A non-success HTTP status is not built here. The client hands its status
-//! and bounded body to `promptforge::transport::classify_http_failure`,
+//! and bounded body to `harness_gateway_client::classify_http_failure`,
 //! which reads them. These helpers cover the rest: a send or read that went
 //! wrong, a disabled client, and a reply this crate cannot read. The
 //! phrases match the ones the classifier uses for the same kinds.

@@ -708,7 +708,6 @@ Step, answer, log, and stop only at `Done`. Next, the [effect](effect) page show
 - [event](event): log, show, and debug what happens during a run.
 - [ids](ids): group a run's log by task, and follow each task from start to end.
 - [model](model): describe your models, see which model each prompt role got, and answer model rounds.
-- [transport](transport): build request bodies, read streamed replies, and report failed rounds when you write your own model connection.
 - [tools](tools): offer tools to a run, and answer the tool calls it makes.
 - [capabilities](capabilities): name capabilities, check which tools belong to each, and give a run the Lua that capabilities add.
 - [prompt](prompt): read what a prompt declares before you run it, and pass it arguments.

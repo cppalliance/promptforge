@@ -7,12 +7,10 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
+use promptforge::model::{CompletionErrorKind, CompletionResult, RawExchange};
 use serde_json::json;
 
 use super::*;
-use crate::client::{CompletionResult, RawExchange};
-use crate::model::CompletionErrorKind;
-use promptforge_types::metrics::ClientTiming;
 
 /// A chunk source over canned chunks; it never pends, so the tests need
 /// no executor.

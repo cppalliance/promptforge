@@ -38,7 +38,7 @@ impl Completion {
     ) -> Result<Completion, CompletionError> {
         if let CompletionResult::ToolCalls(calls) = &result {
             if calls.is_empty() {
-                return Err(empty_reply_error(false, None));
+                return Err(empty_reply_error());
             }
             let mut seen = HashSet::new();
             for call in calls {

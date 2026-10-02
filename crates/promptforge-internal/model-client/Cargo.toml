@@ -6,16 +6,15 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge model vocabulary: the chat-completions wire types and SSE reassembly a Chat effect exchanges, and the model catalog/binding vocabulary; no transport"
+description = "PromptForge model vocabulary: the chat-completions wire types a Chat effect exchanges and the model catalog/binding vocabulary; no transport and no wire parsing"
 readme = "README.md"
 keywords = ["llm", "gateway", "openai", "wire-types"]
 categories = ["data-structures"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
-# The canonical metrics vocabulary this crate parses response bodies into,
-# the StreamDelta the reassembly reports, and the model catalog types the
-# `model` module re-exports.
+# The canonical metrics vocabulary a Completion holds and the model catalog
+# types the `model` module re-exports.
 promptforge-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true

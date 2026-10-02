@@ -1,0 +1,29 @@
+[package]
+name = "harness-gateway-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge Gateway client: the OpenAI chat-completions wire code that turns a Chat effect into a request body and a streamed reply into a Completion"
+readme = "README.md"
+keywords = ["promptforge", "llm", "gateway", "openai", "sse"]
+categories = ["web-programming::http-client"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+# The Engine's public API: the chat vocabulary (Message, ToolSchema,
+# Completion, CompletionError) the wire code reads and builds through its
+# public constructors, and the canonical metrics and delta vocabulary.
+promptforge.workspace = true
+# Derives the private wire shapes of the `usage` and llama.cpp `timings`
+# metadata sections.
+serde.workspace = true
+# The request body, every streamed payload, and the reassembled response
+# are JSON.
+serde_json.workspace = true
+workspace-hack.workspace = true
+
+[lints]
+workspace = true

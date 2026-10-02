@@ -3,14 +3,13 @@
 //! [`SseScanner`] splits the raw byte stream into `data:` payloads, and
 //! [`StreamAccumulator`] folds those payloads back into the buffered
 //! chat-completion body shape, then [`finishes`](StreamAccumulator::finish)
-//! it into a [`Completion`]. The strict turn rules stay in
-//! [`crate::normalize`]: the accumulator only reassembles, so streamed and
-//! buffered turns are judged by one rule set.
+//! it into a [`Completion`]. The strict turn rules stay in [`super::parse`]:
+//! the accumulator only reassembles, so streamed and buffered turns are
+//! judged by one rule set.
 //!
 //! No HTTP happens here. The transport that reads the bytes off the wire
-//! lives in the Harness's model client, which performs each `Chat` effect:
-//! it hands bytes to the scanner, payloads to the accumulator, and takes
-//! the completion from `finish`.
+//! hands them to the read loop, which feeds the scanner, hands payloads to
+//! the accumulator, and takes the completion from `finish`.
 //!
 //! The progress subscription in the model vocabulary deliberately has its
 //! own SSE decoder, and neither can substitute for the other: that one
@@ -22,24 +21,23 @@
 
 use std::collections::BTreeMap;
 
-use promptforge_types::metrics::{CallMetrics, ClientTiming};
-use promptforge_types::wire::StreamDelta;
+use promptforge::metrics::{CallMetrics, ClientTiming};
+use promptforge::model::{Completion, CompletionError, RawExchange, StreamDelta};
 use serde_json::{Map, Value};
 
-use super::{Completion, RawExchange};
-use crate::Result;
-use crate::classify::classify_stream_error;
-use crate::model::CompletionError;
+use super::classify::classify_stream_error;
+use super::parse::{normalize, response_metadata};
+use crate::failure::malformed;
 
 /// Splits a raw SSE byte stream into `data:` payloads.
 ///
 /// Blank lines, `:` comments, and non-`data:` fields (`event:`, `id:`,
 /// `retry:`) are skipped; the caller sees only payload text.
 ///
-/// Engine-internal: a transport reaches it only through
-/// [`read_completion_stream`](super::read_completion_stream).
+/// Crate-private: a transport reaches it only through
+/// [`read_completion_stream`](crate::read_completion_stream).
 #[derive(Debug, Default)]
-pub struct SseScanner {
+pub(crate) struct SseScanner {
     buffer: Vec<u8>,
     /// How much of `buffer` is already known to hold no `\n`.
     scanned: usize,
@@ -48,7 +46,7 @@ pub struct SseScanner {
 impl SseScanner {
     /// A scanner with an empty buffer.
     #[must_use]
-    pub fn new() -> SseScanner {
+    pub(crate) fn new() -> SseScanner {
         SseScanner {
             buffer: Vec::new(),
             scanned: 0,
@@ -56,13 +54,13 @@ impl SseScanner {
     }
 
     /// Buffers freshly received bytes for line extraction.
-    pub fn extend(&mut self, bytes: &[u8]) {
+    pub(crate) fn extend(&mut self, bytes: &[u8]) {
         self.buffer.extend_from_slice(bytes);
     }
 
     /// Returns the next complete `data:` payload, or `None` until one is
     /// fully buffered.
-    pub fn next_data(&mut self) -> Option<String> {
+    pub(crate) fn next_data(&mut self) -> Option<String> {
         loop {
             let Some(offset) = self.buffer[self.scanned..]
                 .iter()
@@ -89,7 +87,7 @@ impl SseScanner {
 
 /// The outcome of applying one `data:` payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Applied {
+pub(crate) enum Applied {
     /// The payload advanced the accumulation; `delta` is true when it
     /// included answer text, reasoning, or a tool-call fragment (the
     /// TTFT/ITL clock ticks on those, never on role or summary chunks).
@@ -120,10 +118,10 @@ struct ToolCallParts {
 /// chunk `stream_options.include_usage` appends, and are handed to the
 /// lenient metadata parser unjudged.
 ///
-/// Engine-internal: a transport reaches it only through
-/// [`read_completion_stream`](super::read_completion_stream).
+/// Crate-private: a transport reaches it only through
+/// [`read_completion_stream`](crate::read_completion_stream).
 #[derive(Debug, Default)]
-pub struct StreamAccumulator {
+pub(crate) struct StreamAccumulator {
     /// Answer text; `None` until the first `content` fragment arrives.
     content: Option<String>,
     /// Reasoning side-channel text; `None` until the first fragment.
@@ -138,7 +136,7 @@ pub struct StreamAccumulator {
 impl StreamAccumulator {
     /// An empty accumulator.
     #[must_use]
-    pub fn new() -> StreamAccumulator {
+    pub(crate) fn new() -> StreamAccumulator {
         StreamAccumulator::default()
     }
 
@@ -151,17 +149,16 @@ impl StreamAccumulator {
     /// shape, and the [`classify_stream_error`] result when the payload is
     /// a mid-stream error envelope (`Transport` unless its text names a
     /// known cause).
-    pub fn apply(
+    pub(crate) fn apply(
         &mut self,
         data: &str,
         on_delta: &impl Fn(StreamDelta),
-    ) -> std::result::Result<Applied, CompletionError> {
+    ) -> Result<Applied, CompletionError> {
         if data == "[DONE]" {
             return Ok(Applied::Done);
         }
-        let chunk: Value = serde_json::from_str(data).map_err(|error| {
-            CompletionError::malformed("stream chunk was not valid JSON").with_source(error)
-        })?;
+        let chunk: Value = serde_json::from_str(data)
+            .map_err(|error| malformed("stream chunk was not valid JSON").with_source(error))?;
         // A mid-stream `error` envelope is how the gateway (and llama.cpp)
         // report a failure after the 200 has already been sent: the
         // completion died in flight, so it is a transport failure unless
@@ -191,7 +188,7 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(Applied::Chunk { delta: false }),
             Some(Value::Array(choices)) => choices,
             Some(_) => {
-                return Err(CompletionError::malformed(
+                return Err(malformed(
                     "stream chunk `choices` was present but not an array",
                 ));
             }
@@ -206,11 +203,13 @@ impl StreamAccumulator {
     }
 
     /// Applies one streamed choice, returning whether it held content.
-    fn apply_choice(&mut self, choice: &Value, on_delta: &impl Fn(StreamDelta)) -> Result<bool> {
+    fn apply_choice(
+        &mut self,
+        choice: &Value,
+        on_delta: &impl Fn(StreamDelta),
+    ) -> Result<bool, CompletionError> {
         let Some(index) = choice.get("index").and_then(Value::as_u64) else {
-            return Err(CompletionError::malformed(
-                "stream choice had no integer index",
-            ));
+            return Err(malformed("stream choice had no integer index"));
         };
         // Mirror the buffered normalizer: the first choice is the turn.
         if index != 0 {
@@ -220,7 +219,7 @@ impl StreamAccumulator {
             None | Some(Value::Null) => {}
             Some(Value::String(reason)) => self.finish_reason = Some(reason.clone()),
             Some(_) => {
-                return Err(CompletionError::malformed(
+                return Err(malformed(
                     "stream choice `finish_reason` was present but not a string",
                 ));
             }
@@ -230,7 +229,7 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(false),
             Some(delta @ Value::Object(_)) => delta,
             Some(_) => {
-                return Err(CompletionError::malformed(
+                return Err(malformed(
                     "stream choice `delta` was present but not an object",
                 ));
             }
@@ -261,7 +260,7 @@ impl StreamAccumulator {
                 }
             }
             Some(_) => {
-                return Err(CompletionError::malformed(
+                return Err(malformed(
                     "stream delta `tool_calls` was present but not an array",
                 ));
             }
@@ -270,27 +269,23 @@ impl StreamAccumulator {
     }
 
     /// Merges one tool-call fragment into its index-keyed buffer.
-    fn apply_tool_fragment(&mut self, fragment: &Value) -> Result<()> {
+    fn apply_tool_fragment(&mut self, fragment: &Value) -> Result<(), CompletionError> {
         let Some(index) = fragment.get("index").and_then(Value::as_u64) else {
-            return Err(CompletionError::malformed(
-                "stream tool-call fragment had no integer index",
-            ));
+            return Err(malformed("stream tool-call fragment had no integer index"));
         };
         let parts = self.tool_calls.entry(index).or_default();
         match fragment.get("id") {
             None | Some(Value::Null) => {}
             Some(Value::String(id)) => parts.id.push_str(id),
             Some(_) => {
-                return Err(CompletionError::malformed(
-                    "stream tool-call fragment `id` was not a string",
-                ));
+                return Err(malformed("stream tool-call fragment `id` was not a string"));
             }
         }
         let function = match fragment.get("function") {
             None | Some(Value::Null) => return Ok(()),
             Some(function @ Value::Object(_)) => function,
             Some(_) => {
-                return Err(CompletionError::malformed(
+                return Err(malformed(
                     "stream tool-call fragment `function` was not an object",
                 ));
             }
@@ -303,7 +298,7 @@ impl StreamAccumulator {
                 None | Some(Value::Null) => {}
                 Some(Value::String(piece)) => slot.push_str(piece),
                 Some(_) => {
-                    return Err(CompletionError::malformed(format!(
+                    return Err(malformed(format!(
                         "stream tool-call fragment `{key}` was not a string"
                     )));
                 }
@@ -324,14 +319,15 @@ impl StreamAccumulator {
     /// # Errors
     /// Returns a `MalformedResponse`-kind [`CompletionError`] when a
     /// tool-call batch was cut short by a `length` or `content_filter`
-    /// finish (partial arguments must not execute), and the normalizer's
-    /// own errors otherwise (`EmptyReply` for a turn with neither
-    /// non-empty tool calls nor non-empty text).
-    pub fn finish(
+    /// finish (partial arguments must not execute), the normalizer's own
+    /// errors (`EmptyReply` for a turn with neither non-empty tool calls nor
+    /// non-empty text), and the validating constructor's (a
+    /// `MalformedResponse` for two calls sharing an id).
+    pub(crate) fn finish(
         self,
         request_body: Value,
         client_timing: Option<ClientTiming>,
-    ) -> std::result::Result<Completion, CompletionError> {
+    ) -> Result<Completion, CompletionError> {
         // The truncation rule runs before normalization: a tool-call batch
         // cut short by `length` or `content_filter` may hold partial JSON
         // arguments, and partial arguments must not execute.
@@ -342,14 +338,14 @@ impl StreamAccumulator {
             )
         {
             let reason = self.finish_reason.unwrap_or_default();
-            return Err(CompletionError::malformed(format!(
+            return Err(malformed(format!(
                 "tool-call batch truncated by finish_reason {reason:?}: \
                  partial arguments must not execute"
             )));
         }
         let response_body = self.into_body();
-        let turn = crate::normalize::normalize(&response_body)?;
-        let metadata = crate::normalize::response_metadata(&response_body);
+        let turn = normalize(&response_body)?;
+        let metadata = response_metadata(&response_body);
         let metrics = CallMetrics {
             client: client_timing,
             ..metadata.metrics
@@ -358,15 +354,18 @@ impl StreamAccumulator {
             || metrics.llama.is_some()
             || metrics.vllm.is_some()
             || metrics.client.is_some();
-        Ok(Completion {
-            result: turn.outcome,
-            finish_reason: turn.finish_reason,
-            reasoning_content: turn.reasoning_content,
-            model: metadata.model,
-            metrics: measured.then_some(metrics),
-            metadata_diagnostics: metadata.diagnostics,
-            raw: Some(RawExchange::new(request_body, response_body)),
-        })
+        let mut completion = Completion::from_result(turn.outcome, metadata.model)?
+            .with_metadata_diagnostics(metadata.diagnostics);
+        if let Some(reason) = turn.finish_reason {
+            completion = completion.with_finish_reason(reason);
+        }
+        if let Some(reasoning) = turn.reasoning_content {
+            completion = completion.with_reasoning_content(reasoning);
+        }
+        if measured {
+            completion = completion.with_metrics(metrics);
+        }
+        Ok(completion.with_raw(RawExchange::new(request_body, response_body)))
     }
 
     /// Reassembles the accumulation into the buffered chat-completion body
@@ -430,14 +429,14 @@ fn append_string_fragment(
     key: &str,
     slot: &mut Option<String>,
     label: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<String>, CompletionError> {
     match delta.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(text)) => {
             slot.get_or_insert_with(String::new).push_str(text);
             Ok(Some(text.clone()))
         }
-        Some(_) => Err(CompletionError::malformed(format!(
+        Some(_) => Err(malformed(format!(
             "stream delta `{label}` was present but not a string"
         ))),
     }
@@ -451,7 +450,7 @@ fn append_string_fragment(
 /// reported as a fixed marker.
 ///
 /// A transport runs a non-success status's error body through here before
-/// handing it to [`classify_http_failure`](super::classify_http_failure), so
+/// handing it to [`classify_http_failure`](crate::classify_http_failure), so
 /// every transport bounds and escapes a backend body by the same rule.
 #[must_use]
 pub fn escape_controls(body: &str, max: usize) -> String {
