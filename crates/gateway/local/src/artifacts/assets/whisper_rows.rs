@@ -13,6 +13,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "windows-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
@@ -26,7 +27,14 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         os: "windows",
         arch: "x86_64",
         backend: Some(WhisperBackend::Cuda),
-        min_driver_major: None,
+        // CUDA 13 runs on Windows driver 580 or later.
+        min_driver_major: Some(580),
+        // The native code in the pinned archive's `ggml-cuda.dll` fatbinary,
+        // as read on 2026-10-02. Its PTX for compute_75, compute_80, and
+        // compute_90 is ISA 9.3 from CUDA 13.3, which an older driver cannot
+        // compile. Like `X86_BASELINE`, the list is tied to `WHISPER_RELEASE`,
+        // and a release bump re-reads it from the new archive.
+        native_compute_caps: Some(&[(8, 6), (8, 9), (12, 0), (12, 1)]),
         platform: "windows-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
@@ -41,6 +49,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "aarch64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "macos-aarch64-metal",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
@@ -55,6 +64,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "macos-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
@@ -69,6 +79,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "x86_64",
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "linux-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
@@ -87,6 +98,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: Some(WhisperBackend::Cuda),
         // CUDA 12.8 runs on Linux driver 570 or later.
         min_driver_major: Some(570),
+        native_compute_caps: None,
         platform: "linux-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
@@ -101,6 +113,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         arch: "aarch64",
         backend: None,
         min_driver_major: None,
+        native_compute_caps: None,
         platform: "linux-aarch64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",

@@ -155,17 +155,32 @@ fn unsupported_whisper_platforms_are_an_error() {
 fn whisper_assets_cover_the_seven_release_builds() {
     use WhisperBackend::{Cpu, Cuda};
 
+    const WINDOWS_CUDA_NATIVE: &[(u64, u64)] = &[(8, 6), (8, 9), (12, 0), (12, 1)];
     let builds = [
-        ("windows", "x86_64", Some(Cpu), "windows-x86_64"),
-        ("windows", "x86_64", Some(Cuda), "windows-x86_64-cuda"),
-        ("macos", "aarch64", None, "macos-aarch64-metal"),
-        ("macos", "x86_64", None, "macos-x86_64"),
-        ("linux", "x86_64", Some(Cpu), "linux-x86_64"),
-        ("linux", "x86_64", Some(Cuda), "linux-x86_64-cuda"),
-        ("linux", "aarch64", None, "linux-aarch64"),
+        ("windows", "x86_64", Some(Cpu), "windows-x86_64", None, None),
+        (
+            "windows",
+            "x86_64",
+            Some(Cuda),
+            "windows-x86_64-cuda",
+            Some(580),
+            Some(WINDOWS_CUDA_NATIVE),
+        ),
+        ("macos", "aarch64", None, "macos-aarch64-metal", None, None),
+        ("macos", "x86_64", None, "macos-x86_64", None, None),
+        ("linux", "x86_64", Some(Cpu), "linux-x86_64", None, None),
+        (
+            "linux",
+            "x86_64",
+            Some(Cuda),
+            "linux-x86_64-cuda",
+            Some(570),
+            None,
+        ),
+        ("linux", "aarch64", None, "linux-aarch64", None, None),
     ];
     assert_eq!(WHISPER_ASSETS.len(), builds.len(), "one row per build");
-    for (os, arch, backend, platform) in builds {
+    for (os, arch, backend, platform, min_driver_major, native_compute_caps) in builds {
         let library = match os {
             "windows" => "whisper.dll",
             "macos" => "libwhisper.dylib",
@@ -175,6 +190,8 @@ fn whisper_assets_cover_the_seven_release_builds() {
             .expect("supported whisper build");
         assert_eq!(asset.platform, platform);
         assert_eq!(asset.backend, backend, "{platform}");
+        assert_eq!(asset.min_driver_major, min_driver_major, "{platform}");
+        assert_eq!(asset.native_compute_caps, native_compute_caps, "{platform}");
         assert_eq!(asset.library_name, library, "{platform}");
         assert_eq!(
             asset.archive.archive_name,

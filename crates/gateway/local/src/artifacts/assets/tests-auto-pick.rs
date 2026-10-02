@@ -62,8 +62,14 @@ fn auto_takes_the_linux_cuda_whisper_build_from_driver_570() {
 }
 
 #[test]
-fn auto_takes_the_windows_cuda_whisper_build_at_any_driver_version() {
-    for driver_major in [None, Some(0), Some(569), Some(570), Some(591)] {
+fn auto_takes_the_windows_cuda_whisper_build_from_driver_580() {
+    for (driver_major, platform) in [
+        (None, "windows-x86_64"),
+        (Some(0), "windows-x86_64"),
+        (Some(579), "windows-x86_64"),
+        (Some(580), "windows-x86_64-cuda"),
+        (Some(591), "windows-x86_64-cuda"),
+    ] {
         let probe = nvidia(driver_major);
         let asset = whisper_asset(
             "windows",
@@ -73,23 +79,56 @@ fn auto_takes_the_windows_cuda_whisper_build_at_any_driver_version() {
             X86_BASELINE,
         )
         .expect("auto windows whisper asset");
+        assert_eq!(asset.platform, platform, "driver {driver_major:?}");
+    }
+}
+
+#[test]
+fn auto_takes_the_windows_cpu_whisper_build_for_a_gpu_without_native_code() {
+    for foreign in [(7, 5), (8, 0), (9, 0), (6, 1)] {
+        for caps in [vec![foreign], vec![foreign, (8, 6)], vec![(8, 6), foreign]] {
+            assert_eq!(
+                auto_platform("windows", &caps, 591),
+                "windows-x86_64",
+                "{caps:?}"
+            );
+        }
+    }
+    for caps in [
+        vec![(8, 6)],
+        vec![(8, 9)],
+        vec![(12, 0)],
+        vec![(12, 1)],
+        vec![(8, 6), (12, 0)],
+    ] {
         assert_eq!(
-            asset.platform, "windows-x86_64-cuda",
-            "driver {driver_major:?}"
+            auto_platform("windows", &caps, 591),
+            "windows-x86_64-cuda",
+            "{caps:?}"
         );
     }
 }
 
 #[test]
+fn auto_takes_the_linux_cuda_whisper_build_for_any_gpu_above_its_floor() {
+    assert_eq!(auto_platform("linux", &[(7, 5)], 570), "linux-x86_64-cuda");
+}
+
+#[test]
 fn an_explicit_whisper_backend_ignores_the_probe() {
-    // The drivers below the Linux CUDA floor are included: an explicit
-    // `cuda` is honored there.
+    // The drivers below each CUDA floor and a GPU without native code in
+    // the Windows build are included: an explicit `cuda` is honored there.
     let probes = [
         None,
         Some(no_gpu()),
         Some(rtx_3090s()),
         Some(nvidia(Some(569))),
+        Some(nvidia(Some(579))),
         Some(nvidia(None)),
+        Some(NvidiaProbe {
+            compute_caps: vec![(7, 5)],
+            driver_major: Some(591),
+        }),
     ];
     for os in ["windows", "linux"] {
         for gpus in &probes {
