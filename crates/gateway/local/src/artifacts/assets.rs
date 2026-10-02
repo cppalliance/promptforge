@@ -26,6 +26,45 @@ pub(super) struct NvidiaProbe {
     pub(super) driver_major: Option<u64>,
 }
 
+/// What the whisper `auto` pick reads from the host beside the NVIDIA
+/// probe: `visible_devices`, the `CUDA_VISIBLE_DEVICES` value, `None` when
+/// unset, and `libstdcxx`, the bytes of the host's `libstdc++.so.6`, `None`
+/// when none was read.
+#[derive(Debug, Default)]
+pub(super) struct CudaHost {
+    pub(super) visible_devices: Option<String>,
+    pub(super) libstdcxx: Option<Vec<u8>>,
+}
+
+/// Whether a `CUDA_VISIBLE_DEVICES` of `value` hides every one of
+/// `gpu_count` GPUs. CUDA exposes only the devices listed before the first
+/// invalid entry, so a set value hides them all unless its first entry is a
+/// device index below `gpu_count` or a `GPU-` or `MIG-` identifier. The
+/// probe reads no UUIDs, so an identifier counts as visible without being
+/// matched: one that names no GPU, or an abbreviated one that names several,
+/// hides every GPU from CUDA but not here. An unset value hides none.
+pub(super) fn cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let first = value.split(',').next().unwrap_or_default().trim();
+    let visible = first.starts_with("GPU-")
+        || first.starts_with("MIG-")
+        || first.parse::<usize>().is_ok_and(|index| index < gpu_count);
+    !visible
+}
+
+/// Whether the C++ runtime `library` defines the symbol version `version`:
+/// its bytes hold the name followed by a NUL, so a longer version that
+/// shares the prefix, such as `GLIBCXX_3.4.300` for `GLIBCXX_3.4.30`, does
+/// not count.
+pub(super) fn libstdcxx_defines(library: &[u8], version: &str) -> bool {
+    let name = version.as_bytes();
+    library
+        .windows(name.len() + 1)
+        .any(|window| window.ends_with(&[0]) && window.starts_with(name))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArchiveKind {
     TarGz,
@@ -74,7 +113,9 @@ pub(super) struct ServerAsset<'a> {
 /// `native_compute_caps` lists the GPU compute capabilities, as
 /// `(major, minor)`, the build carries native code for, which only the
 /// `auto` pick consults: every probed GPU must be in the list. `None` checks
-/// nothing.
+/// nothing. `min_glibcxx` is the `libstdc++` symbol version the build needs,
+/// which only the `auto` pick consults: the host's C++ runtime must define
+/// it. `None` checks nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
@@ -82,6 +123,7 @@ pub(super) struct WhisperAsset<'a> {
     pub(super) backend: Option<WhisperBackend>,
     pub(super) min_driver_major: Option<u64>,
     pub(super) native_compute_caps: Option<&'a [(u64, u64)]>,
+    pub(super) min_glibcxx: Option<&'a str>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
@@ -97,6 +139,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
         native_compute_caps: None,
+        min_glibcxx: None,
         platform: "windows-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
@@ -118,6 +161,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         // compile. Like `X86_BASELINE`, the list is tied to `WHISPER_RELEASE`,
         // and a release bump re-reads it from the new archive.
         native_compute_caps: Some(&[(8, 6), (8, 9), (12, 0), (12, 1)]),
+        min_glibcxx: None,
         platform: "windows-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
@@ -133,6 +177,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: None,
         min_driver_major: None,
         native_compute_caps: None,
+        min_glibcxx: None,
         platform: "macos-aarch64-metal",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
@@ -148,6 +193,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: None,
         min_driver_major: None,
         native_compute_caps: None,
+        min_glibcxx: None,
         platform: "macos-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
@@ -163,6 +209,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: Some(WhisperBackend::Cpu),
         min_driver_major: None,
         native_compute_caps: None,
+        min_glibcxx: None,
         platform: "linux-x86_64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
@@ -182,6 +229,10 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         // CUDA 12.8 runs on Linux driver 570 or later.
         min_driver_major: Some(570),
         native_compute_caps: None,
+        // The version the pinned archive's `libggml-cuda.so.0` needs for
+        // `std::condition_variable::wait`, from GCC 12's runtime. Like the
+        // Windows native list, it is tied to `WHISPER_RELEASE`.
+        min_glibcxx: Some("GLIBCXX_3.4.30"),
         platform: "linux-x86_64-cuda",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
@@ -197,6 +248,7 @@ const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         backend: None,
         min_driver_major: None,
         native_compute_caps: None,
+        min_glibcxx: None,
         platform: "linux-aarch64",
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",
@@ -361,15 +413,31 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 }
 
 /// The whisper `auto` pick on a platform with both builds: an NVIDIA GPU
-/// gets the CUDA build when the platform's CUDA row sets no driver floor or
-/// the driver meets it, and the row lists no native compute capabilities or
-/// every probed GPU's is among them. Anything else - including a failed
-/// probe, an unreadable driver version under a floor, or any GPU without
-/// native code - gets the CPU build.
-fn auto_whisper_backend(os: &str, arch: &str, gpus: Option<&NvidiaProbe>) -> WhisperBackend {
+/// gets the CUDA build when `CUDA_VISIBLE_DEVICES` leaves a GPU visible, the
+/// platform's CUDA row sets no driver floor or the driver meets it, the row
+/// lists no native compute capabilities or every probed GPU's is among
+/// them, and the row names no `min_glibcxx` or the host's C++ runtime
+/// defines it. Anything else - including a failed probe, GPUs hidden from
+/// CUDA, an unreadable driver version under a floor, any GPU without native
+/// code, or no runtime read - gets the CPU build. A `None` host reads as
+/// [`CudaHost::default`].
+fn auto_whisper_backend(
+    os: &str,
+    arch: &str,
+    gpus: Option<&NvidiaProbe>,
+    cuda_host: Option<&CudaHost>,
+) -> WhisperBackend {
     let Some(probe) = gpus.filter(|probe| !probe.compute_caps.is_empty()) else {
         return WhisperBackend::Cpu;
     };
+    let unread = CudaHost::default();
+    let host = cuda_host.unwrap_or(&unread);
+    if cuda_visible_devices_hides_every_gpu(
+        host.visible_devices.as_deref(),
+        probe.compute_caps.len(),
+    ) {
+        return WhisperBackend::Cpu;
+    }
     let cuda = whisper_row(os, arch, Some(WhisperBackend::Cuda));
     let meets_floor = cuda
         .and_then(|cuda| cuda.min_driver_major)
@@ -380,7 +448,14 @@ fn auto_whisper_backend(os: &str, arch: &str, gpus: Option<&NvidiaProbe>) -> Whi
     let all_native = cuda
         .and_then(|cuda| cuda.native_compute_caps)
         .is_none_or(|native| probe.compute_caps.iter().all(|cap| native.contains(cap)));
-    if meets_floor && all_native {
+    let has_runtime = cuda
+        .and_then(|cuda| cuda.min_glibcxx)
+        .is_none_or(|version| {
+            host.libstdcxx
+                .as_deref()
+                .is_some_and(|library| libstdcxx_defines(library, version))
+        });
+    if meets_floor && all_native && has_runtime {
         WhisperBackend::Cuda
     } else {
         WhisperBackend::Cpu
@@ -411,15 +486,18 @@ fn whisper_row(
 
 /// Selects the pinned whisper.cpp runtime for `(os, arch)`.
 ///
-/// `backend` (the `[stt] whisper_backend` setting) and `gpus` (what the
-/// NVIDIA probe reported, when a probe was needed and worked) are consulted
-/// only on Windows x86-64 and Linux x86-64, the two platforms with a
-/// choice; every other platform has exactly one row. There `auto` takes the
-/// CUDA row only when `gpus` names a GPU, the driver meets the row's
-/// `min_driver_major`, and every GPU's compute capability is in the row's
-/// `native_compute_caps` when it lists them. On x86-64, under every
-/// setting, the selected row needs every [`X86_BASELINE`] extension in
-/// `x86_extensions`, the ones the host CPU reports.
+/// `backend` (the `[stt] whisper_backend` setting), `gpus` (what the
+/// NVIDIA probe reported, when a probe was needed and worked), and
+/// `cuda_host` (what was read from the host for the CUDA row, when it was
+/// read) are consulted only on Windows x86-64 and Linux x86-64, the two
+/// platforms with a choice; every other platform has exactly one row. There
+/// `auto` takes the CUDA row only when `gpus` names a GPU that
+/// `CUDA_VISIBLE_DEVICES` leaves visible, the driver meets the row's
+/// `min_driver_major`, every GPU's compute capability is in the row's
+/// `native_compute_caps` when it lists them, and the host's C++ runtime
+/// defines the row's `min_glibcxx` when it names one. On x86-64, under
+/// every setting, the selected row needs every [`X86_BASELINE`] extension
+/// in `x86_extensions`, the ones the host CPU reports.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
@@ -430,11 +508,12 @@ pub(super) fn whisper_asset(
     arch: &str,
     backend: WhisperBackend,
     gpus: Option<&NvidiaProbe>,
+    cuda_host: Option<&CudaHost>,
     x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
     let wanted = if whisper_backend_applies(os, arch) {
         Some(match backend {
-            WhisperBackend::Auto => auto_whisper_backend(os, arch, gpus),
+            WhisperBackend::Auto => auto_whisper_backend(os, arch, gpus, cuda_host),
             explicit => explicit,
         })
     } else {
@@ -467,7 +546,9 @@ pub(super) fn whisper_asset(
 /// [`whisper_asset`] with the GPU evidence gathered on demand: `probe`
 /// (the host's `nvidia-smi` query in production) runs only for `auto` on a
 /// platform with both builds, because every explicit backend and every
-/// other platform already knows its row. `x86_extensions` passes through.
+/// other platform already knows its row. `cuda_host` (the host's
+/// `CUDA_VISIBLE_DEVICES` and C++ runtime in production) runs there too,
+/// and only after the probe reports a GPU. `x86_extensions` passes through.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the
@@ -478,14 +559,27 @@ pub(super) fn whisper_asset_with_probe(
     arch: &str,
     backend: WhisperBackend,
     probe: impl FnOnce() -> Option<NvidiaProbe>,
+    cuda_host: impl FnOnce() -> CudaHost,
     x86_extensions: &[&str],
 ) -> Result<WhisperAsset<'static>> {
-    let gpus = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
-        probe()
+    let (gpus, host) = if backend == WhisperBackend::Auto && whisper_backend_applies(os, arch) {
+        let gpus = probe();
+        let host = gpus
+            .as_ref()
+            .is_some_and(|probe| !probe.compute_caps.is_empty())
+            .then(cuda_host);
+        (gpus, host)
     } else {
-        None
+        (None, None)
     };
-    whisper_asset(os, arch, backend, gpus.as_ref(), x86_extensions)
+    whisper_asset(
+        os,
+        arch,
+        backend,
+        gpus.as_ref(),
+        host.as_ref(),
+        x86_extensions,
+    )
 }
 
 /// Selects the pinned GPU-capable `llama-server` asset for `(os, arch)`.
@@ -605,6 +699,85 @@ mod tests {
         }
     }
 
+    /// The bytes of a C++ runtime that defines each of `versions`, laid out
+    /// as NUL-terminated names the way a library's string table holds them.
+    fn runtime_defining(versions: &[&str]) -> Vec<u8> {
+        let mut library = b"\x7fELF\0libstdc++.so.6\0".to_vec();
+        for version in versions {
+            library.extend_from_slice(version.as_bytes());
+            library.push(0);
+        }
+        library
+    }
+
+    /// A host that leaves `CUDA_VISIBLE_DEVICES` unset and whose C++
+    /// runtime defines `GLIBCXX_3.4.30`, so it meets every CUDA row.
+    fn cuda_ready() -> CudaHost {
+        CudaHost {
+            visible_devices: None,
+            libstdcxx: Some(runtime_defining(&["GLIBCXX_3.4.29", "GLIBCXX_3.4.30"])),
+        }
+    }
+
+    /// [`cuda_ready`] with `CUDA_VISIBLE_DEVICES` set to `value`.
+    fn visible(value: &str) -> CudaHost {
+        CudaHost {
+            visible_devices: Some(value.to_owned()),
+            ..cuda_ready()
+        }
+    }
+
+    /// [`cuda_ready`] with the C++ runtime `libstdcxx`, `None` for none read.
+    fn runtime(libstdcxx: Option<Vec<u8>>) -> CudaHost {
+        CudaHost {
+            libstdcxx,
+            ..cuda_ready()
+        }
+    }
+
+    #[test]
+    fn cuda_visible_devices_hides_every_gpu_by_cudas_rule() {
+        for value in [
+            None,
+            Some("0"),
+            Some("1"),
+            Some("1,0"),
+            Some("0,-1"),
+            Some("GPU-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
+            Some("MIG-8f6e2c1a-5b3d-4e7f-9a0b-1c2d3e4f5a6b"),
+        ] {
+            assert!(!cuda_visible_devices_hides_every_gpu(value, 2), "{value:?}");
+        }
+        for value in ["", "-1", "2", "none", "-1,0", "2,0"] {
+            assert!(
+                cuda_visible_devices_hides_every_gpu(Some(value), 2),
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn libstdcxx_defines_matches_only_the_whole_version() {
+        let version = "GLIBCXX_3.4.30";
+        assert!(libstdcxx_defines(&runtime_defining(&[version]), version));
+        assert!(libstdcxx_defines(
+            &runtime_defining(&["GLIBCXX_3.4.29", version, "GLIBCXX_3.4.31"]),
+            version
+        ));
+        for others in [
+            &["GLIBCXX_3.4.29"][..],
+            &["GLIBCXX_3.4.300"],
+            &["GLIBCXX_3.4.29", "GLIBCXX_3.4.300"],
+            &[],
+        ] {
+            assert!(
+                !libstdcxx_defines(&runtime_defining(others), version),
+                "{others:?}"
+            );
+        }
+        assert!(!libstdcxx_defines(b"GLIBCXX_3.4.30", version), "no NUL");
+    }
+
     #[test]
     fn an_nvidia_gpu_selects_the_cuda_whisper_build() {
         for (os, platform) in [
@@ -621,6 +794,7 @@ mod tests {
                     "x86_64",
                     WhisperBackend::Auto,
                     Some(&probe),
+                    Some(&cuda_ready()),
                     X86_BASELINE,
                 )
                 .expect("cuda whisper asset");
@@ -634,8 +808,15 @@ mod tests {
         let empty = no_gpu();
         for (os, platform) in [("windows", "windows-x86_64"), ("linux", "linux-x86_64")] {
             for gpus in [None, Some(&empty)] {
-                let asset = whisper_asset(os, "x86_64", WhisperBackend::Auto, gpus, X86_BASELINE)
-                    .expect("cpu whisper asset");
+                let asset = whisper_asset(
+                    os,
+                    "x86_64",
+                    WhisperBackend::Auto,
+                    gpus,
+                    Some(&cuda_ready()),
+                    X86_BASELINE,
+                )
+                .expect("cpu whisper asset");
                 assert_eq!(asset.platform, platform, "{gpus:?}");
             }
         }
@@ -656,6 +837,7 @@ mod tests {
                 "x86_64",
                 WhisperBackend::Auto,
                 Some(&probe),
+                Some(&cuda_ready()),
                 X86_BASELINE,
             )
             .expect("auto linux whisper asset");
@@ -678,6 +860,7 @@ mod tests {
                 "x86_64",
                 WhisperBackend::Auto,
                 Some(&probe),
+                Some(&cuda_ready()),
                 X86_BASELINE,
             )
             .expect("auto windows whisper asset");
@@ -686,17 +869,23 @@ mod tests {
     }
 
     /// The `auto` pick on `os` x86-64 for GPUs at `compute_caps` on driver
-    /// `driver_major`.
+    /// `driver_major`, on a [`cuda_ready`] host.
     fn auto_platform(os: &str, compute_caps: &[(u64, u64)], driver_major: u64) -> &'static str {
         let probe = NvidiaProbe {
             compute_caps: compute_caps.to_vec(),
             driver_major: Some(driver_major),
         };
+        auto_pick(os, &probe, Some(&cuda_ready()))
+    }
+
+    /// The `auto` pick on `os` x86-64 for `probe` on `host`.
+    fn auto_pick(os: &str, probe: &NvidiaProbe, host: Option<&CudaHost>) -> &'static str {
         whisper_asset(
             os,
             "x86_64",
             WhisperBackend::Auto,
-            Some(&probe),
+            Some(probe),
+            host,
             X86_BASELINE,
         )
         .expect("auto whisper asset")
@@ -735,9 +924,73 @@ mod tests {
     }
 
     #[test]
+    fn auto_takes_the_linux_cuda_whisper_build_only_with_glibcxx_3_4_30() {
+        let probe = nvidia(Some(591));
+        let hosts = [
+            (Some(cuda_ready()), "linux-x86_64-cuda"),
+            (
+                Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.30"])))),
+                "linux-x86_64-cuda",
+            ),
+            (
+                Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.29"])))),
+                "linux-x86_64",
+            ),
+            (
+                Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.300"])))),
+                "linux-x86_64",
+            ),
+            (Some(runtime(None)), "linux-x86_64"),
+            (None, "linux-x86_64"),
+        ];
+        for (index, (host, platform)) in hosts.iter().enumerate() {
+            assert_eq!(
+                auto_pick("linux", &probe, host.as_ref()),
+                *platform,
+                "host {index}"
+            );
+            assert_eq!(
+                auto_pick("windows", &probe, host.as_ref()),
+                "windows-x86_64-cuda",
+                "host {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn gpus_hidden_from_cuda_select_the_cpu_whisper_build() {
+        let probe = rtx_3090s();
+        for os in ["windows", "linux"] {
+            for value in ["", "-1", "2", "none"] {
+                assert_eq!(
+                    auto_pick(os, &probe, Some(&visible(value))),
+                    format!("{os}-x86_64"),
+                    "{os} with CUDA_VISIBLE_DEVICES={value:?}"
+                );
+            }
+            for value in ["0", "1", "1,0", "0,-1", "GPU-8f6e2c1a"] {
+                assert_eq!(
+                    auto_pick(os, &probe, Some(&visible(value))),
+                    format!("{os}-x86_64-cuda"),
+                    "{os} with CUDA_VISIBLE_DEVICES={value:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn an_explicit_whisper_backend_ignores_the_probe() {
-        // The drivers below each CUDA floor and a GPU without native code in
-        // the Windows build are included: an explicit `cuda` is honored there.
+        // The drivers below each CUDA floor, a GPU without native code in the
+        // Windows build, GPUs hidden from CUDA, and a C++ runtime without the
+        // Linux build's version are included: an explicit `cuda` is honored
+        // there.
+        let hosts = [
+            None,
+            Some(cuda_ready()),
+            Some(visible("-1")),
+            Some(runtime(None)),
+            Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.29"])))),
+        ];
         let probes = [
             None,
             Some(no_gpu()),
@@ -752,24 +1005,29 @@ mod tests {
         ];
         for os in ["windows", "linux"] {
             for gpus in &probes {
-                let cpu = whisper_asset(
-                    os,
-                    "x86_64",
-                    WhisperBackend::Cpu,
-                    gpus.as_ref(),
-                    X86_BASELINE,
-                )
-                .expect("explicit cpu whisper asset");
-                assert_eq!(cpu.platform, format!("{os}-x86_64"), "{gpus:?}");
-                let cuda = whisper_asset(
-                    os,
-                    "x86_64",
-                    WhisperBackend::Cuda,
-                    gpus.as_ref(),
-                    X86_BASELINE,
-                )
-                .expect("explicit cuda whisper asset");
-                assert_eq!(cuda.platform, format!("{os}-x86_64-cuda"), "{gpus:?}");
+                for (index, host) in hosts.iter().enumerate() {
+                    let label = format!("{gpus:?} on host {index}");
+                    let cpu = whisper_asset(
+                        os,
+                        "x86_64",
+                        WhisperBackend::Cpu,
+                        gpus.as_ref(),
+                        host.as_ref(),
+                        X86_BASELINE,
+                    )
+                    .expect("explicit cpu whisper asset");
+                    assert_eq!(cpu.platform, format!("{os}-x86_64"), "{label}");
+                    let cuda = whisper_asset(
+                        os,
+                        "x86_64",
+                        WhisperBackend::Cuda,
+                        gpus.as_ref(),
+                        host.as_ref(),
+                        X86_BASELINE,
+                    )
+                    .expect("explicit cuda whisper asset");
+                    assert_eq!(cuda.platform, format!("{os}-x86_64-cuda"), "{label}");
+                }
             }
         }
     }
@@ -777,6 +1035,7 @@ mod tests {
     #[test]
     fn single_build_whisper_platforms_ignore_the_backend() {
         let probe = rtx_3090s();
+        let host = cuda_ready();
         for (os, arch, platform) in [
             ("macos", "aarch64", "macos-aarch64-metal"),
             ("macos", "x86_64", "macos-x86_64"),
@@ -784,7 +1043,7 @@ mod tests {
         ] {
             for backend in WHISPER_BACKENDS {
                 for gpus in [None, Some(&probe)] {
-                    let asset = whisper_asset(os, arch, backend, gpus, X86_BASELINE)
+                    let asset = whisper_asset(os, arch, backend, gpus, Some(&host), X86_BASELINE)
                         .expect("single whisper build");
                     assert_eq!(asset.platform, platform, "{backend:?} with {gpus:?}");
                 }
@@ -795,6 +1054,7 @@ mod tests {
     #[test]
     fn a_cpu_missing_a_baseline_extension_fails_every_x86_64_whisper_row() {
         let probe = rtx_3090s();
+        let host = cuda_ready();
         for &dropped in X86_BASELINE {
             let extensions: Vec<&str> = X86_BASELINE
                 .iter()
@@ -805,17 +1065,24 @@ mod tests {
                 for backend in WHISPER_BACKENDS {
                     for gpus in [None, Some(&probe)] {
                         let label = format!("{os} {backend:?} with {gpus:?} without {dropped}");
-                        let selected = whisper_asset(os, "x86_64", backend, gpus, X86_BASELINE)
-                            .expect("the full baseline selects a row");
-                        let (platform, required, missing) =
-                            match whisper_asset(os, "x86_64", backend, gpus, &extensions) {
-                                Err(LocalError::UnsupportedCpu {
-                                    platform,
-                                    required,
-                                    missing,
-                                }) => (platform, required, missing),
-                                other => panic!("{label}: {other:?}"),
-                            };
+                        let selected =
+                            whisper_asset(os, "x86_64", backend, gpus, Some(&host), X86_BASELINE)
+                                .expect("the full baseline selects a row");
+                        let (platform, required, missing) = match whisper_asset(
+                            os,
+                            "x86_64",
+                            backend,
+                            gpus,
+                            Some(&host),
+                            &extensions,
+                        ) {
+                            Err(LocalError::UnsupportedCpu {
+                                platform,
+                                required,
+                                missing,
+                            }) => (platform, required, missing),
+                            other => panic!("{label}: {other:?}"),
+                        };
                         assert_eq!(platform, selected.platform, "{label}");
                         assert_eq!(required, X86_BASELINE, "{label}");
                         assert_eq!(missing, [dropped], "{label}");
@@ -827,6 +1094,7 @@ mod tests {
             "linux",
             "x86_64",
             WhisperBackend::Cpu,
+            None,
             None,
             &["sse4.2", "avx", "bmi2", "f16c"],
         )
@@ -841,10 +1109,11 @@ mod tests {
     #[test]
     fn aarch64_whisper_rows_need_no_x86_extensions() {
         let probe = rtx_3090s();
+        let host = cuda_ready();
         for (os, platform) in [("macos", "macos-aarch64-metal"), ("linux", "linux-aarch64")] {
             for backend in WHISPER_BACKENDS {
                 for gpus in [None, Some(&probe)] {
-                    let asset = whisper_asset(os, "aarch64", backend, gpus, &[])
+                    let asset = whisper_asset(os, "aarch64", backend, gpus, Some(&host), &[])
                         .expect("aarch64 whisper build");
                     assert_eq!(asset.platform, platform, "{backend:?} with {gpus:?}");
                 }
@@ -853,15 +1122,17 @@ mod tests {
     }
 
     /// Runs [`whisper_asset_with_probe`] on the full x86 baseline with a
-    /// probe that reports `answer`, returning the pick and how many times the
-    /// probe ran.
+    /// probe that reports `answer` and a [`cuda_ready`] host, returning the
+    /// pick, how many times the probe ran, and how many times the host was
+    /// read.
     fn pick_with_probe(
         os: &str,
         arch: &str,
         backend: WhisperBackend,
         answer: Option<NvidiaProbe>,
-    ) -> (Result<WhisperAsset<'static>>, usize) {
+    ) -> (Result<WhisperAsset<'static>>, usize, usize) {
         let mut probes = 0;
+        let mut host_reads = 0;
         let pick = whisper_asset_with_probe(
             os,
             arch,
@@ -870,22 +1141,28 @@ mod tests {
                 probes += 1;
                 answer
             },
+            || {
+                host_reads += 1;
+                cuda_ready()
+            },
             X86_BASELINE,
         );
-        (pick, probes)
+        (pick, probes, host_reads)
     }
 
     #[test]
     fn auto_probes_where_both_whisper_builds_exist_and_follows_the_answer() {
         for os in ["windows", "linux"] {
-            for (answer, platform) in [
-                (Some(rtx_3090s()), format!("{os}-x86_64-cuda")),
-                (Some(no_gpu()), format!("{os}-x86_64")),
-                (None, format!("{os}-x86_64")),
+            for (answer, platform, reads) in [
+                (Some(rtx_3090s()), format!("{os}-x86_64-cuda"), 1),
+                (Some(no_gpu()), format!("{os}-x86_64"), 0),
+                (None, format!("{os}-x86_64"), 0),
             ] {
                 let label = format!("{os} with {answer:?}");
-                let (pick, probes) = pick_with_probe(os, "x86_64", WhisperBackend::Auto, answer);
+                let (pick, probes, host_reads) =
+                    pick_with_probe(os, "x86_64", WhisperBackend::Auto, answer);
                 assert_eq!(probes, 1, "{label}");
+                assert_eq!(host_reads, reads, "{label}");
                 assert_eq!(
                     pick.expect("auto whisper asset").platform,
                     platform,
@@ -902,8 +1179,10 @@ mod tests {
                 (WhisperBackend::Cpu, format!("{os}-x86_64")),
                 (WhisperBackend::Cuda, format!("{os}-x86_64-cuda")),
             ] {
-                let (pick, probes) = pick_with_probe(os, "x86_64", backend, Some(rtx_3090s()));
+                let (pick, probes, host_reads) =
+                    pick_with_probe(os, "x86_64", backend, Some(rtx_3090s()));
                 assert_eq!(probes, 0, "{os} with {backend:?}");
+                assert_eq!(host_reads, 0, "{os} with {backend:?}");
                 assert_eq!(
                     pick.expect("explicit whisper asset").platform,
                     platform,
@@ -919,11 +1198,13 @@ mod tests {
             ("windows", "aarch64"),
         ] {
             for backend in WHISPER_BACKENDS {
-                let (pick, probes) = pick_with_probe(os, arch, backend, Some(rtx_3090s()));
+                let (pick, probes, host_reads) =
+                    pick_with_probe(os, arch, backend, Some(rtx_3090s()));
                 assert_eq!(probes, 0, "{os}-{arch} with {backend:?}");
+                assert_eq!(host_reads, 0, "{os}-{arch} with {backend:?}");
                 assert_eq!(
                     pick.ok(),
-                    whisper_asset(os, arch, backend, None, X86_BASELINE).ok(),
+                    whisper_asset(os, arch, backend, None, None, X86_BASELINE).ok(),
                     "{os}-{arch} with {backend:?}"
                 );
             }
@@ -936,7 +1217,7 @@ mod tests {
             for backend in WHISPER_BACKENDS {
                 assert!(
                     matches!(
-                        whisper_asset(os, arch, backend, None, X86_BASELINE),
+                        whisper_asset(os, arch, backend, None, None, X86_BASELINE),
                         Err(LocalError::UnsupportedPlatform { .. })
                     ),
                     "{os}-{arch} with {backend:?}"
@@ -950,42 +1231,62 @@ mod tests {
         use WhisperBackend::{Cpu, Cuda};
 
         const WINDOWS_CUDA_NATIVE: &[(u64, u64)] = &[(8, 6), (8, 9), (12, 0), (12, 1)];
+        // What only `auto` consults: `min_driver_major`,
+        // `native_compute_caps`, and `min_glibcxx`.
+        type AutoNeeds = (
+            Option<u64>,
+            Option<&'static [(u64, u64)]>,
+            Option<&'static str>,
+        );
+        const NONE: AutoNeeds = (None, None, None);
         let builds = [
-            ("windows", "x86_64", Some(Cpu), "windows-x86_64", None, None),
+            ("windows", "x86_64", Some(Cpu), "windows-x86_64", NONE),
             (
                 "windows",
                 "x86_64",
                 Some(Cuda),
                 "windows-x86_64-cuda",
-                Some(580),
-                Some(WINDOWS_CUDA_NATIVE),
+                (Some(580), Some(WINDOWS_CUDA_NATIVE), None),
             ),
-            ("macos", "aarch64", None, "macos-aarch64-metal", None, None),
-            ("macos", "x86_64", None, "macos-x86_64", None, None),
-            ("linux", "x86_64", Some(Cpu), "linux-x86_64", None, None),
+            ("macos", "aarch64", None, "macos-aarch64-metal", NONE),
+            ("macos", "x86_64", None, "macos-x86_64", NONE),
+            ("linux", "x86_64", Some(Cpu), "linux-x86_64", NONE),
             (
                 "linux",
                 "x86_64",
                 Some(Cuda),
                 "linux-x86_64-cuda",
-                Some(570),
-                None,
+                (Some(570), None, Some("GLIBCXX_3.4.30")),
             ),
-            ("linux", "aarch64", None, "linux-aarch64", None, None),
+            ("linux", "aarch64", None, "linux-aarch64", NONE),
         ];
         assert_eq!(WHISPER_ASSETS.len(), builds.len(), "one row per build");
-        for (os, arch, backend, platform, min_driver_major, native_compute_caps) in builds {
+        for (os, arch, backend, platform, auto_needs) in builds {
             let library = match os {
                 "windows" => "whisper.dll",
                 "macos" => "libwhisper.dylib",
                 _ => "libwhisper.so",
             };
-            let asset = whisper_asset(os, arch, backend.unwrap_or_default(), None, X86_BASELINE)
-                .expect("supported whisper build");
+            let asset = whisper_asset(
+                os,
+                arch,
+                backend.unwrap_or_default(),
+                None,
+                None,
+                X86_BASELINE,
+            )
+            .expect("supported whisper build");
             assert_eq!(asset.platform, platform);
             assert_eq!(asset.backend, backend, "{platform}");
-            assert_eq!(asset.min_driver_major, min_driver_major, "{platform}");
-            assert_eq!(asset.native_compute_caps, native_compute_caps, "{platform}");
+            assert_eq!(
+                (
+                    asset.min_driver_major,
+                    asset.native_compute_caps,
+                    asset.min_glibcxx
+                ),
+                auto_needs,
+                "{platform}"
+            );
             assert_eq!(asset.library_name, library, "{platform}");
             assert_eq!(
                 asset.archive.archive_name,

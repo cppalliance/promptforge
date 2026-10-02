@@ -67,7 +67,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A Linux x86-64 host with an older or unreadable driver, or without an NVIDIA GPU, gets the CPU build under `auto`, as today.
   - A Windows x86-64 host with an NVIDIA GPU on driver 580 or later, every GPU at compute capability 8.6, 8.9, 12.0, or 12.1, keeps the CUDA build under `auto`. A host without an NVIDIA GPU, on an older driver, or with any other GPU, whose CPU has the x86 baseline, loads the CPU build and transcribes.
   - On Linux, `auto` takes the CUDA build only where the host's `libstdc++.so.6` defines `GLIBCXX_3.4.30`, and the CPU build elsewhere.
-  - With `CUDA_VISIBLE_DEVICES` hiding every GPU, `auto` takes the CPU build on both platforms, and a Windows gateway so configured exits 0 at a graceful stop after transcriptions.
+  - With `CUDA_VISIBLE_DEVICES` hiding every GPU by index or by an invalid first entry, `auto` takes the CPU build on both platforms, and a Windows gateway so configured exits 0 at a graceful stop after transcriptions. A `GPU-` or `MIG-` identifier counts as visible, because the probe reads no UUIDs.
   - A host whose CPU lacks a baseline extension fails the speech load with an error naming the required and missing extensions, and the gateway keeps serving.
   - `cpu` and `cuda` force their build on both platforms.
   - The native fixtures pass on a Linux host with an NVIDIA GPU without extra setup, and CI's native job still exercises the CUDA build.
@@ -372,7 +372,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - Every GPU must be native, not just one, because whisper uses CUDA's device 0, whose fastest-first order need not match `nvidia-smi`'s.
     - The gate closes the Windows stop crash under `auto` for its likely cause, a driver older than 580, and for GPUs hidden from CUDA. Hosts it turns away keep `cuda` as their override, as Linux sm_86 and sm_89 GPUs on drivers 525 to 569 do.
     - Linux `auto` requires the CUDA row's `GLIBCXX_3.4.30` in the host's C++ runtime, so RHEL 9, its rebuilds, and Amazon Linux 2023 keep the CPU build they had before this work. The archive itself does not change, and the alternative of rebuilding it is rejected below.
-    - A `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, by CUDA's documented rule, because `nvidia-smi` ignores the variable.
+    - A `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, by CUDA's documented rule, because `nvidia-smi` ignores the variable. A first entry that is a `GPU-` or `MIG-` identifier counts as visible unmatched, since the probe reads no UUIDs; a stale identifier then leaves the CUDA build selected, which the docs state.
   - A graceful stop aborts running decodes through whisper.cpp's own `abort_callback`.
     - It is fed by the runtime's admission epoch, the signal that already settles admitted requests at shutdown.
     - The engine worker's stopping flag cannot serve, because it is set only after the drain wait.
@@ -841,7 +841,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - The harness's `wsl-env.sh` and `win-env.sh` accept only `4b2ab768` today, so each step first names its own commit there. `wsl-prepare.sh` and `win-prepare.sh` then point the clones' two new rows at run 36900875610's archives, served from loopback, and build the gateways.
   - Windows, `win_gateway.py boots`: on this host, whose two RTX 3090s report 8.6 on driver 591, `auto` still takes the CUDA build, and `cpu` takes the CPU build.
 
-### Step 14: Gate `auto` on hidden GPUs and the Linux C++ runtime
+### Step 14: Gate `auto` on hidden GPUs and the Linux C++ runtime [completed]
 
 - In `crates/gateway/local/src/artifacts/assets.rs`:
   - `WhisperAsset` gains `min_glibcxx: Option<&'a str>`, beside `native_compute_caps`: the `libstdc++` symbol version the build needs, which only the `auto` pick consults.

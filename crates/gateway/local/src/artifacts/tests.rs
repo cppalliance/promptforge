@@ -1547,6 +1547,7 @@ fn provision_whisper_library_reuses_a_verified_install() {
             std::env::consts::ARCH,
             backend,
             None,
+            None,
             X86_BASELINE,
         )
         .expect("host whisper asset");
@@ -1596,6 +1597,7 @@ fn whisper_installs_never_fall_back_to_an_older_abi() {
         std::env::consts::OS,
         std::env::consts::ARCH,
         WhisperBackend::Cpu,
+        None,
         None,
         X86_BASELINE,
     )
