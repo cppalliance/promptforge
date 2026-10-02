@@ -238,7 +238,7 @@ fn provision_whisper_library_reuses_a_verified_install() {
         let hub = ProgressHub::new();
         let whisper = hub.begin("whisper-library");
         let provisioned = store
-            .provision_whisper_library(backend, Some(&whisper))
+            .provision_whisper_library_with_cancellation(backend, Some(&whisper), None)
             .expect("warm-cache provision");
         assert_eq!(provisioned, install.join(asset.library_name), "{backend:?}");
         assert_eq!(
@@ -247,6 +247,43 @@ fn provision_whisper_library_reuses_a_verified_install() {
             "a verified whisper install runs no stage and names none: {backend:?}"
         );
     }
+}
+
+#[test]
+fn a_cancelled_whisper_provision_downloads_nothing() {
+    // The explicit CPU backend keeps the host's GPU probe out of the test,
+    // and the empty cache would otherwise start the pinned download.
+    let asset = whisper_asset(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        WhisperBackend::Cpu,
+        None,
+        None,
+        X86_BASELINE,
+    )
+    .expect("host whisper asset");
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let token = CancellationToken::new();
+    token.cancel();
+
+    let err = store
+        .provision_whisper_library_with_cancellation(WhisperBackend::Cpu, None, Some(&token))
+        .expect_err("a fired token must stop the provision");
+    assert!(
+        matches!(err, LocalError::Cancelled),
+        "a fired token surfaces as Cancelled: {err:?}"
+    );
+    let archive = temp
+        .path()
+        .join("downloads")
+        .join(asset.archive.archive_name);
+    assert!(!archive.exists(), "no archive was downloaded");
+    assert!(!part_path(&archive).exists(), "no download was staged");
+    assert!(
+        !temp.path().join("whisper.cpp").exists(),
+        "no install was created"
+    );
 }
 
 #[test]
