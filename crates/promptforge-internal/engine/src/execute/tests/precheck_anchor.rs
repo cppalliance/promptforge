@@ -1,15 +1,15 @@
 //! Tests for the `chat` arm's context precheck beyond the bare estimate:
 //! the room it keeps for the reply (the binding's `max_tokens`, else an
 //! eighth of the window) and the anchor it takes from the provider's usage
-//! after a served round. Each case drives two rounds over one list and one
-//! 4096-token window, so the second round's count decides whether the
-//! request leaves. The chat arm's overflow flag is in `chat_arm`; the
+//! after a served round, for the model that served it. Each case drives two
+//! or three rounds over one list and one 4096-token window, so the last
+//! round's count decides whether the request leaves. The chat arm's overflow flag is in `chat_arm`; the
 //! compactor that receives it in `models_loop_compactors`.
 
 use super::models_loop::{loop_context, loop_prompt};
 use super::*;
 use crate::lua::ToolSet;
-use crate::model::ModelInvocation;
+use crate::model::{ModelBinding, ModelInvocation};
 use crate::test_support::tokio_driver::TokioDriver;
 
 /// A text reply with the usage a provider would report for the round.
@@ -172,6 +172,152 @@ async fn a_merged_history_falls_back_to_the_estimate() {
     let (out, gateway) = run_rounds(section, vec![reply_with_usage("ok", 100, 5, None)]).await;
     assert_eq!(out, "context_exhausted:precheck");
     assert_eq!(gateway.call_count(), 1, "only the first round ran");
+}
+
+/// [`run_rounds`] with a third binding, `twin`: the default model under
+/// other invocation settings, so it shares `writer`'s tokenizer. `other`
+/// names a different model.
+async fn run_rounds_with_twin(lua: &str, replies: Vec<GatewayReply>) -> (String, ScriptedGateway) {
+    let gateway = ScriptedGateway::start(replies).await;
+    let prompt = parse(&loop_prompt(lua));
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    {
+        let shared = ctx.model_set();
+        let mut models = shared.lock().expect("the model set mutex is not poisoned");
+        let writer = models.bindings[0].clone();
+        let twin = ModelBinding::new(
+            "twin",
+            "The default model with other settings",
+            writer.id().clone(),
+            ModelInvocation {
+                temperature: None,
+                max_tokens: None,
+                thinking: Some(false),
+            },
+            writer.context(),
+        );
+        models.bindings.push(twin);
+    }
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the section catches its own overflow");
+    (out, gateway)
+}
+
+/// The model each request named, in the order they left.
+fn request_models(gateway: &ScriptedGateway) -> Vec<String> {
+    gateway
+        .requests()
+        .iter()
+        .map(|body| body["model"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_model_switch_leaves_the_second_round_on_the_estimate() {
+    // The first round on `writer` anchors at 3500 tokens, which would
+    // refuse the second request (3604 plus the 512 reserve). The second
+    // request goes to `other`, a different model, so another tokenizer's
+    // count does not apply and the estimate of about 113 tokens admits it.
+    let section = "local msgs = messages.new()\n\
+         msgs:user('xxxxx')\n\
+         models.loop(msgs)\n\
+         msgs:user(string.rep('y', 400))\n\
+         models.use('other')\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         if ok then return 'sent' end\n\
+         return err.kind .. ':' .. err.reason";
+    let (out, gateway) = run_rounds(
+        section,
+        vec![reply_with_usage("ok", 3400, 100, None), resp_text("done")],
+    )
+    .await;
+    assert_eq!(out, "sent");
+    assert_eq!(gateway.call_count(), 2, "both rounds left");
+    assert_eq!(request_models(&gateway), ["test-model", "other-model"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn another_alias_of_the_same_model_keeps_the_anchor() {
+    // `twin` is a different alias with different settings, but it names the
+    // model that `writer` named, so the 3500-token anchor still refuses the
+    // second request.
+    let section = "local msgs = messages.new()\n\
+         msgs:user('xxxxx')\n\
+         models.loop(msgs)\n\
+         msgs:user(string.rep('y', 400))\n\
+         models.use('twin')\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         if ok then return 'sent' end\n\
+         return err.kind .. ':' .. err.reason";
+    let (out, gateway) =
+        run_rounds_with_twin(section, vec![reply_with_usage("ok", 3400, 100, None)]).await;
+    assert_eq!(out, "context_exhausted:precheck");
+    assert_eq!(gateway.call_count(), 1, "only the first round ran");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_next_served_round_anchors_on_the_new_model() {
+    // The switch to `other` runs on the estimate, because the first
+    // round's 3500 tokens would refuse it. That round reports 3500 tokens
+    // of its own. The third request stays on `other` and extends the
+    // second round, so the new measurement anchors it and refuses it. The
+    // estimate of the third request is about 220 tokens.
+    let section = "local msgs = messages.new()\n\
+         msgs:user('xxxxx')\n\
+         models.loop(msgs)\n\
+         msgs:user(string.rep('y', 400))\n\
+         models.use('other')\n\
+         models.loop(msgs)\n\
+         msgs:user(string.rep('z', 400))\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         if ok then return 'sent' end\n\
+         return err.kind .. ':' .. err.reason";
+    let (out, gateway) = run_rounds(
+        section,
+        vec![
+            reply_with_usage("ok", 3400, 100, None),
+            reply_with_usage("again", 3400, 100, None),
+        ],
+    )
+    .await;
+    assert_eq!(out, "context_exhausted:precheck");
+    assert_eq!(gateway.call_count(), 2, "only the first two rounds ran");
+    assert_eq!(request_models(&gateway), ["test-model", "other-model"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_return_to_the_first_model_uses_the_estimate() {
+    // The second round on `other` replaced the measurement, so the third
+    // request back on `writer` meets another model's anchor and counts by
+    // the estimate.
+    let section = "local msgs = messages.new()\n\
+         msgs:user('xxxxx')\n\
+         models.loop(msgs)\n\
+         msgs:user('yyyy')\n\
+         models.use('other')\n\
+         models.loop(msgs)\n\
+         msgs:user(string.rep('z', 400))\n\
+         models.use('writer')\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         if ok then return 'sent' end\n\
+         return err.kind .. ':' .. err.reason";
+    let (out, gateway) = run_rounds(
+        section,
+        vec![
+            reply_with_usage("ok", 3400, 100, None),
+            reply_with_usage("again", 3400, 100, None),
+            resp_text("done"),
+        ],
+    )
+    .await;
+    assert_eq!(out, "sent");
+    assert_eq!(gateway.call_count(), 3);
+    assert_eq!(
+        request_models(&gateway),
+        ["test-model", "other-model", "test-model"]
+    );
 }
 
 /// Runs `lua` on a binding that sets `max_tokens`, over the 4096-token

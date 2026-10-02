@@ -152,14 +152,18 @@ impl Scheduler {
         // room never leaves. The refusal is the round's answer - the
         // overflow flag - and is observed as a failed turn, exactly as the
         // loop reported it. The count starts from the provider's numbers
-        // for the chain's last measured round when this request extends it.
-        if let Err(reason) = precheck(&conversation, context, reserve, chain.anchor.measured()) {
+        // for the chain's last measured round when this request extends it
+        // and goes to the same model.
+        let anchor = chain.anchor.measured(binding.id());
+        if let Err(reason) = precheck(&conversation, context, reserve, anchor) {
             emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
                 overflow_result(reason, handles.turns.load(Ordering::Relaxed)),
             )))));
         }
-        chain.anchor.sending(conversation.clone());
+        chain
+            .anchor
+            .sending(binding.id().clone(), conversation.clone());
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
@@ -185,8 +189,8 @@ impl Scheduler {
     /// requested tool outside the scope this chain advertised for the round
     /// fails the call as out of scope after a failed-tool-call observation.
     /// A round that reported usage becomes the chain's measurement for the
-    /// next dispatch's precheck, whatever the round's outcome; any other
-    /// round only releases the messages it sent.
+    /// next dispatch's precheck to the same model, whatever the round's
+    /// outcome; any other round only releases the messages it sent.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the parked chain has lost its frame
