@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 
 use super::*;
-use crate::client::CompletionResult;
+use crate::client::{CompletionResult, RawExchange};
 use crate::model::CompletionErrorKind;
 use promptforge_types::metrics::ClientTiming;
 
@@ -135,12 +135,20 @@ fn read_completion_stream_reassembles_the_turn_and_times_it_on_the_injected_cloc
     );
     assert_eq!(completion.finish_reason(), Some("stop"));
     assert_eq!(seen.borrow().len(), 2, "one live delta per text fragment");
-    let timing = completion.client_timing().expect("timing is measured");
+    let timing = completion
+        .metrics()
+        .and_then(|metrics| metrics.client.as_ref())
+        .expect("timing is measured");
     // Rounding makes every timing a whole microsecond, so the serialized
     // text is exact and short: there is no epsilon left to choose.
     assert_eq!(
         serde_json::to_string(timing).expect("timing serializes"),
         r#"{"ttft_ms":10.0,"mean_itl_ms":10.0,"e2e_ms":30.0}"#
+    );
+    assert_eq!(
+        completion.raw().map(RawExchange::request),
+        Some(&json!({ "model": "m" })),
+        "the completion carries back the request body the transport sent"
     );
 }
 
@@ -183,7 +191,10 @@ fn read_completion_stream_rounds_timings_to_microseconds_for_the_log() {
         now,
     ))
     .expect("a whole stream reassembles");
-    let timing = completion.client_timing().expect("timing is measured");
+    let timing = completion
+        .metrics()
+        .and_then(|metrics| metrics.client.as_ref())
+        .expect("timing is measured");
     let text = serde_json::to_string(timing).expect("timing serializes");
     assert_eq!(
         text, r#"{"ttft_ms":1234.568,"mean_itl_ms":333.333,"e2e_ms":3703.704}"#,

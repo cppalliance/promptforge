@@ -198,7 +198,7 @@ Show the content events, pair tool results by turn and id, and let `origin` deci
 
 A model is behaving strangely, and you want to see exactly what each round sent and received.
 
-Capture feels like the verbose flag on an HTTP client that dumps request and response bodies. Unlike a log flag, the bodies arrive as ordinary events in the same stream, as JSON values. Capture moves each model round's raw bodies into the event stream, and nothing else about the run changes.
+Capture feels like the verbose flag on an HTTP client that dumps request and response bodies. Unlike a log flag, the bodies arrive as ordinary events in the same stream, as JSON values. Capture copies each model round's raw bodies into the event stream, and nothing else about the run changes.
 
 ````
 # use std::sync::Arc;
@@ -286,13 +286,13 @@ assert!(matches!((captured, quiet), (RunResult::Ok(on), RunResult::Ok(off)) if o
 ````
 
 1. Pass [`DebugMode::On`] to [`RunContext::report_debug`](crate::RunContext::report_debug) when you build the context, before prepare. It is the only switch, and you set it before the run starts. Each model round then reports an [`Event::Request`] with the raw body sent and an [`Event::Response`] with the raw body returned. The greeter is the one from [Show a transcript](#show-a-transcript).
-2. The bodies arrive as ordinary events in the same stream. Here both print as `null`, because a canned [`Completion`](crate::model::Completion) carries no bodies. A transport is your code that sends each model round over HTTP, as [Read a streamed reply](crate::transport#read-a-streamed-reply) shows. Its completion carries the exact request body it built and sent. The response body is not the bytes on the wire: the reader rebuilds it from the streamed chunks into the shape a non-streaming backend would return. The `Response` also holds the backend's `finish_reason` and `reasoning_content` when the backend supplied them, so you see what the model was sent beside what it answered.
+2. The bodies arrive as ordinary events in the same stream. Here both print as `null`, because a canned [`Completion`](crate::model::Completion) carries no [`RawExchange`](crate::model::RawExchange). A transport is your code that sends each model round over HTTP, as [Read a streamed reply](crate::transport#read-a-streamed-reply) shows. The completion that [`read_completion_stream`](crate::transport::read_completion_stream) returns carries a `RawExchange` holding the exact request body the transport built and sent, and the response body. The response body is not the bytes on the wire: the reader rebuilds it from the streamed chunks into the shape a non-streaming backend would return. A broker that does not use HTTP can attach its own pair with [`Completion::with_raw`](crate::model::Completion::with_raw); a completion with none reports `null` for both bodies. The `Response` also holds the backend's `finish_reason` and `reasoning_content` when the backend supplied them, so you see what the model was sent beside what it answered.
 3. Pair a `Request` with its `Response` by `turn`. The greeter's one model round is captured once, and both events share its turn.
 4. Without `report_debug`, the context uses [`DebugMode::Off`], the default. Neither event appears, and the run returns the same `HI THERE`, because capture only adds events and events never change the run.
 
 Treat both bodies as private and untrusted. The request body is the exact JSON sent and the response body is rebuilt from the stream. Both are unredacted and hold the full prompt and any user text, and nothing redacts them for you. A debug log can leak a user's private text if you store or show it as is.
 
-Leave capture off unless you are debugging. Capture never copies a body; it moves each one out of the completion into its event, so it costs the log space those large bodies take, on top of the privacy risk above. Capture is the only way to get the response body, because `Completion` has no public accessor for its bodies. For what an effect log keeps, see [Log effects and answers](crate::effect#log-effects-and-answers).
+Leave capture off unless you are debugging. Capture copies each body into its event, so it costs the log space and the copy those large bodies take, on top of the privacy risk above. The code that answered a round can read its bodies from [`Completion::raw`](crate::model::Completion::raw) before it hands the completion over, but a Host that only reads events sees them through capture alone. For what an effect log keeps, see [Log effects and answers](crate::effect#log-effects-and-answers).
 
 You might expect to need capture to see what was sent to the model. Instead, your transport builds the exact request body itself with [`build_request_body`](crate::transport::build_request_body) and hands that same value to [`read_completion_stream`](crate::transport::read_completion_stream), so you can log the request body yourself.
 

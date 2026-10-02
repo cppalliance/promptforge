@@ -4,7 +4,7 @@ You need this when you report the cost, speed, or token usage of your model call
 
 # Where this fits
 
-Your program, the [Harness](crate), already answers model calls and logs the events each run reports, as the [event page](crate::event) shows. A run is one execution of one prompt, and an event is its record of something that happened. A call's metrics ride on the [`Event::AssistantReply`](crate::event::Event::AssistantReply) event that the run reports after a model call ends in a text reply. This page shows you how to read them.
+Your program, the [Harness](crate), already answers model calls and logs the events each run reports, as the [event page](crate::event) shows. A run is one execution of one prompt, and an event is its record of something that happened. The broker that answers a model call, the code that sends it to a model, builds the call's metrics and attaches them to the [`Completion`](crate::model::Completion) it returns. A call's metrics then ride on the [`Event::AssistantReply`](crate::event::Event::AssistantReply) event that the run reports after a model call ends in a text reply. This page shows you how to build and read them.
 
 One type here is not a measurement: [`ToolCallEvent`] is the record of one tool call a model asked for, which you read from [`Event::AssistantToolCalls`](crate::event::Event::AssistantToolCalls).
 
@@ -26,8 +26,8 @@ use promptforge::metrics::{CallMetrics, ClientTiming, Usage};
 
 // 1. The greeter's canned reply measures nothing, so a test builds the metrics itself.
 # let reply = CompletionResult::Text("hi there".to_owned());
-let canned = Completion::from_result(reply, "canned");
-assert!(canned.is_ok_and(|c| c.usage().is_none() && c.client_timing().is_none()));
+let canned = Completion::from_result(reply, "canned")?;
+assert!(canned.metrics().is_none());
 let usage = Usage {
     prompt_tokens: 12,
     completion_tokens: 5,
@@ -37,6 +37,8 @@ let usage = Usage {
 };
 let client = ClientTiming { ttft_ms: None, mean_itl_ms: None, e2e_ms: 40.0 };
 let metrics = CallMetrics { usage: Some(usage), llama: None, vllm: None, client: Some(client) };
+let measured = canned.with_metrics(metrics.clone());
+assert_eq!(measured.metrics(), Some(&metrics));
 
 // 2. Put them on the reply event the run reports for the greeter's chat round.
 let mut event = Event::AssistantReply {
@@ -75,13 +77,14 @@ if let Event::AssistantReply { metrics: Some(metrics), .. } = &mut event {
     metrics.usage = None;
 }
 assert_eq!(summary(&event), "tokens unknown, 40 ms");
+# Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
 1. Step 1 uses the greeter from [Answer a model](crate#answer-a-model).
-   - [`Completion::from_result`](crate::model::Completion::from_result) cans the greeter's text reply and leaves every measurement empty, so the assertion checks that there are no token counts and no client timing.
-   - It returns a `Result` only because it refuses an empty tool-call batch or two calls with the same id, and a text reply is never refused.
-   - With no server to measure anything, the test builds [`Usage`] and [`ClientTiming`] itself and sets all four sections, `llama` and `vllm` to `None`, because `CallMetrics` has no `Default`.
-2. Step 2 puts the metrics on an [`Event::AssistantReply`](crate::event::Event::AssistantReply), whose `metrics` field is `None` when nothing measured the call. A real Harness never builds this event: the run reports it after each model call that ends in a text reply, and you read it from the run's events as the [event page](crate::event) shows. The hidden `turn` field is the run's model-turn counter, which tells you which round produced the reply, where a round is one model call and the answer the run gets back. [`ReplyOrigin::Chat`](crate::event::ReplyOrigin::Chat) marks a reply that belongs in the user-facing conversation. `models.infer` is the Lua function a prompt calls to ask a model for a reply directly, as the crate page's examples show, and [`ReplyOrigin::Infer`](crate::event::ReplyOrigin::Infer) marks a reply produced that way, which a Host may keep apart from the conversation.
+   - [`Completion::from_result`](crate::model::Completion::from_result) cans the greeter's text reply and leaves every measurement empty, so the assertion checks that [`metrics()`](crate::model::Completion::metrics) is `None`.
+   - It returns a `Result` only because it refuses an empty tool-call batch or two calls with the same id, and a text reply is never refused, so the `?` here never fires.
+   - With no server to measure anything, the test builds [`Usage`] and [`ClientTiming`] itself and sets all four sections, `llama` and `vllm` to `None`, because `CallMetrics` has no `Default`. [`with_metrics`](crate::model::Completion::with_metrics) attaches them to the completion, which a real broker does with what its backend reported, and `metrics()` reads them back.
+2. Step 2 puts the metrics on an [`Event::AssistantReply`](crate::event::Event::AssistantReply), whose `metrics` field is `None` when nothing measured the call. A real Harness never builds this event: the run copies the completion's metrics onto it after each model call that ends in a text reply, and you read it from the run's events as the [event page](crate::event) shows. The hidden `turn` field is the run's model-turn counter, which tells you which round produced the reply, where a round is one model call and the answer the run gets back. [`ReplyOrigin::Chat`](crate::event::ReplyOrigin::Chat) marks a reply that belongs in the user-facing conversation. `models.infer` is the Lua function a prompt calls to ask a model for a reply directly, as the crate page's examples show, and [`ReplyOrigin::Infer`](crate::event::ReplyOrigin::Infer) marks a reply produced that way, which a Host may keep apart from the conversation.
 3. `summary` matches `metrics: Some(..)` first, so an unmeasured call prints `not measured` rather than looking like a bug. It prints each missing section as unknown, never zero, and here prints `17 tokens, 40 ms`.
 4. Step 4 sets `usage` to `None`, as a server that reports no token counts leaves it. `client` remains, so you still report speed: `tokens unknown, 40 ms`.
 
@@ -105,7 +108,7 @@ Non-finite values do not read back. `NaN` writes as `null`. In an optional field
 
 ## CallMetrics
 
-[`CallMetrics`] holds everything measured about one model call, with one optional section per source that reported. You read it from the `metrics` field of [`Event::AssistantReply`](crate::event::Event::AssistantReply) to learn a call's cost and speed, as [Read a call's metrics](#read-a-calls-metrics) teaches. An empty value writes as `{}`, because absent sections are omitted. Reading ignores unknown keys. Reading fails when a section is present but missing a required field, such as `prompt_n` in [`LlamaTimings`]; supply them all, or leave that section out.
+[`CallMetrics`] holds everything measured about one model call, with one optional section per source that reported. You read it from the `metrics` field of [`Event::AssistantReply`](crate::event::Event::AssistantReply) to learn a call's cost and speed, as [Read a call's metrics](#read-a-calls-metrics) teaches. A broker sets it on the completion it returns with [`Completion::with_metrics`](crate::model::Completion::with_metrics), and [`Completion::metrics`](crate::model::Completion::metrics) reads it back; the completion holds none when nothing was measured. An empty value writes as `{}`, because absent sections are omitted. Reading ignores unknown keys. Reading fails when a section is present but missing a required field, such as `prompt_n` in [`LlamaTimings`]; supply them all, or leave that section out.
 
 - `usage`: the token accounting, present when the server reported usage.
 - `llama`: the llama.cpp server's timings, present when that server served the call.

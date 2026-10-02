@@ -104,7 +104,7 @@ Effect::Chat { messages, tools, options, .. } => {
     let body = build_request_body(&messages, Some(tools.as_slice()), &options);
     let completion = stream_round(body, 1 << 20)?;
     assert_eq!(completion.result(), &CompletionResult::Text(shown.take().concat()));
-    let timing = completion.client_timing().ok_or("the reader timed the round")?;
+    let timing = completion.metrics().and_then(|metrics| metrics.client.as_ref()).ok_or("the reader timed the round")?;
     assert_eq!((timing.ttft_ms, timing.e2e_ms), (Some(10.0), 40.0));
     EffectAnswer::Chat(Ok(Box::new(completion)))
 }
@@ -130,10 +130,10 @@ assert_eq!(shown.take(), ["hello"]);
 2. `stream_round` hands the reader the source, the body you sent, a byte limit, a callback, `started`, and `now`. Read `started` just before you send. Here `now` ticks 10 ms per call. The callback is `Fn`, so it collects pieces through a `RefCell`, and it never sees tool-call fragments. The hidden `block_on` stands in for your async runtime.
 3. Step 3 is the chat arm of the Harness loop from [Answer a model](crate#answer-a-model), with the rest hidden.
    - It builds the body from the effect's messages, tools, and options. Every body asks for a stream, so send it only to a server that streams OpenAI-style chat completions.
-   - The reader stores the body you pass on the completion, so pass the value you sent, and a run's debug capture shows exactly that.
+   - The reader keeps the body you pass, with the response it rebuilds, as the completion's [`RawExchange`](crate::model::RawExchange), so pass the value you sent, and a run's debug capture shows exactly that.
    - A chunk is whatever one `next_chunk` call yields, and it can hold part of an event or several, as the third chunk here holds a payload and the `[DONE]` line. The reader counts payloads, not chunks.
    - The reader calls `now` once per payload holding text, reasoning, or a tool-call fragment, and once at the end. Three text payloads give a time to first token of 10 ms and an end-to-end time of 40 ms.
-   - [`Completion::client_timing`](crate::model::Completion::client_timing) returns a [`ClientTiming`](crate::metrics::ClientTiming) with `ttft_ms`, `mean_itl_ms`, and `e2e_ms`, each rounded to a whole microsecond. `mean_itl_ms` averages the gaps between content payloads, 10 ms here.
+   - [`Completion::metrics`](crate::model::Completion::metrics) returns a [`CallMetrics`](crate::metrics::CallMetrics), and its `client` section is a [`ClientTiming`](crate::metrics::ClientTiming) with `ttft_ms`, `mean_itl_ms`, and `e2e_ms`, each rounded to a whole microsecond. `mean_itl_ms` averages the gaps between content payloads, 10 ms here. The other sections, `usage`, `llama`, and `vllm`, come from the stream's own `usage`, `timings`, and `metrics` objects when the backend sent them; a stream with no usage chunk has no `usage`.
    - Time to first token is `None` with no content payloads, and mean inter-token latency with fewer than two.
    - The final `data: [DONE]` line, newline included, lets the stream finish. Answering with the completion in [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat) is the whole happy path.
 4. Under a 64-byte limit, the 61-byte first chunk fits and `hello` is printed, then the second chunk passes the limit. The round fails with a [`CompletionErrorKind::MalformedResponse`](crate::model::CompletionErrorKind::MalformedResponse) error. The limit counts raw bytes, framing included. The error is *retryable*: [`CompletionError::is_retryable`](crate::model::CompletionError::is_retryable) returns `true`, a hint that resending may succeed. This crate never resends, so your connection decides.
@@ -364,7 +364,7 @@ The rules run in this order, and the first match wins:
 
 ## read_completion_stream
 
-[`read_completion_stream`] reads a streamed chat-completions reply to its `[DONE]` sentinel into a [`Completion`](crate::model::Completion), forwarding live text to your callback. Call it on a success status, then answer the `Chat` effect with the result. Too many bytes, a missing `[DONE]`, invalid JSON, or a cut-off tool-call batch fails as `MalformedResponse`, with what went wrong named after the fixed phrase. An in-stream `error` fails as [`classify_stream_error`] reads it, which is `Transport` unless its text names a known cause, and an empty turn as `EmptyReply`. [Read a streamed reply](#read-a-streamed-reply) teaches it.
+[`read_completion_stream`] reads a streamed chat-completions reply to its `[DONE]` sentinel into a [`Completion`](crate::model::Completion), forwarding live text to your callback. Call it on a success status, then answer the `Chat` effect with the result. Too many bytes, a missing `[DONE]`, invalid JSON, or a cut-off tool-call batch fails as `MalformedResponse`, with what went wrong named after the fixed phrase. An in-stream `error` fails as [`classify_stream_error`] reads it, which is `Transport` unless its text names a known cause, and an empty turn as `EmptyReply`. The completion carries the round's [`CallMetrics`](crate::metrics::CallMetrics), absent when nothing was measured, and a [`RawExchange`](crate::model::RawExchange) of the request you passed and the response it rebuilt. [Read a streamed reply](#read-a-streamed-reply) teaches it.
 
 - `max_bytes`: counts raw received bytes, event framing included, and a stream of exactly `max_bytes` passes.
 - `on_delta`: gets [`StreamDelta::Text`](crate::model::StreamDelta::Text) for `content`, and [`StreamDelta::Reasoning`](crate::model::StreamDelta::Reasoning) for `reasoning_content`, `reasoning`, or `thinking`.

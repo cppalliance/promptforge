@@ -8,9 +8,10 @@
 
 use std::collections::HashSet;
 
+use promptforge_types::metrics::CallMetrics;
 use serde_json::Value;
 
-use super::{Completion, CompletionResult, ToolCall};
+use super::{Completion, CompletionResult, RawExchange, ToolCall};
 use crate::model::CompletionError;
 use crate::normalize::{
     check_call_arguments, check_call_id, check_call_name, check_unique_call_id, empty_reply_error,
@@ -18,8 +19,12 @@ use crate::normalize::{
 
 impl Completion {
     /// A completion from a bare result with no transport metadata. `model`
-    /// is the name the completion reports; every optional field is absent
-    /// and both bodies are JSON `null`. A text result is not validated.
+    /// is the name the completion reports; every optional field is absent,
+    /// so `metrics` and `raw` are `None`. A text result is not validated.
+    /// [`with_metrics`](Completion::with_metrics),
+    /// [`with_raw`](Completion::with_raw), and
+    /// [`with_finish_reason`](Completion::with_finish_reason) add what a
+    /// broker knows beyond the result.
     ///
     /// # Errors
     /// Returns an `EmptyReply`-kind [`CompletionError`] for an empty
@@ -43,14 +48,36 @@ impl Completion {
             finish_reason: None,
             reasoning_content: None,
             model: model.into(),
-            usage: None,
-            llama_timings: None,
-            vllm_metrics: None,
-            client_timing: None,
+            metrics: None,
             metadata_diagnostics: Vec::new(),
-            request_body: Value::Null,
-            response_body: Value::Null,
+            raw: None,
         })
+    }
+
+    /// Returns the completion with `metrics` as what the call measured.
+    /// A broker with nothing to report leaves the completion as
+    /// [`from_result`](Completion::from_result) built it.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: CallMetrics) -> Completion {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    /// Returns the completion with `raw` as the request and response a
+    /// Host's debug capture records. Only a broker that has them attaches
+    /// them; the capture is off unless the Host turns it on.
+    #[must_use]
+    pub fn with_raw(mut self, raw: RawExchange) -> Completion {
+        self.raw = Some(raw);
+        self
+    }
+
+    /// Returns the completion with `finish_reason` as the stop label the
+    /// backend supplied.
+    #[must_use]
+    pub fn with_finish_reason(mut self, finish_reason: impl Into<String>) -> Completion {
+        self.finish_reason = Some(finish_reason.into());
+        self
     }
 }
 

@@ -5,7 +5,7 @@
 #[path = "wire-canned.rs"]
 mod canned;
 
-use promptforge_types::metrics::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
+use promptforge_types::metrics::CallMetrics;
 use serde_json::Value;
 
 /// A single chat message.
@@ -273,15 +273,68 @@ pub enum CompletionResult {
     ToolCalls(Vec<ToolCall>),
 }
 
+/// What a transport sent and what it read for one round, as opaque JSON.
+///
+/// A broker that speaks a JSON wire format can attach the pair to the
+/// [`Completion`] it returns, so a Host's debug capture shows exactly what
+/// crossed the wire. The Engine never looks inside either value: it hands
+/// them to the debug capture and nothing else. Build one with
+/// [`RawExchange::new`]; a completion built without a transport carries
+/// none.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge::model::RawExchange;
+/// use serde_json::json;
+///
+/// let raw = RawExchange::new(
+///     json!({ "model": "m", "messages": [] }),
+///     json!({ "choices": [] }),
+/// );
+/// assert_eq!(raw.request()["model"], "m");
+/// assert_eq!(raw.response()["choices"], json!([]));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RawExchange {
+    /// The request as it left for the backend.
+    pub(crate) request: Value,
+    /// The response as the backend returned it, reassembled into the
+    /// buffered chat-completion shape when it streamed.
+    pub(crate) response: Value,
+}
+
+impl RawExchange {
+    /// A raw exchange from the request a transport sent and the response it
+    /// read. Neither value is checked.
+    #[must_use]
+    pub fn new(request: Value, response: Value) -> RawExchange {
+        RawExchange { request, response }
+    }
+
+    /// Returns the request as it left for the backend.
+    #[must_use]
+    pub fn request(&self) -> &Value {
+        &self.request
+    }
+
+    /// Returns the response as the backend returned it.
+    #[must_use]
+    pub fn response(&self) -> &Value {
+        &self.response
+    }
+}
+
 /// A parsed chat-completions round trip, including metadata later steps need.
 ///
 /// [`CompletionResult`] remains the decision the tool loop matches on.
 /// `finish_reason` and `reasoning_content` sit beside it so observers can
 /// report payload-free signals without reading the raw bodies, and the call
-/// metadata - the serving model plus the canonical metrics vocabulary
-/// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
-/// [`VllmMetrics`], [`ClientTiming`]) - is included for attribution and
-/// accounting. Outside crates read through the accessor methods.
+/// metadata - the serving model plus everything the call measured, as
+/// [`CallMetrics`] - is included for attribution and accounting. A broker
+/// may also attach the round's [`RawExchange`] for debug capture. Outside
+/// crates read through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
@@ -293,24 +346,15 @@ pub struct Completion {
     pub(crate) reasoning_content: Option<String>,
     /// The model that served the call, empty when the body named none.
     pub(crate) model: String,
-    /// Token accounting, when the backend reported `usage`.
-    pub(crate) usage: Option<Usage>,
-    /// llama.cpp's `timings` extension, when that backend served the call.
-    pub(crate) llama_timings: Option<LlamaTimings>,
-    /// vLLM's `metrics` extension, when that backend served the call.
-    pub(crate) vllm_metrics: Option<VllmMetrics>,
-    /// Timing measured by this client's own clock: time to first token,
-    /// mean inter-token latency, and end-to-end wall time for the stream.
-    pub(crate) client_timing: Option<ClientTiming>,
+    /// Everything the call measured, when anything reported: the backend's
+    /// `usage` and timing extensions, and the client's own clock.
+    pub(crate) metrics: Option<CallMetrics>,
     /// One line per response metadata section that was present but
     /// malformed and degraded to `None`; empty for a well-formed body. The
     /// Engine reports each line as a `model_metadata_degraded` event.
     pub(crate) metadata_diagnostics: Vec<String>,
-    /// The JSON body sent to the gateway.
-    pub(crate) request_body: Value,
-    /// The buffered chat-completion body reassembled from the streamed
-    /// chunks, in the same shape a non-streaming backend would return.
-    pub(crate) response_body: Value,
+    /// The request and response the broker attached for debug capture.
+    pub(crate) raw: Option<RawExchange>,
 }
 
 impl Completion {
@@ -340,23 +384,19 @@ impl Completion {
         &self.model
     }
 
-    /// Returns the backend's token accounting, when it reported `usage`.
+    /// Returns everything the call measured, when anything reported: token
+    /// accounting, llama.cpp's `timings`, vLLM's `metrics`, and the timing
+    /// the client measured on its own clock. Each section is absent when
+    /// its source did not report it.
     #[must_use]
-    pub fn usage(&self) -> Option<&Usage> {
-        self.usage.as_ref()
+    pub fn metrics(&self) -> Option<&CallMetrics> {
+        self.metrics.as_ref()
     }
 
-    /// Returns llama.cpp's `timings` for the call, when that backend served
-    /// it.
+    /// Returns the request and response the broker attached for debug
+    /// capture, when it attached them.
     #[must_use]
-    pub fn llama_timings(&self) -> Option<&LlamaTimings> {
-        self.llama_timings.as_ref()
-    }
-
-    /// Returns the timing this client measured on its own clock, when the
-    /// transport measured one.
-    #[must_use]
-    pub fn client_timing(&self) -> Option<&ClientTiming> {
-        self.client_timing.as_ref()
+    pub fn raw(&self) -> Option<&RawExchange> {
+        self.raw.as_ref()
     }
 }

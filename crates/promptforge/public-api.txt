@@ -52,6 +52,7 @@
 #[non_exhaustive] pub struct promptforge::model::ModelDescriptor { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::ModelId { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::ModelIdError { /* private fields */ }
+#[non_exhaustive] pub struct promptforge::model::RawExchange { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::ToolArguments<'a> { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::ToolCall { /* private fields */ }
 #[non_exhaustive] pub struct promptforge::model::ToolSchema { /* private fields */ }
@@ -139,6 +140,7 @@ auto promptforge::model::ModelDescriptor: Freeze, RefUnwindSafe, Send, Sync, Unp
 auto promptforge::model::ModelId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::ModelIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::ModelInvocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::model::RawExchange: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::StreamDelta: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::Temperature: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::TemperatureError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -259,6 +261,7 @@ derives promptforge::model::ModelDescriptor: Clone, Debug, Eq, PartialEq
 derives promptforge::model::ModelId: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 derives promptforge::model::ModelIdError: Clone, Debug, Eq, PartialEq
 derives promptforge::model::ModelInvocation: Clone, Debug, PartialEq
+derives promptforge::model::RawExchange: Clone, Debug, Eq, PartialEq
 derives promptforge::model::StreamDelta: Clone, Debug, Eq, PartialEq
 derives promptforge::model::Temperature: Clone, Copy, Debug, PartialEq
 derives promptforge::model::TemperatureError: Clone, Debug, PartialEq
@@ -487,14 +490,16 @@ pub fn promptforge::ids::ChainId::root() -> Self
 pub fn promptforge::ids::ParseIdError::input(&self) -> &str
 pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option<Self>
 pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
-pub fn promptforge::model::Completion::client_timing(&self) -> core::option::Option<&promptforge::metrics::ClientTiming>
 pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::Completion, promptforge::model::CompletionError>
-pub fn promptforge::model::Completion::llama_timings(&self) -> core::option::Option<&promptforge::metrics::LlamaTimings>
+pub fn promptforge::model::Completion::metrics(&self) -> core::option::Option<&promptforge::metrics::CallMetrics>
 pub fn promptforge::model::Completion::model(&self) -> &str
+pub fn promptforge::model::Completion::raw(&self) -> core::option::Option<&promptforge::model::RawExchange>
 pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::CompletionResult
-pub fn promptforge::model::Completion::usage(&self) -> core::option::Option<&promptforge::metrics::Usage>
+pub fn promptforge::model::Completion::with_finish_reason(self, finish_reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::with_metrics(self, metrics: promptforge::metrics::CallMetrics) -> promptforge::model::Completion
+pub fn promptforge::model::Completion::with_raw(self, raw: promptforge::model::RawExchange) -> promptforge::model::Completion
 pub fn promptforge::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::detail(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
@@ -545,6 +550,9 @@ pub fn promptforge::model::ModelId::gateway(name: impl core::convert::Into<alloc
 pub fn promptforge::model::ModelId::name(&self) -> &str
 pub fn promptforge::model::ModelId::new(server: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::ModelId, promptforge::model::ModelIdError>
 pub fn promptforge::model::ModelId::server(&self) -> &str
+pub fn promptforge::model::RawExchange::new(request: serde_json::value::Value, response: serde_json::value::Value) -> promptforge::model::RawExchange
+pub fn promptforge::model::RawExchange::request(&self) -> &serde_json::value::Value
+pub fn promptforge::model::RawExchange::response(&self) -> &serde_json::value::Value
 pub fn promptforge::model::Temperature::get(self) -> f64
 pub fn promptforge::model::Temperature::new(value: f64) -> core::result::Result<promptforge::model::Temperature, promptforge::model::TemperatureError>
 pub fn promptforge::model::ToolArguments::contains(&self, key: &str) -> bool

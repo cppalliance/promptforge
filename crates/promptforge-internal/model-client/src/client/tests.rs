@@ -1,5 +1,6 @@
 //! Tests for the wire message constructors and tool schema validation.
 
+use promptforge_types::metrics::{CallMetrics, Usage};
 use serde_json::Value;
 
 use super::*;
@@ -113,6 +114,49 @@ fn from_result_refuses_an_empty_batch_and_duplicate_ids_and_accepts_text() {
     assert_eq!(text.model(), "m");
     Completion::from_result(CompletionResult::ToolCalls(vec![call]), "m")
         .expect("a batch of distinct calls is accepted");
+}
+
+#[test]
+fn a_completion_from_a_bare_result_carries_no_metrics_and_no_raw_exchange() {
+    let completion = Completion::from_result(CompletionResult::Text("pong".to_owned()), "m")
+        .expect("a text result is accepted");
+    assert_eq!(completion.metrics(), None);
+    assert_eq!(completion.raw(), None);
+    assert_eq!(completion.finish_reason(), None);
+    assert_eq!(completion.reasoning_content(), None);
+}
+
+#[test]
+fn the_builders_set_metrics_the_raw_exchange_and_the_finish_reason() {
+    let metrics = CallMetrics {
+        usage: Some(Usage {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            total_tokens: 10,
+            cached_tokens: None,
+            reasoning_tokens: None,
+        }),
+        llama: None,
+        vllm: None,
+        client: None,
+    };
+    let request = serde_json::json!({ "model": "m", "messages": [] });
+    let response = serde_json::json!({ "choices": [] });
+    let completion = Completion::from_result(CompletionResult::Text("pong".to_owned()), "m")
+        .expect("a text result is accepted")
+        .with_metrics(metrics.clone())
+        .with_raw(RawExchange::new(request.clone(), response.clone()))
+        .with_finish_reason("stop");
+    assert_eq!(completion.metrics(), Some(&metrics));
+    let raw = completion.raw().expect("the raw exchange was attached");
+    assert_eq!(raw.request(), &request);
+    assert_eq!(raw.response(), &response);
+    assert_eq!(completion.finish_reason(), Some("stop"));
+    assert_eq!(
+        completion.result(),
+        &CompletionResult::Text("pong".to_owned()),
+        "the builders leave the outcome as it was"
+    );
 }
 
 #[test]

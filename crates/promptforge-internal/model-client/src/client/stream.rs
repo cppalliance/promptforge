@@ -23,11 +23,11 @@
 
 use std::collections::BTreeMap;
 
-use promptforge_types::metrics::ClientTiming;
+use promptforge_types::metrics::{CallMetrics, ClientTiming};
 use promptforge_types::wire::StreamDelta;
 use serde_json::{Map, Value};
 
-use super::Completion;
+use super::{Completion, RawExchange};
 use crate::Result;
 use crate::classify::classify_stream_error;
 use crate::model::CompletionError;
@@ -316,8 +316,11 @@ impl StreamAccumulator {
     /// Finishes the accumulation into the [`Completion`] the turn produced:
     /// the truncation rule, the strict turn normalizer, and the lenient
     /// metadata parser, in that order. `request_body` is the body the
-    /// transport sent and `client_timing` what it measured on its own
-    /// clock; both are recorded on the completion for the debug capture.
+    /// transport sent; with the reassembled response it becomes the
+    /// completion's [`RawExchange`] for the debug capture. `client_timing`
+    /// is what the transport measured on its own clock; it joins the
+    /// backend's sections in the completion's [`CallMetrics`], which is
+    /// absent when nothing was measured.
     ///
     /// # Errors
     /// Returns a `MalformedResponse`-kind [`CompletionError`] when a
@@ -348,18 +351,22 @@ impl StreamAccumulator {
         let response_body = self.into_body();
         let turn = crate::normalize::normalize(&response_body)?;
         let metadata = crate::normalize::response_metadata(&response_body);
+        let metrics = CallMetrics {
+            client: client_timing,
+            ..metadata.metrics
+        };
+        let measured = metrics.usage.is_some()
+            || metrics.llama.is_some()
+            || metrics.vllm.is_some()
+            || metrics.client.is_some();
         Ok(Completion {
             result: turn.outcome,
             finish_reason: turn.finish_reason,
             reasoning_content: turn.reasoning_content,
             model: metadata.model,
-            usage: metadata.usage,
-            llama_timings: metadata.llama_timings,
-            vllm_metrics: metadata.vllm_metrics,
-            client_timing,
+            metrics: measured.then_some(metrics),
             metadata_diagnostics: metadata.diagnostics,
-            request_body,
-            response_body,
+            raw: Some(RawExchange::new(request_body, response_body)),
         })
     }
 
@@ -468,3 +475,7 @@ pub fn escape_controls(body: &str, max: usize) -> String {
 #[cfg(test)]
 #[path = "stream-tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stream-metrics-tests.rs"]
+mod metrics_tests;

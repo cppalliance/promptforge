@@ -58,6 +58,7 @@ pub mod model {
     pub use promptforge_model_client::client::Completion;
     pub use promptforge_model_client::client::CompletionResult;
     pub use promptforge_model_client::client::Message;
+    pub use promptforge_model_client::client::RawExchange;
     pub use promptforge_model_client::client::ToolArguments;
     pub use promptforge_model_client::client::ToolCall;
     pub use promptforge_model_client::client::ToolSchema;

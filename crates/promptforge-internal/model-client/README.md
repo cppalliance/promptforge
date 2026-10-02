@@ -20,10 +20,16 @@ whole, so partial arguments never execute; an empty product is
 `EmptyReply`) and produces the `Completion`.
 
 Each `Completion` holds the call's metadata parsed from the stream:
-the serving `model`, `usage` token accounting (with cached- and
-reasoning-token details), llama.cpp `timings`, vLLM `metrics`, and the
-`client_timing` (TTFT, mean inter-token latency, end-to-end) the
-transport measured on its own clock. The metrics vocabulary (`Usage`,
+the serving `model`, and `metrics`, one `CallMetrics` built from `usage`
+token accounting (with cached- and reasoning-token details), llama.cpp
+`timings`, vLLM `metrics`, and the client timing (TTFT, mean inter-token
+latency, end-to-end) the transport measured on its own clock. `metrics`
+is absent when nothing was measured, and a stream with no usage chunk
+has no `usage`. The read loop also attaches a `RawExchange`, the request
+body the transport sent and the response body rebuilt from the chunks,
+which the Engine copies into its debug capture events when a run turns
+capture on. A completion built without a transport has neither. The
+metrics vocabulary (`Usage`,
 `LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) and
 `StreamDelta` are canonical in `promptforge-types`; this crate uses them
 from there and does not re-export them. A

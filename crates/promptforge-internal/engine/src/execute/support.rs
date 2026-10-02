@@ -1,12 +1,9 @@
-//! Cross-cutting run helpers: the turn counter, the `sys` JSON, the round
-//! metrics, the shared round report, and the shared run constants.
+//! Cross-cutting run helpers: the turn counter, the `sys` JSON, the shared
+//! round report, and the shared run constants.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use promptforge_model_client::detail::{
-    completion_into_result, completion_metadata_diagnostics, completion_take_request_body,
-    completion_take_response_body, completion_vllm_metrics,
-};
+use promptforge_model_client::detail::{completion_into_result, completion_metadata_diagnostics};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::lifecycle;
 use promptforge_types::event::{Event, ReplyOrigin};
@@ -64,22 +61,6 @@ pub(crate) fn sys_json(
     })
 }
 
-/// Assembles one round's [`CallMetrics`] from everything the completion
-/// measured, or `None` when nothing was measured.
-pub(crate) fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
-    let metrics = CallMetrics {
-        usage: completion.usage().cloned(),
-        llama: completion.llama_timings().cloned(),
-        vllm: completion_vllm_metrics(completion).cloned(),
-        client: completion.client_timing().cloned(),
-    };
-    let measured = metrics.usage.is_some()
-        || metrics.llama.is_some()
-        || metrics.vllm.is_some()
-        || metrics.client.is_some();
-    measured.then_some(metrics)
-}
-
 /// What a served completion reports once the turn has advanced and the
 /// round-level events have fired: the pieces the chat arm's answer arms
 /// carry alongside the outcome. The nested-inference arm ignores it.
@@ -93,7 +74,8 @@ pub(crate) struct Served {
 /// outcome beside the metadata an answer needs.
 ///
 /// The sequence is fixed and lives here for both the chat and the nested
-/// inference paths: the debug request/response pair, `MODEL_TURN_COMPLETED`,
+/// inference paths: the debug request/response pair (when debug capture is
+/// on, from the completion's raw exchange), `MODEL_TURN_COMPLETED`,
 /// one `model_metadata_degraded` per metadata diagnostic the completion
 /// holds, the thinking side channel, the `length` truncation observation,
 /// then exactly one `assistant_reply` content report carrying `origin` -
@@ -104,10 +86,10 @@ pub(crate) fn report_model_turn(
     emitter: &Emitter,
     section: &str,
     turn: u32,
-    mut completion: Completion,
+    completion: Completion,
     origin: ReplyOrigin,
 ) -> (CompletionResult, Served) {
-    let metrics = call_metrics(&completion);
+    let metrics = completion.metrics().cloned();
     let model = completion.model().to_owned();
     let thinking = completion
         .reasoning_content()
@@ -115,11 +97,18 @@ pub(crate) fn report_model_turn(
         .map(str::to_owned);
     let finish_reason = completion.finish_reason().map(str::to_owned);
     if emitter.captures_debug() {
-        emitter.request(section, turn, completion_take_request_body(&mut completion));
+        // A completion no broker attached a raw exchange to still reports
+        // its pair, with `null` bodies, so a Host pairs every round.
+        let (request, response) = completion
+            .raw()
+            .map_or((serde_json::Value::Null, serde_json::Value::Null), |raw| {
+                (raw.request().clone(), raw.response().clone())
+            });
+        emitter.request(section, turn, request);
         emitter.response(
             section,
             turn,
-            completion_take_response_body(&mut completion),
+            response,
             finish_reason.clone(),
             completion.reasoning_content().map(str::to_owned),
         );

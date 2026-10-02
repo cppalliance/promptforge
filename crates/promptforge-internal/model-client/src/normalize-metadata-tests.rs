@@ -47,7 +47,7 @@ fn llama_body_parses_model_usage_and_timings() {
     assert_eq!(warnings, 0, "a well-formed body must not warn");
     assert_eq!(metadata.model, "qwen3-30b");
     assert_eq!(
-        metadata.usage,
+        metadata.metrics.usage,
         Some(Usage {
             prompt_tokens: 7,
             completion_tokens: 3,
@@ -58,7 +58,7 @@ fn llama_body_parses_model_usage_and_timings() {
         "flat llama.cpp usage reports the token counts only"
     );
     assert_eq!(
-        metadata.llama_timings,
+        metadata.metrics.llama,
         Some(LlamaTimings {
             prompt_n: 7,
             prompt_ms: 12.5,
@@ -70,7 +70,11 @@ fn llama_body_parses_model_usage_and_timings() {
             draft_n_accepted: 2,
         })
     );
-    assert_eq!(metadata.vllm_metrics, None);
+    assert_eq!(metadata.metrics.vllm, None);
+    assert_eq!(
+        metadata.metrics.client, None,
+        "only the transport's own clock fills the client section"
+    );
 }
 
 #[test]
@@ -93,7 +97,7 @@ fn llama_timings_without_draft_counters_default_to_zero() {
 
     let (metadata, warnings) = with_warn_count(&body);
     assert_eq!(warnings, 0);
-    let timings = metadata.llama_timings.unwrap();
+    let timings = metadata.metrics.llama.unwrap();
     assert_eq!(timings.draft_n, 0);
     assert_eq!(timings.draft_n_accepted, 0);
 }
@@ -124,7 +128,7 @@ fn vllm_body_parses_metrics_and_cached_tokens() {
     assert_eq!(warnings, 0, "a well-formed body must not warn");
     assert_eq!(metadata.model, "meta-llama/Llama-3.1-8B-Instruct");
     assert_eq!(
-        metadata.usage,
+        metadata.metrics.usage,
         Some(Usage {
             prompt_tokens: 20,
             completion_tokens: 5,
@@ -134,9 +138,9 @@ fn vllm_body_parses_metrics_and_cached_tokens() {
         }),
         "the prompt_tokens_details cache detail must flatten into usage"
     );
-    assert_eq!(metadata.llama_timings, None);
+    assert_eq!(metadata.metrics.llama, None);
     assert_eq!(
-        metadata.vllm_metrics,
+        metadata.metrics.vllm,
         Some(VllmMetrics {
             time_to_first_token_ms: Some(8.5),
             generation_time_ms: Some(22.5),
@@ -158,7 +162,7 @@ fn vllm_metrics_omit_what_was_not_measured() {
     let (metadata, warnings) = with_warn_count(&body);
     assert_eq!(warnings, 0);
     assert_eq!(
-        metadata.vllm_metrics,
+        metadata.metrics.vllm,
         Some(VllmMetrics {
             time_to_first_token_ms: Some(8.5),
             generation_time_ms: None,
@@ -195,7 +199,7 @@ fn frontier_body_parses_usage_detail_fields() {
     assert_eq!(warnings, 0, "a well-formed body must not warn");
     assert_eq!(metadata.model, "gpt-5.2");
     assert_eq!(
-        metadata.usage,
+        metadata.metrics.usage,
         Some(Usage {
             prompt_tokens: 100,
             completion_tokens: 40,
@@ -205,11 +209,11 @@ fn frontier_body_parses_usage_detail_fields() {
         })
     );
     assert_eq!(
-        metadata.llama_timings, None,
+        metadata.metrics.llama, None,
         "frontier bodies have no timings"
     );
     assert_eq!(
-        metadata.vllm_metrics, None,
+        metadata.metrics.vllm, None,
         "frontier bodies have no metrics"
     );
 }
@@ -229,9 +233,9 @@ fn absent_metadata_sections_are_none_without_warning() {
         let (metadata, warnings) = with_warn_count(&body);
         assert_eq!(warnings, 0, "absence is normal, never a warning: {body}");
         assert_eq!(metadata.model, "m");
-        assert_eq!(metadata.usage, None);
-        assert_eq!(metadata.llama_timings, None);
-        assert_eq!(metadata.vllm_metrics, None);
+        assert_eq!(metadata.metrics.usage, None);
+        assert_eq!(metadata.metrics.llama, None);
+        assert_eq!(metadata.metrics.vllm, None);
     }
 }
 
@@ -249,12 +253,15 @@ fn malformed_metadata_degrades_to_none_with_a_warning() {
 
     let (metadata, warnings) = with_warn_count(&body);
     assert_eq!(metadata.model, "", "a non-string model records as empty");
-    assert_eq!(metadata.usage, None, "non-numeric token counts degrade");
     assert_eq!(
-        metadata.llama_timings, None,
+        metadata.metrics.usage, None,
+        "non-numeric token counts degrade"
+    );
+    assert_eq!(
+        metadata.metrics.llama, None,
         "timings missing required fields degrade"
     );
-    assert_eq!(metadata.vllm_metrics, None, "a non-object metrics degrades");
+    assert_eq!(metadata.metrics.vllm, None, "a non-object metrics degrades");
     assert_eq!(warnings, 4, "each malformed section warns exactly once");
 }
 
@@ -276,9 +283,9 @@ fn metadata_sections_degrade_independently() {
 
     let (metadata, warnings) = with_warn_count(&body);
     assert_eq!(warnings, 1, "only the broken section warns");
-    assert_eq!(metadata.usage, None);
+    assert_eq!(metadata.metrics.usage, None);
     assert!(
-        metadata.llama_timings.is_some(),
+        metadata.metrics.llama.is_some(),
         "a malformed sibling section must not take timings down with it"
     );
 }

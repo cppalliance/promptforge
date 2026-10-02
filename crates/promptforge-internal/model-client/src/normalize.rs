@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 
-use promptforge_types::metrics::{LlamaTimings, Usage, VllmMetrics};
+use promptforge_types::metrics::{CallMetrics, LlamaTimings, Usage, VllmMetrics};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -331,12 +331,10 @@ pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
 pub(crate) struct ResponseMetadata {
     /// The model that served the call, or empty when the body named none.
     pub(crate) model: String,
-    /// Token accounting, when the backend reported `usage`.
-    pub(crate) usage: Option<Usage>,
-    /// llama.cpp's `timings` extension, when that backend served the call.
-    pub(crate) llama_timings: Option<LlamaTimings>,
-    /// vLLM's `metrics` extension, when that backend served the call.
-    pub(crate) vllm_metrics: Option<VllmMetrics>,
+    /// What the backend reported: `usage`, llama.cpp's `timings`, and vLLM's
+    /// `metrics`. The `client` section is always `None` here; only the
+    /// transport's own clock fills it.
+    pub(crate) metrics: CallMetrics,
     /// One line per section that was present but malformed and so
     /// degraded to `None`, and one for a body naming no string `model`:
     /// the Engine reports each as a `model_metadata_degraded` event, since
@@ -354,9 +352,12 @@ pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
     let mut diagnostics = Vec::new();
     ResponseMetadata {
         model: parse_model(body, &mut diagnostics),
-        usage: parse_section(body, "usage", parse_usage, &mut diagnostics),
-        llama_timings: parse_section(body, "timings", parse_llama_timings, &mut diagnostics),
-        vllm_metrics: parse_section(body, "metrics", parse_vllm_metrics, &mut diagnostics),
+        metrics: CallMetrics {
+            usage: parse_section(body, "usage", parse_usage, &mut diagnostics),
+            llama: parse_section(body, "timings", parse_llama_timings, &mut diagnostics),
+            vllm: parse_section(body, "metrics", parse_vllm_metrics, &mut diagnostics),
+            client: None,
+        },
         diagnostics,
     }
 }

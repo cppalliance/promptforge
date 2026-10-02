@@ -32,7 +32,8 @@ pub use read::{ChunkSource, read_body_capped, read_completion_stream};
 pub use request::build_request_body;
 pub use stream::{Applied, SseScanner, StreamAccumulator, escape_controls};
 pub use wire::{
-    Completion, CompletionResult, Message, ToolArguments, ToolCall, ToolSchema, ToolSchemaError,
+    Completion, CompletionResult, Message, RawExchange, ToolArguments, ToolCall, ToolSchema,
+    ToolSchemaError,
 };
 
 #[cfg(test)]

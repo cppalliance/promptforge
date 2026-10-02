@@ -255,6 +255,7 @@ Owns:
 - item: promptforge::model::CompletionErrorKind
 - item: promptforge::model::CompletionResult
 - item: promptforge::model::ModelCatalogError
+- item: promptforge::model::RawExchange
 - item: promptforge::model::StreamDelta
 - item: promptforge::model::TemperatureError
 - item: promptforge::model::ThinkingMode
@@ -531,7 +532,7 @@ Primer sources: none
 - How: How do I read the token counts and timings of one model call?
 - What if: What happens when the server reports no token counts?
 - Why: Why does one call carry separate timings from the server and from my own client?
-- Example: read the metrics from a canned reply event, and print one summary line.
+- Example: attach metrics to a canned completion, read them from a canned reply event, and print one summary line.
 - Diagram: none
 
 Owns:

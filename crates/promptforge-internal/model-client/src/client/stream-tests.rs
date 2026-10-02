@@ -147,9 +147,13 @@ fn finish_normalizes_the_turn_and_returns_the_metadata() {
     }
     assert_eq!(completion.finish_reason(), Some("stop"));
     assert_eq!(completion.model(), "qwen3-30b");
-    assert_eq!(completion.usage().map(|usage| usage.total_tokens), Some(10));
-    assert_eq!(completion.request_body, request);
-    assert!(completion.client_timing().is_none());
+    let metrics = completion.metrics().expect("the usage chunk was measured");
+    assert_eq!(
+        metrics.usage.as_ref().map(|usage| usage.total_tokens),
+        Some(10)
+    );
+    assert!(metrics.client.is_none());
+    assert_eq!(completion.raw().map(RawExchange::request), Some(&request));
 }
 
 #[test]

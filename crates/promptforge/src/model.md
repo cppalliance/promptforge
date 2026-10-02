@@ -220,6 +220,8 @@ assert_eq!(error.kind(), RunErrorKind::Completion);
 
 When the model asks for tools instead, build each call with [`ToolCall::from_parts`]. Pass its arguments as a parsed JSON object, not the encoded string the wire carries, and wrap the calls in [`CompletionResult::ToolCalls`]. `from_result` refuses an empty batch and two calls that share an id, but not an empty text reply. A live reply whose text is empty or only whitespace is an `EmptyReply` failure, and `from_result` accepts both, so check `text.trim().is_empty()` yourself when your backend can return one.
 
+A completion built with `from_result` carries no measurements and no raw exchange. A broker that has them adds them: [`with_metrics`](Completion::with_metrics) takes the call's [`CallMetrics`](crate::metrics::CallMetrics), [`with_finish_reason`](Completion::with_finish_reason) takes the backend's stop label, and [`with_raw`](Completion::with_raw) takes a [`RawExchange`], the request and response as opaque JSON. The run copies the metrics onto the reply event, as [the metrics page](crate::metrics) shows. It reads the raw exchange only when the Host turns on debug capture, as [Capture raw model traffic](crate::event#capture-raw-model-traffic) shows, so attach one only when your backend speaks JSON and you want it in that capture.
+
 To decide on a retry, read [`is_retryable()`](CompletionError::is_retryable). The failure's kind fixes the answer: it is true for `RateLimited`, `Overloaded`, `Timeout`, `Transport`, `ServerError`, and `MalformedResponse`, and false for the rest. A 429 is retryable, so your retry loop backs off on it; this crate never resends. A `CompletionError`'s `Display` never shows the backend's error body. Read [`detail()`](CompletionError::detail) when you want it, so you choose whether that body reaches your logs.
 
 You might expect to answer a chat effect with the reply text. Instead, the answer is a boxed `Completion` built with `Completion::from_result`, which carries whether the model replied or asked for tools, and which model served the round.
@@ -235,7 +237,9 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 - [`model`](Completion::model): the name the backend reported serving, which can differ from the request; empty when the response named no model.
 - [`reasoning_content`](Completion::reasoning_content): never folded into the answer text, so show or log it yourself.
 - [`finish_reason`](Completion::finish_reason): the choice's `finish_reason`, when the backend supplied one.
-- [`usage`](Completion::usage), [`llama_timings`](Completion::llama_timings), [`client_timing`](Completion::client_timing): token accounting, llama.cpp's `timings`, and client-clock timings; always `None` after `from_result`.
+- [`metrics`](Completion::metrics): everything the call measured as a [`CallMetrics`](crate::metrics::CallMetrics), which holds token accounting, llama.cpp's `timings`, vLLM's `metrics`, and client-clock timings; `None` after `from_result` until you add one with [`with_metrics`](Completion::with_metrics), and `None` when nothing was measured.
+- [`raw`](Completion::raw): the [`RawExchange`] a broker attached, the request and response as opaque JSON; `None` after `from_result` until you add one with [`with_raw`](Completion::with_raw).
+- [`with_finish_reason`](Completion::with_finish_reason): sets the stop label that [`finish_reason`](Completion::finish_reason) returns.
 
 ## CompletionError
 
@@ -379,6 +383,15 @@ Each kind has one fixed message, written for a model reader, and an HTTP failure
 ## ModelCatalogError
 
 [`ModelCatalogError`] says why [`ModelCatalog::new`] refused its descriptors. Its variant [`DuplicateId`](ModelCatalogError::DuplicateId) means two descriptors shared one [`ModelId`]; its `server` and `name` are the repeated id's parts, from the second occurrence. The enum and the variant are both `#[non_exhaustive]`, so match `DuplicateId { .. }`, and you cannot build one. Remove or rename the repeated model, and build the catalog again. [Describe your models](#describe-your-models) teaches it.
+
+## RawExchange
+
+[`RawExchange`] holds the request a broker sent and the response it read for one model round, as opaque JSON. Attach one to a [`Completion`] with [`with_raw`](Completion::with_raw) when you want the Host's debug capture to show what crossed the wire. A completion built without a transport carries none. [Answer a model round](#answer-a-model-round) mentions it, and [Capture raw model traffic](crate::event#capture-raw-model-traffic) shows where it goes.
+
+- [`new`](RawExchange::new): takes the request and the response and checks neither, so build both from the real bodies.
+- [`request`](RawExchange::request) and [`response`](RawExchange::response): borrow the two values back. A streamed response is the buffered body the reader rebuilds from the chunks, not the bytes on the wire.
+
+The Engine never looks inside either value. It copies them into the [`Event::Request`](crate::event::Event::Request) and [`Event::Response`](crate::event::Event::Response) events, and only when the run has capture on. Treat both as private and untrusted, because nothing redacts them.
 
 ## StreamDelta
 

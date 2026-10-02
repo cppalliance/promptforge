@@ -129,14 +129,18 @@ async fn streamed_text_usage_timings_and_client_timing_accumulate() {
     );
     assert_eq!(completion.finish_reason(), Some("stop"));
     assert_eq!(completion.model(), "qwen3-30b");
-    let usage = completion.usage().expect("usage from the final chunk");
+    let metrics = completion.metrics().expect("the round reported metrics");
+    let usage = metrics.usage.as_ref().expect("usage from the final chunk");
     assert_eq!(usage.total_tokens, 10);
-    let timings = completion
-        .llama_timings()
+    let timings = metrics
+        .llama
+        .as_ref()
         .expect("timings from the final chunk");
     assert_eq!(timings.predicted_n, 3);
-    let timing = completion
-        .client_timing()
+    assert_eq!(metrics.vllm, None, "llama.cpp reports no vLLM section");
+    let timing = metrics
+        .client
+        .as_ref()
         .expect("the streaming transport measures its own clock");
     assert!(
         timing.ttft_ms.is_some_and(|ttft| ttft >= 0.0),
@@ -147,6 +151,16 @@ async fn streamed_text_usage_timings_and_client_timing_accumulate() {
         "mean ITL is measured with two delta chunks: {timing:?}"
     );
     assert!(timing.e2e_ms >= 0.0);
+    let raw = completion
+        .raw()
+        .expect("the HTTP path attaches the raw exchange for debug capture");
+    assert_eq!(raw.request()["messages"][0]["content"], "hi");
+    assert_eq!(raw.request()["stream"], true);
+    assert_eq!(
+        raw.response()["choices"][0]["message"]["content"],
+        "Hello!",
+        "the response is the reassembled buffered body"
+    );
 }
 
 #[tokio::test]
