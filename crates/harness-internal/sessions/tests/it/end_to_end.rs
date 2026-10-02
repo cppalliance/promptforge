@@ -16,6 +16,7 @@ use axum::extract::{Json, State};
 use axum::http::HeaderMap;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::routing::post;
+use harness_capabilities::HostServices;
 use harness_gateway_client::{GatewayClient, GatewayEndpoint, SecretString};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::prepare::{Prepared, Services, prepare_run};
@@ -313,25 +314,32 @@ fn assert_task_columns(records: &[Record], main_task: &str) {
     );
 }
 
+/// The fixture's preparation services over `recorder` and `chat`, with no
+/// capabilities, no Host services, and the bound model.
+fn services(recorder: &Arc<MemoryRecorder>, chat: GatewayChatPerformer) -> Services {
+    Services {
+        registry: None,
+        services: HostServices::new(),
+        vfs: promptforge::vfs::VfsRef::default(),
+        input_text: None,
+        cancel: CancelHandle::new(),
+        recorder: recorder.clone(),
+        chat: Arc::new(chat),
+        input: None,
+        session_id: "session-e2e".to_owned(),
+        agent: "end-to-end".to_owned(),
+        model: Some(current_model()),
+        ui: None,
+    }
+}
+
 #[tokio::test]
 async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
     let (client, seen) = mock_gateway().await;
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
-    let services = Services {
-        registry: None,
-        vfs: promptforge::vfs::VfsRef::default(),
-        input_text: None,
-        cancel: CancelHandle::new(),
-        recorder: recorder.clone(),
-        chat: Arc::new(GatewayChatPerformer::new(client, deltas)),
-        input: None,
-        session_id: "session-e2e".to_owned(),
-        agent: "end-to-end".to_owned(),
-        model: Some(current_model()),
-        ui: None,
-    };
+    let services = services(&recorder, GatewayChatPerformer::new(client, deltas));
 
     let Prepared {
         run,

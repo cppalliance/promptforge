@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::MemoryRecorder;
 use harness::{GatewayBinding, Harness, HarnessConfig};
 
@@ -12,6 +13,8 @@ fn harness() -> Harness {
             agents_path: PathBuf::from("agents"),
         },
         Arc::new(MemoryRecorder::new()),
+        CapabilityRegistry::new(),
+        HostServices::new(),
     )
 }
 

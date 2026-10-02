@@ -1,8 +1,9 @@
-//! The explicit Harness-built capability registry: [`CapabilityRegistry`].
+//! The explicit Host-built capability registry: [`CapabilityRegistry`].
 //!
-//! Linking a capability crate alone registers nothing: the Harness builds one
-//! registry, registers each installed capability by hand, and hands the
-//! registry to [`activate`](crate::activate) for each run. v1 is
+//! Linking a capability crate alone registers nothing: the Host builds one
+//! registry, registers each installed capability by hand, and hands it to
+//! the Harness, which passes it to [`activate`](crate::activate) for each
+//! run. v1 is
 //! unversioned - one capability per id - so a duplicate registration is
 //! rejected rather than shadowing the installed capability, and an id
 //! differing from a registered id only by `-`/`_`/`.` punctuation is
@@ -65,15 +66,18 @@ use crate::capability::Capability;
 #[path = "registry-tests.rs"]
 mod tests;
 
-/// An explicit Harness-built registry of installed capabilities.
+/// An explicit Host-built registry of installed capabilities.
 ///
-/// Linking a capability crate alone registers nothing: the Harness registers
-/// each installed capability by hand and hands the registry to
-/// [`activate`](crate::activate) for each run. v1 is unversioned - one
+/// Linking a capability crate alone registers nothing: the Host registers
+/// each installed capability by hand and hands the registry to the
+/// Harness, which passes it to [`activate`](crate::activate) for each run.
+/// v1 is unversioned - one
 /// capability per id - so a duplicate registration is rejected rather than
 /// shadowing the installed capability, and an id differing from a
 /// registered id only by `-`/`_`/`.` punctuation is rejected as a
-/// normalization collision.
+/// normalization collision. A clone shares the registered capabilities and
+/// takes registrations of its own.
+#[derive(Clone)]
 pub struct CapabilityRegistry {
     /// The installed capabilities, keyed by their stable ids.
     capabilities: BTreeMap<CapabilityId, Arc<dyn Capability>>,

@@ -21,6 +21,7 @@ An agent never reaches the outside world by itself. When it needs outside work d
 Here is the smallest agent a Host can launch, placed in `desk`'s agents folder:
 
 ````
+use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig};
 use std::fs;
@@ -49,17 +50,19 @@ let hello = concat!(
 );
 fs::write(agents.join("hello.md"), hello)?;
 
-// 3. Build a harness over the folder, recording runs in memory.
-let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
+// 3. Build a harness over the folder that offers the operator-input capability, recording runs in memory.
+let mut capabilities = CapabilityRegistry::new();
+capabilities.register(Arc::new(UserInput::new()))?;
+let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 
 // 4. The harness offers `hello` next to the built-in `chat`.
 assert_eq!(harness.discover(), ["chat", "hello"]);
-Ok::<(), std::io::Error>(())
+Ok::<(), Box<dyn std::error::Error>>(())
 ````
 
 1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the Harness reads by path.
 2. Step 2 writes `hello.md`. Its frontmatter holds the three keys every agent needs: `name`, `description`, and `promptforge: 0`. Then come one H1 title and one section whose Lua returns a fixed text. The source is built with `concat!` so that rustdoc keeps its `# Hello` line. The smallest agent needs no model, no tool, and no operator.
-3. Step 3 builds a Harness over the folder with [`Harness::new`], a [`HarnessConfig`], and a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory. Building a Harness touches no folder, so this step cannot fail. [Recording runs](record) shows how to bring your own recorder.
+3. Step 3 builds a Harness over the folder with [`Harness::new`]. It takes a [`HarnessConfig`], a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory, a [`CapabilityRegistry`](capability::CapabilityRegistry) of the capabilities your agents may declare, and the [`HostServices`](capability::HostServices) those capabilities read. `desk` registers [`UserInput`](capability::UserInput), the `promptforge/user-input` capability that the built-in `chat` declares to ask the operator, and provides no services. Building a Harness touches no folder, so only the registration can fail, and only for an id already registered. [Recording runs](record) shows how to bring your own recorder, and [Capabilities](capability) shows how to offer capabilities of your own.
 4. Step 4 asserts that [`Harness::discover`] lists `chat` and `hello`, sorted. The file stem is the name a launch asks for, and it sits next to the built-in `chat`.
 
 # Launch an agent
@@ -70,6 +73,7 @@ Launching feels like [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spaw
 
 ````
 use harness::{display_chain, CatalogBinding, GatewayBinding, HostSnapshot, LaunchRequest, SessionState};
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{Harness, HarnessConfig};
 # use std::error::Error;
@@ -77,6 +81,8 @@ use harness::{display_chain, CatalogBinding, GatewayBinding, HostSnapshot, Launc
 # let desk = std::env::temp_dir().join("desk-launch-an-agent");
 # let agents = desk.join("agents");
 # std::fs::create_dir_all(&agents)?;
+# let mut capabilities = CapabilityRegistry::new();
+# capabilities.register(Arc::new(UserInput::new()))?;
 
 // 1. Add desk's `greet` agent: it answers the line in `line.txt` into `reply.txt`.
 let greet = concat!(
@@ -90,8 +96,8 @@ let greet = concat!(
 );
 std::fs::write(agents.join("greet.md"), greet)?;
 
-// 2. Build one harness over a memory recorder, and share it behind an `Arc`.
-let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new())));
+// 2. Build one harness with desk's capabilities over a memory recorder, and share it behind an `Arc`.
+let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new()));
 
 // 3. Push the stub model server at generation 1, without `/v1`.
 let stub = "http://127.0.0.1:8080";
@@ -115,11 +121,11 @@ async fn ask(harness: &Harness, line: &str) -> Result<String, Box<dyn Error>> {
 assert_eq!(harness.discover(), ["chat", "greet"]);
 assert_eq!(harness.gateway().map(|gateway| gateway.generation), Some(1));
 assert!(format!("{:?}", harness.gateway()).contains("<redacted>"));
-# Ok::<(), std::io::Error>(())
+# Ok::<(), Box<dyn Error>>(())
 ````
 
 1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the Harness puts the `input:` file and looks for the `output:` file.
-2. Step 2 builds one [`Harness`] from a [`HarnessConfig`] and a recorder, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder.
+2. Step 2 builds one [`Harness`] from a [`HarnessConfig`], a recorder, and the capabilities and services that [Before you start](#before-you-start) built, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder, and resolves its declared capabilities against that registry.
 3. Step 3 pushes the stub model server with [`Harness::set_gateway`], as a [`GatewayBinding`]. Leave `/v1` off its `base_url`, because the Harness appends it. Give every new binding a higher `generation` than the last.
 4. Step 4 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array; the Harness takes the model's name from its `"id"` string.
 5. Step 5 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs the live stub, so the example never calls it.
@@ -133,7 +139,7 @@ What a gateway push does depends on its generation:
 
 The Harness checks the name before the gateway. A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. No gateway, or one whose URL does not parse or whose key is empty, fails with [`LaunchError::GatewayUnusable`].
 
-You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch.
+You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch. A capability an agent requires and your registry lacks fails the run the same way, as it prepares.
 
 A missing or empty catalog raises no error: the session stays `Alive` and waits until a catalog with at least one model arrives.
 
@@ -153,6 +159,7 @@ Deltas feel like an [`mpsc`](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.
 
 ````
 use harness::DeltaKind;
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::collections::HashMap;
@@ -162,8 +169,10 @@ use harness::DeltaKind;
 # use std::sync::Arc;
 # use std::task::Poll;
 # fn desk() -> Harness {
+#     let mut capabilities = CapabilityRegistry::new();
+#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -251,7 +260,7 @@ The agent asks the operator a question, and your program must show it and send b
 
 A wait feels like a [`oneshot`](https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html) channel whose sender you hold. Unlike a oneshot, you answer it by token through the session, and it outlives any receiver you watched it on.
 
-An agent can ask in two ways. Its own Lua can call `input.ask()`, which needs only `promptforge/user-input` in its `capabilities:` frontmatter. `capabilities:` lists the tool sets the Harness provides, and `promptforge/user-input` is the set for asking the operator. `chat` declares it and calls `input.ask()` directly, so this tour takes that path.
+An agent can ask in two ways. Its own Lua can call `input.ask()`, which needs only `promptforge/user-input` in its `capabilities:` frontmatter, and [`UserInput`](capability::UserInput) in the registry your program hands [`Harness::new`]. `capabilities:` lists the tool sets the Harness provides, and `promptforge/user-input` is the set for asking the operator. `chat` declares it and calls `input.ask()` directly, so this tour takes that path.
 
 Or the model can decide to ask. Then the agent's `tools:` frontmatter maps an alias, the name the model calls, to a tool's full id, as in `ask: promptforge/user-input/ask`, and [`USER_INPUT_ASK_TOOL`] is that id. The agent still declares `promptforge/user-input` under `capabilities:`, because a tool slot whose capability is not declared refuses the run with `RequirementsUnmet`.
 
@@ -259,13 +268,16 @@ Binding a tool is not the same as offering it: the agent's Lua offers the alias 
 
 ````
 use harness::{WaitError, WaitFrame};
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     let mut capabilities = CapabilityRegistry::new();
+#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -351,13 +363,16 @@ Cancelling a turn feels like aborting a tokio task. Unlike an aborted task, the 
 
 ````
 use harness::{FailureKind, SessionFailure, SessionState};
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitError, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     let mut capabilities = CapabilityRegistry::new();
+#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -435,13 +450,16 @@ A session id feels like a database key. Unlike a row, what it names keeps runnin
 
 ````
 use harness::SessionId;
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     let mut capabilities = CapabilityRegistry::new();
+#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -523,6 +541,7 @@ Keep the id, subscribe first, then replay and re-announce. Next, [The complete p
 Here is the whole `desk` Host, every line visible: your program owns the settings and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
 
 ````
+use harness::capability::{CapabilityRegistry, HostServices, RegistryError, UserInput};
 use harness::record::MemoryRecorder;
 use harness::{
     display_chain, CatalogBinding, DeltaKind, GatewayBinding, Harness, HarnessConfig,
@@ -539,11 +558,15 @@ const STUB: &str = "http://127.0.0.1:8080";
 // A task desk hands to its runtime, such as `tokio::spawn`.
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-// 1. desk owns every setting, and its recorder, and pushes each setting into the harness at generation 1.
-fn build_harness() -> Arc<Harness> {
+// 1. desk owns every setting, its recorder, and its capabilities, and pushes each setting into the harness at generation 1.
+fn build_harness() -> Result<Arc<Harness>, RegistryError> {
+    let mut capabilities = CapabilityRegistry::new();
+    capabilities.register(Arc::new(UserInput::new()))?;
     let harness = Arc::new(Harness::new(
         HarnessConfig { agents_path: "desk/agents".into() },
         Arc::new(MemoryRecorder::new()),
+        capabilities,
+        HostServices::new(),
     ));
     harness.set_host(HostSnapshot {
         selected_model: Some("stub-model".into()),
@@ -558,7 +581,7 @@ fn build_harness() -> Arc<Harness> {
         key: "desk-key".into(),
         generation: 1,
     });
-    harness
+    Ok(harness)
 }
 
 // 2. Print each text piece as it arrives; a receiver that falls behind only loses pieces.
@@ -623,7 +646,7 @@ async fn answer(session: &Session, text: &str) -> Result<(), Box<dyn Error>> {
 }
 
 async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
-    let harness = build_harness();
+    let harness = build_harness()?;
 
     // 6. Launch `chat` by name, and start the tasks before its first turn.
     let request = LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None };
@@ -670,7 +693,7 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
 }
 ````
 
-1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). You might expect the Harness to find its model server and model in the environment or a config file. Instead, it holds only what your program pushes, and it starts with no gateway at all. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a gateway push, or a catalog push whose model list changed, restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
+1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). It registers [`UserInput`](capability::UserInput) because `chat` declares `promptforge/user-input`, and a run whose agent requires a capability the registry lacks is refused. You might expect the Harness to find its model server and model in the environment or a config file. Instead, it holds only what your program pushes, and it starts with no gateway at all. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a gateway push, or a catalog push whose model list changed, restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
 2. Step 2 is `stream`, from [Stream a reply](#stream-a-reply). It owns its own delta receiver and a state watch, prints `Text` pieces, and shrugs off a lag error while the session runs. It ends once the state is `Closed`.
 3. Step 3 is `show_replies`, which prints each `assistant_reply` event. That finished text replaces the pieces `stream` printed under the same reply number.
 4. Step 4 is `report_close`, which holds its own clone of the [`Session`]. `report_close` keeps a handle because [`Harness::close`] removes the session from the Harness while it is still `Closing`.
@@ -745,7 +768,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 [`Harness`] runs every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, or an unreadable agent source. Fix them in the order reported. [Launch an agent](#launch-an-agent) teaches this.
 
-- [`Harness::new`]: takes the config and an `Arc<dyn RunRecorder>`, and touches no filesystem. The Harness writes every run it makes to that recorder, and opens no file at launch. [Recording runs](record) teaches the recorder.
+- [`Harness::new`]: takes the config, an `Arc<dyn RunRecorder>`, a [`CapabilityRegistry`](capability::CapabilityRegistry), and [`HostServices`](capability::HostServices), and touches no filesystem. The Harness writes every run it makes to that recorder, opens no file at launch, and resolves every run's declared capabilities against that registry, plus its own web when the registry holds no `promptforge/web`, handing them those services. [Recording runs](record) teaches the recorder, and [Capabilities](capability) the registry and services.
 - [`Harness::discover`]: the `.md` file stems in `agents_path` plus the built-in `chat`, sorted.
 - `launch`: returns a session already registered and running, with [`LaunchOptions::default()`](LaunchOptions::default), so each run works in a fresh memory store.
 - [`Harness::set_gateway`]: a push with the current generation does nothing, so [`Harness::gateway`] keeps returning the earlier URL and key.
@@ -753,7 +776,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## HarnessConfig
 
-[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
+[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder, capability registry, and services. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
 
 - `agents_path`: the folder whose `.md` files are the launchable agents; launching `name` reads `<agents_path>/<name>.md`.
 
@@ -863,6 +886,7 @@ A [`WaitFrame`] tells you that a session opened a question for the operator, or 
 # Where to go next
 
 - [`cancel`]: stop async work safely, at its next safe point, instead of dropping it mid-step.
+- [`capability`]: install the capabilities your agents declare, and provide the services they read.
 - [`record`]: record every run to a store of your own, and read a session's transcript.
 - [`vfs`]: give a session files of your own instead of the empty store each run starts with.
 

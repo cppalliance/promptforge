@@ -17,6 +17,7 @@ A section is one `##` heading of the prompt with the prose and Lua under it, nam
 Here is the one prompt the first tour needs.
 
 ````
+# use harness::capability::{CapabilityRegistry, HostServices};
 # use harness::record::MemoryRecorder;
 # use harness::{Harness, HarnessConfig};
 # use std::sync::Arc;
@@ -37,7 +38,7 @@ let summarize = concat!(
 std::fs::write(agents.join("summarize.md"), summarize)?;
 
 // 2. desk launches it by name, like any agent in its folder.
-# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), CapabilityRegistry::new(), HostServices::new());
 assert_eq!(harness.discover(), ["chat", "summarize"]);
 # Ok::<(), std::io::Error>(())
 ````
@@ -56,6 +57,7 @@ A handle attaches each *backend*, the thing that holds files, at a path, and tha
 ````
 use harness::vfs::{Origin, VfsRef};
 use harness::{LaunchOptions, LaunchRequest, SessionState};
+# use harness::capability::{CapabilityRegistry, HostServices};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot};
 # use std::error::Error;
@@ -74,7 +76,7 @@ use harness::{LaunchOptions, LaunchRequest, SessionState};
 #     "```\n",
 # );
 # std::fs::write(agents.join("summarize.md"), source)?;
-# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), CapabilityRegistry::new(), HostServices::new());
 # harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 # harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -141,6 +143,7 @@ Each operation passes through its `Access` in order: the policy, then the claims
 use harness::vfs::{Origin, VfsError, VfsRef};
 use promptforge::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
 use std::sync::{Arc, Mutex};
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot};
 # use harness::{LaunchOptions, LaunchRequest, Session, SessionState, WaitFrame};
@@ -161,7 +164,9 @@ use std::sync::{Arc, Mutex};
 #     "```\n",
 # );
 # std::fs::write(agents.join("review.md"), source)?;
-# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
+# let mut capabilities = CapabilityRegistry::new();
+# capabilities.register(Arc::new(UserInput::new()))?;
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 # harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 # harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });

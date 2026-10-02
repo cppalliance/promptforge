@@ -33,6 +33,7 @@ mod wire;
 use std::fmt;
 use std::sync::Arc;
 
+use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 use harness::{Harness, HarnessConfig, LaunchError, LaunchRequest, Session, SessionId};
 use workshop_registry::Registry;
 use workshop_run_log::TursoRecorder;
@@ -51,11 +52,18 @@ const HARNESS_STATE_DIR: &str = "harness";
 /// server's current state already pushed through its public API: the
 /// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
 /// each read through `registry` from the subsystems registered before it.
-/// The composition root registers the returned handle and the forwarder
-/// task ([`register_tasks`]) that keeps the bindings current from the
-/// buses once the server serves. Nothing touches the filesystem here: the
-/// run log opens under the state directory when the first run starts.
+/// Its capability registry holds `promptforge/user-input`, so agents can
+/// ask the operator, and it is given no services; `promptforge/web` is
+/// the Harness's built-in, built from each gateway pushed. The
+/// composition root registers the returned handle and the forwarder task
+/// ([`register_tasks`]) that keeps the bindings current from the buses
+/// once the server serves. Nothing touches the filesystem here: the run
+/// log opens under the state directory when the first run starts.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
+    let mut capabilities = CapabilityRegistry::new();
+    // An empty registry takes any one capability, so the error is
+    // unreachable here.
+    let _ = capabilities.register(Arc::new(UserInput::new()));
     let harness = Arc::new(Harness::new(
         HarnessConfig {
             agents_path: config.agents.path.clone(),
@@ -63,6 +71,8 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
         Arc::new(TursoRecorder::new(
             config.server.state_dir.join(HARNESS_STATE_DIR),
         )),
+        capabilities,
+        HostServices::new(),
     ));
     push_bindings(registry, &harness);
     harness

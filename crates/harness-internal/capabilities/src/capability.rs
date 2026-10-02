@@ -162,11 +162,32 @@ impl RunServices {
     /// ```
     #[must_use]
     pub fn new(vfs: VfsRef, cancel: CancelHandle) -> RunServices {
-        RunServices {
-            vfs,
-            cancel,
-            host: HostServices::new(),
-        }
+        RunServices::with_host(vfs, cancel, HostServices::new())
+    }
+
+    /// Builds the services handed to [`Capability::create`] for one run,
+    /// with `host` as the services the run has.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use harness_capabilities::{HostServices, RunServices, ServiceKey};
+    /// use promptforge::cancel::CancelHandle;
+    /// use promptforge::vfs::VfsRef;
+    ///
+    /// const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
+    ///
+    /// let mut host = HostServices::new();
+    /// host.provide(&GREETING, Arc::from("hello"))?;
+    /// let services = RunServices::with_host(VfsRef::default(), CancelHandle::new(), host);
+    /// assert_eq!(services.get(&GREETING).as_deref(), Some("hello"));
+    /// # Ok::<(), harness_capabilities::ServiceError>(())
+    /// ```
+    #[must_use]
+    pub fn with_host(vfs: VfsRef, cancel: CancelHandle, host: HostServices) -> RunServices {
+        RunServices { vfs, cancel, host }
     }
 
     /// Supplies the run's input broker under [`INPUT_BROKER`], replacing

@@ -9,16 +9,16 @@ todos:
     content: In harness-capabilities, replace the closed Service enum with const ServiceKey and ServiceId (id literal plus provider type) and HostServices; provides checks id and type, so activation treats a wrong-typed provider as missing and reports it by id; the input broker becomes the named service promptforge/input-broker
     status: pending
   - id: host-registry
-    content: Harness::new takes the Host's CapabilityRegistry and HostServices; delete first_party_registry, the registry in GatewayResources, and its supervisor plumbing; publish harness::capability with its hand-written page; update every Harness::new call; Workshop registers UserInput now (web returns in step 6)
+    content: Harness::new takes the Host's CapabilityRegistry and HostServices; first_party_registry stops registering UserInput and keeps only a temporary built-in web until step 5; publish harness::capability with its hand-written page; update every Harness::new call; Workshop registers UserInput
     status: pending
   - id: gateway-search
     content: Copy the Gateway web-search HTTP client into harness-gateway-client as GatewaySearch over GatewayEndpoint and SecretString, keeping every message, deadline, and header unchanged; the internal web-search crate stays live until step 5; GatewayEndpoint errors stop echoing the URL
     status: pending
   - id: harness-web
-    content: Create root crates/harness-web merging web, webfetch, and the search tool; search calls the promptforge/search-provider service and renders typed results; fetch runs on the promptforge/tokio-runtime service with abort-on-drop; delete the three harness-internal web crates; in the same step update root Cargo.toml members and dependencies, run hakari, rewrite the harness inventory test, and add harness-web to PUBLIC_HARNESS with fixtures
+    content: Create root crates/harness-web merging web, webfetch, and the search tool; search calls the promptforge/search-provider service and renders typed results; fetch runs on the promptforge/tokio-runtime service with abort-on-drop; delete the three harness-internal web crates and the Harness's built-in web; in the same step update root Cargo.toml members and dependencies, run hakari, rewrite the harness inventory test, add harness-web to PUBLIC_HARNESS with fixtures, and have Workshop register Web with a Gateway-backed SearchProvider adapter and its tokio runtime handle
     status: pending
   - id: workshop-wiring
-    content: Workshop registers Web beside UserInput, provides a Gateway-backed SearchProvider adapter that follows gateway generations, and provides its tokio runtime handle; update crates/README.md, vibe/archdoc.md, guide chapters 5, 12, and 13 with the regenerated export, and the crate READMEs
+    content: Update crates/README.md, vibe/archdoc.md, guide chapters 5, 12, and 13 with the regenerated export, and the crate READMEs; run the full exit criteria
     status: pending
 isProject: false
 ---
@@ -137,8 +137,9 @@ flowchart LR
   - `harness-runner`: `prepare::Services` (`crates/harness-internal/runner/src/prepare.rs:54-87`) gains `services: HostServices`, the Host's. Preparation clones it into each run's `RunServices` and inserts `Services.input`, when present, under `INPUT_BROKER` (`:331-334`).
   - `harness-sessions`:
     - `Harness::new(config, recorder, capabilities: CapabilityRegistry, services: HostServices)` (today `crates/harness-internal/sessions/src/runtime.rs:141`). The Harness holds both and passes them to every run through `prepare::Services`.
-    - Delete `first_party_registry` (`src/environment.rs:104-131`) and `GatewayResources.registry`, with its supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`) and its test uses (`src/environment-tests.rs:112`, `:117`). Drop the `harness-web` dependency.
-    - In this step Workshop's `harness_for` registers `UserInput` alone, so Workshop prompts that declare `promptforge/user-input` keep working. Workshop has no web capability from this step until the Workshop wiring step, because the Harness no longer builds it and Workshop may not name the internal crate. No test covers web, so nothing fails, and a manual web run in that window is refused.
+    - In the `Harness::new` step, `first_party_registry` (`src/environment.rs:104-131`) stops registering `UserInput`, which the Host now registers, and becomes a temporary built-in web. Each gateway generation's registry is the Host's registry plus the internal `Web`, when the gateway URL and key build it and the Host registered no `promptforge/web`. The built-in `chat` agent requires `promptforge/web` (`agents/chat.md:5-6`), so without this fallback every chat run would be refused until Workshop registers web.
+    - In the `harness-web` step, the fallback goes with the internal crates: `first_party_registry`, `GatewayResources.registry`, its supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`), its test uses (`src/environment-tests.rs:112`, `:117`), and the `harness-web` dependency. From then on the Harness builds no capability.
+    - In the `Harness::new` step Workshop's `harness_for` registers `UserInput` alone, and web still comes from the fallback.
   - Facade `crates/harness`: a new `pub mod capability` with page `src/capability.md`, re-exporting `Capability`, `CapabilityError`, `CapabilityErrorKind`, `CapabilityId`, `CapabilityRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal until change 8.
   - `harness-gateway-client`: a `search` module exporting `GatewaySearch::new(GatewayEndpoint, SecretString)` and `GatewaySearch::search(&GatewaySearchRequest) -> Result<GatewaySearchResponse, GatewaySearchError>`.
     - It POSTs `{api_root}/tools/web_search` with the bearer key under the 30-second deadline (`REQUEST_TIMEOUT`, `crates/harness-internal/web-search/src/web_search.rs:36`, applied at `:136-147`). It bounds and escapes error bodies, and parses the response into its wire types, which mirror the Gateway's request and response.
@@ -327,8 +328,8 @@ Moved tests move with their code and pass in their new crates. Their assertions 
   - Contributing whichever tool has its service. Reason: a research prompt wants both tools or neither. Revisit if a Host needs search without fetch.
   - Defining `TOKIO_RUNTIME` in `harness-capabilities`. Reason: the Harness core would name a tokio type. Revisit when a second capability crate needs the runtime.
 - Assumptions, risks, and notes:
-  - Assumption: the change-4 execution preferences hold. Six steps, the `AGENTS.md` trim being the first, each one tested commit. Each step runs only its touched crates' tests, and the full exit criteria run once on the final step. The workspace, product-rule, and hakari edits sit in the `harness-web` step and the docs in the Workshop step, because a separate final step would leave the `harness-web` and Workshop commits failing `cargo test -p build-xtask`.
-  - Risk: Workshop has no web capability from the `Harness::new` step until the Workshop step. No test covers web, so the gap is silent; a manual web run in that window is refused.
+  - Assumption: the change-4 execution preferences hold. Six steps, the `AGENTS.md` trim being the first, each one tested commit. Each step runs only its touched crates' tests, and the full exit criteria run once on the final step. The workspace, product-rule, and hakari edits and Workshop's web wiring sit in the `harness-web` step, and the docs in the final step, because otherwise the `harness-web` commit would fail `cargo test -p build-xtask` and the built-in `chat` agent would lose web.
+  - **A temporary built-in web bridges the `Harness::new` and `harness-web` steps.** The built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), so a commit where neither the Harness nor Workshop supplies web refuses every chat run (14 Workshop tests). The Harness keeps adding the internal `Web` when the Host registered none, and the `harness-web` step removes that fallback in the same commit where Workshop starts registering web. User's choice over making web optional in `chat.md` for three commits, or merging three steps into one.
   - Risk: splitting tests that cover both halves of search. `forwards_query_and_returns_untrusted_results` checks both the request sent and the untrusted wrapping, so its assertions split between `harness-gateway-client` and `harness-web`, and no assertion may be dropped.
   - Risk: fetch cancellation changes form. Today dropping the performer task drops the fetch future. After this change the spawned task must be aborted on drop, which a test pins.
   - Note: the search output loses fields the Gateway may add later, and `guide/src/language/13-web-fetch-and-search.md:465-471` must stop saying every field is kept.
@@ -415,9 +416,9 @@ Five components, in dependency order:
 
 1. Rule-file trim (step 1). It goes first so no later step reads a stale rule. The trim also cuts the gateway client's "one read loop" rule, which step 4's copied readers would otherwise break, and the cicerone rule, which step 3's new facade module would otherwise trigger.
 2. Host services (steps 2 and 3). It comes next because the `harness-web` capability and Workshop's wiring are written against `ServiceKey`, `HostServices`, the `harness::capability` module, and the new `Harness::new`.
-3. Gateway search client (step 4). It depends only on the trim, so it can be built alongside component 2. It sits after component 2 because nothing there needs it, and before component 5, which does.
-4. `harness-web` crate (step 5). It needs component 2's service types and facade module. It deletes the internal web crates, which is safe only after step 3 removed `first_party_registry`, their only production user.
-5. Workshop web wiring (step 6). It comes last because it needs component 3's `GatewaySearch` and component 4's `Web`, service keys, and `PUBLIC_HARNESS` entry.
+3. Gateway search client (step 4). It depends only on the trim, so it can be built alongside component 2. It sits after component 2 because nothing there needs it, and before component 4, which does.
+4. `harness-web` crate and Workshop web wiring (step 5). It needs component 2's service types and facade module, and component 3's `GatewaySearch`. It deletes the internal web crates and the Harness's temporary built-in web, and in the same commit Workshop registers the root `Web` with its two services, so no commit leaves the built-in `chat` agent without `promptforge/web`.
+5. Docs and exit criteria (step 6). It comes last because it describes the finished wiring and runs the full exit criteria once.
 
 Each step is one commit holding its code and its tests. Each step runs only its touched crates' checks; the full exit criteria in the Testing Plan run once, in step 6.
 
@@ -475,27 +476,27 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-3>
 
-### Step 3: The Host supplies the registry and services
+### Step 3: The Host supplies the registry and services [completed]
 
 - Component: Host services
 - Depends on: step 2.
 - Piece: the Host-supplied registry and services. Built after step 2 (sequential). `Harness::new`, its callers, and the facade module change in one commit, because the new signature breaks every caller until it can name the facade types.
 - `crates/harness-internal/sessions`:
   - `src/runtime.rs:141`: `Harness::new(config, recorder, capabilities: CapabilityRegistry, services: HostServices)`. The Harness holds both and passes them to every run through `prepare::Services`. `src/session/run.rs:91-106` hands the Harness's registry to each run.
-  - `src/environment.rs`: delete `first_party_registry` (`:104-131`) and `GatewayResources.registry`. `GatewayResources::build` (`:155-191`) and `Bindings::set_gateway` (`:267-285`) keep only the binding and the model client.
-  - Remove the supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`) and the test uses at `src/environment-tests.rs:112` and `:117`.
-  - `Cargo.toml:32`: drop the `harness-web` dependency.
+  - `src/environment.rs`: `first_party_registry` (`:104-131`) stops registering `UserInput` and becomes a temporary built-in web. Per gateway generation (`GatewayResources::build`, `:155-191`, called from `Bindings::set_gateway`, `:267-285`), the registry handed to runs is the Host's registry plus the internal `Web`, when the gateway URL and key build it and the Host's registry holds no `promptforge/web`. Step 5 deletes it.
+  - Keep `GatewayResources.registry`, the supervisor plumbing (`src/supervisor.rs:330`, `gateway.registry()`), and the `harness-web` dependency (`Cargo.toml:32`) until step 5. Update `src/environment-tests.rs` (`:112`, `:117`) to the new behavior.
 - `crates/harness-internal/runner/src/prepare.rs`: `Services` (`:54-87`) gains `services: HostServices`. Preparation clones it into each run's `RunServices` before inserting the input broker. Update the runner test helpers that build `Services`.
 - Facade `crates/harness`: `pub mod capability` in `src/lib.rs` with a hand-written page `src/capability.md`, re-exporting `Capability`, `CapabilityError`, `CapabilityErrorKind`, `CapabilityId`, `CapabilityRegistry`, `RegistryError`, `RegistryErrorKind`, `Contribution`, `Tool`, `RunServices`, `HostServices`, `ServiceId`, `ServiceKey`, `ServiceError`, and `UserInput`. `USER_INPUT_ASK_TOOL` stays at the root. `InputBroker` and `INPUT_BROKER` stay internal.
 - Every `Harness::new` call gains the two arguments:
   - `crates/workshop/server/src/agents.rs`: `harness_for` (`:58-69`) registers `UserInput::new()` alone and passes an empty `HostServices`.
   - `crates/harness/tests/suite/gateway.rs`, `crates/harness-internal/sessions/tests/it/session.rs` (`:63`, `:193`), and `session-infer.rs`.
   - The doc examples in `crates/harness/src/lib.md`, `record.md`, `vfs.md`, and `cancel.md`, and the prose there that describes `Harness::new`'s arguments (`lib.md:62`, `:136`, `:748`, `:756`; `record.md:7`, `:104`).
-- Known gap until step 6: Workshop has no web capability, and a manual web run is refused. No test covers web.
+- No web gap: the built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), and the built-in web keeps supplying it until step 5.
 - Tests:
   - New, in `crates/harness-internal/runner/tests/it/`: a fixture capability needing a test-only service key activates when the Host's `HostServices` provides it, and records a gap when the Host does not. This proves the Host's map reaches each run.
   - New, in `crates/harness-internal/sessions/tests/it/session.rs`: a Harness whose registry lacks `UserInput` refuses an agent requiring `promptforge/user-input` as a missing required capability.
-  - The existing `harness-runner`, `harness-sessions`, `crates/harness/tests/suite`, and `workshop-server` suites pass with Host-supplied registries.
+  - New, in `src/environment-tests.rs`: a Host registry without `promptforge/web` gains the built-in web when the gateway builds it, and keeps only the Host's capabilities when the gateway cannot build it.
+  - The existing `harness-runner`, `harness-sessions`, `crates/harness/tests/suite`, and `workshop-server` suites pass with Host-supplied registries, including the Workshop tests that run the built-in `chat` agent.
   - Run `cargo nextest run --locked -p harness-runner -p harness-sessions -p harness --all-features`, `cargo test --locked -p harness-sessions -p harness --all-features --doc`, `cargo nextest run --locked -p workshop-server`, clippy on those crates (`workshop-server` without `--all-features`), `RUSTDOCFLAGS="-D warnings" cargo doc -p harness --no-deps`, and `cargo test -p build-xtask`.
 
 </step-3>
@@ -526,11 +527,11 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-5>
 
-### Step 5: Root harness-web crate replaces the internal web crates
+### Step 5: Root harness-web crate replaces the internal web crates, and Workshop wires it
 
-- Component: harness-web crate
-- Depends on: steps 2 and 3, not step 4.
-- Pieces: the fetch tool, the search tool, the capability, and the workspace and boundary rules. Built jointly in one commit: the new package takes over the name `harness-web` that the internal capability crate holds today (`Cargo.toml:49`), and `cargo test -p build-xtask` reads the real workspace, so the new crate, the deletions, and the rule changes only build and pass together.
+- Component: harness-web crate and Workshop web wiring
+- Depends on: steps 2, 3, and 4.
+- Pieces: the fetch tool, the search tool, the capability, the workspace and boundary rules, the removal of the Harness's built-in web, and Workshop's registration with its search-provider adapter. Built jointly in one commit: the new package takes over the name `harness-web` that the internal capability crate holds today (`Cargo.toml:49`), and `cargo test -p build-xtask` reads the real workspace, so the new crate, the deletions, and the rule changes only build and pass together. The built-in `chat` agent requires `promptforge/web` (`crates/harness-internal/sessions/agents/chat.md:5-6`), so the commit that removes the built-in web must also make Workshop supply it.
 - Crate `crates/harness-web`, library `harness_web`:
   - `Cargo.toml`: `[lints] workspace = true`. Dependencies are `harness`, `promptforge`, `async-trait`, and the third-party crates `webfetch` and `web-search` use today, including `reqwest` with `gzip` and `brotli`, `serde`, and `tokio`. Dev-dependencies are `axum`, `flate2`, `futures-util`, and `tokio`, not `harness-runner`. It never depends on a `crates/harness-internal` crate or on `harness-gateway-client`, and no `crates/harness-internal` crate depends on it. It gets no `AGENTS.md`.
   - `src/lib.rs`: a `//! ## Invariants` block naming the allowed and forbidden dependencies, and re-exports of `FetchConfig`, `FetchConfigBuilder`, and `ConfigError`. Every file stays at or under 500 lines, laid out by the flat-source-directory rule.
@@ -540,6 +541,14 @@ Each step is one commit holding its code and its tests. Each step runs only its 
   - Search tool: the tool half of `web_search.rs` (`:67-135` without the client, `:237-311`, argument parsing at `:316`, and the untrusted output at `:377`) and the argument rules in `web_search-request.rs`. It calls the provider, rejects an empty `url` as `Backend` with today's message, adds the `web_search: ` prefix, and attaches the provider error with `ToolError::with_source`. It renders compact JSON in the Gateway's field order and skip rules (`crates/gateway/web-search/src/service.rs:113-140`), wraps it as untrusted, and sets no deadline of its own.
   - Capability: `Web::new()` and `Web::with_fetch_config(FetchConfig)`. `needs()` returns both service ids. `create` reads both with `get` and contributes no tools when either is missing.
 - Delete `crates/harness-internal/{web,webfetch,web-search}`, including their `clippy.toml` files. This retires `construction_rejects_an_invalid_gateway_root_or_empty_token`, `constructor_rejects_bad_urls_credentials_query_and_empty_token`, and the unit tests in `endpoint.rs` and `secret.rs`, whose coverage step 4 confirmed.
+- Remove the Harness's built-in web from `crates/harness-internal/sessions`: delete `first_party_registry` (`src/environment.rs`) and `GatewayResources.registry`, so `GatewayResources::build` and `Bindings::set_gateway` keep only the binding and the model client; remove the supervisor plumbing (`src/supervisor.rs`, `gateway.registry()`) and the built-in web tests in `src/environment-tests.rs`; drop the `harness-web` dependency from `Cargo.toml`. Runs get the Harness's Host registry directly.
+- Workshop (`crates/workshop/server`):
+  - `Cargo.toml`: add `harness-web` and `harness-gateway-client`.
+  - New `src/agents/search.rs`: a type implementing `harness_web::SearchProvider` over `harness_gateway_client::GatewaySearch`, using qualified `harness_gateway_client::` paths because `workshop_gateway` has its own `GatewayClient`.
+    - It holds the server's `Registry`, never a subsystem handle, and looks up `registry.state::<GatewayHandles>()` on each call, as `push_bindings` does (`src/agents/bindings.rs:32-34`).
+    - From the handles it reads `binding()` (`crates/workshop/gateway/src/handles.rs:34`) and the `GatewaySnapshot`'s `base_url`, `api_key`, and `generation` (`crates/workshop/gateway/src/binding.rs:55-68`). It caches one `GatewaySearch` per generation.
+    - A missing registration, no usable gateway, or an endpoint or key that cannot be built fails with `Transport` and the text `request failed`, so no endpoint or key detail reaches the model. Other failures map the `GatewaySearchError` kind and text and pass the error as the source.
+  - `src/agents.rs` `harness_for`: register `Web::new()` beside `UserInput::new()`. Supply the adapter under `SEARCH_PROVIDER`. Supply `tokio::runtime::Handle::try_current()` under `TOKIO_RUNTIME` only when it returns a handle: it does on the serve path (`serve.rs:255`, `app.rs:286`, `compose.rs:203`) and under the integration tests' runtime, and not in the synchronous `src/app/tests.rs:165-189`, where web is then refused or recorded as a gap.
 - Workspace and boundary rules:
   - Root `Cargo.toml`: remove the three crates from `members`; the `crates/*` glob picks up `crates/harness-web`. In `[workspace.dependencies]` (`:49-51`), point `harness-web` at `crates/harness-web` and remove `harness-webfetch` and `harness-web-search`.
   - Run `cargo hakari generate` and `cargo hakari manage-deps`, so the new crate gets its `workspace-hack` dependency.
@@ -557,23 +566,22 @@ Each step is one commit holding its code and its tests. Each step runs only its 
     - Provider error kinds and messages map with the `web_search: ` prefix, and the `ToolError` keeps the provider error as its source.
   - Capability: the tests in `crates/harness-internal/web/src/lib.rs`, moved and adapted to services. `needs()` names both services, and `create` contributes no tools when either is missing.
   - Each service key's literal parses as a `CapabilityId`.
-  - Run `cargo nextest run --locked -p harness-web -p harness-sessions --all-features`, `cargo test --locked -p harness-web --all-features --doc`, clippy on `harness-web` and `harness-sessions`, `cargo test -p build-xtask`, and `cargo hakari verify`. An `rg` confirms no test names the three deleted packages.
+  - New Workshop tests:
+    - A prompt declaring `promptforge/web` prepares.
+    - A Harness built without the search provider refuses a prompt requiring `promptforge/web`, naming `promptforge/search-provider`.
+    - The adapter maps a mock Gateway's search response and its error status. Build the mock with `spawn_gateway(Router)` (`src/app/test_helpers.rs:73`, re-exported at `tests/common/mod.rs:147`) and a `/v1/tools/web_search` route, as `tests/it/agents.rs:140-142` builds its router.
+  - The existing `harness-sessions` suites and the Workshop suites under `crates/workshop/server/tests/it/`, including the tests that run the built-in `chat` agent, pass.
+  - Run `cargo nextest run --locked -p harness-web -p harness-sessions --all-features`, `cargo test --locked -p harness-web --all-features --doc`, `cargo nextest run --locked -p workshop-server`, clippy on `harness-web` and `harness-sessions` and on `workshop-server` without `--all-features`, `cargo test -p build-xtask`, and `cargo hakari verify`. An `rg` confirms no test names the three deleted packages.
 
 </step-5>
 
 <step-6>
 
-### Step 6: Workshop registers web and supplies its services
+### Step 6: Docs and exit criteria
 
-- Component: Workshop web wiring
-- Depends on: steps 4 and 5.
-- Pieces: the search-provider adapter with its registration, and the docs. Built jointly: the docs describe the wiring the same commit makes, and the exit criteria run once here.
-- `crates/workshop/server/Cargo.toml`: add `harness-web` and `harness-gateway-client`.
-- New `crates/workshop/server/src/agents/search.rs`: a type implementing `harness_web::SearchProvider` over `harness_gateway_client::GatewaySearch`, using qualified `harness_gateway_client::` paths because `workshop_gateway` has its own `GatewayClient`.
-  - It holds the server's `Registry`, never a subsystem handle, and looks up `registry.state::<GatewayHandles>()` on each call, as `push_bindings` does (`src/agents/bindings.rs:32-34`).
-  - From the handles it reads `binding()` (`crates/workshop/gateway/src/handles.rs:34`) and the `GatewaySnapshot`'s `base_url`, `api_key`, and `generation` (`crates/workshop/gateway/src/binding.rs:55-68`). It caches one `GatewaySearch` per generation.
-  - A missing registration, no usable gateway, or an endpoint or key that cannot be built fails with `Transport` and the text `request failed`, so no endpoint or key detail reaches the model. Other failures map the `GatewaySearchError` kind and text and pass the error as the source.
-- `src/agents.rs` `harness_for`: register `Web::new()` beside `UserInput::new()`. Supply the adapter under `SEARCH_PROVIDER`. Supply `tokio::runtime::Handle::try_current()` under `TOKIO_RUNTIME` only when it returns a handle: it does on the serve path (`serve.rs:255`, `app.rs:286`, `compose.rs:203`), and not in the synchronous `src/app/tests.rs:165-189`, where web is then refused or recorded as a gap.
+- Component: Docs and exit criteria
+- Depends on: step 5.
+- Pieces: the docs that describe the finished wiring, and the full exit criteria. Built jointly: the docs describe what step 5 wired, and the exit criteria run once here.
 - Docs:
   - `crates/README.md`: update the `harness-gateway-client` entry (`:17-19`) for the search client, and add a `harness-web` entry.
   - `vibe/archdoc.md:10`: the Host registers every capability and supplies every service, and first-party capabilities are no longer a Harness duty.
@@ -583,11 +591,6 @@ Each step is one commit holding its code and its tests. Each step runs only its 
   - Regenerate `guide/promptforge-language-guide.md` with `cargo run --locked -q -p build-user-guide`.
   - `crates/harness-internal/capabilities/README.md:9` and the public-surface section of `crates/harness-gateway-client/README.md`.
 - Tests:
-  - New Workshop tests:
-    - A prompt declaring `promptforge/web` prepares.
-    - A Harness built without the search provider refuses a prompt requiring `promptforge/web`, naming `promptforge/search-provider`.
-    - The adapter maps a mock Gateway's search response and its error status. Build the mock with `spawn_gateway(Router)` (`src/app/test_helpers.rs:73`, re-exported at `tests/common/mod.rs:147`) and a `/v1/tools/web_search` route, as `tests/it/agents.rs:140-142` builds its router.
-  - The existing suites under `crates/workshop/server/tests/it/` pass.
   - Exit criteria, run once here: every command in the Testing Plan's exit criteria, including `node --test crates/workshop/ui/test/docs-claims.mjs`; `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`; and a manual Workshop agent run of a prompt that declares `promptforge/web` that searches and fetches.
 
 </step-6>

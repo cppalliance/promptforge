@@ -5,7 +5,7 @@ use super::*;
 use std::path::Path;
 use std::sync::Arc;
 
-use harness_capabilities::{CapabilityRegistry, InputBroker, UserInput};
+use harness_capabilities::{CapabilityRegistry, HostServices, InputBroker, UserInput};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use harness_runner::prepare::{Services, prepare_source};
@@ -287,6 +287,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     let recorder = Arc::new(MemoryRecorder::new());
     let services = Services {
         registry: Some(Arc::new(capabilities)),
+        services: HostServices::new(),
         vfs: VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),

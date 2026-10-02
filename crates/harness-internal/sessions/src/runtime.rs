@@ -1,14 +1,15 @@
-//! The Harness handle: its configuration, the Host's run recorder, the
-//! bindings a client pushes through the public API, and the sessions it
-//! serves.
+//! The Harness handle: its configuration, the Host's run recorder,
+//! capability registry, and services, the bindings a client pushes
+//! through the public API, and the sessions it serves.
 //!
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, pushes the gateway binding at startup and on
-//! every replacement (the capability registry and model client are
-//! rebuilt when the generation changes), pushes its chat catalog and Host
-//! snapshot as they change, and launches sessions by discovered agent
-//! name. Sessions outlive client connections: a client that reattaches
-//! looks its session up by id and reads the transcript past its cursor.
+//! every replacement (the capability registry, the Host's plus the
+//! built-in web, and the model client are rebuilt when the generation
+//! changes), pushes its chat catalog and Host snapshot as they change,
+//! and launches sessions by discovered agent name. Sessions outlive
+//! client connections: a client that reattaches looks its session up by
+//! id and reads the transcript past its cursor.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -16,6 +17,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use harness_capabilities::{CapabilityRegistry, HostServices};
 use harness_runner::recorder::RunRecorder;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use promptforge::vfs::VfsRef;
@@ -117,6 +119,11 @@ pub struct Harness {
     bindings: Arc<Bindings>,
     /// The Host's recorder: every run of every session writes to it.
     recorder: Arc<dyn RunRecorder>,
+    /// The Host's installed capabilities: every gateway generation's
+    /// registry, which runs resolve against, starts from them.
+    capabilities: CapabilityRegistry,
+    /// The Host's services: every run's capabilities read them.
+    services: HostServices,
     sessions: Arc<SessionTable>,
 }
 
@@ -126,6 +133,8 @@ impl fmt::Debug for Harness {
             .debug_struct("Harness")
             .field("config", &self.config)
             .field("bindings", &self.bindings)
+            .field("capabilities", &self.capabilities)
+            .field("services", &self.services)
             .field("sessions", &self.sessions.len())
             .finish_non_exhaustive()
     }
@@ -133,16 +142,27 @@ impl fmt::Debug for Harness {
 
 impl Harness {
     /// A Harness over `config` with no gateway bound yet, which records
-    /// every run it makes through `recorder`. Nothing touches the
-    /// filesystem here, and the Harness opens no file at launch either:
-    /// discovery reads the agents directory per request, and the recorder
-    /// is the Host's own.
+    /// every run it makes through `recorder`, resolves every run's
+    /// declared capabilities against `capabilities`, plus the built-in
+    /// `promptforge/web` when `capabilities` holds none and the gateway
+    /// builds it, and hands `services` to the capabilities it activates.
+    /// Nothing touches the filesystem
+    /// here, and the Harness opens no file at launch either: discovery
+    /// reads the agents directory per request, and the recorder is the
+    /// Host's own.
     #[must_use]
-    pub fn new(config: HarnessConfig, recorder: Arc<dyn RunRecorder>) -> Self {
+    pub fn new(
+        config: HarnessConfig,
+        recorder: Arc<dyn RunRecorder>,
+        capabilities: CapabilityRegistry,
+        services: HostServices,
+    ) -> Self {
         Self {
             config,
             bindings: Arc::new(Bindings::new()),
             recorder,
+            capabilities,
+            services,
             sessions: Arc::new(SessionTable::default()),
         }
     }
@@ -158,7 +178,7 @@ impl Harness {
     /// differs from the current one, and every session observes the new
     /// generation.
     pub fn set_gateway(&self, binding: GatewayBinding) {
-        self.bindings.set_gateway(binding);
+        self.bindings.set_gateway(binding, &self.capabilities);
     }
 
     /// The most recently set gateway binding, or `None` before the first
@@ -273,6 +293,7 @@ impl Harness {
             files: SessionFiles::new(vfs, input_text),
             lifecycle: Arc::new(RunLifecycle::new(events, cancellations)),
             recorder: Arc::clone(&self.recorder),
+            services: self.services.clone(),
         });
         self.sessions.insert(Arc::clone(&core));
         let supervisor = Supervisor::new(SupervisorParts {

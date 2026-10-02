@@ -1,8 +1,8 @@
 //! The session run's environment: the bindings a client pushes through
 //! the public API (the gateway, the chat catalog, the Host snapshot), the
 //! resources the Harness builds from one gateway generation (the
-//! capability registry of first-party capabilities and the model client),
-//! and the launch-time resolution of the client's selected model into the
+//! capability registry runs resolve against and the model client), and
+//! the launch-time resolution of the client's selected model into the
 //! run's context.
 //!
 //! Everything here arrives as data. The Harness never resolves a gateway,
@@ -17,11 +17,12 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use harness_capabilities::{CapabilityRegistry, UserInput};
+use harness_capabilities::CapabilityRegistry;
 use harness_gateway_client::{
     CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
 };
 use harness_web::Web;
+use promptforge::capabilities::CapabilityId;
 use promptforge::model::{ModelDescriptor, ModelId};
 use tokio::sync::watch;
 
@@ -101,23 +102,31 @@ impl HostSnapshot {
     }
 }
 
-/// Builds a registry holding the first-party capabilities for one gateway
-/// generation: `promptforge/user-input` always, and `promptforge/web`,
-/// built from the gateway's API root (`root`, the OpenAI-compatible `/v1`
-/// base) and bearer `token`, when those build it. A web failure is logged
-/// and costs only web, so activation still finds user input and a prompt
-/// that needs only user input still prepares. A session launch also needs
-/// the model client, which [`gateway_client`] builds from the same root
-/// and token. The registry is rebuilt when the gateway generation changes,
-/// so a replacement gateway's root and key reach the contributed tools.
+/// Builds the registry runs launched under one gateway generation resolve
+/// against: the Host's `host` registry, plus the built-in
+/// `promptforge/web` when the Host registered none, built from the
+/// gateway's API root (`root`, the OpenAI-compatible `/v1` base) and
+/// bearer `token` when those build it. A web failure is logged and costs
+/// only web, so a prompt that needs only the Host's capabilities still
+/// prepares. A session launch also needs the model client, which
+/// [`gateway_client`] builds from the same root and token. The registry is
+/// rebuilt when the gateway generation changes, so a replacement gateway's
+/// root and key reach the contributed tools.
 #[must_use]
-pub fn first_party_registry(root: &str, token: &str) -> CapabilityRegistry {
-    let mut registry = CapabilityRegistry::new();
-    // The ids are distinct literals, so neither registration can collide;
-    // the registry's error is unreachable on this path.
-    let _ = registry.register(Arc::new(UserInput::new()));
+pub fn first_party_registry(
+    host: &CapabilityRegistry,
+    root: &str,
+    token: &str,
+) -> CapabilityRegistry {
+    let mut registry = host.clone();
+    let hosted = CapabilityId::parse("promptforge/web").is_ok_and(|id| host.get(&id).is_some());
+    if hosted {
+        return registry;
+    }
     match Web::new(root, token) {
         Ok(web) => {
+            // The Host registered no `promptforge/web`, and no other id
+            // normalizes to it, so the registration cannot collide.
             let _ = registry.register(Arc::new(web));
         }
         Err(error) => {
@@ -153,8 +162,9 @@ pub fn gateway_client(binding: &GatewayBinding) -> Option<GatewayClient> {
 }
 
 /// What the Harness builds from one gateway generation and shares across
-/// every run launched under it: the registry of first-party capabilities
-/// and the model client. Rebuilt whole when the generation changes.
+/// every run launched under it: the capability registry runs resolve
+/// against and the model client. Rebuilt whole when the generation
+/// changes.
 #[derive(Clone)]
 pub struct GatewayResources {
     binding: GatewayBinding,
@@ -174,14 +184,18 @@ impl fmt::Debug for GatewayResources {
 }
 
 impl GatewayResources {
-    /// Builds the resources for `binding`. The registry always holds the
-    /// capabilities that need no gateway; a binding whose root or key
-    /// cannot build web leaves web out of it, and one that cannot build a
-    /// client leaves the client `None`, so a launch under it is refused
-    /// with the reason.
+    /// Builds the resources for `binding` over the Host's `host` registry.
+    /// The registry always holds the Host's capabilities; a binding whose
+    /// root or key cannot build web leaves the built-in web out of it, and
+    /// one that cannot build a client leaves the client `None`, so a launch
+    /// under it is refused with the reason.
     #[must_use]
-    pub fn build(binding: GatewayBinding) -> Self {
-        let registry = Arc::new(first_party_registry(&binding.api_root(), &binding.key));
+    pub fn build(binding: GatewayBinding, host: &CapabilityRegistry) -> Self {
+        let registry = Arc::new(first_party_registry(
+            host,
+            &binding.api_root(),
+            &binding.key,
+        ));
         let client = gateway_client(&binding);
         Self {
             binding,
@@ -202,7 +216,7 @@ impl GatewayResources {
         self.binding.generation
     }
 
-    /// The registry of first-party capabilities this binding could build.
+    /// The registry runs launched under this generation resolve against.
     #[must_use]
     pub fn registry(&self) -> &Arc<CapabilityRegistry> {
         &self.registry
@@ -260,11 +274,12 @@ impl Bindings {
         }
     }
 
-    /// Replaces the gateway binding. The registry and client are rebuilt
-    /// when `binding.generation` differs from the current one; returns
-    /// whether they were. A repeated generation is a no-op, since the
-    /// generation is the client's word that the gateway changed.
-    pub fn set_gateway(&self, binding: GatewayBinding) -> bool {
+    /// Replaces the gateway binding. The registry, over the Host's `host`
+    /// registry, and the client are rebuilt when `binding.generation`
+    /// differs from the current one; returns whether they were. A repeated
+    /// generation is a no-op, since the generation is the client's word
+    /// that the gateway changed.
+    pub fn set_gateway(&self, binding: GatewayBinding, host: &CapabilityRegistry) -> bool {
         let generation = binding.generation;
         // The write lock is held across the check, the build, and the
         // store, and the watch is sent under it too: two concurrent pushes
@@ -280,7 +295,7 @@ impl Bindings {
         {
             return false;
         }
-        *current = Some(Arc::new(GatewayResources::build(binding)));
+        *current = Some(Arc::new(GatewayResources::build(binding, host)));
         self.gateway_generation.send_replace(Some(generation));
         true
     }

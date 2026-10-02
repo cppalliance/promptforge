@@ -8,9 +8,9 @@
 //! the ceremony the Engine's `Environment` expects of the Harness:
 //! parse; put the prompt's declared `input:` file in place in the store
 //! (`files::stage_input`); hand the run's whole filesystem, real
-//! directories and the declared store, to the capabilities'
-//! services and to the context as given; activate the prompt's declared
-//! capabilities against the caller's registry, which assembles the
+//! directories and the declared store, to the capabilities' services
+//! beside the Host's, and to the context as given; activate the prompt's
+//! declared capabilities against the caller's registry, which assembles the
 //! catalog, the preludes, and the implementation table; install the
 //! catalog and the preludes and prepare the context; merge activation's
 //! report into prepare's and refuse an
@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use harness_capabilities::{CapabilityRegistry, InputBroker, RunServices, activate};
+use harness_capabilities::{CapabilityRegistry, HostServices, InputBroker, RunServices, activate};
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::ModelDescriptor;
@@ -48,14 +48,18 @@ use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutc
 use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
-/// installed capabilities, the real directories, the run's cancel flag, the
-/// recorder, the chat performer and the optional input broker that reach
-/// beyond the runner, and the session's identity for the run's metadata.
+/// installed capabilities and the Host's services, the real directories,
+/// the run's cancel flag, the recorder, the chat performer and the
+/// optional input broker that reach beyond the runner, and the session's
+/// identity for the run's metadata.
 pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
     /// against; `None` is a Harness with no capabilities, where every
     /// required declaration is reported missing.
     pub registry: Option<Arc<CapabilityRegistry>>,
+    /// The Host's services: the run's capabilities read them, and the
+    /// input broker, when present, replaces any provider under its id.
+    pub services: HostServices,
     /// The run's whole filesystem: the real directories and the declared store,
     /// passed straight to the context's VFS and handed to the capabilities
     /// as the run's services.
@@ -91,6 +95,7 @@ impl fmt::Debug for Services {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Services")
             .field("registry", &self.registry)
+            .field("services", &self.services)
             .field("session_id", &self.session_id)
             .field("agent", &self.agent)
             .field("model", &self.model)
@@ -244,6 +249,7 @@ pub async fn prepare_source(
 ) -> Result<Prepared, PrepareError> {
     let Services {
         registry,
+        services: host,
         vfs,
         input_text,
         cancel,
@@ -321,14 +327,15 @@ pub async fn prepare_source(
     }
     // The activate-prepare-refuse ceremony: the run's whole filesystem,
     // the real directories and the declared store, is handed to the
-    // capabilities' services and to the context as given, so the
-    // capabilities and the run share one filesystem; the activated
-    // catalog is what prepare fills slots against, its preludes go to
-    // every section VM, and the implementations stay here for the tool
-    // performer.
+    // capabilities' services beside the Host's and to the context as
+    // given, so the capabilities and the run share one filesystem; the
+    // activated catalog is what prepare fills slots against, its preludes
+    // go to every section VM, and the implementations stay here for the
+    // tool performer.
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
-    let mut run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
+    let mut run_services =
+        RunServices::with_host(ctx.vfs_handle().clone(), ctx.cancel_handle(), host);
     if let Some(broker) = input {
         run_services.insert_input_broker(broker);
     }

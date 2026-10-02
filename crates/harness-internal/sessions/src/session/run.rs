@@ -90,6 +90,7 @@ pub(crate) async fn run_once(
     let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);
     let services = Services {
         registry: Some(registry),
+        services: core.services.clone(),
         vfs: vfs.clone(),
         input_text: core.files.input_text(),
         cancel: cancel.clone(),

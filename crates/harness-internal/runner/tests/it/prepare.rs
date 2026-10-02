@@ -7,16 +7,17 @@
 //! `ToolCall` effect's id in the activated table. The Host's optional
 //! input broker - handed to every activated capability and behind the
 //! `promptforge/user-input` capability - sits in the `input` child
-//! module, a capability's prelude reaching the prepared run sits in
-//! the `prelude` child module, and the prompt's declared input and output
-//! files sit in the `files` child module.
+//! module, the Host's services reaching activation sit in the
+//! `host_services` child module, a capability's prelude reaching the
+//! prepared run sits in the `prelude` child module, and the prompt's
+//! declared input and output files sit in the `files` child module.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use harness_capabilities::{
-    Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, RunServices, Tool,
-    ToolTable,
+    Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
+    RunServices, Tool, ToolTable,
 };
 use harness_runner::display_chain;
 use harness_runner::effect_loop::drive_run;
@@ -32,6 +33,8 @@ use crate::support::Unused;
 
 #[path = "prepare-files.rs"]
 mod files;
+#[path = "prepare-host-services.rs"]
+mod host_services;
 #[path = "prepare-input.rs"]
 mod input;
 #[path = "prepare-prelude.rs"]
@@ -89,11 +92,12 @@ fn assert_events_are_the_recorded_ones(recorder: &MemoryRecorder, run_id: RunId,
     assert_eq!(stored, returned, "the error carries what was recorded");
 }
 
-/// The preparation services over `recorder` and `registry`, with the
-/// performers no test here reaches.
+/// The preparation services over `recorder` and `registry`, with no Host
+/// services and the performers no test here reaches.
 fn services(recorder: &Arc<MemoryRecorder>, registry: Option<Arc<CapabilityRegistry>>) -> Services {
     Services {
         registry,
+        services: HostServices::new(),
         vfs: promptforge::vfs::VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),

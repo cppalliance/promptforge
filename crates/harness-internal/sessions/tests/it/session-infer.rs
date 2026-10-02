@@ -101,6 +101,8 @@ fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness
             agents_path: agents,
         },
         Arc::new(MemoryRecorder::new()),
+        user_input_registry(),
+        HostServices::new(),
     );
     harness.set_gateway(GatewayBinding {
         base_url: base_url.to_owned(),

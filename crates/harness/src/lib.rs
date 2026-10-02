@@ -33,6 +33,26 @@ pub mod cancel {
     pub use harness_runner::cancel::wait_cancelled;
 }
 
+pub mod capability {
+    #![doc = include_str!("capability.md")]
+
+    pub use harness_capabilities::Capability;
+    pub use harness_capabilities::CapabilityError;
+    pub use harness_capabilities::CapabilityErrorKind;
+    pub use harness_capabilities::CapabilityRegistry;
+    pub use harness_capabilities::Contribution;
+    pub use harness_capabilities::HostServices;
+    pub use harness_capabilities::RegistryError;
+    pub use harness_capabilities::RegistryErrorKind;
+    pub use harness_capabilities::RunServices;
+    pub use harness_capabilities::ServiceError;
+    pub use harness_capabilities::ServiceId;
+    pub use harness_capabilities::ServiceKey;
+    pub use harness_capabilities::Tool;
+    pub use harness_capabilities::UserInput;
+    pub use promptforge::capabilities::CapabilityId;
+}
+
 pub mod record {
     #![doc = include_str!("record.md")]
 

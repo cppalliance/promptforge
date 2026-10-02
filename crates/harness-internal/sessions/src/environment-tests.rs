@@ -1,10 +1,14 @@
 //! Tests for gateway binding changes rebuilding the environment's registry
-//! and client, and for the first-party registry holding user input on
-//! every gateway.
+//! and client, and for each generation's registry: the Host's
+//! capabilities, plus the built-in web when the Host registered none and
+//! the gateway can build it.
 
 use std::path::Path;
 
-use harness_capabilities::{CapabilityId, InputBroker, InputError};
+use harness_capabilities::{
+    Capability, CapabilityError, CapabilityId, Contribution, HostServices, InputBroker, InputError,
+    RunServices, UserInput,
+};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use harness_runner::prepare::{Services, prepare_source};
@@ -23,10 +27,22 @@ fn binding(generation: u64) -> GatewayBinding {
     }
 }
 
+/// A Host registry holding only `promptforge/user-input`.
+fn user_input_host() -> CapabilityRegistry {
+    let mut host = CapabilityRegistry::new();
+    host.register(Arc::new(UserInput::new()))
+        .expect("an empty registry takes user input");
+    host
+}
+
 #[test]
 fn a_generation_change_rebuilds_the_registry_and_client() {
+    let host = CapabilityRegistry::new();
     let bindings = Bindings::new();
-    assert!(bindings.set_gateway(binding(1)), "the first push builds");
+    assert!(
+        bindings.set_gateway(binding(1), &host),
+        "the first push builds"
+    );
     let first = bindings.gateway().expect("resources exist after a push");
     assert_eq!(first.generation(), 1);
     assert!(
@@ -39,7 +55,7 @@ fn a_generation_change_rebuilds_the_registry_and_client() {
     );
 
     assert!(
-        bindings.set_gateway(binding(2)),
+        bindings.set_gateway(binding(2), &host),
         "a new generation rebuilds"
     );
     let second = bindings.gateway().expect("resources exist after a rebuild");
@@ -58,14 +74,18 @@ fn a_generation_change_rebuilds_the_registry_and_client() {
 
 #[test]
 fn a_repeated_generation_keeps_the_built_resources() {
+    let host = CapabilityRegistry::new();
     let bindings = Bindings::new();
-    assert!(bindings.set_gateway(binding(3)));
+    assert!(bindings.set_gateway(binding(3), &host));
     let built = bindings.gateway().expect("resources exist");
     assert!(
-        !bindings.set_gateway(GatewayBinding {
-            base_url: "http://127.0.0.1:9999".to_owned(),
-            ..binding(3)
-        }),
+        !bindings.set_gateway(
+            GatewayBinding {
+                base_url: "http://127.0.0.1:9999".to_owned(),
+                ..binding(3)
+            },
+            &host,
+        ),
         "the same generation is the client's word that nothing changed"
     );
     let kept = bindings.gateway().expect("resources still exist");
@@ -93,12 +113,12 @@ fn web_id() -> CapabilityId {
 }
 
 #[test]
-fn an_unusable_binding_keeps_a_registry_but_builds_no_client() {
-    let resources = GatewayResources::build(unusable_binding());
+fn an_unusable_binding_keeps_the_hosts_registry_but_builds_no_client() {
+    let resources = GatewayResources::build(unusable_binding(), &user_input_host());
     let registry = resources.registry();
     assert!(
         registry.get(&user_input_id()).is_some(),
-        "user input needs no gateway"
+        "the Host's user input needs no gateway"
     );
     assert!(
         registry.get(&web_id()).is_none(),
@@ -108,22 +128,84 @@ fn an_unusable_binding_keeps_a_registry_but_builds_no_client() {
 }
 
 #[test]
-fn the_registry_holds_user_input_whether_or_not_the_gateway_can_build_web() {
-    let usable = first_party_registry("http://127.0.0.1:8000/v1", "key");
-    assert!(usable.get(&user_input_id()).is_some());
-    assert!(usable.get(&web_id()).is_some());
+fn a_host_registry_without_web_gains_the_built_in_web_only_when_the_gateway_builds_it() {
+    let host = user_input_host();
+    let usable = first_party_registry(&host, "http://127.0.0.1:8000/v1", "key");
+    assert!(
+        usable.get(&user_input_id()).is_some(),
+        "the Host's capabilities stay"
+    );
+    assert!(
+        usable.get(&web_id()).is_some(),
+        "a usable gateway builds the built-in web"
+    );
+    assert!(
+        host.get(&web_id()).is_none(),
+        "the Host's own registry is left as it was"
+    );
 
     for (root, token) in [("not a url", "key"), ("http://127.0.0.1:8000/v1", "")] {
-        let registry = first_party_registry(root, token);
+        let registry = first_party_registry(&host, root, token);
         assert!(
             registry.get(&user_input_id()).is_some(),
-            "user input is registered for root {root:?} and token {token:?}"
+            "only the Host's capabilities for root {root:?} and token {token:?}"
         );
         assert!(
             registry.get(&web_id()).is_none(),
             "web is not registered for root {root:?} and token {token:?}"
         );
     }
+}
+
+#[test]
+fn the_harness_adds_no_user_input_of_its_own() {
+    let registry = first_party_registry(
+        &CapabilityRegistry::new(),
+        "http://127.0.0.1:8000/v1",
+        "key",
+    );
+    assert!(
+        registry.get(&user_input_id()).is_none(),
+        "user input reaches a run only from the Host's registry"
+    );
+    assert!(registry.get(&web_id()).is_some());
+}
+
+/// A Host's own `promptforge/web`, contributing nothing.
+struct HostWeb {
+    id: CapabilityId,
+}
+
+impl Capability for HostWeb {
+    fn id(&self) -> &CapabilityId {
+        &self.id
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Capability trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "The Host's own web."
+    }
+
+    fn create(&self, _services: &RunServices) -> Result<Contribution, CapabilityError> {
+        Ok(Contribution::default())
+    }
+}
+
+#[test]
+fn a_host_that_registers_web_keeps_its_own_over_the_built_in() {
+    let mut host = CapabilityRegistry::new();
+    host.register(Arc::new(HostWeb { id: web_id() }))
+        .expect("an empty registry takes the Host's web");
+    let registry = first_party_registry(&host, "http://127.0.0.1:8000/v1", "key");
+    let web = registry.get(&web_id()).expect("web stays registered");
+    assert_eq!(
+        web.description(),
+        "The Host's own web.",
+        "runs get the Host's web, not the built-in one"
+    );
 }
 
 /// A prompt that needs only user input and returns the operator's answer.
@@ -158,11 +240,12 @@ impl ChatPerformer for NoChat {
 }
 
 #[tokio::test]
-async fn a_prompt_that_needs_only_user_input_prepares_and_runs_on_an_unusable_gateway() {
-    let resources = GatewayResources::build(unusable_binding());
+async fn a_prompt_that_needs_only_the_hosts_user_input_runs_on_an_unusable_gateway() {
+    let resources = GatewayResources::build(unusable_binding(), &user_input_host());
     let recorder = Arc::new(MemoryRecorder::new());
     let services = Services {
         registry: Some(Arc::clone(resources.registry())),
+        services: HostServices::new(),
         vfs: VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),

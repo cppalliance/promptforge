@@ -15,13 +15,16 @@ A cancel handle feels like a shared [`Arc<AtomicBool>`](std::sync::atomic::Atomi
 ````
 use harness::cancel::{self, CancelHandle};
 use harness::Session;
+# use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     let mut capabilities = CapabilityRegistry::new();
+#     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });

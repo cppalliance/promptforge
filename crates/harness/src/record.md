@@ -4,7 +4,7 @@ You need this when your program keeps a history of runs, or when a client reconn
 
 # Where this fits
 
-[The crate overview](crate) shows how to launch a session, answer its questions, and watch its events. Every run the Harness makes is also written to a *recorder*, an object your program passes to [`Harness::new`](crate::Harness::new) beside the config. The Harness only writes to it. It holds no database and no storage path, and it never reads a run back. The recorder is the Host's, so the Host decides where a history lives and how long it stays.
+[The crate overview](crate) shows how to launch a session, answer its questions, and watch its events. Every run the Harness makes is also written to a *recorder*, an object your program passes to [`Harness::new`](crate::Harness::new) beside the config, the capability registry, and the services. The Harness only writes to it. It holds no database and no storage path, and it never reads a run back. The recorder is the Host's, so the Host decides where a history lives and how long it stays.
 
 The Harness keeps one thing for itself: each session's *transcript*, the events the session has sent, in memory. This page shows how to write a recorder, how to use the one the crate ships for tests, and how to read a transcript.
 
@@ -15,6 +15,7 @@ The Harness keeps one thing for itself: each session's *transcript*, the events 
 Passing a recorder feels like handing a logger a `Write`: the Harness calls it for each record, and you decide where the bytes go. Unlike a plain writer, each call returns a future that the Harness awaits before it goes on, and the recorder issues the id of each run.
 
 ````
+use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::{
     Record, RecordKind, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
@@ -64,10 +65,11 @@ impl RunRecorder for DeskRecorder {
     }
 }
 
-// 5. Hand the recorder to the Harness beside its config, and keep a handle of your own.
+// 5. Hand the recorder to the Harness after its config, and keep a handle of your own.
 let recorder = Arc::new(DeskRecorder::default());
 let shared: Arc<dyn RunRecorder> = recorder.clone();
-let harness = Harness::new(HarnessConfig { agents_path: "desk/agents".into() }, shared);
+let config = HarnessConfig { agents_path: "desk/agents".into() };
+let harness = Harness::new(config, shared, CapabilityRegistry::new(), HostServices::new());
 assert_eq!(harness.discover(), ["chat"]);
 
 // 6. Call the recorder the way the Harness does: begin, append, end.
@@ -101,7 +103,7 @@ assert_eq!(
 2. Step 2 implements `begin_run`. It receives a [`RunMeta`], what the Harness knows when a run starts, and returns the [`RunId`] the run will carry in every later call. The recorder picks the number, so a database can hand out its own row ids.
 3. Step 3 implements `append`, which receives one [`Record`] for every effect the Engine issues, every answer the Harness gives it, and every event it reports. `desk` keeps only the kind. A real store would keep the `payload`, which is JSON.
 4. Step 4 implements `end_run`, which receives how the run ended as a [`RunOutcome`].
-5. Step 5 builds the Harness with `Arc<dyn RunRecorder>` as its second argument and keeps a typed handle to read the store back. [`Harness::new`](crate::Harness::new) touches no file, and neither does a launch, because the recorder is yours.
+5. Step 5 builds the Harness with `Arc<dyn RunRecorder>` as its second argument, between the config and the capability registry and services, here both empty, and keeps a typed handle to read the store back. [`Harness::new`](crate::Harness::new) touches no file, and neither does a launch, because the recorder is yours.
 6. Step 6 calls the recorder by hand in the order the Harness does, and asserts the three lines. The hand-written calls stand in for a launched run, which needs a live model.
 
 The Harness awaits each call before it goes on, so the order you see is the order the run took:
@@ -123,6 +125,7 @@ A test, or a Host that needs no durable record, can use the [`MemoryRecorder`] t
 A `MemoryRecorder` feels like a `Vec` behind a lock that you read back after the work is done. Unlike a bare vector, it issues the run ids, and it refuses a write that breaks the call order, so a test notices a caller that does.
 
 ````
+use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::{MemoryRecorder, RunId, RunMeta, RunOutcome, RunRecorder};
 use harness::{Harness, HarnessConfig};
 use std::error::Error;
@@ -133,7 +136,8 @@ use std::sync::Arc;
 // 1. Give the Harness one handle to a memory recorder, and keep another to read it back.
 let recorder = Arc::new(MemoryRecorder::new());
 let shared: Arc<dyn RunRecorder> = recorder.clone();
-let harness = Harness::new(HarnessConfig { agents_path: "desk/agents".into() }, shared);
+let config = HarnessConfig { agents_path: "desk/agents".into() };
+let harness = Harness::new(config, shared, CapabilityRegistry::new(), HostServices::new());
 
 // 2. Summarize runs by the ids a session reports through `Session::run_ids`.
 fn summary(recorder: &MemoryRecorder, runs: &[RunId]) -> Vec<String> {
@@ -193,6 +197,7 @@ Keep a typed handle, read runs back by their ids, and treat a refused write as a
 A transcript feels like a log file you can seek in. Unlike a file, it lives in the session's memory, so reading it cannot fail and costs no disk.
 
 ````
+use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig, SessionId};
 use std::error::Error;
@@ -220,7 +225,8 @@ async fn catch_up(
 }
 
 // 5. A Harness has no session for an id it never issued.
-let harness = Harness::new(HarnessConfig { agents_path: "desk/agents".into() }, Arc::new(MemoryRecorder::new()));
+let config = HarnessConfig { agents_path: "desk/agents".into() };
+let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), CapabilityRegistry::new(), HostServices::new());
 assert!(harness.session(&SessionId::new("never-issued")).is_none());
 ````
 

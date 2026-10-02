@@ -6,17 +6,18 @@
 //! relaunches the program as a second run whose transcript indices
 //! continue; and a catalog whose models changed retires the run. The close
 //! path - draining outstanding effects and reporting the interrupt as one
-//! `Interrupted` failure - sits in the `close` child module, the prompt's
-//! declared input and output files in the `files` child module, and the
-//! recorder's own failures and the transcript of a failed run in the
-//! `record` child module.
+//! `Interrupted` failure - sits in the `close` child module, the
+//! capabilities runs resolve against in the `capabilities` child module,
+//! the prompt's declared input and output files in the `files` child
+//! module, and the recorder's own failures and the transcript of a failed
+//! run in the `record` child module.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use harness_capabilities::USER_INPUT_ASK_TOOL;
+use harness_capabilities::{CapabilityRegistry, HostServices, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunOutcome, RunRecorder};
 use harness_sessions::environment::{CatalogBinding, GatewayBinding};
 use harness_sessions::input::{WaitError, WaitFrame};
@@ -25,6 +26,9 @@ use harness_sessions::runtime::{Harness, HarnessConfig, LaunchError};
 use harness_sessions::session::Session;
 use harness_sessions::transition::SessionState;
 use tokio::sync::broadcast;
+
+#[path = "session-capabilities.rs"]
+mod capabilities;
 
 #[path = "session-close.rs"]
 mod close;
@@ -53,10 +57,21 @@ fn idless_chat_model() -> serde_json::Value {
     serde_json::json!({ "kind": "chat" })
 }
 
+/// A registry holding `promptforge/user-input`, which `asks.md` declares.
+fn user_input_registry() -> CapabilityRegistry {
+    let mut registry = CapabilityRegistry::new();
+    registry.register(Arc::new(UserInput::new())).unwrap();
+    registry
+}
+
 /// A Harness over a fresh agents directory holding `asks.md`, recording
-/// through `recorder`, with a usable (never contacted) gateway and no
-/// catalog bound yet.
-fn unbound_harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
+/// through `recorder` and resolving capabilities against `capabilities`,
+/// with a usable (never contacted) gateway and no catalog bound yet.
+fn unbound_harness_over(
+    dir: &Path,
+    recorder: Arc<dyn RunRecorder>,
+    capabilities: CapabilityRegistry,
+) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join("asks.md"), ASKS).unwrap();
@@ -65,6 +80,8 @@ fn unbound_harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
             agents_path: agents,
         },
         recorder,
+        capabilities,
+        HostServices::new(),
     );
     harness.set_gateway(GatewayBinding {
         base_url: "http://127.0.0.1:9".to_owned(),
@@ -74,14 +91,15 @@ fn unbound_harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
     harness
 }
 
-/// [`unbound_harness_over`] a fresh [`MemoryRecorder`].
+/// [`unbound_harness_over`] a fresh [`MemoryRecorder`] and user input.
 fn unbound_harness(dir: &Path) -> Harness {
-    unbound_harness_over(dir, Arc::new(MemoryRecorder::new()))
+    unbound_harness_over(dir, Arc::new(MemoryRecorder::new()), user_input_registry())
 }
 
-/// [`unbound_harness_over`] with a usable catalog bound at generation 1.
+/// [`unbound_harness_over`] user input, with a usable catalog bound at
+/// generation 1.
 fn harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
-    let harness = unbound_harness_over(dir, recorder);
+    let harness = unbound_harness_over(dir, recorder, user_input_registry());
     harness.set_catalog(CatalogBinding {
         generation: 1,
         models: vec![idless_chat_model()],
@@ -190,7 +208,12 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
         .expect_err("a path-shaped name is not a discovered agent");
     assert!(matches!(error, LaunchError::UnknownAgent { .. }), "{error}");
 
-    let unbound = Harness::new(harness.config().clone(), Arc::new(MemoryRecorder::new()));
+    let unbound = Harness::new(
+        harness.config().clone(),
+        Arc::new(MemoryRecorder::new()),
+        user_input_registry(),
+        HostServices::new(),
+    );
     let error = unbound
         .launch(LaunchRequest {
             agent: "asks".to_owned(),
