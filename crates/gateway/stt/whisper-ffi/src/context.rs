@@ -149,7 +149,8 @@ impl WhisperState {
     /// # Errors
     /// Returns [`WhisperError::CountOverflow`] when the sample count exceeds
     /// the C integer range, or [`WhisperError::Inference`] when whisper rejects
-    /// the pass.
+    /// the pass or ends it because the
+    /// [abort flag](FullParams::set_abort_flag) was set.
     pub fn full(&mut self, params: &FullParams, samples: &[f32]) -> Result<(), WhisperError> {
         let count = c_int::try_from(samples.len())
             .map_err(|_| WhisperError::CountOverflow { value: "sample" })?;
@@ -159,8 +160,9 @@ impl WhisperState {
         let mut native = unsafe { (self.context.library.functions.full_default_params)(strategy) };
         params.apply(&mut native);
         // SAFETY: context and state are live and paired, native's borrowed
-        // string pointers remain owned by params through this call, and
-        // samples contains count readable f32 values.
+        // string pointers and its abort flag remain owned by params, which
+        // this call borrows throughout, and samples contains count readable
+        // f32 values.
         let code = unsafe {
             (self.context.library.functions.full_with_state)(
                 self.context.pointer.as_ptr(),

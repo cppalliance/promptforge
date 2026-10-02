@@ -926,7 +926,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - CI's STT gate, `RUSTFLAGS="-D warnings" cargo rustc --locked -p <crate> --lib -- -F unsafe-code`, passes for `gateway-stt-engine` and `gateway-stt`.
   - CI's Miri jobs run the new `miri_` tests. Their pinned nightly is not installed on this host.
 
-### Step 17: Abort running whisper decodes when admission shuts down
+### Step 17: Abort running whisper decodes when admission shuts down [completed]
 
 - In `crates/gateway/stt/whisper-ffi/src/raw.rs`, a new `AbortCallback`, `Option<extern "C" fn(*mut c_void) -> bool>`, is `ggml_abort_callback` from the pinned ggml.h, and `FullParams.abort_callback` takes that type in place of `*mut c_void`. A nullable function pointer is pointer-sized, so `pinned_b4938_parameter_layout_matches_the_64_bit_c_abi` still holds at 304 bytes.
 - In `crates/gateway/stt/whisper-ffi/src/params.rs`:

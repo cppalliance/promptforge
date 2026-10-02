@@ -256,10 +256,11 @@ impl Gateway {
     /// body that ignored its cancellation token is abandoned to the runtime
     /// teardown instead of pinning the exit. Last, within the same
     /// deadline, the speech service retires: admission closes, which ends
-    /// Realtime sessions, admitted speech work drains, and the engine's
-    /// workers are joined, so a native decoder frees its context before
-    /// the process exits. A retirement still draining at the deadline is
-    /// abandoned the same way.
+    /// Realtime sessions and aborts running decodes after their current
+    /// encoder pass or decoder step, admitted speech work drains, and the
+    /// engine's workers are joined, so a native decoder frees its context
+    /// before the process exits. A retirement still draining at the
+    /// deadline is abandoned the same way.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
