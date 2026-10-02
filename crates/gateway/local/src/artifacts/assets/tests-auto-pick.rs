@@ -170,7 +170,7 @@ fn auto_takes_the_linux_cuda_whisper_build_for_any_gpu_above_its_floor() {
 #[test]
 fn auto_takes_the_linux_cuda_whisper_build_only_with_glibcxx_3_4_30() {
     let probe = nvidia(Some(591));
-    let hosts = [
+    let machines = [
         (Some(cuda_ready()), "linux-x86_64-cuda"),
         (
             Some(runtime(Some(runtime_defining(&["GLIBCXX_3.4.30"])))),
@@ -187,16 +187,16 @@ fn auto_takes_the_linux_cuda_whisper_build_only_with_glibcxx_3_4_30() {
         (Some(runtime(None)), "linux-x86_64"),
         (None, "linux-x86_64"),
     ];
-    for (index, (host, platform)) in hosts.iter().enumerate() {
+    for (index, (machine, platform)) in machines.iter().enumerate() {
         assert_eq!(
-            auto_pick("linux", &probe, host.as_ref()),
+            auto_pick("linux", &probe, machine.as_ref()),
             *platform,
-            "host {index}"
+            "machine {index}"
         );
         assert_eq!(
-            auto_pick("windows", &probe, host.as_ref()),
+            auto_pick("windows", &probe, machine.as_ref()),
             "windows-x86_64-cuda",
-            "host {index}"
+            "machine {index}"
         );
     }
 }
@@ -228,7 +228,7 @@ fn an_explicit_whisper_backend_ignores_the_probe() {
     // Windows build, GPUs hidden from CUDA, and a C++ runtime without the
     // Linux build's version are included: an explicit `cuda` is honored
     // there.
-    let hosts = [
+    let machines = [
         None,
         Some(cuda_ready()),
         Some(visible("-1")),
@@ -249,14 +249,14 @@ fn an_explicit_whisper_backend_ignores_the_probe() {
     ];
     for os in ["windows", "linux"] {
         for gpus in &probes {
-            for (index, host) in hosts.iter().enumerate() {
-                let label = format!("{gpus:?} on host {index}");
+            for (index, machine) in machines.iter().enumerate() {
+                let label = format!("{gpus:?} on machine {index}");
                 let cpu = whisper_asset(
                     os,
                     "x86_64",
                     WhisperBackend::Cpu,
                     gpus.as_ref(),
-                    host.as_ref(),
+                    machine.as_ref(),
                     X86_BASELINE,
                 )
                 .expect("explicit cpu whisper asset");
@@ -266,7 +266,7 @@ fn an_explicit_whisper_backend_ignores_the_probe() {
                     "x86_64",
                     WhisperBackend::Cuda,
                     gpus.as_ref(),
-                    host.as_ref(),
+                    machine.as_ref(),
                     X86_BASELINE,
                 )
                 .expect("explicit cuda whisper asset");

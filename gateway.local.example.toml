@@ -32,7 +32,7 @@ vocabulary = ["PromptForge", "WG21", "GGUF"]
 # otherwise; "cpu" and "cuda" force the build. The Linux CUDA build needs
 # NVIDIA driver 570 or later: below it "auto" picks CPU, while "cuda" is
 # still honored and loading it can end the gateway. It also needs a GCC 12 or
-# later C++ runtime: "auto" picks CPU where the host's libstdc++.so.6 lacks
+# later C++ runtime: "auto" picks CPU where the machine's libstdc++.so.6 lacks
 # GLIBCXX_3.4.30, as on RHEL 9 and Amazon Linux 2023, and "cuda" there fails
 # to load. On both platforms a CUDA_VISIBLE_DEVICES that hides every GPU
 # counts as no GPU for "auto", but a first entry that is a GPU- or MIG-

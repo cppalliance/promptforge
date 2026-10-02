@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn single_build_whisper_platforms_ignore_the_backend() {
     let probe = rtx_3090s();
-    let host = cuda_ready();
+    let machine = cuda_ready();
     for (os, arch, platform) in [
         ("macos", "aarch64", "macos-aarch64-metal"),
         ("macos", "x86_64", "macos-x86_64"),
@@ -14,7 +14,7 @@ fn single_build_whisper_platforms_ignore_the_backend() {
     ] {
         for backend in WHISPER_BACKENDS {
             for gpus in [None, Some(&probe)] {
-                let asset = whisper_asset(os, arch, backend, gpus, Some(&host), X86_BASELINE)
+                let asset = whisper_asset(os, arch, backend, gpus, Some(&machine), X86_BASELINE)
                     .expect("single whisper build");
                 assert_eq!(asset.platform, platform, "{backend:?} with {gpus:?}");
             }
@@ -25,7 +25,7 @@ fn single_build_whisper_platforms_ignore_the_backend() {
 #[test]
 fn a_cpu_missing_a_baseline_extension_fails_every_x86_64_whisper_row() {
     let probe = rtx_3090s();
-    let host = cuda_ready();
+    let machine = cuda_ready();
     for &dropped in X86_BASELINE {
         let extensions: Vec<&str> = X86_BASELINE
             .iter()
@@ -37,14 +37,14 @@ fn a_cpu_missing_a_baseline_extension_fails_every_x86_64_whisper_row() {
                 for gpus in [None, Some(&probe)] {
                     let label = format!("{os} {backend:?} with {gpus:?} without {dropped}");
                     let selected =
-                        whisper_asset(os, "x86_64", backend, gpus, Some(&host), X86_BASELINE)
+                        whisper_asset(os, "x86_64", backend, gpus, Some(&machine), X86_BASELINE)
                             .expect("the full baseline selects a row");
                     let (platform, required, missing) = match whisper_asset(
                         os,
                         "x86_64",
                         backend,
                         gpus,
-                        Some(&host),
+                        Some(&machine),
                         &extensions,
                     ) {
                         Err(LocalError::UnsupportedCpu {
@@ -80,11 +80,11 @@ fn a_cpu_missing_a_baseline_extension_fails_every_x86_64_whisper_row() {
 #[test]
 fn aarch64_whisper_rows_need_no_x86_extensions() {
     let probe = rtx_3090s();
-    let host = cuda_ready();
+    let machine = cuda_ready();
     for (os, platform) in [("macos", "macos-aarch64-metal"), ("linux", "linux-aarch64")] {
         for backend in WHISPER_BACKENDS {
             for gpus in [None, Some(&probe)] {
-                let asset = whisper_asset(os, "aarch64", backend, gpus, Some(&host), &[])
+                let asset = whisper_asset(os, "aarch64", backend, gpus, Some(&machine), &[])
                     .expect("aarch64 whisper build");
                 assert_eq!(asset.platform, platform, "{backend:?} with {gpus:?}");
             }
@@ -101,10 +101,10 @@ fn auto_probes_where_both_whisper_builds_exist_and_follows_the_answer() {
             (None, format!("{os}-x86_64"), 0),
         ] {
             let label = format!("{os} with {answer:?}");
-            let (pick, probes, host_reads) =
+            let (pick, probes, machine_reads) =
                 pick_with_probe(os, "x86_64", WhisperBackend::Auto, answer);
             assert_eq!(probes, 1, "{label}");
-            assert_eq!(host_reads, reads, "{label}");
+            assert_eq!(machine_reads, reads, "{label}");
             assert_eq!(
                 pick.expect("auto whisper asset").platform,
                 platform,
@@ -121,10 +121,10 @@ fn the_whisper_probe_runs_only_for_auto_where_both_builds_exist() {
             (WhisperBackend::Cpu, format!("{os}-x86_64")),
             (WhisperBackend::Cuda, format!("{os}-x86_64-cuda")),
         ] {
-            let (pick, probes, host_reads) =
+            let (pick, probes, machine_reads) =
                 pick_with_probe(os, "x86_64", backend, Some(rtx_3090s()));
             assert_eq!(probes, 0, "{os} with {backend:?}");
-            assert_eq!(host_reads, 0, "{os} with {backend:?}");
+            assert_eq!(machine_reads, 0, "{os} with {backend:?}");
             assert_eq!(
                 pick.expect("explicit whisper asset").platform,
                 platform,
@@ -140,9 +140,10 @@ fn the_whisper_probe_runs_only_for_auto_where_both_builds_exist() {
         ("windows", "aarch64"),
     ] {
         for backend in WHISPER_BACKENDS {
-            let (pick, probes, host_reads) = pick_with_probe(os, arch, backend, Some(rtx_3090s()));
+            let (pick, probes, machine_reads) =
+                pick_with_probe(os, arch, backend, Some(rtx_3090s()));
             assert_eq!(probes, 0, "{os}-{arch} with {backend:?}");
-            assert_eq!(host_reads, 0, "{os}-{arch} with {backend:?}");
+            assert_eq!(machine_reads, 0, "{os}-{arch} with {backend:?}");
             assert_eq!(
                 pick.ok(),
                 whisper_asset(os, arch, backend, None, None, X86_BASELINE).ok(),

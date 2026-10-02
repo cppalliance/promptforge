@@ -236,8 +236,8 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
-  # The CUDA compile is slow on a hosted runner, so only a release dispatch
-  # runs it.
+  # The CUDA compile is slow on a GitHub-hosted runner, so only a release
+  # dispatch runs it.
   build-linux-cuda:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
@@ -317,9 +317,9 @@ jobs:
             sha256sum "$archive" > "$archive.sha256"
           )
 
-      # Hosted runners have no NVIDIA driver, so the toolkit's stub stands in
-      # for libcuda.so.1. Every driver call through the stub fails, which ggml
-      # logs and survives, and the CUDA backend still registers.
+      # GitHub-hosted runners have no NVIDIA driver, so the toolkit's stub
+      # stands in for libcuda.so.1. Every driver call through the stub fails,
+      # which ggml logs and survives, and the CUDA backend still registers.
       - name: Smoke-load the CUDA runtime against the driver stub
         shell: bash
         run: |

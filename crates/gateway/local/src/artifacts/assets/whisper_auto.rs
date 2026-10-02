@@ -3,7 +3,7 @@
 use gateway_config::WhisperBackend;
 
 use super::{
-    CudaHost, NvidiaProbe, WHISPER_ASSETS, WhisperAsset, cuda_visible_devices_hides_every_gpu,
+    CudaMachine, NvidiaProbe, WHISPER_ASSETS, WhisperAsset, cuda_visible_devices_hides_every_gpu,
     libstdcxx_defines,
 };
 
@@ -11,24 +11,24 @@ use super::{
 /// gets the CUDA build when `CUDA_VISIBLE_DEVICES` leaves a GPU visible, the
 /// platform's CUDA row sets no driver floor or the driver meets it, the row
 /// lists no native compute capabilities or every probed GPU's is among
-/// them, and the row names no `min_glibcxx` or the host's C++ runtime
+/// them, and the row names no `min_glibcxx` or the machine's C++ runtime
 /// defines it. Anything else - including a failed probe, GPUs hidden from
 /// CUDA, an unreadable driver version under a floor, any GPU without native
-/// code, or no runtime read - gets the CPU build. A `None` host reads as
-/// [`CudaHost::default`].
+/// code, or no runtime read - gets the CPU build. A `None`
+/// `cuda_machine` counts as [`CudaMachine::default`].
 pub(super) fn auto_whisper_backend(
     os: &str,
     arch: &str,
     gpus: Option<&NvidiaProbe>,
-    cuda_host: Option<&CudaHost>,
+    cuda_machine: Option<&CudaMachine>,
 ) -> WhisperBackend {
     let Some(probe) = gpus.filter(|probe| !probe.compute_caps.is_empty()) else {
         return WhisperBackend::Cpu;
     };
-    let unread = CudaHost::default();
-    let host = cuda_host.unwrap_or(&unread);
+    let unread = CudaMachine::default();
+    let machine = cuda_machine.unwrap_or(&unread);
     if cuda_visible_devices_hides_every_gpu(
-        host.visible_devices.as_deref(),
+        machine.visible_devices.as_deref(),
         probe.compute_caps.len(),
     ) {
         return WhisperBackend::Cpu;
@@ -46,7 +46,8 @@ pub(super) fn auto_whisper_backend(
     let has_runtime = cuda
         .and_then(|cuda| cuda.min_glibcxx)
         .is_none_or(|version| {
-            host.libstdcxx
+            machine
+                .libstdcxx
                 .as_deref()
                 .is_some_and(|library| libstdcxx_defines(library, version))
         });
