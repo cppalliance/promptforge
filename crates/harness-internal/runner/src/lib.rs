@@ -35,6 +35,7 @@ pub mod effect_loop;
 pub mod files;
 pub mod performers;
 pub mod prepare;
+pub mod recorder;
 pub mod spawn;
 #[cfg(feature = "test-support")]
 pub mod test_support;

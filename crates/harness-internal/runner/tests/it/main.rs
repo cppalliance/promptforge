@@ -10,5 +10,6 @@
 mod effect_loop;
 mod performers;
 mod prepare;
+mod recorder;
 mod spawn;
 mod support;
