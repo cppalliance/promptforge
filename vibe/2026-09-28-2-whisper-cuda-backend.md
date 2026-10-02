@@ -901,7 +901,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`, and `cargo test --locked -p gateway --lib boot_load::` pass.
   - Linux, `wsl-lifecycle2.sh` with `ONLY=download`: the stop during the throttled 743 MB download exits within a second with no `did not stop` or `did not retire` warning, where the end-to-end round's took 10 s and logged both, and the next boot resumes the partial download.
 
-### Step 16: Carry the admission epoch's cancellation flag on every decode request
+### Step 16: Carry the admission epoch's cancellation flag on every decode request [completed]
 
 - In `crates/gateway/stt/engine/src/decoder.rs`:
   - `DecodeRequest` gains `cancellation: Option<Arc<AtomicBool>>`, set by `#[must_use] pub fn with_cancellation(self, flag: Arc<AtomicBool>) -> Self` and read by `pub fn cancellation(&self) -> Option<&Arc<AtomicBool>>`.

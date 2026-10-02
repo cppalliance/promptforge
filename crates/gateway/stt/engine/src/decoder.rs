@@ -2,6 +2,7 @@
 
 use std::fmt::{self, Debug};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::TranscribeError;
 
@@ -24,6 +25,7 @@ pub struct DecodeRequest {
     guidance: Vec<String>,
     finalized: String,
     lifetime_guard: Option<RequestLifetime>,
+    cancellation: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,7 @@ impl DecodeRequest {
             guidance,
             finalized,
             lifetime_guard: None,
+            cancellation: None,
         }
     }
 
@@ -95,6 +98,17 @@ impl DecodeRequest {
     #[must_use]
     pub fn with_lifetime_guard(mut self, guard: impl Send + Sync + 'static) -> Self {
         self.lifetime_guard = Some(RequestLifetime(Arc::new(guard)));
+        self
+    }
+
+    /// Attaches the caller's cancellation flag.
+    ///
+    /// The flag reads true once the caller has abandoned the decode; a
+    /// decoder may then stop early and fail. Clones of this request share
+    /// the flag.
+    #[must_use]
+    pub fn with_cancellation(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.cancellation = Some(flag);
         self
     }
 
@@ -134,6 +148,15 @@ impl DecodeRequest {
         &self.finalized
     }
 
+    /// The caller's cancellation flag, if one is attached.
+    ///
+    /// It reads true once the caller has abandoned the decode; a decoder may
+    /// then stop early and fail. Clones of this request share it.
+    #[must_use]
+    pub fn cancellation(&self) -> Option<&Arc<AtomicBool>> {
+        self.cancellation.as_ref()
+    }
+
     pub(crate) fn take_lifetime_guard(&mut self) -> Option<Arc<dyn Send + Sync>> {
         self.lifetime_guard.take().map(|guard| guard.0)
     }
@@ -163,9 +186,34 @@ pub trait ModelFactory: Debug + Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
 
     use super::{DecodeMode, DecodeRequest};
+
+    fn final_request() -> DecodeRequest {
+        DecodeRequest::new(DecodeMode::Final, vec![1.0], Vec::new(), String::new())
+    }
+
+    #[test]
+    fn miri_a_cancellation_flag_reaches_every_clone() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let request = final_request().with_cancellation(Arc::clone(&flag));
+        let clone = request.clone();
+
+        let shared = clone.cancellation().expect("a clone keeps the flag");
+        assert!(Arc::ptr_eq(shared, &flag), "a clone shares the flag");
+        assert!(!shared.load(Ordering::Acquire));
+        request
+            .cancellation()
+            .expect("the original keeps the flag")
+            .store(true, Ordering::Release);
+        assert!(shared.load(Ordering::Acquire), "a clone sees the store");
+
+        let bare = final_request();
+        assert!(bare.cancellation().is_none(), "a bare request has no flag");
+        assert!(bare.clone().cancellation().is_none());
+    }
 
     #[test]
     fn miri_sample_retirement_returns_the_owned_buffer_once() {
