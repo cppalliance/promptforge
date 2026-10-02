@@ -4,8 +4,10 @@
 //! Dispatch resolves the round's binding and tool scope (the bound and
 //! local halves, plus the model's task built-ins once the section has run
 //! `tools.allow_tasks`), records the scope on the chain as `advertised`,
-//! prechecks the projected conversation against the model's context
-//! window, and issues the single gateway round as a `Chat` effect - the
+//! prechecks the projected conversation, with room kept for the reply,
+//! against the model's context window (counting from the provider's usage
+//! for the chain's last measured round when the request extends it), and
+//! issues the single gateway round as a `Chat` effect - the
 //! same effect a nested `infer` issues, over the author's conversation
 //! and the advertised schemas. The driver classifies the answered
 //! completion into the round's answer when it arrives
@@ -28,8 +30,8 @@ use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
 use crate::lua::{
-    MessageRecord, OverflowReason, current_tool_bindings, precheck, project_messages,
-    resolve_model_binding,
+    MessageRecord, OverflowReason, current_tool_bindings, output_reserve, precheck,
+    project_messages, resolve_model_binding,
 };
 use crate::model::ModelBinding;
 use crate::model::{Completion, CompletionErrorKind, CompletionResult, ToolCall};
@@ -143,16 +145,21 @@ impl Scheduler {
             }
         };
         let context = binding.context();
-        self.chains[id.index()].advertised = Some(dispatch);
-        // The pre-dispatch precheck: an over-window request never leaves.
-        // The refusal is the round's answer - the overflow flag - and is
-        // observed as a failed turn, exactly as the loop reported it.
-        if let Err(reason) = precheck(&conversation, context) {
+        let reserve = output_reserve(context, binding.invocation().max_tokens);
+        let chain = &mut self.chains[id.index()];
+        chain.advertised = Some(dispatch);
+        // The pre-dispatch precheck: a request that leaves the reply no
+        // room never leaves. The refusal is the round's answer - the
+        // overflow flag - and is observed as a failed turn, exactly as the
+        // loop reported it. The count starts from the provider's numbers
+        // for the chain's last measured round when this request extends it.
+        if let Err(reason) = precheck(&conversation, context, reserve, chain.anchor.measured()) {
             emitter.report(&section, lifecycle::MODEL_TURN_FAILED);
             return Ok(ChatDispatch::Answered(Answer::Chat(Ok(Box::new(
                 overflow_result(reason, handles.turns.load(Ordering::Relaxed)),
             )))));
         }
+        chain.anchor.sending(conversation.clone());
         let effect = Effect::Chat {
             options: binding.completion_options(),
             binding,
@@ -177,13 +184,16 @@ impl Scheduler {
     /// observation on a `length` finish) or the tool-call batch; a
     /// requested tool outside the scope this chain advertised for the round
     /// fails the call as out of scope after a failed-tool-call observation.
+    /// A round that reported usage becomes the chain's measurement for the
+    /// next dispatch's precheck, whatever the round's outcome; any other
+    /// round only releases the messages it sent.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the parked chain has lost its frame
     /// or the scope it advertised for the round, or the run's tool set
     /// cannot be read.
     pub(super) fn accept_chat(
-        &self,
+        &mut self,
         id: ChainIndex,
         result: Result<Box<Completion>>,
     ) -> Result<Answer<Error>> {
@@ -200,7 +210,11 @@ impl Scheduler {
         };
         let completion = match result {
             Ok(completion) => completion,
-            Err(error) => return Ok(Answer::Chat(round.failed(error))),
+            Err(error) => {
+                let failure = round.failed(error);
+                self.chains[id.index()].anchor.settle(None);
+                return Ok(Answer::Chat(failure));
+            }
         };
         // A round trip that produced a reply is a turn, whether the reply
         // is text or a batch of tool calls.
@@ -226,6 +240,11 @@ impl Scheduler {
             // neither resumed nor promoted to an answer.
             _ => Err(Error::internal("unrecognized completion outcome")),
         };
+        let usage = served
+            .metrics
+            .as_ref()
+            .and_then(|metrics| metrics.usage.as_ref());
+        self.chains[id.index()].anchor.settle(usage);
         Ok(Answer::Chat(result.map(Box::new)))
     }
 }

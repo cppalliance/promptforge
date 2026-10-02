@@ -146,7 +146,7 @@ mod protocol;
 // here. The facade re-exports only `VfsOp` and `VfsOutcome`.
 pub use crate::argv::Argv;
 pub use collection::render_item;
-pub use compactors::{Compactor, OverflowReason, precheck};
+pub use compactors::{Compactor, OverflowReason, UsageAnchor, output_reserve, precheck};
 #[cfg(feature = "test-support")]
 pub use coro::install_model_tool_call_shim;
 pub use coro::{install_section_loop_shim, install_store_shims};

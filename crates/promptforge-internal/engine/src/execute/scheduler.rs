@@ -95,7 +95,7 @@ use promptforge_types::event::lifecycle;
 use super::context::RunState;
 use super::protocol::Answer;
 use super::run::{Effect, EffectAnswer, EffectId};
-use chain_record::Chain;
+use chain_record::{Chain, ChatAnchor};
 use pending::{Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
 

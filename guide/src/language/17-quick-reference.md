@@ -105,7 +105,7 @@ Every global, function, field, and record shape a prompt's Lua code can use, wit
 |---|---|---|---|
 | `compactors.fail` | `models.loop(msgs, compactors.fail)` | The default policy; an overflowing round raises `context_exhausted` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `compactors.fail(tag)` | `compactors.fail('precheck')` | Never returns; raises `context_exhausted` with `reason` set to the tag | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
-| overflow reason `"precheck"` | `err.reason == 'precheck'` | The estimated request exceeded the context window; nothing was sent | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
+| overflow reason `"precheck"` | `err.reason == 'precheck'` | The request's token count plus the room kept for the reply exceeded the context window; nothing was sent | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | overflow reason `"provider"` | `err.reason == 'provider'` | The provider rejected the request as too large for the context window | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 
 ### tools

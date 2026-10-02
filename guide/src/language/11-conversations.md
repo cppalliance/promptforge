@@ -419,7 +419,7 @@ A compactor is the policy for a round that overflows the model's context window.
 
 | Reason | What happened |
 |---|---|
-| `precheck` | The estimated request size exceeded the model's context window, and the round stopped before its request reached the Harness |
+| `precheck` | The request's token count plus the room kept for the reply exceeded the model's context window, and the round stopped before its request reached the Harness |
 | `provider` | The provider rejected the request as too large for its context window |
 
 `pcall` catches context exhaustion as an error value whose `kind` is `context_exhausted` and whose `reason` field is `"precheck"` or `"provider"`:
@@ -475,11 +475,19 @@ A refused round appends nothing. A bad compactor argument is refused before any 
 
 ### The precheck
 
-Before each round is sent, a precheck compares the estimated request size with the model's context window. Only an estimate larger than the window is refused, with reason `"precheck"` and before anything reaches the Harness, so an estimate equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
+Before each round is sent, a precheck adds the request's token count to the room kept for the model's reply and compares the total with the model's context window. Only a total larger than the window is refused, with reason `"precheck"` and before anything reaches the Harness, so a total equal to the window passes. A handle that [`models.get`](10-models.md#model-handles) returns for a raw model id, rather than for a declared role, has a context window of 8192 tokens for this check.
 
-The estimate is the conversation's total text length in UTF-8 bytes, divided by 4 with the remainder dropped, plus 4 tokens for each record sent. The division runs once over the whole conversation, and records are counted after they merge as [How the list reaches the model](#how-the-list-reaches-the-model) describes, so merged records pay the per-record overhead once. One 396-character record estimates to 103 tokens, 99 for the text plus 4, so a 103-token window admits it and a 102-token window refuses it. Non-ASCII text weighs more per visible character, because each such character takes more than one byte.
+The room kept for the reply is the handle's `max_tokens` when it has one, and otherwise one eighth of the context window, at most 8192 tokens. In both cases it is never more than half the context window. So a `max_tokens` at or above the window cannot refuse every request, an empty one included. The precheck leaves such a request to the provider, which still refuses one that is too large.
+
+The request's token count starts as an estimate. The estimate is the conversation's total text length in UTF-8 bytes, divided by 4 with the remainder dropped, plus 4 tokens for each record sent. The division runs once over the whole conversation, and records are counted after they merge as [How the list reaches the model](#how-the-list-reaches-the-model) describes, so merged records pay the per-record overhead once. One 396-character record estimates to 103 tokens, 99 for the text plus 4. With a `max_tokens` of 20, a 123-token window admits it and a 122-token window refuses it. Non-ASCII text weighs more per visible character, because each such character takes more than one byte.
 
 The estimate counts a record's plain string content, the `text` of each text part, and the whole serialized form of each tool call the record carries, not only its arguments. Image parts count nothing, so an image-heavy conversation can pass the precheck and still overflow at the provider.
+
+After a round whose provider reported token usage, the precheck counts from the provider's own numbers instead. It remembers the records that round sent and a token total: the prompt tokens plus the completion tokens, less any reasoning tokens the provider reported, because the list never sends reasoning back to the model. The next request uses that total only when it has more records than the round sent, its first records are exactly the records the round sent, and the record right after them is an assistant record, the reply. Its count is then the remembered total plus the estimate for the records after the reply. The total already covers the reply, so the reply is never counted twice.
+
+Any other request uses the estimate alone: a list you rewrote, compacted, or merged so that its first records changed, a record after the sent ones that is not an assistant record, and any request after a round that reported no usage. A round that reports no usage leaves the earlier total in place, and a request that no longer extends the records it measured simply does not use it.
+
+The provider's token counts include the tool schemas and the system template, which the estimate ignores. So once a round has reported usage, a conversation can fail the precheck a round earlier or later than the estimate alone would have decided.
 
 ### Provider rejections
 

@@ -12,7 +12,7 @@ use crate::execute::run::EffectId;
 use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result};
 
-use super::{Chain, ChainIndex, Counters, Scheduler, SlicePath};
+use super::{Chain, ChainIndex, ChatAnchor, Counters, Scheduler, SlicePath};
 
 impl Scheduler {
     /// Allocates the next child id under `owner`'s chain: the owner's id
@@ -110,6 +110,7 @@ impl Scheduler {
             pending_spawn: None,
             parent,
             advertised: None,
+            anchor: ChatAnchor::default(),
             h1: false,
         });
         Ok(id)

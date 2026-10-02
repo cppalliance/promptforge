@@ -7,17 +7,57 @@ use std::sync::Arc;
 
 use mlua::Thread;
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_types::metrics::Usage;
 use promptforge_vfs::Access;
 
 use crate::execute::context::RunState;
 use crate::execute::protocol::Answer;
 use crate::execute::scope::DispatchTarget;
 use crate::execute::section_context::{SectionContext, TaskSeed};
+use crate::lua::UsageAnchor;
+use crate::model::Message;
 use crate::parser::{Block, Prompt, Section};
 use crate::{Error, Result};
 
 use super::await_tasks::AwaitTasks;
 use super::{ChainIndex, Counters, SlicePath, SpawnRecord};
+
+/// What the chain's `chat` rounds taught the context precheck about token
+/// counts: the provider's numbers for the newest round that reported usage.
+///
+/// A chain has one parked `chat` round at a time. Dispatch holds that
+/// round's projected messages in `in_flight`; the arrival of its answer
+/// settles them into `measured` when the round reported usage, and drops
+/// them otherwise. A round with no usage leaves the older measurement in
+/// place: it still describes a prefix of the conversation, and the
+/// precheck uses it only while the request extends that prefix.
+#[derive(Default)]
+pub(super) struct ChatAnchor {
+    in_flight: Option<Vec<Message>>,
+    measured: Option<UsageAnchor>,
+}
+
+impl ChatAnchor {
+    /// The newest measurement, for the precheck of the next dispatch.
+    pub(super) fn measured(&self) -> Option<&UsageAnchor> {
+        self.measured.as_ref()
+    }
+
+    /// Records the projected messages of a round about to be sent.
+    pub(super) fn sending(&mut self, messages: Vec<Message>) {
+        self.in_flight = Some(messages);
+    }
+
+    /// Settles the parked round: its sent messages and `usage` become the
+    /// measurement when it reported usage; a failed round, or one with no
+    /// usage, only releases the sent messages.
+    pub(super) fn settle(&mut self, usage: Option<&Usage>) {
+        let sent = self.in_flight.take();
+        if let (Some(sent), Some(usage)) = (sent, usage) {
+            self.measured = Some(UsageAnchor::new(sent, usage));
+        }
+    }
+}
 
 /// One chain: a contained line of section execution.
 ///
@@ -177,6 +217,9 @@ pub(super) struct Chain {
     /// model invents or reaches for outside the scope fails as out of
     /// scope. `None` before the chain's first round.
     pub(super) advertised: Option<BTreeMap<String, DispatchTarget>>,
+    /// The provider's token counts for the chain's `chat` rounds, which the
+    /// next round's context precheck counts from.
+    pub(super) anchor: ChatAnchor,
     /// The H1 marker: the chain runs the prompt's H1 blocks under its
     /// title - section 0. Such a chain runs the walk's rules with three
     /// deltas: the frame keeps id 0 (no section observations fire), a
@@ -230,3 +273,7 @@ impl Chain {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "chain_record-tests.rs"]
+mod tests;
