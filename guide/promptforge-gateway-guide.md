@@ -442,7 +442,7 @@ On Windows the CUDA build needs NVIDIA driver 580 or later, the floor for CUDA 1
 
 Every x86-64 build, whatever the setting, uses the SSE4.2, AVX, AVX2, BMI2, FMA, and F16C instructions. On a CPU that lacks any of them, provisioning the whisper library fails with an error that names the build, the required extensions, and the missing ones, and speech stays unavailable while the gateway keeps serving.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. A failed boot load never stops the gateway and is never retried in-process: speech stays unavailable, the failed boot command shows on the queue and progress surfaces, and a restart is the recovery. A stop during the speech load cancels the whisper library and speech model downloads at their next chunk, and the next start resumes them; an extraction already under way finishes first.
 
 ## How a take is transcribed
 

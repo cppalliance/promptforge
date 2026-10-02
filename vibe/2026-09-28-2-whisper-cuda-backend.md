@@ -190,13 +190,13 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Two pure helpers sit in `assets.rs`:
     - `cuda_visible_devices_hides_every_gpu(value: Option<&str>, gpu_count: usize) -> bool` applies CUDA's rule that only the devices before the first invalid entry are visible.
     - `libstdcxx_defines(library: &[u8], version: &str) -> bool` finds the version name, NUL-terminated, in the library's bytes.
-  - `ArtifactStore::provision_whisper_library` gathers the two host answers beside `nvidia_probe`, only under `auto` where both builds exist, and only after the probe reports a GPU. They travel to selection as a `CudaHost`.
+  - `ArtifactStore::provision_whisper_library_with_cancellation` gathers the two host answers beside `nvidia_probe`, only under `auto` where both builds exist, and only after the probe reports a GPU. They travel to selection as a `CudaHost`.
     - It reads `CUDA_VISIBLE_DEVICES`.
     - On Linux it reads the first that exists of `/usr/lib/x86_64-linux-gnu/libstdc++.so.6`, `/usr/lib64/libstdc++.so.6`, `/lib/x86_64-linux-gnu/libstdc++.so.6`, `/lib64/libstdc++.so.6`, and `/usr/lib/libstdc++.so.6`, and no library found counts as lacking the version.
     - llama-server's selection reads neither.
   - The NVIDIA probe in `crates/gateway/local/src/artifacts.rs` reads each GPU's compute capability and the driver version in one `nvidia-smi --query-gpu=compute_cap,driver_version --format=csv,noheader` call. llama-server's selection keeps reading only the capabilities, so its behavior is unchanged.
   - `ArtifactStore::provision_whisper_library(backend, activity)`, in `crates/gateway/local/src/artifacts.rs`, still returns the library path, and goes through the existing verified install path once a row is selected.
-    - `ArtifactStore::provision_whisper_library_with_cancellation(backend, activity, token)` passes `token` to `provision_install`. `provision_whisper_library` calls it with `None`, as `provision_llama_server_with_progress` calls its cancellable twin.
+    - The fixes replace it with `ArtifactStore::provision_whisper_library_with_cancellation(backend, activity, token)`, which passes `token` to `provision_install`. The token-free method is removed, because after `prepare()` moves over no production code calls it; its one test passes `None`.
     - A fired token stops a download between chunks and at phase boundaries, not inside an extraction or the probe, and returns `LocalError::Cancelled`.
   - `prepare()`, in `crates/gateway/stt/api/src/artifacts.rs`, reads the setting from `[stt]`, passes it to provisioning through `prepare_impl`, which takes the provisioning as an argument, and logs `provisioned whisper library` with the path, as `crates/gateway/local/src/runtime.rs` logs `provisioned llama-server`.
     - It takes the load's `CancellationToken` and passes it to the library download and, through the existing `ensure_model_with_cancellation`, to each speech model download.
@@ -226,7 +226,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - `crates/gateway/stt/whisper-ffi/src/raw.rs`, `params.rs`, and `context.rs`.
   - New public API: `gateway_config::WhisperBackend`, `SttPipelineConfig::whisper_backend`, and the `LocalError` variant for an unsupported CPU.
     - The fixes add `ArtifactStore::provision_whisper_library_with_cancellation`, `DecodeRequest::with_cancellation` and its accessor, and `FullParams::set_abort_flag`.
-  - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`, which the fixes move to the cancellable twin.
+  - Changed public API: `ArtifactStore::provision_whisper_library` takes the backend. Its one production caller is `prepare()`. The fixes then replace it with `provision_whisper_library_with_cancellation`, which also takes the token.
   - Docs:
     - `gateway.local.example.toml`: a commented `whisper_backend` line with the three values.
     - `guide/src/gateway/05-speech.md`: the two builds on Windows x86-64 and Linux x86-64, how the setting chooses between them, the Linux CUDA build's driver floor with the `auto` fallback below it, and the x86 CPU baseline. The `[stt]` row in `crates/gateway/app/README.md` and the example config state the floor and the baseline too.
@@ -875,11 +875,11 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - In WSL, `wsl-extra.sh hidden` takes the CPU build the same way, and `wsl-gateway.sh`'s `auto` boots still name `b4938-linux-x86_64-cuda`, which runs the C++ runtime reader against Ubuntu 24.04's `libstdc++.so.6`.
   - As the last step of its component, it runs the full suite.
 
-### Step 15: Cancel speech downloads with the boot command's token
+### Step 15: Cancel speech downloads with the boot command's token [completed]
 
 - In `crates/gateway/local/src/artifacts.rs`:
   - A new `ArtifactStore::provision_whisper_library_with_cancellation(backend, activity, token: Option<&CancellationToken>)` selects the row as before and passes `token` to `provision_install`.
-  - `provision_whisper_library(backend, activity)` calls it with `None`, as `provision_llama_server_with_progress` calls its cancellable twin.
+  - `provision_whisper_library(backend, activity)` is removed, because `prepare()` was its one production caller; `provision_whisper_library_reuses_a_verified_install` calls the new method with `None`.
   - The twin's doc says a fired token stops the download at its next chunk or the next phase boundary, never inside an extraction or the probe, and returns `LocalError::Cancelled`.
 - In `crates/gateway/stt/api/src/artifacts.rs`:
   - `prepare(config, progress, cancel: &CancellationToken)` hands the token to `prepare_impl`, whose injected library provision gains an `Option<&CancellationToken>` parameter and is `ArtifactStore::provision_whisper_library_with_cancellation` in production.

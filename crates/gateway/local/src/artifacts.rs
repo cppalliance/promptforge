@@ -363,15 +363,21 @@ impl ArtifactStore {
     /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
     /// the returned file for the platform loader.
     ///
+    /// A fired `token` stops the provision at the download's next chunk or
+    /// the next phase boundary, never inside an extraction or the probe. The
+    /// staged partial stays in place for a later resume.
+    ///
     /// # Errors
-    /// Returns [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks an
+    /// Returns [`LocalError::Cancelled`] when the fired token stops the
+    /// provision, [`LocalError::UnsupportedCpu`] when an x86-64 CPU lacks an
     /// extension the selected build executes, and another [`LocalError`]
     /// when the platform is unsupported or download, verification,
     /// extraction, or cache publication fails.
-    pub fn provision_whisper_library(
+    pub fn provision_whisper_library_with_cancellation(
         &self,
         backend: WhisperBackend,
         activity: Option<&Activity>,
+        token: Option<&CancellationToken>,
     ) -> Result<PathBuf> {
         let asset = whisper_asset_with_probe(
             std::env::consts::OS,
@@ -382,7 +388,7 @@ impl ArtifactStore {
             &host_x86_extensions(),
         )?;
         let archives = [asset.archive];
-        self.provision_install(whisper_install_asset(asset, &archives), activity, None)
+        self.provision_install(whisper_install_asset(asset, &archives), activity, token)
     }
 
     /// Ensures a GGUF (or other blob) from `source` is available locally.

@@ -70,7 +70,7 @@ impl GenerationState {
         if cancel.is_cancelled() {
             return Err(SpeechError::InitialLoadCancelled);
         }
-        let prepared = artifacts::prepare(config, progress)?;
+        let prepared = artifacts::prepare(config, progress, cancel)?;
         if cancel.is_cancelled() {
             return Err(SpeechError::InitialLoadCancelled);
         }
