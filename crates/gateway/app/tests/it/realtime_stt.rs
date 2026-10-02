@@ -9,7 +9,7 @@ use base64::Engine as _;
 use futures_util::{SinkExt as _, StreamExt as _};
 use gateway::{Config, Gateway, ProfilesContext};
 use gateway_stt::SpeechService;
-use gateway_stt::test_fixtures::native::require_fixture;
+use gateway_stt::test_fixtures::native::{fixture_whisper_backend, require_fixture};
 use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
@@ -227,6 +227,7 @@ fn native_speech_service() -> SpeechService {
         "ggml-tiny.en.bin",
     );
     let model = model.display().to_string().replace('\\', "/");
+    let whisper_backend = fixture_whisper_backend();
     std::thread::spawn(move || {
         let cache = tempfile::tempdir().expect("native test cache creates");
         let cache = cache.path().display().to_string().replace('\\', "/");
@@ -234,7 +235,7 @@ fn native_speech_service() -> SpeechService {
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
              [local]\ncache_dir = {cache:?}\n\
-             [stt]\nwindow_seconds = 4\ninterval_ms = 500\n\
+             [stt]\nwindow_seconds = 4\ninterval_ms = 500\nwhisper_backend = {whisper_backend:?}\n\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {model:?}\nvram_gb = 1.0\n\
              [[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {model:?}\nvram_gb = 1.0\n\
              [[profile]]\nname = \"native\"\nmodels = [\"speech\", \"speech-final\"]\n"

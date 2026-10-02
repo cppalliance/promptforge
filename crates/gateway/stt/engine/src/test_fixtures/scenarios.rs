@@ -2,9 +2,10 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::ThreadId;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{DecodeRequest, Decoder, TranscribeError};
 
@@ -43,6 +44,8 @@ struct DecoderState {
     decode_threads: Vec<ThreadId>,
     waiters: usize,
     park: ParkState,
+    cancellation_park: Option<Duration>,
+    observed_cancellation: bool,
     construction: ConstructionState,
     worker_dropped: bool,
     panic_on_drop: bool,
@@ -86,6 +89,21 @@ impl ScriptedDecoder {
     /// Makes the next decode panic on its owning worker.
     pub fn panic_next(&self) {
         self.state().outcomes.push_back(ScriptedOutcome::Panic);
+    }
+
+    /// Makes the next decode poll its request's cancellation flag until the
+    /// flag reads true or `bound` passes, and then fail.
+    ///
+    /// A request without a flag waits out the whole bound.
+    pub fn park_next_until_cancelled(&self, bound: Duration) {
+        self.state().cancellation_park = Some(bound);
+    }
+
+    /// Whether the latest decode parked by [`Self::park_next_until_cancelled`]
+    /// saw its request's cancellation flag set.
+    #[must_use]
+    pub fn observed_cancellation(&self) -> bool {
+        self.state().observed_cancellation
     }
 
     /// Makes the next construction attempt return the supplied failure.
@@ -260,6 +278,20 @@ impl Decoder for WorkerDecoder {
         state.requests.push(request.clone());
         state.decode_threads.push(std::thread::current().id());
         changed.notify_all();
+        if let Some(bound) = state.cancellation_park.take() {
+            drop(state);
+            let observed = wait_for_cancellation(request.cancellation(), bound);
+            let mut state = self.0.state();
+            state.observed_cancellation = observed;
+            state.completed += 1;
+            changed.notify_all();
+            let message = if observed {
+                "scripted decode observed its cancellation flag".to_owned()
+            } else {
+                format!("scripted decode waited out its {bound:?} cancellation bound")
+            };
+            return Err(TranscribeError::inference(std::io::Error::other(message)));
+        }
         if state.park == ParkState::Armed {
             state.park = ParkState::Parked;
             changed.notify_all();
@@ -279,6 +311,22 @@ impl Decoder for WorkerDecoder {
         state.completed += 1;
         changed.notify_all();
         outcome
+    }
+}
+
+fn wait_for_cancellation(flag: Option<&Arc<AtomicBool>>, bound: Duration) -> bool {
+    const POLL: Duration = Duration::from_millis(1);
+
+    let deadline = Instant::now() + bound;
+    loop {
+        if flag.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        std::thread::sleep(remaining.min(POLL));
     }
 }
 

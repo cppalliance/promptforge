@@ -648,6 +648,46 @@ async fn four_items_finalize_in_reverse_order_without_crossing_ownership() {
 }
 
 #[tokio::test]
+async fn realtime_interim_and_final_decodes_carry_a_cancellation_flag() {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("provisional");
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text("authoritative");
+    let registry = RealtimeSessionRegistryFixture::default();
+    let mut session = registry
+        .register_with_scripted_engine(
+            ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
+        )
+        .expect("scripted session starts");
+    session
+        .append_base64(&encoded(&vec![16_384; 24_000]))
+        .expect("one second of speech appends");
+    session
+        .run_interim()
+        .await
+        .expect("the production interim decode completes");
+    let item_id = session.commit().expect("item commits").item_id().to_owned();
+    session
+        .finish_finalization(&item_id)
+        .await
+        .expect("the committed item finalizes");
+
+    let interim_requests = interim.requests();
+    let final_requests = final_decoder.requests();
+    assert_eq!(interim_requests.len(), 1, "one interim decode ran");
+    assert!(!final_requests.is_empty(), "the committed item decoded");
+    for request in interim_requests.iter().chain(&final_requests) {
+        let flag = request
+            .cancellation()
+            .expect("every Realtime decode carries the epoch's flag");
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "an open epoch's flag is unset"
+        );
+    }
+}
+
+#[tokio::test]
 async fn canceling_item_finish_keeps_finalization_owned_for_retry() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();

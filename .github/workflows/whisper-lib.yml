@@ -34,6 +34,8 @@ jobs:
         include:
           - platform: windows-x86_64-cuda
             runs-on: [self-hosted, windows, cuda]
+          - platform: windows-x86_64
+            runs-on: windows-2022
           - platform: macos-aarch64-metal
             runs-on: macos-latest
           - platform: macos-x86_64
@@ -65,6 +67,16 @@ jobs:
           -DBUILD_SHARED_LIBS=ON
           -DGGML_CUDA=ON
           -DGGML_NATIVE=OFF
+          -DWHISPER_BUILD_EXAMPLES=OFF
+          -DWHISPER_BUILD_TESTS=OFF
+
+      - name: Configure Windows CPU
+        if: matrix.platform == 'windows-x86_64'
+        run: >-
+          cmake -S whisper.cpp -B build -A x64
+          -DBUILD_SHARED_LIBS=ON
+          -DGGML_NATIVE=OFF
+          -DGGML_OPENMP=OFF
           -DWHISPER_BUILD_EXAMPLES=OFF
           -DWHISPER_BUILD_TESTS=OFF
 
@@ -117,28 +129,32 @@ jobs:
         run: cmake --install build --config Release --prefix stage
 
       - name: Package Windows runtime
-        if: matrix.platform == 'windows-x86_64-cuda'
+        if: startsWith(matrix.platform, 'windows-')
         shell: powershell
         run: |
           $archive = "whisper-$env:WHISPER_TAG-${{ matrix.platform }}.zip"
           New-Item -ItemType Directory -Path package, dist -Force | Out-Null
           Get-ChildItem stage -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName package -Force }
-          $cudaBin = if ($env:CUDA_PATH) {
-            Join-Path $env:CUDA_PATH "bin"
-          } else {
-            $compiler = Get-Content build\CMakeCache.txt |
-              Where-Object { $_ -like "CMAKE_CUDA_COMPILER:FILEPATH=*" } |
-              Select-Object -First 1
-            if (-not $compiler) { throw "CMake did not record its CUDA compiler" }
-            Split-Path ($compiler -split "=", 2)[1] -Parent
-          }
-          $cudaRoot = Split-Path $cudaBin -Parent
-          @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll") |
-            ForEach-Object {
-              Get-ChildItem $cudaRoot -Recurse -Filter $_ -File -ErrorAction SilentlyContinue |
-                ForEach-Object { Copy-Item $_.FullName package -Force }
+          if ("${{ matrix.platform }}" -eq "windows-x86_64-cuda") {
+            $cudaBin = if ($env:CUDA_PATH) {
+              Join-Path $env:CUDA_PATH "bin"
+            } else {
+              $compiler = Get-Content build\CMakeCache.txt |
+                Where-Object { $_ -like "CMAKE_CUDA_COMPILER:FILEPATH=*" } |
+                Select-Object -First 1
+              if (-not $compiler) { throw "CMake did not record its CUDA compiler" }
+              Split-Path ($compiler -split "=", 2)[1] -Parent
             }
+            $cudaRoot = Split-Path $cudaBin -Parent
+            foreach ($runtime in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+              Get-ChildItem $cudaRoot -Recurse -Filter $runtime -File -ErrorAction SilentlyContinue |
+                ForEach-Object { Copy-Item $_.FullName package -Force }
+              if (-not (Get-ChildItem package -Filter $runtime)) {
+                throw "$runtime missing from the runtime bundle"
+              }
+            }
+          }
           Copy-Item whisper.cpp\include\whisper.h package
           Copy-Item whisper.cpp\LICENSE package
           if (-not (Test-Path package\whisper.dll)) { throw "whisper.dll missing from install" }
@@ -152,7 +168,7 @@ jobs:
           "$hash  $archive" | Set-Content -NoNewline "dist\$archive.sha256"
 
       - name: Smoke-load Windows runtime
-        if: matrix.platform == 'windows-x86_64-cuda'
+        if: startsWith(matrix.platform, 'windows-')
         shell: powershell
         run: |
           $package = (Resolve-Path package).Path
@@ -169,7 +185,7 @@ jobs:
           "@ | python -
 
       - name: Package Unix runtime
-        if: matrix.platform != 'windows-x86_64-cuda'
+        if: ${{ !startsWith(matrix.platform, 'windows-') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -194,7 +210,7 @@ jobs:
           )
 
       - name: Smoke-load Unix runtime
-        if: matrix.platform != 'windows-x86_64-cuda'
+        if: ${{ !startsWith(matrix.platform, 'windows-') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -220,8 +236,146 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # The CUDA compile is slow on a GitHub-hosted runner, so only a release
+  # dispatch runs it.
+  build-linux-cuda:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      CUDA_HOME: /usr/local/cuda-12.8
+    steps:
+      - name: Check out whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_TAG }}
+          path: whisper.cpp
+
+      - name: Clean staging directories
+        run: |
+          cmake -E remove_directory stage
+          cmake -E remove_directory package
+          cmake -E remove_directory dist
+
+      - name: Install the CUDA 12.8 compiler, runtime, cuBLAS, and driver stubs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/cuda-keyring.deb" \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i "$RUNNER_TEMP/cuda-keyring.deb"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cuda-nvcc-12-8 cuda-cudart-dev-12-8 libcublas-dev-12-8 cuda-driver-dev-12-8
+          echo "$CUDA_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Linux CUDA
+        shell: bash
+        run: |
+          cmake -S whisper.cpp -B build \
+            -DBUILD_SHARED_LIBS=ON \
+            -DGGML_CUDA=ON \
+            -DGGML_NATIVE=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            '-DCMAKE_INSTALL_RPATH=$ORIGIN'
+
+      # A bare --parallel runs make -j with no limit, which starts every nvcc
+      # compile at once and can exhaust the runner's memory.
+      - name: Build and install
+        run: cmake --build build --config Release --parallel "$(nproc)"
+
+      - name: Install to staging
+        run: cmake --install build --config Release --prefix stage
+
+      # The loader finds each ggml library by its soname and the gateway opens
+      # libwhisper.so by path, so each library ships once, under that name.
+      - name: Package the CUDA runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="whisper-${WHISPER_TAG}-linux-x86_64-cuda.zip"
+          mkdir -p package dist
+          while IFS= read -r library; do
+            soname="$(objdump -p "$library" | awk '$1 == "SONAME" { print $2 }')"
+            cp "$library" "package/${soname:?$library declares no SONAME}"
+          done < <(find stage -type f -name 'libggml*.so*')
+          cp -L "$(find stage -name libwhisper.so)" package/libwhisper.so
+          for runtime in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+            cp -L "$CUDA_HOME/lib64/$runtime" package/
+          done
+          cp whisper.cpp/include/whisper.h whisper.cpp/LICENSE package/
+          (
+            cd package
+            zip -9 "../dist/$archive" ./*
+          )
+          (
+            cd dist
+            sha256sum "$archive" > "$archive.sha256"
+          )
+
+      # GitHub-hosted runners have no NVIDIA driver, so the toolkit's stub
+      # stands in for libcuda.so.1. Every driver call through the stub fails,
+      # which ggml logs and survives, and the CUDA backend still registers.
+      - name: Smoke-load the CUDA runtime against the driver stub
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$(pwd -P)/package"
+          driver="$(mktemp -d)"
+          ln -s "$CUDA_HOME/lib64/stubs/libcuda.so" "$driver/libcuda.so.1"
+          export LD_LIBRARY_PATH="$driver"
+          LIBRARY="$package/libwhisper.so" python3 - <<'PY'
+          import ctypes
+          import os
+          whisper = ctypes.CDLL(os.environ["LIBRARY"])
+          whisper.whisper_print_system_info.restype = ctypes.c_char_p
+          info = whisper.whisper_print_system_info().decode()
+          print(info)
+          if "CUDA : " not in info:
+              raise SystemExit("whisper_print_system_info() lists no CUDA backend; the CUDA build must list one")
+          PY
+          system=" linux-vdso.so.1 ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libmvec.so.1 libdl.so.2"
+          system+=" libpthread.so.0 librt.so.1 libresolv.so.2 libutil.so.1 libanl.so.1"
+          system+=" libstdc++.so.6 libgcc_s.so.1 libgomp.so.1 libcuda.so.1 "
+          declare -A unmet=()
+          lines=()
+          for library in "$package"/*.so*; do
+            while read -r name arrow path _; do
+              [[ "$arrow" == "=>" ]] || path="$name"
+              if [[ "$path" == not ]]; then
+                lines+=("${library##*/}: $name not found")
+              elif [[ "$path" != "$package/"* && "$system" != *" ${name##*/} "* ]]; then
+                lines+=("${library##*/}: $name => $path")
+              else
+                continue
+              fi
+              unmet["${name##*/}"]=1
+            done < <(ldd "$library")
+          done
+          if ((${#unmet[@]} > 0)); then
+            echo "Dependencies not found or resolved outside the package (${#unmet[@]} distinct):" \
+              "$(printf '%s\n' "${!unmet[@]}" | sort | paste -sd' ' -)." \
+              "Only glibc, libstdc++, libgcc_s, libgomp, and libcuda may come from the system. Per package library, ldd shows:" >&2
+            printf '  %s\n' "${lines[@]}" >&2
+            exit 1
+          fi
+          echo "ldd resolved every other library inside the package"
+
+      - name: Upload the platform archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-linux-x86_64-cuda-${{ env.WHISPER_TAG }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
   publish:
-    needs: build
+    needs: [build, build-linux-cuda]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
@@ -234,16 +388,70 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Assemble SHA256SUMS
-        working-directory: dist
-        run: sha256sum *.zip > SHA256SUMS
+      # Released gateways pin each archive's sha256 and a rebuilt archive
+      # differs byte for byte, so a republish adds only the archives the
+      # release lacks and replaces SHA256SUMS after they land. It refuses a
+      # release whose archives and SHA256SUMS disagree, as a failed upload
+      # leaves one. The script reads only GH_TOKEN, GITHUB_REPOSITORY,
+      # WHISPER_TAG, and dist/, so it runs unchanged outside Actions.
+      - name: Publish the release add-only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?is empty; set it to a token with contents: write on GITHUB_REPOSITORY}"
+          : "${GITHUB_REPOSITORY:?is empty; set it to the owner/name that holds the release}"
+          : "${WHISPER_TAG:?is empty; set it to the whisper.cpp tag the dist/ archives were built from}"
+          export GH_REPO="$GITHUB_REPOSITORY" LC_ALL=C
+          release="whisper-lib-$WHISPER_TAG"
+          shopt -s nullglob
+          archives=()
+          for path in dist/*.zip; do archives+=("${path#dist/}"); done
+          if ((${#archives[@]} == 0)); then
+            echo "dist/ holds no .zip archive; the publish needs at least one" >&2
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          sums="$work/SHA256SUMS"
 
-      - name: Publish the release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: whisper-lib-${{ env.WHISPER_TAG }}
-          name: whisper-lib-${{ env.WHISPER_TAG }}
-          make_latest: false
-          files: |
-            dist/*.zip
-            dist/SHA256SUMS
+          if ! held="$(gh release view "$release" --json assets --jq '.assets[].name' 2>"$work/view.err")"; then
+            if ! grep -qx 'release not found' "$work/view.err"; then
+              cat "$work/view.err" >&2
+              exit 1
+            fi
+            (cd dist && sha256sum "${archives[@]}") | tee "$sums"
+            gh release create "$release" --title "$release" --notes "" --latest=false \
+              "${archives[@]/#/dist/}" "$sums"
+            echo "published $release with ${#archives[@]} archives"
+            exit 0
+          fi
+
+          if grep -qx SHA256SUMS <<<"$held"; then
+            gh release download "$release" --pattern SHA256SUMS --dir "$work"
+          else
+            : >"$sums"
+          fi
+          on_release="$(awk '/\.zip$/' <<<"$held" | sort)"
+          listed="$(sed -E '/^$/d; s/^[0-9a-f]{64} [ *]//' "$sums" | sort)"
+          if [[ "$on_release" != "$listed" ]]; then
+            unlisted="$(comm -23 <(echo "$on_release") <(echo "$listed") | sed '/^$/d' | paste -sd' ' -)"
+            unheld="$(comm -13 <(echo "$on_release") <(echo "$listed") | sed '/^$/d' | paste -sd' ' -)"
+            echo "$release is inconsistent: its .zip assets and SHA256SUMS lines must name the same archives." \
+              "Assets without a line: [$unlisted]. Lines without an asset: [$unheld]." >&2
+            exit 1
+          fi
+          new=()
+          for name in "${archives[@]}"; do
+            grep -qxF "$name" <<<"$on_release" || new+=("$name")
+          done
+          if ((${#new[@]} == 0)); then
+            echo "$release already holds every archive in dist/; nothing uploaded"
+            exit 0
+          fi
+          [[ -z "$(tail -c1 "$sums")" ]] || echo >>"$sums"
+          (cd dist && sha256sum "${new[@]}") | tee -a "$sums"
+          gh release upload "$release" "${new[@]/#/dist/}"
+          gh release upload "$release" "$sums" --clobber
+          echo "added ${#new[@]} archives to $release"

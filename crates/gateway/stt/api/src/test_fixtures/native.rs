@@ -1,11 +1,23 @@
-//! Native fixture loading: re-exports the engine's `require_fixture` for
-//! downstream integration tests and adds this crate's model and audio
-//! loaders for its own ignored tests.
+//! Native fixture loading: re-exports the engine's `require_fixture` and
+//! names the fixture whisper build for downstream integration tests, and adds
+//! this crate's model and audio loaders for its own ignored tests.
 
 #[cfg(all(test, not(miri)))]
 use std::path::{Path, PathBuf};
 
 pub use gateway_stt_engine::test_fixtures::native::require_fixture;
+
+/// Returns the `[stt] whisper_backend` spelling native fixture configs write:
+/// `PROMPTFORGE_WHISPER_BACKEND` when set, otherwise `cpu`. The spelling is
+/// passed through unchecked, so an unknown value fails the fixture's config
+/// parse with the error that names the accepted values.
+#[must_use]
+pub fn fixture_whisper_backend() -> String {
+    std::env::var_os("PROMPTFORGE_WHISPER_BACKEND").map_or_else(
+        || "cpu".to_owned(),
+        |value| value.to_string_lossy().into_owned(),
+    )
+}
 
 #[cfg(all(test, not(miri)))]
 pub(crate) fn require_model() -> PathBuf {

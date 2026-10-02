@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use gateway_stt::SpeechService;
+use gateway_stt::test_fixtures::native::fixture_whisper_backend;
 use gateway_stt_engine::test_fixtures::native::require_fixture;
 use tower::ServiceExt as _;
 
@@ -76,6 +77,7 @@ fn fixture_service_with_models_on_dedicated_thread(
     let interim_source = interim_model.display().to_string().replace('\\', "/");
     let final_source = final_model.map(|path| path.display().to_string().replace('\\', "/"));
     let cache_path = cache.path().display().to_string().replace('\\', "/");
+    let whisper_backend = fixture_whisper_backend();
     let final_model = if let Some(source) = final_source {
         format!(
             "[[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {source:?}\nvram_gb = 1.0\n"
@@ -92,7 +94,7 @@ fn fixture_service_with_models_on_dedicated_thread(
         "config-version = 0\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          [local]\ncache_dir = {cache_path:?}\n\
-         [stt]\nwindow_seconds = 8\ninterval_ms = 400\n\
+         [stt]\nwindow_seconds = 8\ninterval_ms = 400\nwhisper_backend = {whisper_backend:?}\n\
          [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {interim_source:?}\nvram_gb = 1.0\n\
          {final_model}[[profile]]\nname = \"work\"\nmodels = {profile_models}\n"
     ))

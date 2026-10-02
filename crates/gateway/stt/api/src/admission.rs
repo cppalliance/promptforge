@@ -8,7 +8,7 @@ use tokio::sync::Notify;
 
 #[derive(Debug)]
 struct EpochState {
-    cancelled: AtomicBool,
+    cancelled: Arc<AtomicBool>,
     changed: Notify,
 }
 
@@ -23,7 +23,7 @@ impl SessionEpoch {
     fn new() -> Self {
         Self {
             state: Arc::new(EpochState {
-                cancelled: AtomicBool::new(false),
+                cancelled: Arc::new(AtomicBool::new(false)),
                 changed: Notify::new(),
             }),
         }
@@ -31,6 +31,11 @@ impl SessionEpoch {
 
     pub(crate) fn is_cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::Acquire)
+    }
+
+    /// The flag this epoch's cancellation sets, for decode requests to carry.
+    pub(crate) fn cancellation_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.state.cancelled)
     }
 
     pub(crate) async fn cancelled(&self) {
@@ -215,6 +220,7 @@ impl Drop for JobLease {
 mod tests {
     use super::AdmissionGate;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn miri_admission_counts_requests_and_jobs_without_reference_counts() {
@@ -234,10 +240,19 @@ mod tests {
         let gate = Arc::new(AdmissionGate::default());
         let request = gate.admit().expect("open gate admits");
         let epoch = request.epoch().clone();
+        let flag = epoch.cancellation_flag();
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "an open epoch's flag reads false"
+        );
 
         gate.shutdown();
 
         assert!(epoch.is_cancelled(), "shutdown cancels the session epoch");
+        assert!(
+            flag.load(Ordering::Acquire),
+            "a flag taken before shutdown reads true after it"
+        );
         assert!(!gate.is_open());
         assert!(gate.admit().is_none(), "a shut-down gate admits nothing");
         assert!(

@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
-use gateway_config::{Config, SttRole};
+use gateway_config::{Config, SttRole, WhisperBackend};
 use gateway_local::artifacts::ArtifactStore;
 use gateway_progress::Activity;
+use tokio_util::sync::CancellationToken;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 
@@ -36,9 +37,35 @@ struct ProvisionedModels {
     final_model: Option<(String, PathBuf)>,
 }
 
+/// Provisions the whisper library and the speech models; a fired `cancel`
+/// stops their downloads at the next chunk and fails the load as
+/// [`SpeechError::InitialLoadCancelled`].
 pub(crate) fn prepare(
     config: &Config,
     progress: Option<&Arc<Activity>>,
+    cancel: &CancellationToken,
+) -> Result<PreparedSpeech, SpeechError> {
+    prepare_impl(
+        config,
+        progress,
+        cancel,
+        ArtifactStore::provision_whisper_library_with_cancellation,
+    )
+}
+
+/// Body of [`prepare`] with the whisper library provision injectable, so a
+/// test can observe the backend `[stt]` and the load token it hands over
+/// without probing the machine's GPUs or downloading a runtime.
+fn prepare_impl(
+    config: &Config,
+    progress: Option<&Arc<Activity>>,
+    cancel: &CancellationToken,
+    provision_library: impl FnOnce(
+        &ArtifactStore,
+        WhisperBackend,
+        Option<&Activity>,
+        Option<&CancellationToken>,
+    ) -> Result<PathBuf, gateway_local::LocalError>,
 ) -> Result<PreparedSpeech, SpeechError> {
     if config.stt_models().is_empty() {
         return Ok(PreparedSpeech { generation: None });
@@ -60,14 +87,15 @@ pub(crate) fn prepare(
     if let Some(activity) = activity {
         activity.set_text("Provisioning whisper library");
     }
-    let library = store
-        .provision_whisper_library(activity)
-        .map_err(SpeechError::WhisperLibrary)?;
-    let models = provision_models(config, &store, activity)?;
+    // An absent `[stt]` section yields the defaults, whose backend is `auto`.
+    let capture = config.stt().cloned().unwrap_or_default();
+    let library = provision_library(&store, capture.whisper_backend(), activity, Some(cancel))
+        .map_err(|source| cancelled_or(source, SpeechError::WhisperLibrary))?;
+    tracing::info!(path = %library.display(), "provisioned whisper library");
+    let models = provision_models(config, &store, activity, cancel)?;
     let Some((interim_name, interim_model)) = models.interim else {
         return Err(SpeechError::MissingInterim);
     };
-    let capture = config.stt().cloned().unwrap_or_default();
     let (final_name, final_model) = models
         .final_model
         .map_or((None, None), |(name, path)| (Some(name), Some(path)));
@@ -94,14 +122,17 @@ fn provision_models(
     config: &Config,
     store: &ArtifactStore,
     activity: Option<&Activity>,
+    cancel: &CancellationToken,
 ) -> Result<ProvisionedModels, SpeechError> {
     let mut provisioned = ProvisionedModels::default();
     for model in config.stt_models() {
         let path = store
-            .ensure_model_with_progress(model.source(), model.sha256(), activity)
-            .map_err(|source| SpeechError::Artifact {
-                model: model.name().to_owned(),
-                source,
+            .ensure_model_with_cancellation(model.source(), model.sha256(), activity, Some(cancel))
+            .map_err(|source| {
+                cancelled_or(source, |source| SpeechError::Artifact {
+                    model: model.name().to_owned(),
+                    source,
+                })
             })?;
         match model.role() {
             SttRole::Interim => provisioned.interim = Some((model.name().to_owned(), path)),
@@ -114,6 +145,19 @@ fn provision_models(
         }
     }
     Ok(provisioned)
+}
+
+/// Maps a provision failure to the load's cancellation when the load token
+/// stopped it, and through `stage` otherwise.
+fn cancelled_or(
+    source: gateway_local::LocalError,
+    stage: impl FnOnce(gateway_local::LocalError) -> SpeechError,
+) -> SpeechError {
+    if matches!(source, gateway_local::LocalError::Cancelled) {
+        SpeechError::InitialLoadCancelled
+    } else {
+        stage(source)
+    }
 }
 
 /// A speech preparation, lifecycle, or request failure.
@@ -260,12 +304,15 @@ mod tests {
 
     use super::*;
 
-    fn selected(source: &str, sha256: Option<&str>) -> Config {
+    /// A selected profile whose one interim model is `source`. `sections`
+    /// holds whole top-level tables, such as `[local]` or `[stt]`.
+    fn selected(source: &str, sha256: Option<&str>, sections: &str) -> Config {
         let pin = sha256.map_or_else(String::new, |pin| format!("sha256 = \"{pin}\"\n"));
         let catalog = Config::from_toml_str(&format!(
             "config-version = 0\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
              [workshop]\n\
+             {sections}\
              [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\n\
              {pin}vram_gb = 1.0\n\
              [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n"
@@ -283,9 +330,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let model = dir.path().join("model.bin");
         std::fs::write(&model, b"model bytes").expect("fixture writes");
-        let config = selected(&model.display().to_string(), Some(&"0".repeat(64)));
+        let config = selected(&model.display().to_string(), Some(&"0".repeat(64)), "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
-        let error = provision_models(&config, &store, None).expect_err("bad pin must fail");
+        let error = provision_models(&config, &store, None, &CancellationToken::new())
+            .expect_err("bad pin must fail");
         assert!(matches!(error, SpeechError::Artifact { .. }));
     }
 
@@ -294,9 +342,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let model = dir.path().join("model.bin");
         std::fs::write(&model, b"model bytes").expect("fixture writes");
-        let config = selected(&model.display().to_string(), None);
+        let config = selected(&model.display().to_string(), None, "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
-        let provisioned = provision_models(&config, &store, None).expect("unpinned path works");
+        let provisioned = provision_models(&config, &store, None, &CancellationToken::new())
+            .expect("unpinned path works");
         assert_eq!(
             provisioned.interim.as_ref().map(|(_, path)| path),
             Some(&model)
@@ -312,12 +361,101 @@ mod tests {
         for byte in Sha256::digest(b"model bytes") {
             write!(&mut pin, "{byte:02x}").expect("writing to String is infallible");
         }
-        let config = selected(&model.display().to_string(), Some(&pin));
+        let config = selected(&model.display().to_string(), Some(&pin), "");
         let store = ArtifactStore::new(dir.path().join("cache")).expect("store builds");
-        let provisioned = provision_models(&config, &store, None).expect("matching pin works");
+        let provisioned = provision_models(&config, &store, None, &CancellationToken::new())
+            .expect("matching pin works");
         assert_eq!(
             provisioned.interim.as_ref().map(|(_, path)| path),
             Some(&model)
+        );
+    }
+
+    #[test]
+    fn prepare_passes_the_stt_whisper_backend_to_the_library_provision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"model bytes").expect("fixture writes");
+        let cache = dir.path().join("cache").display().to_string();
+        let library = dir.path().join("whisper-library");
+        for (stt, expected) in [
+            ("", WhisperBackend::Auto),
+            ("[stt]\nwhisper_backend = \"cpu\"\n", WhisperBackend::Cpu),
+            ("[stt]\nwhisper_backend = \"cuda\"\n", WhisperBackend::Cuda),
+        ] {
+            let sections = format!("[local]\ncache_dir = {cache:?}\n{stt}");
+            let config = selected(&model.display().to_string(), None, &sections);
+            let mut received = None;
+            let prepared = prepare_impl(
+                &config,
+                None,
+                &CancellationToken::new(),
+                |_store, backend, _activity, _token| {
+                    received = Some(backend);
+                    Ok(library.clone())
+                },
+            )
+            .expect("speech prepares");
+            assert_eq!(received, Some(expected), "{stt:?}");
+            let generation = prepared.generation.expect("a speech model prepares");
+            assert_eq!(generation.library, library, "{stt:?}");
+        }
+    }
+
+    #[test]
+    fn prepare_hands_the_load_token_to_the_library_provision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"model bytes").expect("fixture writes");
+        let cache = dir.path().join("cache").display().to_string();
+        let sections = format!("[local]\ncache_dir = {cache:?}\n");
+        let config = selected(&model.display().to_string(), None, &sections);
+        let cancel = CancellationToken::new();
+        let load_token = &cancel;
+        let mut handed = false;
+        let error = prepare_impl(
+            &config,
+            None,
+            load_token,
+            |_store, _backend, _activity, token| {
+                handed = token.is_some_and(|token| std::ptr::eq(token, load_token));
+                Err(gateway_local::LocalError::Cancelled)
+            },
+        )
+        .expect_err("a cancelled library provision fails the load");
+        assert!(handed, "the provision received the load's own token");
+        assert!(
+            matches!(error, SpeechError::InitialLoadCancelled),
+            "a cancelled provision is the load's cancellation: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_fired_token_stops_a_speech_model_download() {
+        // The port is bound and dropped, so a request would fail as a
+        // transport error; `InitialLoadCancelled` proves none was made.
+        let addr = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            listener.local_addr().expect("addr")
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = dir.path().join("cache").display().to_string();
+        let sections = format!("[local]\ncache_dir = {cache:?}\n");
+        let source = format!("https://{addr}/ggml-speech.bin");
+        let config = selected(&source, Some(&"0".repeat(64)), &sections);
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let library = dir.path().join("whisper-library");
+        let error = prepare_impl(
+            &config,
+            None,
+            &cancel,
+            |_store, _backend, _activity, _token| Ok(library.clone()),
+        )
+        .expect_err("a fired token stops the model download");
+        assert!(
+            matches!(error, SpeechError::InitialLoadCancelled),
+            "a cancelled model download is the load's cancellation: {error:?}"
         );
     }
 }

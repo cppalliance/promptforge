@@ -64,7 +64,8 @@ impl SpeechService {
     /// unavailable until process restart, and every later call is rejected.
     /// `progress`, when given, receives the provisioning and model-load
     /// stages as text; the backend keeps only a weak reference, so the
-    /// activity ends with the caller's guard.
+    /// activity ends with the caller's guard. Cancellation stops the whisper
+    /// library and speech model downloads at their next chunk.
     ///
     /// # Errors
     /// Returns a typed store, download, verification, configuration, backend,
@@ -89,6 +90,9 @@ impl SpeechService {
     }
 
     /// Stops admitting work and waits for the published runtime to unload.
+    ///
+    /// Closing admission sets the cancellation flag every admitted decode
+    /// carries, so a decoder that watches it can stop early.
     pub fn shutdown(&self) {
         self.state.shutdown();
     }

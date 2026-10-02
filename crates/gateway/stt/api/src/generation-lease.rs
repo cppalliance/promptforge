@@ -84,6 +84,7 @@ impl GenerationLease {
     pub(crate) async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
         let job = self.own_job().ok_or_else(generation_unavailable)?;
         let epoch = self.epoch().clone();
+        let request = request.with_cancellation(epoch.cancellation_flag());
         let (reply, result) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             if reply.is_closed() {
