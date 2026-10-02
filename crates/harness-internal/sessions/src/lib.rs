@@ -6,7 +6,8 @@
 //! ## Invariants
 //!
 //! - Family: Harness, private to `crates/harness-internal/`; may depend
-//!   on: `promptforge` and container siblings only.
+//!   on: `promptforge`, `harness-gateway-client`, and container siblings
+//!   only.
 //!   Never on a `workshop-*`, `gateway-*`, or `shared-*` crate, or a
 //!   private `promptforge-*` crate. Read `AGENTS.md` before adding an
 //!   import.
@@ -37,7 +38,10 @@ pub mod discovery;
 pub mod environment;
 pub mod input;
 pub mod lifecycle;
+mod performer;
 pub mod protocol;
 pub mod runtime;
 pub mod session;
 pub mod transition;
+
+pub use performer::{DeltaSink, GatewayChatPerformer};

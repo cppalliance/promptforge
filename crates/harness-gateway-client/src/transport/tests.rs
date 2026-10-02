@@ -1,8 +1,6 @@
 //! The gateway client against an axum mock gateway: environment loading,
 //! the bearer on the wire, the streamed round, and the bounds.
 
-use harness_runner::spawn::spawn_tagged;
-pub(crate) use harness_runner::test_support::mock_tag;
 use promptforge::model::CompletionOptions;
 use serde_json::Value;
 
@@ -17,7 +15,7 @@ mod streaming;
 pub(crate) async fn client_for(app: axum::Router) -> GatewayClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     GatewayClient::new(
@@ -94,7 +92,7 @@ async fn spawn_raw_gateway(status: axum::http::StatusCode, body: &'static str) -
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     format!("http://{addr}/v1")

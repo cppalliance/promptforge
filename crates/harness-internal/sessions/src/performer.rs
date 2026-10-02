@@ -7,13 +7,12 @@
 //! channel so a session can render them without a fragment ever reaching
 //! the Host's recorder.
 
+use harness_gateway_client::GatewayClient;
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, StreamDelta, ToolSchema,
 };
 use tokio::sync::mpsc;
-
-use crate::GatewayClient;
 
 /// Where a chat round's live deltas go: the send half of an unbounded
 /// channel the session drains.

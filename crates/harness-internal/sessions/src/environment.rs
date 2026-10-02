@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use harness_capabilities::{CapabilityRegistry, UserInput};
-use harness_models::{
+use harness_gateway_client::{
     CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
 };
 use harness_web::Web;

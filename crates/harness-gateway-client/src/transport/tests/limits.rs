@@ -174,7 +174,7 @@ async fn spawn_paced_gateway(pieces: Vec<(Duration, String)>, stall: bool) -> St
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         let Ok((mut sock, _)) = listener.accept().await else {
             return;
         };
@@ -283,7 +283,7 @@ async fn a_body_read_timeout_is_a_timeout_failure() {
     // stalls.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         if let Ok((mut sock, _)) = listener.accept().await {
             let mut buf = [0u8; 1024];
             let _ = sock.read(&mut buf).await;

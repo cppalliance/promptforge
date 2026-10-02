@@ -2,11 +2,11 @@
 
 use std::num::NonZeroU32;
 
-use harness_gateway_client::classify_http_failure;
 use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use serde::Deserialize;
 
 use crate::failure::{malformed, transport_failure};
+use crate::wire::classify::classify_http_failure;
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
 ///
@@ -164,8 +164,8 @@ async fn get_authed(
 /// # Examples
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), harness_models::CompletionError> {
-/// use harness_models::fetch_model_catalog;
+/// # async fn run() -> Result<(), harness_gateway_client::CompletionError> {
+/// use harness_gateway_client::fetch_model_catalog;
 ///
 /// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
 /// println!("gateway offers {} models", catalog.models().len());
@@ -228,15 +228,13 @@ pub async fn fetch_model_catalog(
 
 #[cfg(test)]
 mod tests {
-    use harness_runner::spawn::spawn_tagged;
-
     use super::*;
     use crate::CompletionErrorKind;
 
     async fn spawn_models(app: axum::Router) -> std::net::SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        spawn_tagged(crate::transport::tests::mock_tag(), async move {
+        tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         addr
@@ -403,7 +401,7 @@ mod tests {
         // as its `#[source]`, not display text.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        spawn_tagged(crate::transport::tests::mock_tag(), async move {
+        tokio::spawn(async move {
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
                 let _ = sock.read(&mut buf).await;

@@ -19,9 +19,10 @@ async-trait.workspace = true
 # registry rebuilt for each gateway generation, and the `InputBroker`
 # trait and error vocabulary the session's input broker implements.
 harness-capabilities.workspace = true
-# The gateway model client and the chat performer over it, rebuilt with
-# the capability registry when the gateway generation changes.
-harness-models.workspace = true
+# The gateway model client the chat performer runs rounds on, rebuilt
+# with the capability registry when the gateway generation changes, and
+# the catalog fetch.
+harness-gateway-client.workspace = true
 # The effect loop a session drives its runs through, run preparation,
 # the recorder seam a Host's recorder implements, and the instrumented
 # spawn wrapper.
@@ -46,8 +47,9 @@ tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The loopback mock gateway the mixed-session suite drives real model rounds
-# against, and the tag fixture its server is spawned under.
+# The loopback mock gateways the mixed-session, chat performer, and
+# end-to-end suites drive real model rounds against, and the tag fixture
+# their servers are spawned under.
 axum.workspace = true
 harness-runner = { workspace = true, features = ["test-support"] }
 # The discovery and session suites seed an agents directory on disk.

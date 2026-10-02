@@ -14,13 +14,14 @@
 use std::sync::Arc;
 
 use harness_capabilities::CapabilityRegistry;
-use harness_models::{GatewayChatPerformer, GatewayClient};
+use harness_gateway_client::GatewayClient;
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
 use harness_runner::recorder::{RunOutcome, RunRecorder};
 use promptforge::RunLimits;
 use promptforge::event::Event;
 
+use crate::GatewayChatPerformer;
 use crate::discovery::AgentSource;
 use crate::environment::{
     CatalogBinding, CurrentModelError, GatewayResources, HostSnapshot, current_model,

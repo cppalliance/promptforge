@@ -1,7 +1,6 @@
 //! Environment loading, the bearer on the wire, and the credential and
 //! endpoint guards.
 
-use harness_runner::spawn::spawn_tagged;
 use promptforge::model::Message;
 
 use super::*;
@@ -139,7 +138,7 @@ async fn spawn_auth_capturing_gateway() -> (
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
+    tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     (format!("http://{addr}/v1"), captured)

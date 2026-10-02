@@ -3,24 +3,24 @@
 //!
 //! The request body, the stream reassembly, and the read loop that applies
 //! the byte cap and measures the timing are the shared wire code in
-//! `harness-gateway-client`; this file owns only what touches the wire:
-//! sending, the per-receive timeout, the response as a chunk source, and
-//! the clock the read loop is handed.
+//! `wire`; this file owns only what touches the wire: sending, the
+//! per-receive timeout, the response as a chunk source, and the clock the
+//! read loop is handed.
 
 use std::fmt;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use harness_gateway_client::{
-    ChunkSource, build_request_body, classify_http_failure, escape_controls, read_body_capped,
-    read_completion_stream,
-};
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
 };
 
 use crate::config::{GatewayConfigError, GatewayEndpoint, SecretString};
 use crate::failure::{elapsed, transport_failure, unavailable};
+use crate::wire::classify::classify_http_failure;
+use crate::wire::read::{ChunkSource, read_body_capped, read_completion_stream};
+use crate::wire::request::build_request_body;
+use crate::wire::stream::escape_controls;
 
 /// A chat completions client bound to one gateway URL and, usually, the
 /// gateway's shared bearer key.
@@ -93,7 +93,7 @@ impl GatewayClient {
     ///
     /// ```no_run
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    /// use harness_models::{GatewayClient, GatewayEndpoint, SecretString};
+    /// use harness_gateway_client::{GatewayClient, GatewayEndpoint, SecretString};
     /// use promptforge::model::{CompletionOptions, Message};
     ///
     /// let client = GatewayClient::new(
@@ -132,12 +132,12 @@ impl GatewayClient {
     /// # Examples
     ///
     /// ```
-    /// use harness_models::{GatewayClient, GatewayEndpoint};
+    /// use harness_gateway_client::{GatewayClient, GatewayEndpoint};
     ///
     /// let endpoint = GatewayEndpoint::new("http://127.0.0.1:8081/v1")?;
     /// let client = GatewayClient::keyless(endpoint);
     /// let _ = client;
-    /// # Ok::<(), harness_models::GatewayConfigError>(())
+    /// # Ok::<(), harness_gateway_client::GatewayConfigError>(())
     /// ```
     #[must_use]
     pub fn keyless(endpoint: GatewayEndpoint) -> GatewayClient {
@@ -161,7 +161,7 @@ impl GatewayClient {
     ///
     /// ```
     /// # async fn run() {
-    /// use harness_models::{CompletionErrorKind, GatewayClient};
+    /// use harness_gateway_client::{CompletionErrorKind, GatewayClient};
     /// use promptforge::model::{CompletionOptions, Message};
     ///
     /// let client = GatewayClient::disabled();
@@ -206,7 +206,7 @@ impl GatewayClient {
     /// use std::num::NonZeroU64;
     /// use std::time::Duration;
     ///
-    /// use harness_models::GatewayClient;
+    /// use harness_gateway_client::GatewayClient;
     ///
     /// let cap = NonZeroU64::new(1024 * 1024).ok_or("cap is non-zero")?;
     /// let client = GatewayClient::disabled().with_request_limits(Duration::from_secs(30), cap);

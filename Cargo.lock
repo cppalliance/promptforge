@@ -2619,25 +2619,12 @@ dependencies = [
 name = "harness-gateway-client"
 version = "0.3.0"
 dependencies = [
- "promptforge",
- "serde",
- "serde_json",
- "workspace-hack",
-]
-
-[[package]]
-name = "harness-models"
-version = "0.3.0"
-dependencies = [
  "axum",
  "bytes",
- "harness-gateway-client",
- "harness-runner",
  "promptforge",
  "reqwest",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "url",
@@ -2669,7 +2656,7 @@ dependencies = [
  "async-trait",
  "axum",
  "harness-capabilities",
- "harness-models",
+ "harness-gateway-client",
  "harness-runner",
  "harness-web",
  "promptforge",

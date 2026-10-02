@@ -404,7 +404,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
 
 <step-4>
 
-### Step 4: Move the Gateway client into harness-gateway-client and delete harness-models
+### Step 4: Move the Gateway client into harness-gateway-client and delete harness-models [completed]
 
 - Component: harness-gateway-client
 - Placement: fourth, directly after step 3, so the component's steps stay together.
