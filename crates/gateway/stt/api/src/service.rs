@@ -90,6 +90,9 @@ impl SpeechService {
     }
 
     /// Stops admitting work and waits for the published runtime to unload.
+    ///
+    /// Closing admission sets the cancellation flag every admitted decode
+    /// carries, so a decoder that watches it can stop early.
     pub fn shutdown(&self) {
         self.state.shutdown();
     }

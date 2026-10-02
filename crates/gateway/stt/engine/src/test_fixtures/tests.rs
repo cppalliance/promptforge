@@ -1,5 +1,8 @@
 //! Tests for the scripted engine fixtures and their thread affinity.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::*;
 use crate::{DecodeRequest, EnginePolicy, SttEngine};
 
@@ -228,6 +231,61 @@ fn scripted_final_factory_error_reaches_the_constructor_and_cleans_up_interim() 
     assert!(interim.worker_dropped());
     assert_eq!(final_decoder.creation_thread(), None);
     assert!(!final_decoder.worker_dropped());
+}
+
+#[tokio::test]
+async fn a_decode_parked_until_cancelled_follows_its_request_flag() {
+    const LONG_BOUND: Duration = Duration::from_secs(10);
+    const SHORT_BOUND: Duration = Duration::from_millis(50);
+    const WAIT: Duration = Duration::from_secs(1);
+
+    let interim = ScriptedDecoder::new();
+    let engine = Arc::new(
+        SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
+            .expect("scripted worker starts"),
+    );
+    let flag = Arc::new(AtomicBool::new(false));
+    interim.park_next_until_cancelled(LONG_BOUND);
+    let decode = tokio::spawn({
+        let engine = Arc::clone(&engine);
+        let request = request(DecodeMode::Interim, vec![0.25], Vec::new(), "")
+            .with_cancellation(Arc::clone(&flag));
+        async move { engine.decode(request).await }
+    });
+    let observer = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || observer.wait_for_requests(1, WAIT))
+            .await
+            .expect("request waiter does not panic"),
+        "the decode enters the decoder"
+    );
+    assert!(
+        !decode.is_finished(),
+        "an unset flag keeps the decode parked"
+    );
+    flag.store(true, Ordering::Release);
+    tokio::time::timeout(WAIT, decode)
+        .await
+        .expect("the decode returns once its flag is set")
+        .expect("decode task joins")
+        .expect_err("a cancelled decode fails");
+    assert!(interim.observed_cancellation(), "the park saw its flag set");
+
+    interim.park_next_until_cancelled(SHORT_BOUND);
+    let started = Instant::now();
+    engine
+        .decode(request(DecodeMode::Interim, vec![0.25], Vec::new(), ""))
+        .await
+        .expect_err("a decode without a flag fails at its bound");
+    assert!(
+        started.elapsed() >= SHORT_BOUND,
+        "the park waits out its bound"
+    );
+    assert!(
+        !interim.observed_cancellation(),
+        "a request without a flag is never seen cancelled"
+    );
+    engine.shutdown().expect("worker joins");
 }
 
 #[test]
