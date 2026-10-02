@@ -6,8 +6,10 @@ use super::{NvidiaProbe, WHISPER_ASSETS, WhisperAsset};
 
 /// The whisper `auto` pick on a platform with both builds: an NVIDIA GPU
 /// gets the CUDA build when the platform's CUDA row sets no driver floor or
-/// the driver meets it, and anything else - including a failed probe or an
-/// unreadable driver version under a floor - gets the CPU build.
+/// the driver meets it, and the row lists no native compute capabilities or
+/// every probed GPU's is among them. Anything else - including a failed
+/// probe, an unreadable driver version under a floor, or any GPU without
+/// native code - gets the CPU build.
 pub(super) fn auto_whisper_backend(
     os: &str,
     arch: &str,
@@ -16,9 +18,17 @@ pub(super) fn auto_whisper_backend(
     let Some(probe) = gpus.filter(|probe| !probe.compute_caps.is_empty()) else {
         return WhisperBackend::Cpu;
     };
-    let floor =
-        whisper_row(os, arch, Some(WhisperBackend::Cuda)).and_then(|cuda| cuda.min_driver_major);
-    if floor.is_none_or(|floor| probe.driver_major.is_some_and(|major| major >= floor)) {
+    let cuda = whisper_row(os, arch, Some(WhisperBackend::Cuda));
+    let meets_floor = cuda
+        .and_then(|cuda| cuda.min_driver_major)
+        .is_none_or(|floor| probe.driver_major.is_some_and(|major| major >= floor));
+    // Every GPU counts, not only the first: whisper decodes on CUDA's device
+    // 0, and CUDA orders devices fastest first, which need not match
+    // `nvidia-smi`'s order.
+    let all_native = cuda
+        .and_then(|cuda| cuda.native_compute_caps)
+        .is_none_or(|native| probe.compute_caps.iter().all(|cap| native.contains(cap)));
+    if meets_floor && all_native {
         WhisperBackend::Cuda
     } else {
         WhisperBackend::Cpu

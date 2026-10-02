@@ -80,12 +80,17 @@ pub(super) struct ServerAsset<'a> {
 /// linux-aarch64 rows are each their platform's one build and carry `None`.
 /// `min_driver_major` is the lowest NVIDIA driver major version the build
 /// runs on, which only the `auto` pick consults; `None` sets no floor.
+/// `native_compute_caps` lists the GPU compute capabilities, as
+/// `(major, minor)`, the build carries native code for, which only the
+/// `auto` pick consults: every probed GPU must be in the list. `None` checks
+/// nothing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct WhisperAsset<'a> {
     pub(super) os: &'a str,
     arch: &'a str,
     pub(super) backend: Option<WhisperBackend>,
     pub(super) min_driver_major: Option<u64>,
+    pub(super) native_compute_caps: Option<&'a [(u64, u64)]>,
     pub(super) platform: &'a str,
     pub(super) archive: ArchiveRef<'a>,
     pub(super) library_name: &'a str,
@@ -248,7 +253,10 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
 /// `backend` (the `[stt] whisper_backend` setting) and `gpus` (what the
 /// NVIDIA probe reported, when a probe was needed and worked) are consulted
 /// only on Windows x86-64 and Linux x86-64, the two platforms with a
-/// choice; every other platform has exactly one row. On x86-64, under every
+/// choice; every other platform has exactly one row. There `auto` takes the
+/// CUDA row only when `gpus` names a GPU, the driver meets the row's
+/// `min_driver_major`, and every GPU's compute capability is in the row's
+/// `native_compute_caps` when it lists them. On x86-64, under every
 /// setting, the selected row needs every [`X86_BASELINE`] extension in
 /// `x86_extensions`, the ones the host CPU reports.
 ///

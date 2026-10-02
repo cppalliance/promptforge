@@ -86,6 +86,24 @@ fn no_gpu() -> NvidiaProbe {
     }
 }
 
+/// The `auto` pick on `os` x86-64 for GPUs at `compute_caps` on driver
+/// `driver_major`.
+fn auto_platform(os: &str, compute_caps: &[(u64, u64)], driver_major: u64) -> &'static str {
+    let probe = NvidiaProbe {
+        compute_caps: compute_caps.to_vec(),
+        driver_major: Some(driver_major),
+    };
+    whisper_asset(
+        os,
+        "x86_64",
+        WhisperBackend::Auto,
+        Some(&probe),
+        X86_BASELINE,
+    )
+    .expect("auto whisper asset")
+    .platform
+}
+
 /// Runs [`whisper_asset_with_probe`] on the full x86 baseline with a
 /// probe that reports `answer`, returning the pick and how many times the
 /// probe ran.
