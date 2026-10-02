@@ -446,7 +446,7 @@ Each step is one commit holding its code and its tests. Each step runs only its 
 
 <step-2>
 
-### Step 2: Named, typed service vocabulary
+### Step 2: Named, typed service vocabulary [completed]
 
 - Component: Host services
 - Depends on: step 1.

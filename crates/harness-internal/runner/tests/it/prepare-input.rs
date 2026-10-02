@@ -10,7 +10,7 @@ use super::*;
 
 use std::sync::Mutex;
 
-use harness_capabilities::{InputBroker, InputError, Service, UserInput, activate};
+use harness_capabilities::{INPUT_BROKER, InputBroker, InputError, UserInput, activate};
 use promptforge::Prompt;
 
 /// A prompt declaring the probe capability, with nothing to run.
@@ -65,7 +65,7 @@ impl Capability for Probe {
         self.saw_broker
             .lock()
             .unwrap()
-            .push(services.input.is_some());
+            .push(services.get(&INPUT_BROKER).is_some());
         Ok(Contribution::default())
     }
 }
@@ -193,7 +193,7 @@ async fn a_required_user_input_declaration_on_a_host_without_a_broker_is_refused
     assert_eq!(error.kind(), RunErrorKind::RequirementsUnmet);
     assert!(
         error.to_string().contains(
-            "- promptforge/user-input needs an input broker, and this host provides none"
+            "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
         ),
         "the notice names the capability and the missing service: {error}"
     );
@@ -218,7 +218,7 @@ async fn a_required_user_input_tool_slot_without_a_broker_is_refused_for_the_bro
     let notice = error.to_string();
     assert!(
         notice.contains(
-            "- promptforge/user-input needs an input broker, and this host provides none"
+            "- promptforge/user-input needs promptforge/input-broker, and this host provides none"
         ),
         "the notice names the capability and the missing service: {notice}"
     );
@@ -255,7 +255,7 @@ fn an_optional_user_input_declaration_without_a_broker_records_the_service_gap()
     assert_eq!(activation.service_gaps.len(), 1, "one gap is recorded");
     let gap = &activation.service_gaps[0];
     assert_eq!(gap.capability.to_string(), "promptforge/user-input");
-    assert_eq!(gap.service, Service::Input);
+    assert_eq!(gap.service, INPUT_BROKER.id());
 }
 
 #[tokio::test]

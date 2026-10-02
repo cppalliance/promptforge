@@ -329,8 +329,8 @@ pub async fn prepare_source(
     let env = Environment::new();
     let ctx = ctx.vfs(vfs);
     let mut run_services = RunServices::new(ctx.vfs_handle().clone(), ctx.cancel_handle());
-    if let Some(broker) = &input {
-        run_services = run_services.with_input(Arc::clone(broker));
+    if let Some(broker) = input {
+        run_services.insert_input_broker(broker);
     }
     let activation = activate(registry.as_deref(), &prompt, &run_services);
     let env = env.tools(activation.catalog).preludes(activation.preludes);

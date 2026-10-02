@@ -34,17 +34,17 @@ mod activation;
 mod capability;
 mod input;
 mod registry;
+mod service;
 mod tool;
 mod user_input;
 
 pub use activation::{Activation, ServiceGap, ToolTable, activate};
-pub use capability::{
-    Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices, Service,
-};
+pub use capability::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
 pub use input::{InputBroker, InputError};
 pub use registry::{CapabilityRegistry, RegistryError, RegistryErrorKind};
+pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
 pub use tool::Tool;
-pub use user_input::{USER_INPUT_ASK_TOOL, UserInput};
+pub use user_input::{INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
 
 /// The capability identity vocabulary, re-exported from the Engine's types
 /// so a provider names one crate for the whole contract.

@@ -22,9 +22,14 @@ use promptforge::capabilities::{CapabilityId, Prelude};
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use promptforge::{CapabilityConflict, MissingService, Requirements};
 
-use crate::capability::{Capability, Contribution, RunServices, Service};
+use crate::capability::{Capability, Contribution, RunServices};
 use crate::registry::CapabilityRegistry;
+use crate::service::ServiceId;
 use crate::tool::Tool;
+
+#[cfg(test)]
+#[path = "activation-tests.rs"]
+mod tests;
 
 /// The implementations behind a run's catalog, keyed by stable identity.
 ///
@@ -105,8 +110,8 @@ pub struct Activation {
 pub struct ServiceGap {
     /// The optional capability that activated without the service.
     pub capability: CapabilityId,
-    /// The service it needs and this Host does not provide.
-    pub service: Service,
+    /// The id of the service it needs and this Host does not provide.
+    pub service: ServiceId,
 }
 
 /// Resolves and activates the capabilities `prompt` declares against
@@ -121,13 +126,14 @@ pub struct ServiceGap {
 /// activates neither member and lands in [`Requirements::conflicts`]
 /// naming both. Each remaining capability's [`needs`](Capability::needs)
 /// are checked against [`RunServices::provides`] before any capability
-/// code runs: a required capability that needs a service `services` does
+/// code runs, so a provider of another type than the id names counts as
+/// missing: a required capability that needs a service `services` does
 /// not provide is not activated and lands in
-/// [`Requirements::missing_services`], once per missing service; an
-/// optional one activates anyway, and each missing service becomes a
-/// [`ServiceGap`] in [`Activation::service_gaps`] and a warning. Each
-/// remaining capability is activated with `services` (the run's VFS,
-/// cancellation handle, and input broker when the Host has one); an
+/// [`Requirements::missing_services`] under the service's id, once per
+/// missing service; an optional one activates anyway, and each missing
+/// service becomes a [`ServiceGap`] in [`Activation::service_gaps`] and a
+/// warning. Each remaining capability is activated with `services` (the
+/// run's VFS, cancellation handle, and the services it has); an
 /// activation failure is logged and the capability contributes nothing -
 /// and when the failed capability is required, it also lands in
 /// [`Requirements::missing_required`], since the run cannot have what the
@@ -182,22 +188,22 @@ pub fn activate(
         if is_conflicted {
             continue;
         }
-        let unprovided: Vec<Service> = capability
+        let unprovided: Vec<ServiceId> = capability
             .needs()
             .iter()
             .copied()
-            .filter(|service| !services.provides(*service))
+            .filter(|service| !services.provides(service))
             .collect();
         if !*optional && !unprovided.is_empty() {
             for service in unprovided {
                 tracing::warn!(
                     capability = %id,
-                    service = service.description(),
+                    %service,
                     "required capability needs a service this host does not provide; it does not activate"
                 );
                 requirements
                     .missing_services
-                    .push(MissingService::new(id.clone(), service.description()));
+                    .push(MissingService::new(id.clone(), service.to_string()));
             }
             continue;
         }
@@ -207,7 +213,7 @@ pub fn activate(
                 for service in unprovided {
                     tracing::warn!(
                         capability = %id,
-                        service = service.description(),
+                        %service,
                         "optional capability activated without a service it needs"
                     );
                     service_gaps.push(ServiceGap {

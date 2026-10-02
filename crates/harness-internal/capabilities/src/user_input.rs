@@ -27,7 +27,7 @@
 //! `input` in every section of the run. `input.ask()` calls the ask tool
 //! by its full id, so every ask reaches the Harness as an ordinary
 //! `ToolCall` effect that its tool performer runs. The ask tool waits
-//! on the run's [`InputBroker`] in [`RunServices::input`], the part of
+//! on the run's [`InputBroker`] under [`INPUT_BROKER`], the part of
 //! the Host that carries a question to a person. Each run gets a broker
 //! bound to the session that launched it, so the question reaches the
 //! right operator without naming the run or the section.
@@ -40,11 +40,11 @@
 //! # Answering with operator text
 //!
 //! When the Host has an operator, the Harness puts a broker in the run's
-//! services with [`RunServices::with_input`]. Each `input.ask()` waits on
-//! [`InputBroker::wait`], and the script receives the operator's text
-//! byte-exact with `available` set to `true`. Operator input is trusted,
-//! so the ask tool answers with [`ToolOutput::trusted`] and the text is
-//! never guard-wrapped.
+//! services with [`RunServices::insert_input_broker`]. Each
+//! `input.ask()` waits on [`InputBroker::wait`], and the script receives
+//! the operator's text byte-exact with `available` set to `true`.
+//! Operator input is trusted, so the ask tool answers with
+//! [`ToolOutput::trusted`] and the text is never guard-wrapped.
 //!
 //! ```
 //! use std::sync::Arc;
@@ -67,8 +67,8 @@
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new())
-//!     .with_input(Arc::new(Operator));
+//! let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+//! services.insert_input_broker(Arc::new(Operator));
 //! let contribution = UserInput::new().create(&services)?;
 //! let ask = &contribution.tools[0];
 //! assert_eq!(ask.id().to_string(), USER_INPUT_ASK_TOOL);
@@ -88,10 +88,10 @@
 //!
 //! - A required declaration is refused before the run starts. The
 //!   capability's [`needs`](Capability::needs) names
-//!   [`Service::Input`], so activation never calls
+//!   [`INPUT_BROKER`], so activation never calls
 //!   [`create`](Capability::create) and the refusal notice holds the line
-//!   "- promptforge/user-input needs an input broker, and this host
-//!   provides none".
+//!   "- promptforge/user-input needs promptforge/input-broker, and this
+//!   host provides none".
 //! - An optional declaration activates anyway, and the activation
 //!   records a [`ServiceGap`](crate::ServiceGap). `input.connected()`
 //!   returns `false`. Each `input.ask()` still issues the tool call, so
@@ -140,8 +140,9 @@ use std::sync::Arc;
 use promptforge::capabilities::CapabilityId;
 use promptforge::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 
-use crate::capability::{Capability, CapabilityError, Contribution, RunServices, Service};
+use crate::capability::{Capability, CapabilityError, Contribution, RunServices};
 use crate::input::{InputBroker, InputError};
+use crate::service::{ServiceId, ServiceKey};
 use crate::tool::Tool;
 
 #[cfg(test)]
@@ -152,24 +153,28 @@ mod tests;
 /// binds under an alias of its own to let its model ask the operator.
 pub const USER_INPUT_ASK_TOOL: &str = "promptforge/user-input/ask";
 
+/// The run's input broker, `promptforge/input-broker`: the service the
+/// ask tool waits on.
+pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("promptforge/input-broker");
+
 /// What the ask tool answers on a Host with nobody to ask.
 const FALLBACK: &str = "User input is unavailable in this host; continue without it.";
 
 /// The first-party `promptforge/user-input` capability.
 ///
-/// Needs [`Service::Input`]. Contributes the ask tool,
+/// Needs [`INPUT_BROKER`]. Contributes the ask tool,
 /// [`USER_INPUT_ASK_TOOL`], and a prelude defining `input.ask()` and
 /// `input.connected()`. The module page covers what a script receives.
 ///
 /// # Examples
 ///
 /// ```
-/// use harness_capabilities::{Capability, CapabilityRegistry, Service, UserInput};
+/// use harness_capabilities::{Capability, CapabilityRegistry, INPUT_BROKER, UserInput};
 ///
 /// let mut registry = CapabilityRegistry::new();
 /// registry.register(std::sync::Arc::new(UserInput::new()))?;
 /// assert_eq!(UserInput::new().id().to_string(), "promptforge/user-input");
-/// assert_eq!(UserInput::new().needs(), [Service::Input]);
+/// assert_eq!(UserInput::new().needs(), [INPUT_BROKER.id()]);
 /// # Ok::<(), harness_capabilities::RegistryError>(())
 /// ```
 #[derive(Debug, Clone)]
@@ -223,12 +228,13 @@ impl Capability for UserInput {
         "Ask the operator for their next message."
     }
 
-    fn needs(&self) -> &[Service] {
-        &[Service::Input]
+    fn needs(&self) -> &[ServiceId] {
+        const NEEDS: &[ServiceId] = &[INPUT_BROKER.id()];
+        NEEDS
     }
 
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
-        let broker = services.input.clone();
+        let broker = services.get(&INPUT_BROKER);
         let prelude = prelude(broker.is_some());
         Ok(Contribution {
             tools: vec![Arc::new(Ask {

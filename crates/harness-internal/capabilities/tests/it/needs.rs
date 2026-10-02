@@ -1,13 +1,13 @@
 //! Declared service needs at activation: a capability that needs the
-//! input service, declared required or optional, on a Host that has or
-//! lacks a broker.
+//! input broker, declared required or optional, on a Host that has or
+//! lacks one.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use harness_capabilities::{
     Activation, Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution,
-    InputBroker, InputError, RunServices, Service, activate,
+    INPUT_BROKER, InputBroker, InputError, RunServices, ServiceId, activate,
 };
 use promptforge::cancel::CancelHandle;
 use promptforge::vfs::VfsRef;
@@ -68,8 +68,9 @@ impl Capability for Asker {
         "A fixture capability that needs an input broker."
     }
 
-    fn needs(&self) -> &[Service] {
-        &[Service::Input]
+    fn needs(&self) -> &[ServiceId] {
+        const NEEDS: &[ServiceId] = &[INPUT_BROKER.id()];
+        NEEDS
     }
 
     fn create(&self, services: &RunServices) -> Result<Contribution, CapabilityError> {
@@ -110,7 +111,7 @@ fn activate_asker(source: &str, with_broker: bool) -> (Activation, usize) {
     let prompt = parse(source, "asker");
     let mut services = RunServices::new(VfsRef::default(), CancelHandle::new());
     if with_broker {
-        services = services.with_input(Arc::new(Silent));
+        services.insert_input_broker(Arc::new(Silent));
     }
     let activation = activate(Some(&registry), &prompt, &services);
     (activation, creates.load(Ordering::SeqCst))
@@ -141,7 +142,7 @@ fn a_required_capability_whose_service_is_missing_is_reported_without_calling_cr
     );
     assert_eq!(
         activation.requirements.missing_services,
-        [MissingService::new(asker_id(), "an input broker")]
+        [MissingService::new(asker_id(), "promptforge/input-broker")]
     );
     assert!(
         activation.requirements.missing_required.is_empty(),
@@ -162,14 +163,14 @@ fn an_optional_capability_whose_service_is_missing_activates_degraded_with_a_war
         );
         assert_eq!(activation.service_gaps.len(), 1);
         assert_eq!(activation.service_gaps[0].capability, asker_id());
-        assert_eq!(activation.service_gaps[0].service, Service::Input);
+        assert_eq!(activation.service_gaps[0].service, INPUT_BROKER.id());
     });
     assert!(
         logs.contains("WARN"),
         "the gap is logged as a warning: {logs}"
     );
     assert!(
-        logs.contains("acme/asker") && logs.contains("an input broker"),
+        logs.contains("acme/asker") && logs.contains("promptforge/input-broker"),
         "the warning names the capability and the service: {logs}"
     );
 }
@@ -187,7 +188,7 @@ fn the_run_path_refuses_a_required_capability_whose_service_is_missing() {
     assert_eq!(
         error.to_string(),
         "the environment cannot satisfy this prompt:\n\
-         - acme/asker needs an input broker, and this host provides none"
+         - acme/asker needs promptforge/input-broker, and this host provides none"
     );
     assert_eq!(creates.load(Ordering::SeqCst), 0);
 }

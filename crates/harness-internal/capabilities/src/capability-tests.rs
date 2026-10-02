@@ -5,8 +5,8 @@ use std::sync::Arc;
 use promptforge::cancel::CancelHandle;
 use promptforge::capabilities::CapabilityId;
 
-use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices, Service};
-use crate::{InputBroker, InputError};
+use super::{Capability, CapabilityError, CapabilityErrorKind, Contribution, RunServices};
+use crate::{INPUT_BROKER, InputBroker, InputError, ServiceKey};
 
 /// A minimal in-process capability: a static id, no contributed tools, and
 /// a `create` that refuses a cancelled run so tests can observe the
@@ -62,11 +62,6 @@ fn a_capability_declares_no_conflicts_by_default() {
 fn a_capability_needs_no_host_service_by_default() {
     let capability = StubCapability::web();
     assert!(capability.needs().is_empty());
-}
-
-#[test]
-fn the_input_service_is_named_for_a_model_reader() {
-    assert_eq!(Service::Input.description(), "an input broker");
 }
 
 #[test]
@@ -134,35 +129,60 @@ impl InputBroker for Scripted {
 }
 
 #[tokio::test]
-async fn new_services_have_no_input_broker_and_with_input_supplies_one() {
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+async fn new_services_have_no_input_broker_and_the_insert_supplies_one() {
+    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
     assert!(
-        services.input.is_none(),
+        services.get(&INPUT_BROKER).is_none(),
         "a host that supplies no broker leaves the run without one"
     );
     assert!(
-        format!("{services:?}").contains("input: false"),
-        "Debug says whether a broker is present: {services:?}"
+        !format!("{services:?}").contains("promptforge/input-broker"),
+        "Debug lists the provided service ids: {services:?}"
     );
 
-    let services = services.with_input(Arc::new(Scripted("typed")));
+    services.insert_input_broker(Arc::new(Scripted("typed")));
     let broker = services
-        .input
-        .as_ref()
-        .expect("with_input supplies the broker");
+        .get(&INPUT_BROKER)
+        .expect("the insert supplies the broker");
     assert_eq!(broker.wait().await.expect("the broker answers"), "typed");
     assert!(
-        format!("{services:?}").contains("input: true"),
-        "Debug says whether a broker is present: {services:?}"
+        format!("{services:?}").contains("promptforge/input-broker"),
+        "Debug lists the provided service ids: {services:?}"
     );
 }
 
 #[test]
 fn the_input_service_is_provided_exactly_when_a_broker_is_present() {
-    let services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
-    assert!(!services.provides(Service::Input));
-    let services = services.with_input(Arc::new(Scripted("typed")));
-    assert!(services.provides(Service::Input));
+    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    assert!(!services.provides(&INPUT_BROKER.id()));
+    services.insert_input_broker(Arc::new(Scripted("typed")));
+    assert!(services.provides(&INPUT_BROKER.id()));
+}
+
+#[tokio::test]
+async fn the_input_broker_insert_replaces_an_existing_provider() {
+    const SAME_LITERAL: ServiceKey<str> = ServiceKey::new("promptforge/input-broker");
+    let mut services = RunServices::new(promptforge::vfs::VfsRef::default(), CancelHandle::new());
+    services
+        .host
+        .provide(&SAME_LITERAL, Arc::from("the host's"))
+        .expect("the host's provider is accepted");
+    assert!(!services.provides(&INPUT_BROKER.id()));
+
+    services.insert_input_broker(Arc::new(Scripted("first")));
+    services.insert_input_broker(Arc::new(Scripted("second")));
+    assert!(
+        services.get(&SAME_LITERAL).is_none(),
+        "the host's provider under the same literal is replaced"
+    );
+    let broker = services
+        .get(&INPUT_BROKER)
+        .expect("the inserted broker is provided");
+    assert_eq!(
+        broker.wait().await.expect("the broker answers"),
+        "second",
+        "the latest insert wins"
+    );
 }
 
 #[test]

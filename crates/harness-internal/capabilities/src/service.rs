@@ -1,0 +1,280 @@
+//! Host services: typed objects the Host hands to the capabilities it
+//! installs, each under a named id.
+//!
+//! A capability names the services it needs as [`ServiceId`]s in
+//! [`Capability::needs`](crate::Capability::needs), and reads them at
+//! activation through a [`ServiceKey`], which binds an id literal to the
+//! provider's Rust type. The Host fills a [`HostServices`] map, and the
+//! Harness hands it to each run in [`RunServices`](crate::RunServices).
+//!
+//! An id literal is a two-segment `namespace/name` in the capability id
+//! grammar. [`HostServices::provide`] refuses one that does not parse.
+//!
+//! # Examples
+//!
+//! ```
+//! use std::sync::Arc;
+//!
+//! use harness_capabilities::{HostServices, ServiceKey};
+//!
+//! const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
+//!
+//! let mut services = HostServices::new();
+//! services.provide(&GREETING, Arc::from("hello"))?;
+//! assert_eq!(services.get(&GREETING).as_deref(), Some("hello"));
+//! assert!(services.provides(&GREETING.id()));
+//! # Ok::<(), harness_capabilities::ServiceError>(())
+//! ```
+
+use std::any::{Any, TypeId};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
+use std::sync::Arc;
+
+use promptforge::capabilities::{CapabilityId, CapabilityIdError};
+
+#[cfg(test)]
+#[path = "service-tests.rs"]
+mod tests;
+
+/// The name of a Host service and the type its provider supplies.
+///
+/// Ids compare, hash, and display by their literal alone, so two keys
+/// with one literal name one service. The type decides only whether a
+/// provider satisfies the id: see [`HostServices::provides`].
+#[derive(Clone, Copy)]
+pub struct ServiceId {
+    /// The `namespace/name` literal.
+    literal: &'static str,
+    /// The provider's type, as a function so the id builds in a `const`.
+    type_id: fn() -> TypeId,
+}
+
+impl ServiceId {
+    /// The provider type this id names.
+    fn provider_type(self) -> TypeId {
+        (self.type_id)()
+    }
+}
+
+impl PartialEq for ServiceId {
+    fn eq(&self, other: &ServiceId) -> bool {
+        self.literal == other.literal
+    }
+}
+
+impl Eq for ServiceId {}
+
+impl Hash for ServiceId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.literal.hash(state);
+    }
+}
+
+impl fmt::Debug for ServiceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ServiceId").field(&self.literal).finish()
+    }
+}
+
+impl fmt::Display for ServiceId {
+    /// The `namespace/name` literal.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.literal)
+    }
+}
+
+/// Binds one service id literal to the type `T` its provider supplies.
+///
+/// The crate that defines a service declares its key once, as a `const`,
+/// and both the Host that provides the service and the capability that
+/// reads it name that key.
+///
+/// # Examples
+///
+/// ```
+/// use harness_capabilities::{ServiceId, ServiceKey};
+///
+/// const GREETING: ServiceKey<str> = ServiceKey::new("acme/greeting");
+/// const NEEDS: &[ServiceId] = &[GREETING.id()];
+///
+/// assert_eq!(NEEDS[0].to_string(), "acme/greeting");
+/// ```
+pub struct ServiceKey<T: ?Sized + Send + Sync + 'static> {
+    id: ServiceId,
+    provider: PhantomData<fn() -> Arc<T>>,
+}
+
+impl<T: ?Sized + Send + Sync + 'static> ServiceKey<T> {
+    /// Builds the key for the service named `literal`. The literal is
+    /// checked when a provider is supplied under it.
+    #[must_use]
+    pub const fn new(literal: &'static str) -> ServiceKey<T> {
+        ServiceKey {
+            id: ServiceId {
+                literal,
+                type_id: TypeId::of::<T>,
+            },
+            provider: PhantomData,
+        }
+    }
+
+    /// Returns the id this key names.
+    #[must_use]
+    pub const fn id(&self) -> ServiceId {
+        self.id
+    }
+}
+
+impl<T: ?Sized + Send + Sync + 'static> Clone for ServiceKey<T> {
+    fn clone(&self) -> ServiceKey<T> {
+        *self
+    }
+}
+
+impl<T: ?Sized + Send + Sync + 'static> Copy for ServiceKey<T> {}
+
+impl<T: ?Sized + Send + Sync + 'static> fmt::Debug for ServiceKey<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ServiceKey").field(&self.id.literal).finish()
+    }
+}
+
+/// One provider in a [`HostServices`] map, with the type it was supplied
+/// as.
+#[derive(Clone)]
+struct Entry {
+    provider_type: TypeId,
+    /// An `Arc<T>` for the `T` in `provider_type`.
+    provider: Arc<dyn Any + Send + Sync>,
+}
+
+/// The services a Host provides: a map from id to provider that records
+/// each provider's type.
+///
+/// Cloning shares the providers.
+#[derive(Clone, Default)]
+pub struct HostServices {
+    entries: BTreeMap<&'static str, Entry>,
+}
+
+impl HostServices {
+    /// Builds an empty map.
+    #[must_use]
+    pub fn new() -> HostServices {
+        HostServices::default()
+    }
+
+    /// Provides `provider` under `key`'s id.
+    ///
+    /// # Errors
+    /// Returns [`ServiceError::InvalidId`] when the id literal is not a
+    /// two-segment `namespace/name` id, and [`ServiceError::DuplicateId`]
+    /// when a provider is already supplied under the literal, whatever its
+    /// type. The map is unchanged on either error.
+    pub fn provide<T: ?Sized + Send + Sync + 'static>(
+        &mut self,
+        key: &ServiceKey<T>,
+        provider: Arc<T>,
+    ) -> Result<(), ServiceError> {
+        let literal = key.id.literal;
+        if let Err(source) = CapabilityId::parse(literal) {
+            return Err(ServiceError::InvalidId {
+                id: literal,
+                source,
+            });
+        }
+        if self.entries.contains_key(literal) {
+            return Err(ServiceError::DuplicateId { id: literal });
+        }
+        self.insert(key, provider);
+        Ok(())
+    }
+
+    /// Puts `provider` under `key`'s id, replacing any provider already
+    /// there. The caller owns the literal's validity.
+    pub(crate) fn insert<T: ?Sized + Send + Sync + 'static>(
+        &mut self,
+        key: &ServiceKey<T>,
+        provider: Arc<T>,
+    ) {
+        self.entries.insert(
+            key.id.literal,
+            Entry {
+                provider_type: key.id.provider_type(),
+                provider: Arc::new(provider),
+            },
+        );
+    }
+
+    /// Returns the provider under `key`'s id, or `None` when there is none
+    /// or it was supplied as another type.
+    #[must_use]
+    pub fn get<T: ?Sized + Send + Sync + 'static>(&self, key: &ServiceKey<T>) -> Option<Arc<T>> {
+        self.entries
+            .get(key.id.literal)?
+            .provider
+            .downcast_ref::<Arc<T>>()
+            .cloned()
+    }
+
+    /// Returns whether a provider is under `id` and was supplied as the
+    /// type `id` names. A provider of another type does not count.
+    #[must_use]
+    pub fn provides(&self, id: &ServiceId) -> bool {
+        self.entries
+            .get(id.literal)
+            .is_some_and(|entry| entry.provider_type == id.provider_type())
+    }
+}
+
+impl fmt::Debug for HostServices {
+    /// Lists the provided ids, never the providers.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HostServices")
+            .field("services", &self.entries.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+/// Why [`HostServices::provide`] refused a provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ServiceError {
+    /// The id literal is not a two-segment `namespace/name` id.
+    InvalidId {
+        /// The refused literal.
+        id: &'static str,
+        /// Why it does not parse.
+        source: CapabilityIdError,
+    },
+    /// A provider is already supplied under the id.
+    DuplicateId {
+        /// The literal already provided.
+        id: &'static str,
+    },
+}
+
+impl fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ServiceError::InvalidId { id, .. } => {
+                write!(f, "service id {id} is not a namespace/name id")
+            }
+            ServiceError::DuplicateId { id } => {
+                write!(f, "a service with id {id} is already provided")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ServiceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ServiceError::InvalidId { source, .. } => Some(source),
+            ServiceError::DuplicateId { .. } => None,
+        }
+    }
+}

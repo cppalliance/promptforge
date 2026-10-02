@@ -4,11 +4,12 @@
 use std::sync::Arc;
 
 use promptforge::cancel::CancelHandle;
+use promptforge::capabilities::CapabilityId;
 use promptforge::tools::{OutputTrust, ToolErrorKind, ToolId};
 use serde_json::json;
 
-use super::{FALLBACK, USER_INPUT_ASK_TOOL, UserInput};
-use crate::{Capability, InputBroker, InputError, RunServices, Service, Tool};
+use super::{FALLBACK, INPUT_BROKER, USER_INPUT_ASK_TOOL, UserInput};
+use crate::{Capability, InputBroker, InputError, RunServices, Tool};
 
 /// A broker whose operator always types the same text.
 struct Scripted(&'static str);
@@ -51,7 +52,9 @@ fn headless() -> RunServices {
 
 /// Run services whose broker is `broker`.
 fn with_broker(broker: impl InputBroker + 'static) -> RunServices {
-    headless().with_input(Arc::new(broker))
+    let mut services = headless();
+    services.insert_input_broker(Arc::new(broker));
+    services
 }
 
 /// The one tool the capability contributes under `services`.
@@ -73,11 +76,22 @@ fn prelude(services: &RunServices) -> String {
 }
 
 #[test]
-fn the_capability_is_promptforge_user_input_and_needs_the_input_service() {
+fn the_capability_is_promptforge_user_input_and_needs_the_input_broker() {
     let capability = UserInput::new();
     assert_eq!(capability.id().to_string(), "promptforge/user-input");
-    assert_eq!(capability.needs(), [Service::Input]);
+    assert_eq!(capability.needs(), [INPUT_BROKER.id()]);
+    assert_eq!(
+        capability.needs()[0].to_string(),
+        "promptforge/input-broker"
+    );
     assert!(capability.conflicts().is_empty());
+}
+
+#[test]
+fn the_input_broker_literal_parses_as_a_capability_id() {
+    let literal = INPUT_BROKER.id().to_string();
+    assert_eq!(literal, "promptforge/input-broker");
+    CapabilityId::parse(&literal).expect("the input broker's literal is a namespace/name id");
 }
 
 #[test]
