@@ -4,7 +4,7 @@
 //! `subscribe_errors` as one `Interrupted` failure with the frame's wording.
 
 use harness_capabilities::USER_INPUT_ASK_TOOL;
-use harness_log::{RecordKind, RunOutcome};
+use harness_runner::recorder::{RecordKind, RunOutcome};
 use harness_sessions::input::WaitFrame;
 use harness_sessions::session::{FailureKind, SessionFailure};
 use harness_sessions::transition::{
@@ -12,12 +12,12 @@ use harness_sessions::transition::{
 };
 use tokio::sync::broadcast;
 
-use super::{PATIENCE, harness, launch, required_token, wait_for};
+use super::{PATIENCE, harness, launch, recorded_harness, required_token, wait_for};
 
 #[tokio::test]
 async fn closing_answers_outstanding_effects_dropped_before_closed() {
     let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
+    let (harness, recorder) = recorded_harness(dir.path());
     let session = launch(&harness).await;
     let mut waits = session.subscribe_waits();
     let token = required_token(&mut waits).await;
@@ -42,48 +42,42 @@ async fn closing_answers_outstanding_effects_dropped_before_closed() {
     let frame = waits.recv().await.expect("the cancelled frame arrives");
     assert_eq!(frame, WaitFrame::Cancelled { token });
 
-    // In the log: the wait's effect has exactly one answer, `Dropped`,
-    // and the run's row closed as cancelled - both before `Closed`.
-    let log = harness.log().await.unwrap();
+    // At the recorder: the wait's effect has exactly one answer,
+    // `Dropped`, and the run ended as cancelled - both before `Closed`.
     let runs = session.run_ids();
     assert_eq!(runs.len(), 1);
-    let log = log.lock().await;
-    let row = log.run(runs[0]).await.unwrap();
-    assert_eq!(row.outcome, Some(RunOutcome::Cancelled));
-    let records = log
-        .records(runs[0], harness_log::RecordFilter::default())
-        .await
-        .unwrap();
-    let effects: Vec<_> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Effect)
-        .collect();
+    assert_eq!(recorder.outcome(runs[0]), Some(RunOutcome::Cancelled));
+    let records = recorder.records(runs[0]);
+    let position = |wanted: RecordKind| {
+        records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| record.kind == wanted)
+            .collect::<Vec<_>>()
+    };
+    let effects = position(RecordKind::Effect);
     assert_eq!(effects.len(), 1, "one effect was out: the input wait");
     assert_eq!(
-        effects[0].record.payload["ToolCall"]["tool"],
+        effects[0].1.payload["ToolCall"]["tool"],
         serde_json::json!(USER_INPUT_ASK_TOOL),
         "the input wait is the ask tool's call: {}",
-        effects[0].record.payload
+        effects[0].1.payload
     );
-    let answers: Vec<_> = records
-        .iter()
-        .filter(|stored| stored.record.kind == RecordKind::Answer)
-        .collect();
+    let answers = position(RecordKind::Answer);
     assert_eq!(answers.len(), 1, "every effect has exactly one answer");
-    assert_eq!(answers[0].record.effect_id, effects[0].record.effect_id);
+    assert_eq!(answers[0].1.effect_id, effects[0].1.effect_id);
     assert_eq!(
-        answers[0].record.payload,
+        answers[0].1.payload,
         serde_json::json!("Dropped"),
         "the outstanding effect was answered Dropped: {}",
-        answers[0].record.payload
+        answers[0].1.payload
     );
     assert!(
-        answers[0].seq > effects[0].seq,
+        answers[0].0 > effects[0].0,
         "the answer follows the effect it drops"
     );
-    drop(log);
     assert!(
-        matches!(session.transcript(0).await, Ok(events) if !events.is_empty()),
+        !session.transcript(0).is_empty(),
         "the transcript stays readable after close"
     );
 }

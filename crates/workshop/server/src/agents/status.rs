@@ -46,7 +46,7 @@ async fn report(
             received = events.recv() => match received {
                 Ok(event) => on_event(&event, &push, &backoff),
                 // A lagged receiver missed at most a status transition the
-                // next event restates; the transcript itself is the log's.
+                // next event restates; the session's transcript still holds every event.
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             },
@@ -78,8 +78,8 @@ fn on_delta(delta: &Delta, push: &Push) {
 /// that releases the turn-dispatch Thinking push.
 fn on_event(event: &SessionEvent, push: &Push, backoff: &ReconnectBackoff) {
     let Ok(event) = serde_json::from_value::<Event>(event.event.clone()) else {
-        // A stored payload this build cannot read is the log's concern;
-        // the status bar has nothing to say about it.
+        // An event payload this build cannot read: the status bar has
+        // nothing to say about it.
         return;
     };
     if let Event::AssistantReply { .. } = event {

@@ -21,8 +21,10 @@ An agent never reaches the outside world by itself. When it needs outside work d
 Here is the smallest agent a Host can launch, placed in `desk`'s agents folder:
 
 ````
+use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig};
 use std::fs;
+use std::sync::Arc;
 
 // 1. Make desk's agents folder.
 let desk = std::env::temp_dir().join("desk-before-you-start");
@@ -47,11 +49,8 @@ let hello = concat!(
 );
 fs::write(agents.join("hello.md"), hello)?;
 
-// 3. Build a harness over the folder.
-let harness = Harness::new(HarnessConfig {
-    agents_path: agents,
-    state_dir: desk.join("state"),
-});
+// 3. Build a harness over the folder, recording runs in memory.
+let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
 
 // 4. The harness offers `hello` next to the built-in `chat`.
 assert_eq!(harness.discover(), ["chat", "hello"]);
@@ -60,7 +59,7 @@ Ok::<(), std::io::Error>(())
 
 1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the Harness reads by path.
 2. Step 2 writes `hello.md`. Its frontmatter holds the three keys every agent needs: `name`, `description`, and `promptforge: 0`. Then come one H1 title and one section whose Lua returns a fixed text. The source is built with `concat!` so that rustdoc keeps its `# Hello` line. The smallest agent needs no model, no tool, and no operator.
-3. Step 3 builds a Harness over the folder with [`Harness::new`] and a [`HarnessConfig`]. Building a Harness touches no folder, so this step cannot fail.
+3. Step 3 builds a Harness over the folder with [`Harness::new`], a [`HarnessConfig`], and a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory. Building a Harness touches no folder, so this step cannot fail. [Recording runs](record) shows how to bring your own recorder.
 4. Step 4 asserts that [`Harness::discover`] lists `chat` and `hello`, sorted. The file stem is the name a launch asks for, and it sits next to the built-in `chat`.
 
 # Launch an agent
@@ -71,6 +70,7 @@ Launching feels like [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spaw
 
 ````
 use harness::{display_chain, CatalogBinding, GatewayBinding, HostSnapshot, LaunchRequest, SessionState};
+# use harness::record::MemoryRecorder;
 # use harness::{Harness, HarnessConfig};
 # use std::error::Error;
 # use std::sync::Arc;
@@ -90,11 +90,8 @@ let greet = concat!(
 );
 std::fs::write(agents.join("greet.md"), greet)?;
 
-// 2. Build one harness, and share it behind an `Arc`.
-let harness = Arc::new(Harness::new(HarnessConfig {
-    agents_path: agents,
-    state_dir: desk.join("state"),
-}));
+// 2. Build one harness over a memory recorder, and share it behind an `Arc`.
+let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new())));
 
 // 3. Push the stub model server at generation 1, without `/v1`.
 let stub = "http://127.0.0.1:8080";
@@ -122,7 +119,7 @@ assert!(format!("{:?}", harness.gateway()).contains("<redacted>"));
 ````
 
 1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the Harness puts the `input:` file and looks for the `output:` file.
-2. Step 2 builds one [`Harness`] from a [`HarnessConfig`] and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches.
+2. Step 2 builds one [`Harness`] from a [`HarnessConfig`] and a recorder, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder.
 3. Step 3 pushes the stub model server with [`Harness::set_gateway`], as a [`GatewayBinding`]. Leave `/v1` off its `base_url`, because the Harness appends it. Give every new binding a higher `generation` than the last.
 4. Step 4 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array; the Harness takes the model's name from its `"id"` string.
 5. Step 5 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs the live stub, so the example never calls it.
@@ -136,7 +133,7 @@ What a gateway push does depends on its generation:
 
 The Harness checks the name before the gateway. A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. No gateway, or one whose URL does not parse or whose key is empty, fails with [`LaunchError::GatewayUnusable`].
 
-You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`.
+You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch.
 
 A missing or empty catalog raises no error: the session stays `Alive` and waits until a catalog with at least one model arrives.
 
@@ -148,7 +145,7 @@ Push the gateway and the catalog, launch by name, wait for `Closed`, then read t
 
 # Stream a reply
 
-You want the operator to watch a reply appear as the model writes it, not all at once when it finishes. While the model writes, the session sends small pieces of the reply, the deltas. When the reply is done, the session records one event holding the finished text. Every event a session has recorded, in order, is its [transcript](log). The pieces and the finished event carry the same reply number.
+You want the operator to watch a reply appear as the model writes it, not all at once when it finishes. While the model writes, the session sends small pieces of the reply, the deltas. When the reply is done, the session records one event holding the finished text. Every event a session has sent, in order, is its [transcript](record). The pieces and the finished event carry the same reply number.
 
 Each model round records up to three kinds of event that hold a reply number. A thinking event holds the model's finished reasoning, and replaces the reasoning pieces. The `assistant_reply` event holds the finished answer, and replaces the text pieces. A tool-call event lists the tools the reply asked to run.
 
@@ -156,15 +153,17 @@ Deltas feel like an [`mpsc`](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.
 
 ````
 use harness::DeltaKind;
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::collections::HashMap;
 # use std::error::Error;
 # use std::future::{poll_fn, Future};
 # use std::pin::pin;
+# use std::sync::Arc;
 # use std::task::Poll;
 # fn desk() -> Harness {
-#     let config = HarnessConfig { agents_path: "desk/agents".into(), state_dir: "desk/state".into() };
-#     let harness = Harness::new(config);
+#     let config = HarnessConfig { agents_path: "desk/agents".into() };
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -240,7 +239,7 @@ async fn stream() -> Result<(), Box<dyn Error>> {
 4. Step 4 stops at the `assistant_reply` event, and takes its `reply` number and its finished `text`. Only thinking, reply, and tool-call events carry a `reply` number, so a [`SessionEvent`] whose `reply` is `None` is something other than model text. You can route events without parsing every one.
 5. Step 5 removes the pieces collected under that number and asserts that they equal the finished text. The streamed preview and the finished reply agree, so `desk` can swap one for the other. Each piece carries the number of the event that replaces it, which is how `desk` knows which pieces to swap out.
 
-What happens when you subscribe after the session has recorded some events? Those events are still there: read them with [`Session::transcript`]. Deltas never enter it, so a late subscriber can rebuild every finished reply, but none of the pieces.
+What happens when you subscribe after the session has sent some events? Those events are still there: read them with [`Session::transcript`]. Deltas never enter it, so a late subscriber can rebuild every finished reply, but none of the pieces.
 
 You might expect deltas to be saved like events, so that a late subscriber can replay them. Instead, deltas are live only, and the finished event with the same `reply` number is the lasting copy.
 
@@ -260,11 +259,13 @@ Binding a tool is not the same as offering it: the agent's Lua offers the alias 
 
 ````
 use harness::{WaitError, WaitFrame};
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session};
 # use std::error::Error;
+# use std::sync::Arc;
 # fn desk() -> Harness {
-#     let config = HarnessConfig { agents_path: "desk/agents".into(), state_dir: "desk/state".into() };
-#     let harness = Harness::new(config);
+#     let config = HarnessConfig { agents_path: "desk/agents".into() };
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -350,11 +351,13 @@ Cancelling a turn feels like aborting a tokio task. Unlike an aborted task, the 
 
 ````
 use harness::{FailureKind, SessionFailure, SessionState};
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitError, WaitFrame};
 # use std::error::Error;
+# use std::sync::Arc;
 # fn desk() -> Harness {
-#     let config = HarnessConfig { agents_path: "desk/agents".into(), state_dir: "desk/state".into() };
-#     let harness = Harness::new(config);
+#     let config = HarnessConfig { agents_path: "desk/agents".into() };
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -432,11 +435,13 @@ A session id feels like a database key. Unlike a row, what it names keeps runnin
 
 ````
 use harness::SessionId;
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::error::Error;
+# use std::sync::Arc;
 # fn desk() -> Harness {
-#     let config = HarnessConfig { agents_path: "desk/agents".into(), state_dir: "desk/state".into() };
-#     let harness = Harness::new(config);
+#     let config = HarnessConfig { agents_path: "desk/agents".into() };
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()));
 #     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -473,7 +478,7 @@ async fn reattach() -> Result<(), Box<dyn Error>> {
     // 3. Subscribe first, then replay the history from one past the last shown index.
     let mut live = session.subscribe_events();
     let mut indexes: Vec<u64> = Vec::new();
-    for event in session.transcript(shown + 1).await? {
+    for event in session.transcript(shown + 1) {
         indexes.push(event.index);
     }
 
@@ -504,7 +509,7 @@ assert!(harness.session(&SessionId::new("never-issued")).is_none());
 
 1. Step 1 launches `chat` from the hidden `desk`, and the hidden lines answer its first question. The client keeps the `index` of one live event, saves the id from [`Session::id`] as text with [`SessionId::as_str`], and drops its receiver and its handle. Dropping the handle is a disconnect, not a close: the session keeps running, with its next question open.
 2. Step 2 rebuilds the id with [`SessionId::new`] and finds the same running session with [`Harness::session`]. A `None` would mean the session was closed, with nothing to rejoin, so `desk` would start a new one. The saved text is all a client needs to rejoin.
-3. Step 3 calls [`Session::subscribe_events`] before it reads [`Session::transcript`] from one past the last shown index. An event recorded between the two reads is caught live rather than lost. The other order, history first, would leave a gap.
+3. Step 3 calls [`Session::subscribe_events`] before it reads [`Session::transcript`] from one past the last shown index. An event sent between the two reads is caught live rather than lost. The other order, history first, would leave a gap.
 4. Step 4 re-announces the question asked while the client was away through `question`, which calls `subscribe_waits` and then `resend_waits`. It answers the question, and skips live events whose `index` the replay already gave. Open questions survive a disconnect, and the skip removes repeats.
 5. Step 5 asserts that the replayed and live indexes run one by one from one past the last shown index. `index` numbers every event from zero across every run of the session, restarts included, so one saved number is all the client state `desk` needs.
 6. Step 6 asserts that `Harness::session` finds nothing for an id the Harness never issued, just as it finds nothing once a session is closed. If you need to watch a close finish, keep a [`Session`] handle, because [`Harness::close`] removes the session at once, while it is still `Closing`. A lookup right after a close already returns `None`.
@@ -518,6 +523,7 @@ Keep the id, subscribe first, then replay and re-announce. Next, [The complete p
 Here is the whole `desk` Host, every line visible: your program owns the settings and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
 
 ````
+use harness::record::MemoryRecorder;
 use harness::{
     display_chain, CatalogBinding, DeltaKind, GatewayBinding, Harness, HarnessConfig,
     HostSnapshot, LaunchRequest, Session, SessionState, WaitError, WaitFrame,
@@ -533,12 +539,12 @@ const STUB: &str = "http://127.0.0.1:8080";
 // A task desk hands to its runtime, such as `tokio::spawn`.
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-// 1. desk owns every setting and pushes each one into the harness, each at generation 1.
+// 1. desk owns every setting, and its recorder, and pushes each setting into the harness at generation 1.
 fn build_harness() -> Arc<Harness> {
-    let harness = Arc::new(Harness::new(HarnessConfig {
-        agents_path: "desk/agents".into(),
-        state_dir: "desk/state".into(),
-    }));
+    let harness = Arc::new(Harness::new(
+        HarnessConfig { agents_path: "desk/agents".into() },
+        Arc::new(MemoryRecorder::new()),
+    ));
     harness.set_host(HostSnapshot {
         selected_model: Some("stub-model".into()),
         ..HostSnapshot::default()
@@ -649,7 +655,7 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
     drop(session);
     let session = harness.session(&id).ok_or("desk's session is gone")?;
     let replies = show_replies(&session);
-    let history = session.transcript(0).await?;
+    let history = session.transcript(0);
     assert!(history.iter().zip(0..).all(|(event, index)| event.index == index));
     spawn(replies);
     answer(&session, "Still there?").await?;
@@ -737,9 +743,9 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## Harness
 
-[`Harness`] runs every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, an unreadable agent source, or a run log that cannot open. Fix them in the order reported; the next launch retries the run log. [Launch an agent](#launch-an-agent) teaches this.
+[`Harness`] runs every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, or an unreadable agent source. Fix them in the order reported. [Launch an agent](#launch-an-agent) teaches this.
 
-- [`Harness::new`]: touches no filesystem; the run log is opened under `state_dir` on the first launch.
+- [`Harness::new`]: takes the config and an `Arc<dyn RunRecorder>`, and touches no filesystem. The Harness writes every run it makes to that recorder, and opens no file at launch. [Recording runs](record) teaches the recorder.
 - [`Harness::discover`]: the `.md` file stems in `agents_path` plus the built-in `chat`, sorted.
 - `launch`: returns a session already registered and running, with [`LaunchOptions::default()`](LaunchOptions::default), so each run works in a fresh memory store.
 - [`Harness::set_gateway`]: a push with the current generation does nothing, so [`Harness::gateway`] keeps returning the earlier URL and key.
@@ -747,10 +753,9 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## HarnessConfig
 
-[`HarnessConfig`] tells the Harness where the agents live and where to keep its state. Write it as a struct literal and pass it to [`Harness::new`]. Neither path is checked then, so a bad path shows up at launch, not at construction. A missing `state_dir` is created on the first launch. [Launch an agent](#launch-an-agent) teaches this.
+[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
 
 - `agents_path`: the folder whose `.md` files are the launchable agents; launching `name` reads `<agents_path>/<name>.md`.
-- `state_dir`: the folder the Harness keeps its run log under.
 
 ## HostSnapshot
 
@@ -770,7 +775,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 | `UnknownAgent` | The name is not a discovered agent; `name` holds what you asked for. Pick a name from [`Harness::discover`]. |
 | `GatewayUnusable` | No gateway is bound, or the bound one could not make a model client. Push a valid URL and a non-empty key under a higher generation. |
 | [`SessionState`](LaunchError::SessionState) | This variant shares its name with the [`SessionState`] enum but has nothing to do with it: the agent's source file could not be read. `source` holds the filesystem failure, also reachable through [`Error::source`](std::error::Error::source). |
-| `Log` | The run log could not be opened, which includes a state directory that cannot be created; it converts from [`LogError`](log::LogError). A launch returns it only then. Launch again, since a failed open is retried. |
+
 
 ## LaunchOptions
 
@@ -799,7 +804,7 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 
 ## Session
 
-A [`Session`] is the handle to one running agent. Every clone names the same session, and the session outlives your client's connection. [`Session::send_input`] returns [`WaitError::UnknownToken`] when no open wait holds the token; treat that as a normal race and call [`Session::resend_waits`]. [`Session::transcript`] returns the log's error when a run cannot be read or a stored event no longer parses. [Launch an agent](#launch-an-agent) teaches this.
+A [`Session`] is the handle to one running agent. Every clone names the same session, and the session outlives your client's connection. [`Session::send_input`] returns [`WaitError::UnknownToken`] when no open wait holds the token; treat that as a normal race and call [`Session::resend_waits`]. [`Session::transcript`] reads the session's events from memory, so it cannot fail. [Launch an agent](#launch-an-agent) teaches this.
 
 - Every `subscribe_` receiver sees only what is sent after it subscribes; subscribe to events before you read `transcript`.
 - `send_input`: delivers `text` byte-exact; when it fails, the turn it accepted is settled again, so you need no cleanup.
@@ -809,11 +814,11 @@ A [`Session`] is the handle to one running agent. Every clone names the same ses
 
 ## SessionEvent
 
-A [`SessionEvent`] is one durable entry of a session's event log. You get it live from [`Session::subscribe_events`], or replay it from [`Session::transcript`] after a reconnect. Live events and transcript reads stamp `reply` by the same rule, so you can merge the two by `reply` without special cases. [Stream a reply](#stream-a-reply) teaches this.
+A [`SessionEvent`] is one entry of a session's transcript. You get it live from [`Session::subscribe_events`], or replay it from [`Session::transcript`] after a reconnect. Live events and transcript reads stamp `reply` by the same rule, so you can merge the two by `reply` without special cases. [Stream a reply](#stream-a-reply) teaches this.
 
 - `index`: the entry's position in the whole transcript, from zero and continuing across relaunches; resume past the last one you saw.
 - `reply`: the reply number whose [`Delta`] pieces this event replaces; only thinking, reply, and tool-call events have one.
-- `event`: the logged event in its stored JSON shape.
+- `event`: the event in its JSON shape, the same value the recorder received.
 
 ## SessionFailure
 
@@ -858,6 +863,6 @@ A [`WaitFrame`] tells you that a session opened a question for the operator, or 
 # Where to go next
 
 - [`cancel`]: stop async work safely, at its next safe point, instead of dropping it mid-step.
-- [`log`]: read the saved history every session writes, and tell its failures apart.
+- [`record`]: record every run to a store of your own, and read a session's transcript.
 - [`vfs`]: give a session files of your own instead of the empty store each run starts with.
 

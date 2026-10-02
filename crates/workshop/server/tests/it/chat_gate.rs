@@ -6,8 +6,9 @@
 //! Every test launches the embedded `agents/chat.md`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships -
 //! a Markdown prompt on the unified runtime. A session's transcript sits
-//! in memory until the Harness's run log lands, so no gate here spans a
-//! server restart; reconnect within one process is the agents suite's.
+//! in the Harness's memory, and the Harness records each run through the
+//! Host's recorder, so no gate here spans a server restart; reconnect
+//! within one process is the agents suite's.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions only, not
 // the helpers they share; failing a test by panicking with the invariant

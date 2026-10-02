@@ -33,6 +33,7 @@ mod wire;
 use std::fmt;
 use std::sync::Arc;
 
+use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig, LaunchError, LaunchRequest, Session, SessionId};
 use workshop_registry::Registry;
 use workshop_support::{Config, ReconnectBackoff};
@@ -42,23 +43,22 @@ pub(crate) use bindings::forward as forward_bindings;
 use bindings::push_bindings;
 pub(crate) use state::{SessionsState, register, register_tasks};
 
-/// The directory under the server's state directory the Harness keeps
-/// its own state in: the run log every agent session is recorded in.
-const HARNESS_STATE_DIR: &str = "harness";
-
 /// The Harness every agent session runs in, built for `config` with the
 /// server's current state already pushed through its public API: the
 /// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
 /// each read through `registry` from the subsystems registered before it.
 /// The composition root registers the returned handle and the forwarder
 /// task ([`register_tasks`]) that keeps the bindings current from the
-/// buses once the server serves. Nothing touches the filesystem here: the
-/// run log opens under the state directory on the first launch.
+/// buses once the server serves. Nothing touches the filesystem here, and
+/// every run is recorded in memory: the server keeps no durable record of
+/// a run yet.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
-    let harness = Arc::new(Harness::new(HarnessConfig {
-        agents_path: config.agents.path.clone(),
-        state_dir: config.server.state_dir.join(HARNESS_STATE_DIR),
-    }));
+    let harness = Arc::new(Harness::new(
+        HarnessConfig {
+            agents_path: config.agents.path.clone(),
+        },
+        Arc::new(MemoryRecorder::new()),
+    ));
     push_bindings(registry, &harness);
     harness
 }
@@ -140,8 +140,7 @@ impl AgentSessions {
     /// # Errors
     /// Returns [`LaunchRefusal::Unavailable`] when no Harness is
     /// registered, and the Harness's own [`LaunchError`] otherwise: an
-    /// unknown agent, an unusable gateway, unreadable agent source, or a
-    /// run log that could not open.
+    /// unknown agent, an unusable gateway, or unreadable agent source.
     pub(crate) async fn launch(&self, name: &str) -> Result<Session, LaunchRefusal> {
         let harness = self.harness().ok_or(LaunchRefusal::Unavailable)?;
         push_bindings(&self.inner.registry, &harness);

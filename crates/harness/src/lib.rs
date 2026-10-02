@@ -33,13 +33,18 @@ pub mod cancel {
     pub use harness_runner::cancel::wait_cancelled;
 }
 
-pub mod log {
-    #![doc = include_str!("log.md")]
+pub mod record {
+    #![doc = include_str!("record.md")]
 
-    pub use harness_log::DatabaseSource;
-    pub use harness_log::JsonSource;
-    pub use harness_log::LogError;
-    pub use harness_log::RunId;
+    pub use harness_runner::recorder::MemoryRecorder;
+    pub use harness_runner::recorder::Record;
+    pub use harness_runner::recorder::RecordKind;
+    pub use harness_runner::recorder::RecorderError;
+    pub use harness_runner::recorder::RecorderFuture;
+    pub use harness_runner::recorder::RunId;
+    pub use harness_runner::recorder::RunMeta;
+    pub use harness_runner::recorder::RunOutcome;
+    pub use harness_runner::recorder::RunRecorder;
 }
 
 pub mod vfs {

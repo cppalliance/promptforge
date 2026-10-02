@@ -1,13 +1,15 @@
 //! The session runtime end to end on an in-process harness: a launch
-//! drives the program on the effect loop and records it in the run log; a
-//! reconnecting client's transcript read matches what the log holds and
-//! what a live subscriber saw; an operator's answer resumes the parked
-//! program and the run completes; a turn-cancel relaunches the program as
-//! a second run whose transcript indices continue; and a catalog whose
-//! models changed retires the run. The close path - draining outstanding
-//! effects and reporting the interrupt as one `Interrupted` failure -
-//! sits in the `close` child module, and the prompt's declared input and
-//! output files in the `files` child module.
+//! drives the program on the effect loop and records it through the
+//! Host's recorder; a reconnecting client's transcript read matches what
+//! the recorder holds and what a live subscriber saw; an operator's answer
+//! resumes the parked program and the run completes; a turn-cancel
+//! relaunches the program as a second run whose transcript indices
+//! continue; and a catalog whose models changed retires the run. The close
+//! path - draining outstanding effects and reporting the interrupt as one
+//! `Interrupted` failure - sits in the `close` child module, the prompt's
+//! declared input and output files in the `files` child module, and the
+//! recorder's own failures and the transcript of a failed run in the
+//! `record` child module.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use harness_capabilities::USER_INPUT_ASK_TOOL;
-use harness_log::RunOutcome;
+use harness_runner::recorder::{MemoryRecorder, RecordKind, RunOutcome, RunRecorder};
 use harness_sessions::environment::{CatalogBinding, GatewayBinding};
 use harness_sessions::input::{WaitError, WaitFrame};
 use harness_sessions::protocol::{LaunchRequest, SessionEvent, SessionId};
@@ -33,6 +35,9 @@ mod files;
 #[path = "session-infer.rs"]
 mod infer;
 
+#[path = "session-record.rs"]
+mod record;
+
 /// A prompt that parks on operator input and returns it.
 const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge: 0\n\
     capabilities:\n  - promptforge/user-input\n---\n\n\
@@ -48,16 +53,19 @@ fn idless_chat_model() -> serde_json::Value {
     serde_json::json!({ "kind": "chat" })
 }
 
-/// A Harness over a fresh agents directory holding `asks.md`, with a
-/// usable (never contacted) gateway and no catalog bound yet.
-fn unbound_harness(dir: &Path) -> Harness {
+/// A Harness over a fresh agents directory holding `asks.md`, recording
+/// through `recorder`, with a usable (never contacted) gateway and no
+/// catalog bound yet.
+fn unbound_harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join("asks.md"), ASKS).unwrap();
-    let harness = Harness::new(HarnessConfig {
-        agents_path: agents,
-        state_dir: dir.join("state"),
-    });
+    let harness = Harness::new(
+        HarnessConfig {
+            agents_path: agents,
+        },
+        recorder,
+    );
     harness.set_gateway(GatewayBinding {
         base_url: "http://127.0.0.1:9".to_owned(),
         key: "k".to_owned(),
@@ -66,14 +74,33 @@ fn unbound_harness(dir: &Path) -> Harness {
     harness
 }
 
-/// [`unbound_harness`] with a usable catalog bound at generation 1.
-fn harness(dir: &Path) -> Harness {
-    let harness = unbound_harness(dir);
+/// [`unbound_harness_over`] a fresh [`MemoryRecorder`].
+fn unbound_harness(dir: &Path) -> Harness {
+    unbound_harness_over(dir, Arc::new(MemoryRecorder::new()))
+}
+
+/// [`unbound_harness_over`] with a usable catalog bound at generation 1.
+fn harness_over(dir: &Path, recorder: Arc<dyn RunRecorder>) -> Harness {
+    let harness = unbound_harness_over(dir, recorder);
     harness.set_catalog(CatalogBinding {
         generation: 1,
         models: vec![idless_chat_model()],
     });
     harness
+}
+
+/// [`harness_over`] a fresh [`MemoryRecorder`], which the Harness alone
+/// holds.
+fn harness(dir: &Path) -> Harness {
+    harness_over(dir, Arc::new(MemoryRecorder::new()))
+}
+
+/// A Harness recording to a [`MemoryRecorder`] the test keeps, so it can
+/// read back what the sessions recorded.
+fn recorded_harness(dir: &Path) -> (Harness, Arc<MemoryRecorder>) {
+    let recorder = Arc::new(MemoryRecorder::new());
+    let shared = Arc::clone(&recorder);
+    (harness_over(dir, shared), recorder)
 }
 
 async fn launch(harness: &Harness) -> Session {
@@ -163,7 +190,7 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
         .expect_err("a path-shaped name is not a discovered agent");
     assert!(matches!(error, LaunchError::UnknownAgent { .. }), "{error}");
 
-    let unbound = Harness::new(harness.config().clone());
+    let unbound = Harness::new(harness.config().clone(), Arc::new(MemoryRecorder::new()));
     let error = unbound
         .launch(LaunchRequest {
             agent: "asks".to_owned(),
@@ -176,9 +203,9 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
 }
 
 #[tokio::test]
-async fn a_transcript_read_after_reconnect_matches_the_log_and_the_live_stream() {
+async fn a_transcript_read_after_reconnect_matches_the_recorder_and_the_live_stream() {
     let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
+    let (harness, recorder) = recorded_harness(dir.path());
     let session = launch(&harness).await;
     let mut live = session.subscribe_events();
     let mut waits = session.subscribe_waits();
@@ -193,29 +220,34 @@ async fn a_transcript_read_after_reconnect_matches_the_log_and_the_live_stream()
     let reattached = harness
         .session(&SessionId::new(session.id().as_str()))
         .expect("the session outlives the first handle");
-    let transcript = reattached.transcript(0).await.unwrap();
+    let transcript = reattached.transcript(0);
     assert_eq!(transcript, seen, "the replay matches the live stream");
 
-    // And it must be what the log holds, record for record.
-    let log = harness.log().await.unwrap();
+    // And it must be what the recorder holds, record for record.
     let runs = reattached.run_ids();
     assert_eq!(runs.len(), 1, "one run so far");
-    let records = log.lock().await.transcript(runs[0]).await.unwrap();
+    let stored: Vec<_> = recorder
+        .records(runs[0])
+        .into_iter()
+        .filter(|record| record.kind == RecordKind::Event)
+        .map(|record| record.payload)
+        .collect();
     assert_eq!(
-        records
-            .into_iter()
-            .map(|stored| stored.record.payload)
-            .collect::<Vec<_>>(),
+        stored,
         transcript
             .iter()
             .map(|event| event.event.clone())
             .collect::<Vec<_>>(),
-        "the transcript is the log's event records in order"
+        "the transcript is the recorder's event records in order"
     );
 
     // Resuming past a cursor skips what the client already has.
-    let tail = reattached.transcript(2).await.unwrap();
+    let tail = reattached.transcript(2);
     assert_eq!(tail, seen[2..].to_vec());
+    assert!(
+        reattached.transcript(seen.len() as u64).is_empty(),
+        "a cursor past the last event reads nothing"
+    );
 
     assert!(harness.close(session.id()));
     wait_for(&session, SessionState::Closed).await;
@@ -224,7 +256,7 @@ async fn a_transcript_read_after_reconnect_matches_the_log_and_the_live_stream()
 #[tokio::test]
 async fn an_answer_resumes_the_parked_wait_and_the_run_completes_with_it() {
     let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
+    let (harness, recorder) = recorded_harness(dir.path());
     let session = launch(&harness).await;
     let mut waits = session.subscribe_waits();
     let token = required_token(&mut waits).await;
@@ -260,26 +292,24 @@ async fn an_answer_resumes_the_parked_wait_and_the_run_completes_with_it() {
         harness.session(session.id()).is_none(),
         "a finished session leaves the harness"
     );
-    let log = harness.log().await.unwrap();
     let runs = session.run_ids();
     assert_eq!(runs.len(), 1, "no relaunch: the program returned");
-    let row = log.lock().await.run(runs[0]).await.unwrap();
     assert_eq!(
-        row.outcome,
+        recorder.outcome(runs[0]),
         Some(RunOutcome::Completed {
             final_text: "forty-two".to_owned()
         }),
         "the answer is the program's return value"
     );
     assert!(
-        matches!(&session.transcript(0).await, Ok(events) if events.iter().any(|event| {
+        session.transcript(0).iter().any(|event| {
             let field = |name: &str| event.event.get(name);
             field("kind").and_then(serde_json::Value::as_str) == Some("tool_result")
                 && field("alias").and_then(serde_json::Value::as_str) == Some(USER_INPUT_ASK_TOOL)
                 && field("tool_call_id").and_then(serde_json::Value::as_str) == Some("")
                 && field("content").and_then(serde_json::Value::as_str) == Some("forty-two")
                 && field("trusted").and_then(serde_json::Value::as_bool) == Some(true)
-        })),
+        }),
         "the answer is recorded in the transcript as the ask tool's trusted result"
     );
 }
@@ -287,7 +317,7 @@ async fn an_answer_resumes_the_parked_wait_and_the_run_completes_with_it() {
 #[tokio::test]
 async fn a_turn_cancel_relaunches_as_a_second_run_with_indices_continuing() {
     let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
+    let (harness, recorder) = recorded_harness(dir.path());
     let session = launch(&harness).await;
     let mut live = session.subscribe_events();
     let mut waits = session.subscribe_waits();
@@ -311,24 +341,29 @@ async fn a_turn_cancel_relaunches_as_a_second_run_with_indices_continuing() {
     assert_eq!(session.unresolved_waits(), vec![second_token]);
 
     let runs = session.run_ids();
-    assert_eq!(runs.len(), 2, "the relaunch is a second run in the log");
-    let log = harness.log().await.unwrap();
-    let first = log.lock().await.run(runs[0]).await.unwrap();
-    assert_eq!(first.outcome, Some(RunOutcome::Cancelled));
-    let second = log.lock().await.run(runs[1]).await.unwrap();
-    assert_eq!(second.outcome, None, "the second run is still parked");
+    assert_eq!(
+        runs.len(),
+        2,
+        "the relaunch is a second run at the recorder"
+    );
+    assert_eq!(recorder.outcome(runs[0]), Some(RunOutcome::Cancelled));
+    assert_eq!(
+        recorder.outcome(runs[1]),
+        None,
+        "the second run is still parked"
+    );
 
-    // Live indices continue across the relaunch, and the transcript read
-    // from both runs' records agrees with the live stream index for index.
+    // Live indices continue across the relaunch, and the transcript of
+    // both runs agrees with the live stream index for index.
     let second_run_events = drain_live(&mut live, first_run_events);
     assert!(
         !second_run_events.is_empty(),
         "the second run reported events past the first run's"
     );
     seen.extend(second_run_events);
-    let transcript = session.transcript(0).await.unwrap();
+    let transcript = session.transcript(0);
     assert_eq!(transcript, seen, "the replay spans both runs in order");
-    let tail = session.transcript(first_run_events).await.unwrap();
+    let tail = session.transcript(first_run_events);
     assert_eq!(
         tail.first().map(|event| event.index),
         Some(first_run_events),
@@ -342,7 +377,7 @@ async fn a_turn_cancel_relaunches_as_a_second_run_with_indices_continuing() {
 #[tokio::test]
 async fn a_catalog_with_different_models_retires_the_run() {
     let dir = tempfile::tempdir().unwrap();
-    let harness = harness(dir.path());
+    let (harness, recorder) = recorded_harness(dir.path());
     let session = launch(&harness).await;
     let mut waits = session.subscribe_waits();
     let first_token = required_token(&mut waits).await;
@@ -370,12 +405,10 @@ async fn a_catalog_with_different_models_retires_the_run() {
 
     let runs = session.run_ids();
     assert_eq!(runs.len(), 2, "the retirement relaunched the program");
-    let log = harness.log().await.unwrap();
-    let first = log.lock().await.run(runs[0]).await.unwrap();
     assert_eq!(
-        first.outcome,
+        recorder.outcome(runs[0]),
         Some(RunOutcome::Cancelled),
-        "the retired run closed its row as cancelled"
+        "the retired run ended as cancelled at the recorder"
     );
 
     assert!(harness.close(session.id()));

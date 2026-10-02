@@ -20,7 +20,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use harness_log::RunOutcome;
+use harness_runner::recorder::RunOutcome;
 use promptforge::model::StreamDelta;
 use tokio::sync::{mpsc, watch};
 

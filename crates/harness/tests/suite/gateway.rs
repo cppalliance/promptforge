@@ -1,14 +1,18 @@
 //! The gateway binding the client pushes through the public API.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use harness::record::MemoryRecorder;
 use harness::{GatewayBinding, Harness, HarnessConfig};
 
 fn harness() -> Harness {
-    Harness::new(HarnessConfig {
-        agents_path: PathBuf::from("agents"),
-        state_dir: PathBuf::from("state"),
-    })
+    Harness::new(
+        HarnessConfig {
+            agents_path: PathBuf::from("agents"),
+        },
+        Arc::new(MemoryRecorder::new()),
+    )
 }
 
 fn binding(generation: u64) -> GatewayBinding {

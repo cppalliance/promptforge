@@ -41,15 +41,7 @@ pub(crate) fn delta_frame(delta: Delta) -> Option<AgentDeltaFrame> {
 /// model-round content kinds, the reply stamp its deltas had. A `false`
 /// return means the client is gone.
 pub(crate) async fn drain_events(attached: &mut Attached, socket: &mut WebSocket) -> bool {
-    let transcript = match attached.session.transcript(attached.cursor).await {
-        Ok(transcript) => transcript,
-        Err(error) => {
-            // The run log refused the read; the next wakeup retries from
-            // the same cursor, so nothing is skipped.
-            tracing::warn!(session = %attached.session.id(), %error, "transcript read failed");
-            return true;
-        }
-    };
+    let transcript = attached.session.transcript(attached.cursor);
     for entry in &transcript {
         if !frame_entry(attached, entry, socket).await {
             return false;

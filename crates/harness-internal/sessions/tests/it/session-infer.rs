@@ -96,10 +96,12 @@ fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join(format!("{name}.md")), program).unwrap();
-    let harness = Harness::new(HarnessConfig {
-        agents_path: agents,
-        state_dir: dir.join("state"),
-    });
+    let harness = Harness::new(
+        HarnessConfig {
+            agents_path: agents,
+        },
+        Arc::new(MemoryRecorder::new()),
+    );
     harness.set_gateway(GatewayBinding {
         base_url: base_url.to_owned(),
         key: "k".to_owned(),
@@ -153,7 +155,7 @@ async fn a_mixed_infer_then_chat_session_numbers_each_reply_in_round_order() {
     // The program returned after the chat: the session ends on its own.
     wait_for(&session, SessionState::Closed).await;
 
-    let events = session.transcript(0).await.unwrap();
+    let events = session.transcript(0);
     let replies: Vec<(&str, Option<u64>)> = events
         .iter()
         .filter_map(|event| {
@@ -231,7 +233,7 @@ async fn a_tool_less_infer_reply_sits_between_the_completed_turn_and_the_chunk_s
     let session = launch_agent(&harness, "infers").await;
     wait_for(&session, SessionState::Closed).await;
 
-    let events = session.transcript(0).await.unwrap();
+    let events = session.transcript(0);
     let kinds: Vec<&str> = events
         .iter()
         .filter_map(|event| event.event.get("kind")?.as_str())
@@ -286,4 +288,46 @@ async fn a_tool_less_infer_reply_sits_between_the_completed_turn_and_the_chunk_s
         }),
         "a tool-less infer emits no chat-origin reply: {kinds:?}"
     );
+}
+
+#[tokio::test]
+async fn a_transcript_from_any_index_equals_the_live_stream_with_its_reply_stamps() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = mock_gateway().await;
+    let harness = mixed_harness(dir.path(), &base);
+    let session = launch_agent(&harness, "mixed").await;
+    let mut live = session.subscribe_events();
+    let mut waits = session.subscribe_waits();
+    let first = required_token(&mut waits).await;
+    session
+        .send_input(&first, "first".to_owned(), || {})
+        .unwrap();
+    let second = required_token(&mut waits).await;
+    session
+        .send_input(&second, "second".to_owned(), || {})
+        .unwrap();
+    wait_for(&session, SessionState::Closed).await;
+
+    let seen = drain_live(&mut live, 0);
+    assert_eq!(
+        seen.iter().filter(|event| event.reply.is_some()).count(),
+        2,
+        "the infer reply and the chat reply carry stamps live"
+    );
+    assert_eq!(
+        session.transcript(0),
+        seen,
+        "the transcript holds each entry as the live stream sent it"
+    );
+    let last = seen.len() as u64;
+    for from in [1, last / 2, last - 1, last, last + 5] {
+        assert_eq!(
+            session.transcript(from),
+            seen.iter()
+                .filter(|event| event.index >= from)
+                .cloned()
+                .collect::<Vec<_>>(),
+            "a read from {from} is the live stream's tail from there"
+        );
+    }
 }

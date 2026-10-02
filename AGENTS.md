@@ -7,7 +7,7 @@ Multi-crate Rust workspace for the Engine, the Harness that runs it, the Gateway
 Three words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
 
 - **Engine**: the `promptforge` crates, `crates/promptforge/` and everything under `crates/promptforge-internal/`; the Structure rules below call this product PromptForge. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for the Harness to answer it.
-- **Harness**: the `harness` crates, `crates/harness/` and everything under `crates/harness-internal/`. The Harness steps the Engine, performs every effect, returns each answer, and keeps the run log. Production code runs prompts only through the Harness. In Engine tests and examples, the code that steps the Engine plays the Harness's part and is called the Harness too.
+- **Harness**: the `harness` crates, `crates/harness/` and everything under `crates/harness-internal/`. The Harness steps the Engine, performs every effect, returns each answer, and records every run through the recorder the Host supplies. Production code runs prompts only through the Harness. In Engine tests and examples, the code that steps the Engine plays the Harness's part and is called the Harness too.
 - **Host**: an application that runs prompts through the Harness, such as Workshop or Papergate. The Host makes every policy decision. It runs prompts only through the Harness; it may also use the Engine's parser and types to read prompts and show events.
 
 ### Using the terms
@@ -85,7 +85,7 @@ Three words have exactly one meaning each, everywhere in this repository: code c
 - Long-running gateway work reports through `gateway-progress`, a private gateway family crate: a producer begins an activity with a text, replaces the text as work moves, and drops the guard when done. Consumers outside the family read only the `Progress` wire type from `gateway-api-types`.
 - Unsafe code stays in its explicitly owned boundary. Every unsafe block documents its safety invariants immediately before the block.
 - Comments explain a non-obvious constraint, ordering requirement, or workaround. Every platform or external-bug workaround cites its upstream issue URL in the explanatory comment.
-- JSON that reaches the run log or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite, and serde_json `preserve_order` is never enabled. Exact parsing (`float_roundtrip`) carries that guarantee; a value derived and then logged is additionally rounded to its meaningful precision at the source.
+- JSON that reaches a recorder or a replay comparison round-trips exactly - `to_value`, `to_string`, `from_str` yield an identical value, object keys stay canonical (sorted), numbers must be finite, and serde_json `preserve_order` is never enabled. Exact parsing (`float_roundtrip`) carries that guarantee; a value derived and then logged is additionally rounded to its meaningful precision at the source.
 
 ## Verification
 

@@ -487,7 +487,7 @@ This file has a shared library, two sections, and one child section. The `lua sh
 
 ## The prompt, the Host, and the Harness
 
-Three layers take part in every run. The Engine parses the prompt, steps the run, and emits an effect whenever the run needs something from outside, such as a model reply or a tool result. The Harness performs each effect, hands the answer back to the Engine, and keeps the run log. The Host is the application you run prompts in, such as Workshop: it launches runs, chooses policy such as the selected model and whether someone can answer `input.ask()`, and can cancel a run.
+Three layers take part in every run. The Engine parses the prompt, steps the run, and emits an effect whenever the run needs something from outside, such as a model reply or a tool result. The Harness performs each effect, hands the answer back to the Engine, and records the run through the Host's recorder. The Host is the application you run prompts in, such as Workshop: it launches runs, chooses policy such as the selected model and whether someone can answer `input.ask()`, and can cancel a run.
 
 Four optional frontmatter keys are the contract keys, the prompt's contract with the Harness and the Host:
 

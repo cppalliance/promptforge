@@ -17,7 +17,9 @@ A section is one `##` heading of the prompt with the prose and Lua under it, nam
 Here is the one prompt the first tour needs.
 
 ````
+# use harness::record::MemoryRecorder;
 # use harness::{Harness, HarnessConfig};
+# use std::sync::Arc;
 # let desk = std::env::temp_dir().join("desk-vfs-before-you-start");
 # let _ = std::fs::remove_dir_all(&desk);
 # let agents = desk.join("agents");
@@ -35,7 +37,7 @@ let summarize = concat!(
 std::fs::write(agents.join("summarize.md"), summarize)?;
 
 // 2. desk launches it by name, like any agent in its folder.
-# let harness = Harness::new(HarnessConfig { agents_path: agents, state_dir: desk.join("state") });
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
 assert_eq!(harness.discover(), ["chat", "summarize"]);
 # Ok::<(), std::io::Error>(())
 ````
@@ -54,8 +56,10 @@ A handle attaches each *backend*, the thing that holds files, at a path, and tha
 ````
 use harness::vfs::{Origin, VfsRef};
 use harness::{LaunchOptions, LaunchRequest, SessionState};
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot};
 # use std::error::Error;
+# use std::sync::Arc;
 # let desk = std::env::temp_dir().join("desk-give-a-session-your-own-files");
 # let _ = std::fs::remove_dir_all(&desk);
 # let agents = desk.join("agents");
@@ -70,7 +74,7 @@ use harness::{LaunchOptions, LaunchRequest, SessionState};
 #     "```\n",
 # );
 # std::fs::write(agents.join("summarize.md"), source)?;
-# let harness = Harness::new(HarnessConfig { agents_path: agents, state_dir: desk.join("state") });
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
 # harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 # harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
@@ -103,7 +107,7 @@ async fn summarize(harness: &Harness, options: LaunchOptions, kept: &VfsRef) -> 
 ````
 
 1. Step 1 builds [`VfsRef::default()`](VfsRef::default), a memory backend mounted at `/` and declared as the store, and clones it. Clones share the same files, so `kept` is how `desk` reaches them after the session takes the other.
-2. Step 2 calls `acquire_store` with an [`Origin`], a label for who is asking, and gets an `Access`: a store view that takes the prompt's own paths and reports errors in those names. Seed each input at exactly the declared path, because paths are case-sensitive and never rewritten, so `Notes.md` and `notes.md` are two files. Then drop the view. An access holds a *claim*, the store's record that it touched a file, on each such file until it drops. A claim clashes with the run's when both touch the same file, at least one writes, and both accesses are still alive. When claims clash, the access that touches the file second fails and never reaches it. A seed view still alive at launch makes the Harness's own check or write of `notes.md` come second, so the run fails before it starts with *run error kind* `Input`. A run error kind is the failure class the Harness records in the run log's row for an ended run. Your own call that comes second returns [`VfsError::Conflict`], as the next tour shows.
+2. Step 2 calls `acquire_store` with an [`Origin`], a label for who is asking, and gets an `Access`: a store view that takes the prompt's own paths and reports errors in those names. Seed each input at exactly the declared path, because paths are case-sensitive and never rewritten, so `Notes.md` and `notes.md` are two files. Then drop the view. An access holds a *claim*, the store's record that it touched a file, on each such file until it drops. A claim clashes with the run's when both touch the same file, at least one writes, and both accesses are still alive. When claims clash, the access that touches the file second fails and never reaches it. A seed view still alive at launch makes the Harness's own check or write of `notes.md` come second, so the run fails before it starts with *run error kind* `Input`. A run error kind is the failure class the Harness hands the recorder when it ends a failed run. Your own call that comes second returns [`VfsError::Conflict`], as the next tour shows.
 3. Step 3 moves the other clone into the `vfs` field of [`LaunchOptions`](crate::LaunchOptions). With `vfs: None`, the default, each run gets a fresh memory store at `/` that your program never holds. You cannot write files into it yourself, but `input_text: Some` still places the declared input file, and you read back only through [`Session::output_text`](crate::Session::output_text).
 4. Step 4 defines `summarize`, which launches with [`Harness::launch_with`](crate::Harness::launch_with) and `input_text: None`, then waits for [`SessionState::Closed`](crate::SessionState::Closed). The doc test never calls `summarize`, because it needs the server.
 5. Step 5 reads `summary.md` through a fresh view and expects the echo, `You said: Ship on Friday.` Collect only after `Closed`, because until the run ends the agent may rewrite that file, and its claims on it last as long.
@@ -137,6 +141,7 @@ Each operation passes through its `Access` in order: the policy, then the claims
 use harness::vfs::{Origin, VfsError, VfsRef};
 use promptforge::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
 use std::sync::{Arc, Mutex};
+# use harness::record::MemoryRecorder;
 # use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot};
 # use harness::{LaunchOptions, LaunchRequest, Session, SessionState, WaitFrame};
 # use std::error::Error;
@@ -156,7 +161,7 @@ use std::sync::{Arc, Mutex};
 #     "```\n",
 # );
 # std::fs::write(agents.join("review.md"), source)?;
-# let harness = Harness::new(HarnessConfig { agents_path: agents, state_dir: desk.join("state") });
+# let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()));
 # harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
 # harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 # harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });

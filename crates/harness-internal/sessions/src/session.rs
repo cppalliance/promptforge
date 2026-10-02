@@ -2,47 +2,52 @@
 //! any client connection, and the sink each run of the session reports
 //! through.
 //!
-//! A session owns one running agent. Its transcript is the run log: every
-//! event of every run the session has made, in log order, numbered from
-//! zero across relaunches; a live subscriber receives each event as it is
-//! recorded and a reconnecting client reads [`Session::transcript`] past
-//! its last seen index. Deltas are sent on a separate broadcast, stamped
-//! with the reply id of the event that will supersede them, and never enter
-//! the log. The session's unresolved input waits, its delta and wait
-//! channels, and its lifecycle survive a client's disconnect; the
-//! supervisor (`session::supervisor`) relaunches the program over the
-//! retained transcript after a turn-cancel and ends the session when the
-//! program returns or fails.
+//! A session owns one running agent. Its transcript is every event of
+//! every run the session has made, in the order the session observed
+//! them, numbered from zero across relaunches and held in the session's
+//! memory (`session::transcript`). A live subscriber receives each event
+//! as the session observes it, and a reconnecting client reads
+//! [`Session::transcript`] past its last seen index. Each run is also
+//! written to the Host's recorder as it runs; the session never reads it
+//! back. Deltas are sent on a separate broadcast, stamped with the reply id
+//! of the event that will supersede them, and never enter the transcript.
+//! The session's unresolved input waits, its delta and wait channels, and
+//! its lifecycle survive a client's disconnect; the supervisor
+//! (`session::supervisor`) relaunches the program over the retained
+//! transcript after a turn-cancel and ends the session when the program
+//! returns or fails.
 //!
 //! Reply ids coalesce deltas: every live delta is stamped with the id of
-//! the durable event that will supersede it. The id is the count of
-//! settled model rounds - the core's sink advances it as the reply or
-//! tool-call event lands, before the program resumes - and the transcript
-//! read derives the same count from the event sequence through the one
-//! rule [`reply_stamp`], so live and replayed stamps agree.
+//! the durable event that will supersede it, through the one rule
+//! [`reply_stamp`]. The core appends each event to the transcript with its
+//! stamp before it broadcasts, so live and replayed stamps are the same
+//! values.
 
 pub(crate) mod files;
 pub(crate) mod run;
 pub(crate) mod supervisor;
 
+#[path = "session-transcript.rs"]
+mod transcript;
+
 pub use files::OutputError;
+pub use transcript::reply_stamp;
 
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use harness_log::{LogError, RunId as LogRunId};
+use harness_runner::recorder::{RunId as RecordedRun, RunRecorder};
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use self::files::SessionFiles;
+use self::transcript::Transcript;
 use crate::discovery::AgentSource;
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};
 use crate::lifecycle::RunLifecycle;
 use crate::protocol::{Delta, DeltaKind, SessionEvent, SessionId};
-use crate::runtime::SharedLog;
 use crate::transition::{RunId, SessionState};
 
 /// Capacity of a session's event broadcast. The broadcast is the wakeup;
@@ -233,40 +238,21 @@ impl Session {
         self.core.lifecycle.close();
     }
 
-    /// The runs the session has made, in launch order, as the log knows
-    /// them.
+    /// The runs the session has made, in launch order, as the Host's
+    /// recorder issued their ids.
     #[must_use]
-    pub fn run_ids(&self) -> Vec<LogRunId> {
+    pub fn run_ids(&self) -> Vec<RecordedRun> {
         self.core.run_ids()
     }
 
     /// The session's transcript from index `from` on: every event of
-    /// every run, in log order, read from the run log. Replaces the
-    /// in-memory log for a reconnecting client and a transcript view.
-    ///
-    /// # Errors
-    /// Returns the log's error when a run cannot be read or a stored
-    /// payload no longer parses as an event.
-    pub async fn transcript(&self, from: u64) -> Result<Vec<SessionEvent>, LogError> {
-        let mut index = 0u64;
-        let mut rounds_seen = 0u64;
-        let mut transcript = Vec::new();
-        for run in self.core.run_ids() {
-            let records = self.core.log.lock().await.transcript(run).await?;
-            for stored in records {
-                let event: Event = serde_json::from_value(stored.record.payload.clone())?;
-                let reply = reply_stamp(&event, &mut rounds_seen);
-                if index >= from {
-                    transcript.push(SessionEvent {
-                        index,
-                        reply,
-                        event: stored.record.payload,
-                    });
-                }
-                index += 1;
-            }
-        }
-        Ok(transcript)
+    /// every run, in the order the session observed them, read from the
+    /// session's memory. A reconnecting client reads it past its last
+    /// seen index, and each entry carries the index and reply stamp the
+    /// live [`Session::subscribe_events`] stream gave the same event.
+    #[must_use]
+    pub fn transcript(&self, from: u64) -> Vec<SessionEvent> {
+        self.core.transcript.since(from)
     }
 }
 
@@ -291,9 +277,9 @@ pub(crate) struct SessionCore {
     pub(crate) waits: Arc<WaitRegistry>,
     /// Where the input broker announces waits.
     pub(crate) wait_frames: broadcast::Sender<WaitFrame>,
-    /// The live event broadcast; the transcript is the log.
+    /// The live event broadcast; each event reaches the transcript first.
     events: broadcast::Sender<SessionEvent>,
-    /// The dedicated live-delta channel; deltas never enter the log.
+    /// The dedicated live-delta channel; deltas never enter the transcript.
     deltas: broadcast::Sender<Delta>,
     /// The session's failure reports.
     pub(crate) errors: broadcast::Sender<SessionFailure>,
@@ -301,17 +287,15 @@ pub(crate) struct SessionCore {
     /// drains its receiver and stamps each delta. Held here so the
     /// channel never closes while the session lives.
     pub(crate) delta_source: mpsc::UnboundedSender<StreamDelta>,
-    /// Settled model rounds: the reply id deltas are stamped with.
-    rounds: AtomicU64,
-    /// The next transcript index a live event takes.
-    next_index: AtomicU64,
-    /// The session's runs in launch order.
-    runs: Mutex<Vec<LogRunId>>,
+    /// Every event the session has observed, stamped as the live stream
+    /// stamps it, and the settled round count its deltas take.
+    transcript: Transcript,
+    /// The session's runs in launch order, as the recorder issued them.
+    runs: Mutex<Vec<RecordedRun>>,
     /// Where the current run stands.
     state: watch::Sender<SessionState>,
-    /// The run log every run is recorded in and the transcript is read
-    /// from.
-    pub(crate) log: SharedLog,
+    /// The Host's recorder every run of the session is written to.
+    pub(crate) recorder: Arc<dyn RunRecorder>,
 }
 
 /// What a launch hands the core beyond its channels.
@@ -323,7 +307,7 @@ pub(crate) struct SessionSeed {
     pub(crate) args: String,
     pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
-    pub(crate) log: SharedLog,
+    pub(crate) recorder: Arc<dyn RunRecorder>,
 }
 
 impl SessionCore {
@@ -349,26 +333,25 @@ impl SessionCore {
             deltas,
             errors,
             delta_source,
-            rounds: AtomicU64::new(0),
-            next_index: AtomicU64::new(0),
+            transcript: Transcript::new(),
             runs: Mutex::new(Vec::new()),
             state: watch::Sender::new(SessionState::Alive),
-            log: seed.log,
+            recorder: seed.recorder,
         });
         (core, raw_deltas)
     }
 
     /// The runs in launch order.
-    pub(crate) fn run_ids(&self) -> Vec<LogRunId> {
+    pub(crate) fn run_ids(&self) -> Vec<RecordedRun> {
         self.runs().clone()
     }
 
-    /// Records a run the log has opened for this session.
-    pub(crate) fn record_run(&self, run: LogRunId) {
+    /// Notes a run the recorder has begun for this session.
+    pub(crate) fn record_run(&self, run: RecordedRun) {
         self.runs().push(run);
     }
 
-    fn runs(&self) -> MutexGuard<'_, Vec<LogRunId>> {
+    fn runs(&self) -> MutexGuard<'_, Vec<RecordedRun>> {
         self.runs.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -424,13 +407,14 @@ impl SessionCore {
         let _ = self.deltas.send(Delta {
             kind,
             content,
-            reply: self.rounds.load(Ordering::SeqCst),
+            reply: self.transcript.rounds(),
         });
     }
 
-    /// Applies one run event: the side effects first, then the broadcast
-    /// under the next transcript index, so a client woken by the event
-    /// reads a settled round count.
+    /// Applies one run event: the side effects first, then the transcript
+    /// append under the next index, then the broadcast of that same entry,
+    /// so a client woken by the event reads it in the transcript and sees
+    /// a settled round count.
     pub(crate) fn observe(&self, event: &Event) {
         match event {
             // A failed model round or tool dispatch is operator-visible:
@@ -453,36 +437,9 @@ impl SessionCore {
             }
             _ => {}
         }
-        // The sink is called from one task at a time (the run's loop), so
-        // the load-stamp-store is not raced; the deltas only read.
-        let mut rounds = self.rounds.load(Ordering::SeqCst);
-        let reply = reply_stamp(event, &mut rounds);
-        self.rounds.store(rounds, Ordering::SeqCst);
-        let index = self.next_index.fetch_add(1, Ordering::SeqCst);
-        // The log serialized this same event a moment ago, so this cannot
-        // fail; `Null` keeps the index sequence whole if it ever did.
-        let event = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
-        let _ = self.events.send(SessionEvent {
-            index,
-            reply,
-            event,
-        });
-    }
-}
-
-/// The reply-id rule, applied identically live and on replay: the
-/// model-round content kinds are stamped with the current round count,
-/// and a reply or tool-call batch advances it.
-#[must_use]
-pub fn reply_stamp(event: &Event, rounds_seen: &mut u64) -> Option<u64> {
-    match event {
-        Event::Thinking { .. } => Some(*rounds_seen),
-        Event::AssistantReply { .. } | Event::AssistantToolCalls { .. } => {
-            let round = *rounds_seen;
-            *rounds_seen += 1;
-            Some(round)
-        }
-        _ => None,
+        // No receiver means no client is attached; the transcript already
+        // holds the entry, so a late client reads it there.
+        let _ = self.events.send(self.transcript.push(event));
     }
 }
 

@@ -12,7 +12,7 @@ The system has five parts, and the Engine is the center.
 
 The Engine is a Rust library. It parses a Markdown prompt file and executes it as a program, and it emits an effect whenever the program needs a model reply, a tool result, or a file. It gives you deterministic control flow, isolated sections, and Engine-controlled fan-out.
 
-The Harness is the Rust library that runs the Engine. It performs every effect the Engine emits, sends each model request to the gateway, and keeps the run log.
+The Harness is the Rust library that runs the Engine. It performs every effect the Engine emits, sends each model request to the gateway, and records each run through the recorder the Host gives it.
 
 The gateway is the one process that talks to model backends. It holds every credential, routes chat completions by capability name, manages the model catalog, and runs local models on your own hardware.
 

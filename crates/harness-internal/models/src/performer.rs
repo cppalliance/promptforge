@@ -5,7 +5,7 @@
 //! the round's answer (the turn, the reply, the tool calls); the deltas
 //! are the live view of the reply forming, and they travel on their own
 //! channel so a session can render them without a fragment ever reaching
-//! the run log.
+//! the Host's recorder.
 
 use harness_runner::performers::{BoxFuture, ChatPerformer};
 use promptforge::model::{

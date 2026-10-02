@@ -14,7 +14,6 @@ documentation = "https://cppalliance.github.io/promptforge/harness/harness/index
 # re-exported through the `promptforge` facade, their one public path.
 [dependencies]
 harness-capabilities.workspace = true
-harness-log.workspace = true
 harness-runner.workspace = true
 harness-sessions.workspace = true
 promptforge.workspace = true

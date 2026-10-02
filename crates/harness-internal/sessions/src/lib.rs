@@ -14,9 +14,12 @@
 //!   registration.
 //! - The supervisor's state transitions are a pure reducer whose matches
 //!   stay wildcard-free, so a new variant is a compile error.
-//! - A session's transcript is the run log: the live broadcast and a
-//!   transcript read agree index for index, and the reply-id stamp is one
-//!   rule applied to both.
+//! - The Harness records every run through the Host's recorder, and this
+//!   crate opens no file or database for it.
+//! - A session's transcript is held in memory: the session appends each
+//!   event to it before the live broadcast, so a transcript read and the
+//!   broadcast agree index for index, and the reply-id stamp is one rule
+//!   applied once.
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 //! - Nothing in this crate spawns a tokio task directly; the Harness

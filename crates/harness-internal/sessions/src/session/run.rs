@@ -1,24 +1,23 @@
 //! One run of a session's program on the effect loop: resolve the
 //! client's current model, arm the run's cancel flag, build the session's
-//! performers, prepare the run (beginning it at its recorder and staging the
-//! declared input file), drive it to its end, and read the declared
-//! output file once it completes.
+//! performers, prepare the run (beginning it at the Host's recorder and
+//! staging the declared input file), drive it to its end, and read the
+//! declared output file once it completes.
 //!
 //! Every event the run reports goes through the session core's sink once
-//! the recorder has taken it, so the live broadcast and the transcript read
-//! from the log agree index for index. A run that ends before the loop
-//! sees it - a parse failure or a refusal - has its parse-time events in
-//! the log already; they are replayed into the sink from there, so the
-//! two sides agree for that run too.
+//! the recorder has taken it, so the recorder, the live broadcast, and the
+//! transcript agree event for event. A run that ends before the loop sees
+//! it - a parse failure or a refusal - carries the events it recorded in
+//! its error; the session observes them from there, so the transcript
+//! holds them too.
 
 use std::sync::Arc;
 
 use harness_capabilities::CapabilityRegistry;
-use harness_log::{RunId as LogRunId, RunOutcome};
 use harness_models::{GatewayChatPerformer, GatewayClient};
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
-use harness_runner::recorder::RunRecorder;
+use harness_runner::recorder::{RunOutcome, RunRecorder};
 use promptforge::RunLimits;
 use promptforge::event::Event;
 
@@ -27,7 +26,6 @@ use crate::environment::{
     CatalogBinding, CurrentModelError, GatewayResources, HostSnapshot, current_model,
 };
 use crate::input::SessionInputBroker;
-use crate::runtime::log_recorder::LogRecorder;
 use crate::transition::RunId;
 
 use super::SessionCore;
@@ -88,7 +86,7 @@ pub(crate) async fn run_once(
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
     let vfs = core.files.run_vfs();
-    let recorder: Arc<dyn RunRecorder> = Arc::new(LogRecorder::new(Arc::clone(&core.log)));
+    let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);
     let services = Services {
         registry: Some(registry),
         vfs: vfs.clone(),
@@ -109,10 +107,7 @@ pub(crate) async fn run_once(
     let prepared = match prepare_source(source, &core.prompt_path, &core.args, services).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            if let Some(run_id) = opened_run(&error) {
-                core.record_run(run_id);
-                replay_recorded(&core, run_id).await;
-            }
+            observe_failed_prepare(&core, &error);
             return Err(RunFailure::Prepare(Box::new(error)));
         }
     };
@@ -142,35 +137,21 @@ pub(crate) async fn run_once(
     Ok(outcome)
 }
 
-/// The run a failed preparation began and ended, when it began one.
-fn opened_run(error: &PrepareError) -> Option<LogRunId> {
-    match error {
-        PrepareError::Parse { run_id, .. }
-        | PrepareError::Input { run_id, .. }
-        | PrepareError::Refused { run_id, .. } => Some(*run_id),
+/// Notes the run a failed preparation began and ended, and hands the sink
+/// the events that run recorded: the parse-time events of a run that ended
+/// before the loop saw it.
+fn observe_failed_prepare(core: &SessionCore, error: &PrepareError) {
+    let (run_id, events) = match error {
+        PrepareError::Parse { run_id, events, .. }
+        | PrepareError::Input { run_id, events, .. }
+        | PrepareError::Refused { run_id, events, .. } => (*run_id, events),
         // `Read`, `Recorder`, or a variant `harness-runner` adds behind its
         // `#[non_exhaustive]` `PrepareError`: none of them names a run.
-        _ => None,
-    }
-}
-
-/// Hands the events the log already holds for `run_id` to the sink: the
-/// parse-time events of a run that ended before the loop saw it.
-async fn replay_recorded(core: &SessionCore, run_id: LogRunId) {
-    let records = match core.log.lock().await.transcript(run_id).await {
-        Ok(records) => records,
-        Err(error) => {
-            tracing::error!(%error, run = %run_id, "the run log refused a transcript read");
-            return;
-        }
+        _ => return,
     };
-    for stored in records {
-        match serde_json::from_value::<Event>(stored.record.payload) {
-            Ok(event) => core.observe(&event),
-            Err(error) => {
-                tracing::error!(%error, run = %run_id, "a stored event payload does not parse");
-            }
-        }
+    core.record_run(run_id);
+    for event in events {
+        core.observe(event);
     }
 }
 

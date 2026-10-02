@@ -2595,7 +2595,6 @@ name = "harness"
 version = "0.3.0"
 dependencies = [
  "harness-capabilities",
- "harness-log",
  "harness-runner",
  "harness-sessions",
  "promptforge",
@@ -2673,10 +2672,8 @@ dependencies = [
  "async-trait",
  "axum",
  "harness-capabilities",
- "harness-log",
  "harness-models",
  "harness-runner",
- "harness-sessions",
  "harness-web",
  "promptforge",
  "rand 0.9.5",

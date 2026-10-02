@@ -1,5 +1,6 @@
-//! The Harness handle: its configuration, the bindings a client pushes
-//! through the public API, the run log, and the sessions it serves.
+//! The Harness handle: its configuration, the Host's run recorder, the
+//! bindings a client pushes through the public API, and the sessions it
+//! serves.
 //!
 //! One [`Harness`] serves every session a client launches. The client
 //! holds it behind an `Arc`, pushes the gateway binding at startup and on
@@ -15,10 +16,10 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use harness_log::{LogError, RunLog};
+use harness_runner::recorder::RunRecorder;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use promptforge::vfs::VfsRef;
-use tokio::sync::{OnceCell, mpsc};
+use tokio::sync::mpsc;
 
 use crate::discovery::{agent_source, discover_agents};
 use crate::environment::{Bindings, CatalogBinding, GatewayBinding, HostSnapshot};
@@ -28,25 +29,11 @@ use crate::session::files::SessionFiles;
 use crate::session::supervisor::{Supervisor, SupervisorParts};
 use crate::session::{Session, SessionCore, SessionSeed};
 
-#[path = "log-recorder.rs"]
-pub(crate) mod log_recorder;
-
-/// The file under the state directory the run log is stored in.
-const RUN_LOG_FILE: &str = "runs.db";
-
-/// The run log as the sessions share it: the recorder over it writes
-/// during a run, the transcript views and reconnect read, and the mutex
-/// serializes them. Asynchronous because a write is awaited under it.
-pub type SharedLog = Arc<tokio::sync::Mutex<RunLog>>;
-
 /// What a client tells the Harness at construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessConfig {
     /// The directory the Harness discovers launchable agents in.
     pub agents_path: PathBuf,
-    /// The directory the Harness keeps its state under, the run log
-    /// included.
-    pub state_dir: PathBuf,
 }
 
 /// What a launch hands the session beyond its [`LaunchRequest`]: the
@@ -87,9 +74,6 @@ pub enum LaunchError {
         #[source]
         source: io::Error,
     },
-    /// The run log could not be opened or written.
-    #[error(transparent)]
-    Log(#[from] LogError),
 }
 
 /// The running sessions by id, shared with each supervisor so a finished
@@ -131,8 +115,8 @@ impl SessionTable {
 pub struct Harness {
     config: HarnessConfig,
     bindings: Arc<Bindings>,
-    /// Opened on the first launch; a failed open is retried by the next.
-    log: OnceCell<SharedLog>,
+    /// The Host's recorder: every run of every session writes to it.
+    recorder: Arc<dyn RunRecorder>,
     sessions: Arc<SessionTable>,
 }
 
@@ -142,22 +126,23 @@ impl fmt::Debug for Harness {
             .debug_struct("Harness")
             .field("config", &self.config)
             .field("bindings", &self.bindings)
-            .field("log", &self.log.initialized())
             .field("sessions", &self.sessions.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl Harness {
-    /// A Harness over `config` with no gateway bound yet. Nothing touches
-    /// the filesystem here: discovery reads the agents directory per
-    /// request, and the run log opens on the first launch.
+    /// A Harness over `config` with no gateway bound yet, which records
+    /// every run it makes through `recorder`. Nothing touches the
+    /// filesystem here, and the Harness opens no file at launch either:
+    /// discovery reads the agents directory per request, and the recorder
+    /// is the Host's own.
     #[must_use]
-    pub fn new(config: HarnessConfig) -> Self {
+    pub fn new(config: HarnessConfig, recorder: Arc<dyn RunRecorder>) -> Self {
         Self {
             config,
             bindings: Arc::new(Bindings::new()),
-            log: OnceCell::new(),
+            recorder,
             sessions: Arc::new(SessionTable::default()),
         }
     }
@@ -203,29 +188,6 @@ impl Harness {
         discover_agents(&self.config.agents_path)
     }
 
-    /// The run log, opened under the state directory on first use; the
-    /// test-only way a suite reads back what the sessions recorded.
-    ///
-    /// # Errors
-    /// Returns the log's error when the state directory cannot be created
-    /// or the log cannot be opened.
-    #[cfg(feature = "test-support")]
-    pub async fn log(&self) -> Result<SharedLog, LogError> {
-        self.run_log().await
-    }
-
-    /// The run log, opened under the state directory on first use.
-    pub(crate) async fn run_log(&self) -> Result<SharedLog, LogError> {
-        self.log
-            .get_or_try_init(|| async {
-                tokio::fs::create_dir_all(&self.config.state_dir).await?;
-                let log = RunLog::open(&self.config.state_dir.join(RUN_LOG_FILE)).await?;
-                Ok(Arc::new(tokio::sync::Mutex::new(log)))
-            })
-            .await
-            .cloned()
-    }
-
     /// Launches a session running the discovered agent `request.agent`
     /// with `request.args`, staging `request.input_text` at the prompt's
     /// declared input file, and returns it. The session runs until its
@@ -238,9 +200,10 @@ impl Harness {
     /// Returns [`LaunchError::UnknownAgent`] when the name is not a
     /// discovered agent (which also refuses names that look like paths:
     /// discovery yields bare file stems), [`LaunchError::GatewayUnusable`]
-    /// when no usable gateway is bound, [`LaunchError::SessionState`] when
-    /// the agent's source cannot be read, and [`LaunchError::Log`] when the
-    /// run log cannot be opened.
+    /// when no usable gateway is bound, and [`LaunchError::SessionState`]
+    /// when the agent's source cannot be read. A recorder that refuses a
+    /// write never refuses the launch: it fails the run, which the session
+    /// reports.
     pub async fn launch(&self, request: LaunchRequest) -> Result<Session, LaunchError> {
         self.launch_with(request, LaunchOptions::default()).await
     }
@@ -297,7 +260,6 @@ impl Harness {
             .await
             .unwrap_or_else(|join| Err(io::Error::other(join)))
             .map_err(|source| LaunchError::SessionState { source })?;
-        let log = self.run_log().await?;
 
         let (events, lifecycle_rx) = mpsc::unbounded_channel();
         let (cancellations, cancellations_rx) = mpsc::channel(CANCELLATION_CAPACITY);
@@ -310,7 +272,7 @@ impl Harness {
             args,
             files: SessionFiles::new(vfs, input_text),
             lifecycle: Arc::new(RunLifecycle::new(events, cancellations)),
-            log,
+            recorder: Arc::clone(&self.recorder),
         });
         self.sessions.insert(Arc::clone(&core));
         let supervisor = Supervisor::new(SupervisorParts {

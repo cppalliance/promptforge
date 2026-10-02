@@ -20,7 +20,8 @@ A Rust developer building a program that runs agents through the Harness for a p
 - operator: the person your program puts in front of a session to answer its questions. Owner: lib.md
 - wait: an open question a session has asked the operator and is waiting on. Owner: lib.md
 - delta: one small piece of a reply, sent while the model is still writing. Owner: lib.md
-- transcript: every event a session has recorded, in order. Owner: log.md
+- recorder: the object your program gives the Harness, which writes every run it makes to it. Owner: record.md
+- transcript: every event a session has sent, in order, held in the session's memory. Owner: record.md
 - cancel handle: a shared flag that tells async work to stop at its next safe point. Owner: cancel.md
 - store: the set of files a session reads and writes. Owner: vfs.md
 
@@ -49,7 +50,7 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 
 ### Tour: Stream a reply
 - How: How do I show a reply as the model writes it, then replace it with the finished text?
-- What if: What happens when I subscribe after the session has already recorded some events?
+- What if: What happens when I subscribe after the session has already sent some events?
 - Why: Why does each streamed piece carry the same reply number as the finished event that replaces it?
 - Example: subscribe to events and deltas, print each text piece as it arrives, and swap in the finished reply when its event lands.
 - Diagram: none
@@ -71,8 +72,8 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 ### Tour: Reattach after a disconnect
 - How: How do I pick a session back up after my client disconnects?
 - What if: What happens when I look up a session that has already been closed?
-- Why: Why must I subscribe to live events before I read the stored history?
-- Example: keep the session's id, drop the client, look the session up by id, replay its history past the last seen event, and re-announce its open questions.
+- Why: Why must I subscribe to live events before I read the transcript?
+- Example: keep the session's id, drop the client, look the session up by id, replay its transcript past the last seen event, and re-announce its open questions.
 - Diagram: none
 
 ### Tour: The complete program
@@ -139,35 +140,47 @@ Owns:
 
 </page-cancel>
 
-<page-log>
+<page-record>
 
-Purpose: Explain the saved history every session writes, and how to tell its failures apart.
-Core idea: Every event a session records is saved to disk, so a history survives your client and your process.
-Need this when: you replay a transcript or handle a failure to read the saved history.
+Purpose: Show how to record every run a Harness makes in a store of your own, and how to read a session's transcript.
+Core idea: The Harness writes each run to a recorder your program supplies, and keeps only each session's transcript, in memory.
+Need this when: your program keeps a history of runs, or a client reconnects to a session and must see the events it missed.
 Builds on: lib.md
 Primer sources: none
 
-### Tour: Read a session's history
-- How: How do I read back every event a session recorded, across all its runs?
-- What if: What happens when a saved record no longer reads as an event?
-- Why: Why does a run number mean nothing outside the history that issued it?
-- Example: list the `desk` session's run numbers, read its transcript from the start, and print each event's index.
+### Tour: Record runs in a store of your own
+- How: How do I write a recorder that keeps each run's records in my own store?
+- What if: What happens when my recorder returns an error partway through a run?
+- Why: Why does the Harness stop the run instead of skipping a record that failed?
+- Example: implement the three recorder calls for `desk`, build the Harness over it, call the recorder in the order the Harness does, and assert what it kept.
 - Diagram: none
 
-### Tour: Tell history failures apart
-- How: How do I tell a disk failure from a damaged saved record?
-- What if: What happens when I ask about a run this history never started?
-- Why: Why does the error keep the database library's own error type out of its public shape?
-- Example: match each kind of history failure, and reach the underlying database error when one is present.
+### Tour: Keep runs in memory
+- How: How do I keep runs in memory for a test and read them back?
+- What if: What happens when I write to a run that has already ended?
+- Why: Why does the memory recorder issue the run ids instead of the Harness?
+- Example: give the Harness a memory recorder, begin and end a run by hand, and assert the outcome and the refused second end.
+- Diagram: none
+
+### Tour: Read a session's transcript
+- How: How do I read the events a session sent while my client was away?
+- What if: What happens when I read the transcript of a run that failed to prepare?
+- Why: Why does a transcript need no recorder to answer a reconnecting client?
+- Example: find the `desk` session by its id, subscribe to live events, and read the transcript from one past the last shown index.
 - Diagram: none
 
 Owns:
-- item: harness::log::DatabaseSource
-- item: harness::log::JsonSource
-- item: harness::log::LogError
-- item: harness::log::RunId
+- item: harness::record::MemoryRecorder
+- item: harness::record::Record
+- item: harness::record::RecordKind
+- item: harness::record::RecorderError
+- item: harness::record::RecorderFuture
+- item: harness::record::RunId
+- item: harness::record::RunMeta
+- item: harness::record::RunOutcome
+- item: harness::record::RunRecorder
 
-</page-log>
+</page-record>
 
 <page-vfs>
 

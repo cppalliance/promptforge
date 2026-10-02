@@ -394,8 +394,9 @@ async fn handle_open(
 
 /// The text of the error frame reporting a refused launch: the refusal
 /// and its cause chain. A refusal's `Display` is only its own
-/// message, so a run log that cannot open would otherwise reach the
-/// client as the bare "run log database" with the database's diagnosis gone.
+/// message, so an unreadable agent source would otherwise reach the
+/// client as the bare "agent session state unavailable" with the
+/// filesystem's diagnosis gone.
 fn refusal_text(refusal: &LaunchRefusal) -> String {
     display_chain(refusal)
 }
