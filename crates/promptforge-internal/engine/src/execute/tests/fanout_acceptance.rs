@@ -101,13 +101,12 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
     // reaches the gateway before `a`'s second infer. Admission keyed to
     // the lowest-index arm's end would hold `c` until `a` finished:
     // `[a:1, b:1, a:2, c:1]`.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_delayed_text("A1", PARKED),
         resp_text("B"),
         resp_text("C"),
         resp_text("A2"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -124,7 +123,7 @@ async fn a_queued_arm_is_admitted_when_any_arm_frees_its_slot() {
     let prompt = parse(md);
     let recorder = Arc::new(TaskRecorder::default());
     let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the ceilinged fanout completes");
@@ -156,11 +155,10 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
     // so the started arms report exactly one terminal each (`failed`,
     // `cancelled`), the queued arm never starts and reports nothing, and
     // the driver never waits on the aborted answer.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("boom-answer"),
         resp_delayed_text("slow-answer", Duration::from_secs(30)),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -176,7 +174,7 @@ async fn a_fatal_arm_gives_every_started_arm_exactly_one_terminal() {
     let (ctx, harness) = ceiling_context(&prompt, 2, Arc::clone(&recorder) as Arc<dyn Observer>);
     let result = tokio::time::timeout(
         Duration::from_secs(10),
-        TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -261,8 +259,8 @@ async fn a_nested_fanout_nests_its_arm_ids_under_the_outer_arm() {
 /// Drives the identity prompt against a scripted gateway and returns the
 /// run's output, the gateway's request order, and the order in which the
 /// arms reported success.
-async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<TaskId>) {
-    let gateway = ScriptedGateway::start(script).await;
+async fn identity_run(script: Vec<ScriptedReply>) -> (String, Vec<String>, Vec<TaskId>) {
+    let gateway = ScriptedChat::new(script);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Identity\n\n\
         ## Main\n\n\
@@ -286,7 +284,7 @@ async fn identity_run(script: Vec<GatewayReply>) -> (String, Vec<String>, Vec<Ta
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the identity prompt completes");
@@ -359,15 +357,14 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
     // `[a, a, b, b, c, c]`. The second-round bodies include the round-one
     // exchange (user, assistant tool call, tool result) so the loop, not a
     // bare infer, is what ran in every arm.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_a", "echo", "{\"value\":\"a\"}"),
         resp_tool_call("call_b", "echo", "{\"value\":\"b\"}"),
         resp_tool_call("call_c", "echo", "{\"value\":\"c\"}"),
         resp_text("final"),
         resp_text("final"),
         resp_text("final"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -390,22 +387,14 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("three looping arms complete");
 
     assert_eq!(out, "final|final|final");
     let bodies = gateway.requests();
-    let message_counts: Vec<usize> = bodies
-        .iter()
-        .map(|body| {
-            body["messages"]
-                .as_array()
-                .expect("a chat request includes messages")
-                .len()
-        })
-        .collect();
+    let message_counts: Vec<usize> = bodies.iter().map(|body| body.messages.len()).collect();
     assert_eq!(
         message_counts,
         vec![1, 1, 1, 3, 3, 3],
@@ -420,11 +409,10 @@ async fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_onc
         "each arm opened its own round one"
     );
     for body in &bodies[3..] {
-        let roles: Vec<&str> = body["messages"]
-            .as_array()
-            .expect("a chat request includes messages")
+        let roles: Vec<&str> = body
+            .messages
             .iter()
-            .map(|message| message["role"].as_str().expect("a message has a role"))
+            .map(crate::model::Message::role)
             .collect();
         assert_eq!(
             roles,

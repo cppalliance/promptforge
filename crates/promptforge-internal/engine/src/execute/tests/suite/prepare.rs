@@ -12,7 +12,7 @@ use crate::{Environment, RunErrorKind, RunResult};
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
 
-use super::super::{ScriptedGateway, gateway_client, resp_text};
+use super::super::{ScriptedChat, gateway_client, resp_text};
 use super::support::context;
 
 /// A prompt declaring no capabilities at all.
@@ -173,7 +173,7 @@ const DECLARES_NO_THINKING: &str = concat!(
 #[tokio::test]
 async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking_off() {
     let prompt = parse(DECLARES_NO_THINKING, "declares-no-thinking");
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let (ctx, requirements) = Environment::new().prepare(
         &prompt,
         context("switchable").model(current_model(32_000, ThinkingMode::Switchable)),
@@ -182,7 +182,7 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
         requirements.is_satisfied(),
         "a switchable model can turn thinking off: {requirements:?}"
     );
-    let harness = RunHarness::new().client(gateway_client(gateway.addr()));
+    let harness = RunHarness::new().client(gateway_client(&gateway));
     let result = run_harness(&prompt, "", ctx, harness).await;
     let RunResult::Ok(text) = result else {
         panic!("the prepared prompt runs: {result:?}");
@@ -191,8 +191,8 @@ async fn a_no_thinking_role_on_a_switchable_model_prepares_and_asks_for_thinking
     let body = gateway
         .last_request()
         .expect("the round reaches the gateway");
-    assert_eq!(body["model"], "current");
-    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    assert_eq!(body.options.model(), "current");
+    assert_eq!(body.options.thinking(), Some(false));
 }
 
 #[tokio::test]

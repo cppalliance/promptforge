@@ -39,10 +39,10 @@ use crate::execute::{
 use crate::parser::Prompt;
 
 pub(crate) mod harness;
-#[cfg(test)]
-#[path = "test_support/mock-gateway-client.rs"]
-pub(crate) mod mock_gateway_client;
 pub mod recording;
+#[cfg(test)]
+#[path = "test_support/scripted-chat.rs"]
+pub(crate) mod scripted_chat;
 pub(crate) mod tokio_driver;
 pub(crate) mod tools;
 
@@ -51,10 +51,10 @@ pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestTool, TestToolTable};
 
-/// The suites' mock-gateway client performs a `Chat` round over its
-/// dev-only HTTP under the run's limits.
+/// The suites' scripted model answers a `Chat` round in process under the
+/// run's limits.
 #[cfg(test)]
-impl ChatClient for mock_gateway_client::MockGatewayClient {
+impl ChatClient for scripted_chat::ScriptedChat {
     fn complete(
         &self,
         messages: Vec<crate::model::Message>,
@@ -63,22 +63,21 @@ impl ChatClient for mock_gateway_client::MockGatewayClient {
         limits: crate::execute::RunLimits,
         on_delta: Option<DeltaHook>,
     ) -> BoxFuture<Result<crate::model::Completion, crate::model::CompletionError>> {
-        let client = self.clone();
+        let chat = self.clone();
         Box::pin(async move {
-            client
-                .complete(
-                    &messages,
-                    &tools,
-                    &options,
-                    limits.timeout(),
-                    limits.response_bytes(),
-                    |delta| {
-                        if let Some(hook) = &on_delta {
-                            hook(delta);
-                        }
-                    },
-                )
-                .await
+            chat.complete(
+                &messages,
+                &tools,
+                &options,
+                limits.timeout(),
+                limits.response_bytes(),
+                |delta| {
+                    if let Some(hook) = &on_delta {
+                        hook(delta);
+                    }
+                },
+            )
+            .await
         })
     }
 }

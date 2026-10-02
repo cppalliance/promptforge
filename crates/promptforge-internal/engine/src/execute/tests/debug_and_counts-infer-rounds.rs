@@ -82,9 +82,8 @@ fn line_index(lines: &[String], needle: &str) -> usize {
 
 /// Runs one handle-form `models.infer` round scripted with `reply` and
 /// returns the run's output beside every line the recorder saw.
-async fn run_infer_round(reply: GatewayReply) -> (String, Vec<String>) {
-    let gateway = ScriptedGateway::start(vec![reply]).await;
-    let addr = gateway.addr();
+async fn run_infer_round(reply: ScriptedReply) -> (String, Vec<String>) {
+    let gateway = ScriptedChat::new(vec![reply]);
     let recorder = Arc::new(InferRoundRecorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua shared\n\
@@ -102,7 +101,7 @@ async fn run_infer_round(reply: GatewayReply) -> (String, Vec<String>) {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         },
     )
@@ -112,17 +111,14 @@ async fn run_infer_round(reply: GatewayReply) -> (String, Vec<String>) {
 }
 
 /// A text reply carrying a `reasoning_content` side channel.
-fn resp_text_with_reasoning(content: &str, reasoning: &str) -> GatewayReply {
-    GatewayReply::Json(json!({
-        "model": MOCK_MODEL,
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "reasoning_content": reasoning,
-                "content": content,
-            }
-        }]
-    }))
+fn resp_text_with_reasoning(content: &str, reasoning: &str) -> ScriptedReply {
+    ScriptedReply::Text {
+        model: MOCK_MODEL.to_owned(),
+        content: content.to_owned(),
+        finish_reason: None,
+        reasoning: Some(reasoning.to_owned()),
+        metrics: None,
+    }
 }
 
 #[tokio::test]

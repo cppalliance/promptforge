@@ -148,11 +148,10 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
     // and the captured verdict drives the run's shape before the walk. This
     // needs `tools.add_local` and `models.loop` in H1, both section-only
     // before the one-install-path consolidation.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "decide", "{\"choice\":\"use_mcp\"}"),
         resp_text("decided"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: h1-decision\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Decide\n\n\
         ```lua\n\
@@ -169,7 +168,7 @@ async fn the_h1_decision_tool_idiom_runs_before_the_walk() {
         ```lua\nreturn var.verdict\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the H1 decision-tool idiom runs");

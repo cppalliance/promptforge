@@ -303,7 +303,7 @@ Verification is light: each step runs only its touched crates' tests, and the fu
 
 <step-2>
 
-### Step 2: Run the engine suites against an in-process scripted chat
+### Step 2: Run the engine suites against an in-process scripted chat [completed]
 
 - Component: In-process engine suites
 - Placement: second. Scripted replies need step 1's `with_reasoning_content`. The HTTP mock client is the engine's only importer of the wire code, so it must go before step 3 moves that code out of model-client.

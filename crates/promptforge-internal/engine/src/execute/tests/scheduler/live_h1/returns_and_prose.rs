@@ -62,7 +62,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
     // An H1-only prompt whose Lua reads its pending buffer into an explicit
     // infer ends the run with the inferred text: the scalar return
     // short-circuits the (empty) walk.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 reply")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Only Prose\n\n\
         ```lua\n\
@@ -74,7 +74,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the H1 infer of its prose ends the run");
@@ -87,7 +87,7 @@ async fn h1_prose_inferred_explicitly_is_the_run_result() {
 async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
     // The live H1 pass and the H2 section each read their own pending
     // buffer into an explicit infer - two completions, in source order.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 reply"), resp_text("h2 reply")]);
     let md = "---\nname: shared-loop\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Shared Loop\n\n\
         ```lua\n\
@@ -104,7 +104,7 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("H1 prose and H2 prose each infer explicitly");
@@ -116,12 +116,8 @@ async fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         "the H1 prose and the H2 prose each drive exactly one completion"
     );
     let requests = gateway.requests();
-    let first_prose = requests[0]["messages"][0]["content"]
-        .as_str()
-        .expect("the first request includes a user message");
-    let second_prose = requests[1]["messages"][0]["content"]
-        .as_str()
-        .expect("the second request includes a user message");
+    let first_prose = requests[0].messages[0].content();
+    let second_prose = requests[1].messages[0].content();
     assert!(
         first_prose.contains("h1 prose turn"),
         "the first completion is the H1 prose: {first_prose}"
@@ -172,7 +168,7 @@ async fn unread_h1_prose_stays_inert_and_explicit_infer_requires_a_model() {
 async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
     // The pass reads its pending buffer only through an explicit infer, and
     // `var` writes accumulate across the pass into the walk.
-    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("final answer")]);
     let md = "---\nname: live-h1-prose\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Prose\n\n\
         ```lua\n\
@@ -190,7 +186,7 @@ async fn live_h1_prose_infers_explicitly_and_var_accumulates_into_the_walk() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("live H1 prose infers explicitly");

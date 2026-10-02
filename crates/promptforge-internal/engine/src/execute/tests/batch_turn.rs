@@ -140,23 +140,14 @@ impl Observer for TurnRecorder {
 }
 
 /// A response requesting every `(id, name, arguments)` call in one batch.
-fn resp_batch(calls: &[(&str, &str, &str)]) -> GatewayReply {
-    let tool_calls: Vec<Value> = calls
-        .iter()
-        .map(|(id, name, arguments)| {
-            json!({
-                "id": id,
-                "type": "function",
-                "function": { "name": name, "arguments": arguments }
-            })
-        })
-        .collect();
-    GatewayReply::Json(json!({
-        "model": MOCK_MODEL,
-        "choices": [{
-            "message": { "role": "assistant", "content": null, "tool_calls": tool_calls }
-        }]
-    }))
+fn resp_batch(calls: &[(&str, &str, &str)]) -> ScriptedReply {
+    ScriptedReply::ToolCalls {
+        model: MOCK_MODEL.to_owned(),
+        calls: calls
+            .iter()
+            .map(|(id, name, arguments)| scripted_call(id, name, arguments))
+            .collect(),
+    }
 }
 
 /// The block every test here runs: registers `grab` with `handler` as its
@@ -183,14 +174,14 @@ const INFER_HANDLER: &str = "return 'inferred ' .. models.infer('inner prompt')"
 async fn drive(
     md: &str,
     tools: impl Into<FixtureTools>,
-    replies: Vec<GatewayReply>,
+    replies: Vec<ScriptedReply>,
 ) -> (String, Arc<TurnRecorder>) {
-    let gateway = ScriptedGateway::start(replies).await;
+    let gateway = ScriptedChat::new(replies);
     let prompt = parse(md);
     let recorder = Arc::new(TurnRecorder::default());
     let (ctx, harness) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the batch runs to the final reply");

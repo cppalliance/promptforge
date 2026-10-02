@@ -366,7 +366,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
     // The one-time section scope install is shared between the first script
     // dispatch and the model resolution: a script `tools.call` that runs
     // first must not swallow the install a later `models.infer` relies on.
-    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("prose answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -380,7 +380,7 @@ async fn a_script_tools_call_before_infer_keeps_the_model_install() {
         harness,
         vec![fixture_binding("echo", "echo tool", Arc::new(EchoTool))],
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("infer after a script dispatch still resolves the model");

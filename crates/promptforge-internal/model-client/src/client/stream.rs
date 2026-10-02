@@ -8,10 +8,9 @@
 //! buffered turns are judged by one rule set.
 //!
 //! No HTTP happens here. The transport that reads the bytes off the wire
-//! lives in the Harness's model client, which performs each `Chat` effect;
-//! `promptforge-engine`'s own suites drive the same reassembly through a
-//! dev-only client against a mock gateway. Both hand bytes to the scanner,
-//! payloads to the accumulator, and take the completion from `finish`.
+//! lives in the Harness's model client, which performs each `Chat` effect:
+//! it hands bytes to the scanner, payloads to the accumulator, and takes
+//! the completion from `finish`.
 //!
 //! The progress subscription in the model vocabulary deliberately has its
 //! own SSE decoder, and neither can substitute for the other: that one

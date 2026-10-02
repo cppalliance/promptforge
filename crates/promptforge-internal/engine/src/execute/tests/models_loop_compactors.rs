@@ -12,7 +12,7 @@ use crate::test_support::tokio_driver::TokioDriver;
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -21,7 +21,7 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("an over-window request must exhaust the context");
@@ -43,7 +43,7 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn models_loop_raises_context_exhaustion_at_the_call_site() {
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -54,7 +54,7 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -66,11 +66,11 @@ async fn models_loop_raises_context_exhaustion_at_the_call_site() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
-    let gateway = ScriptedGateway::start(vec![resp_status(
+    let gateway = ScriptedChat::new(vec![resp_failure(
+        crate::model::CompletionErrorKind::ContextOverflow,
         400,
         "This model's maximum context length is 4096 tokens.",
-    )])
-    .await;
+    )]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('a small prompt')\n\
@@ -79,7 +79,7 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("a provider context rejection must exhaust the context");
@@ -100,7 +100,7 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -116,7 +116,7 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -178,7 +178,7 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
 async fn cancel_during_a_looping_compactor_returns_promptly() {
     use std::time::{Duration, Instant};
 
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -188,7 +188,7 @@ async fn cancel_during_a_looping_compactor_returns_promptly() {
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
 
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;

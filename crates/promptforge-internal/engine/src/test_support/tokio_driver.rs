@@ -47,7 +47,7 @@ use tokio::task::JoinHandle;
 use crate::cancel::CancelHandle;
 use crate::lua::run_store_op;
 #[cfg(test)]
-use crate::test_support::mock_gateway_client::MockGatewayClient;
+use crate::test_support::scripted_chat::ScriptedChat;
 use crate::{Error, Result};
 
 #[cfg(test)]
@@ -163,13 +163,13 @@ impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
     /// and replaying its events through the `harness` the suite assembled
     /// itself. The bundle supplies the observer, chat client, tools, delta
-    /// hook, and debug capture; `client` is the run's mock-gateway client
-    /// when the suite supplies one, overriding any in the bundle.
+    /// hook, and debug capture; `client` is the run's scripted model when
+    /// the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(
         state: &RunState,
         harness: RunHarness,
-        client: Option<MockGatewayClient>,
+        client: Option<ScriptedChat>,
     ) -> TokioDriver<'static> {
         let mut harness = harness;
         if let Some(client) = client {

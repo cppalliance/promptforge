@@ -16,16 +16,11 @@ fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> (RunStat
 }
 
 /// The prompt in each gateway request, in arrival order.
-pub(super) fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
+pub(super) fn request_prompts(gateway: &ScriptedChat) -> Vec<String> {
     gateway
         .requests()
         .iter()
-        .map(|body| {
-            body["messages"][0]["content"]
-                .as_str()
-                .expect("an infer request includes a user message")
-                .to_owned()
-        })
+        .map(|body| body.messages[0].content().to_owned())
         .collect()
 }
 

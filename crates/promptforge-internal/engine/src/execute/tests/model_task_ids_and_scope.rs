@@ -25,14 +25,13 @@ use crate::test_support::tokio_driver::TokioDriver;
 /// and the task ids the two waits answered with, in that order), the
 /// model-origin starts, and the order in which the tasks succeeded.
 async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, Vec<TaskId>) {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## A\"}"),
         resp_tool_call("call_2", "task", "{\"target\":\"## B\"}"),
         resp_tool_call("call_3", "await_tasks", "{}"),
         resp_tool_call("call_4", "await_tasks", "{}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = two_child_prompt(
         &loop_owner(
             "local first = msgs[7].content:match('^Task id=(%S+)')\n\
@@ -49,7 +48,7 @@ async fn ordered_run(delays: [Duration; 2]) -> (String, Vec<(TaskId, String)>, V
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&delays),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("both tasks end inside the two waits");
@@ -105,12 +104,11 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
     // the round as `out_of_scope_tool` naming the call, under one failed
     // tool-call observation, before the built-in arm can start anything.
     // The loop raises at the call site with nothing appended.
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![resp_tool_call(
         "call_1",
         "task",
         "{\"target\":\"## Child\"}",
-    )])
-    .await;
+    )]);
     let md = owner_prompt(
         "",
         "local msgs = messages.new()\n\
@@ -127,7 +125,7 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -142,9 +140,7 @@ async fn a_task_call_without_an_allowlist_is_refused_by_the_scope_gate() {
         "the failed round is the only round"
     );
     assert!(
-        gateway.requests()[0]["tools"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
+        gateway.requests()[0].tools.is_empty(),
         "no allowlist, nothing advertised: {:?}",
         gateway.requests()[0]
     );

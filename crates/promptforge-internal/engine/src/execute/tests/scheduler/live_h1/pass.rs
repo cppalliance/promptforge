@@ -10,7 +10,7 @@ use super::*;
 async fn live_h1_infer_runs_once() {
     // The H1 pass selects the default model by label, a handle's `infer`
     // yields through the shim, and the H1 `var` hand-off seeds the walk.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
     let md = "---\nname: live-h1\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
@@ -21,7 +21,7 @@ async fn live_h1_infer_runs_once() {
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the H1 pass must run on the scheduler");
@@ -35,7 +35,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     // The H1 `models.infer` (no handle) resolves the current model from the
     // shared set and runs the one infer shape - a single tool-free
     // round on a fresh conversation that leaves `sys` untouched.
-    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("h1 answer")]);
     let md = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n---\n\n\
         # Live H1 Models Infer\n\n\
         ```lua\n\
@@ -47,7 +47,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = h1_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("H1 models.infer must run on the scheduler");
@@ -58,17 +58,18 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         .last_request()
         .expect("infer must reach the gateway");
     assert_eq!(
-        body["model"], "claude-sonnet-4-6",
+        body.options.model(),
+        "claude-sonnet-4-6",
         "models.infer must use the section's current model"
     );
     assert!(
-        body.get("tools").is_none(),
-        "models.infer advertises no tools: {body}"
+        body.tools.is_empty(),
+        "models.infer advertises no tools: {body:?}"
     );
     assert_eq!(
-        body["messages"].as_array().expect("messages array").len(),
+        body.messages.len(),
         1,
-        "models.infer runs on a fresh context: {body}"
+        "models.infer runs on a fresh context: {body:?}"
     );
 }
 

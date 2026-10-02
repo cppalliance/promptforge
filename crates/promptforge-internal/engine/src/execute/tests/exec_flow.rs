@@ -20,8 +20,7 @@ macro_rules! flow_prompt {
 /// run result is the final Lua return.
 #[tokio::test]
 async fn section_with_alternating_blocks_executes_in_order() {
-    let gateway = ScriptedGateway::start(vec![resp_text("reply-1"), resp_text("reply-2")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("reply-1"), resp_text("reply-2")]);
     let md = flow_prompt!(
         "\
 ## Only\n\n\
@@ -32,7 +31,7 @@ Final ask.\n\n\
 ```lua\nstore.append('order.txt', 'lua3\\n')\nreturn models.infer(prose)\n```\n"
     );
     let store = TestStore::new();
-    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
+    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(&gateway))
         .await
         .expect("alternating blocks must execute");
 
@@ -46,8 +45,7 @@ Final ask.\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn call_runs_named_section_as_subroutine() {
-    let gateway = ScriptedGateway::start(vec![resp_text("research-reply")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("research-reply")]);
 
     // The subroutine sits after its run-ending caller: a contained chain
     // falls through like any walk, so a subroutine placed before later
@@ -70,9 +68,15 @@ return answer\n\
 ```\n"
     );
     let store = TestStore::new();
-    let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
-        .await
-        .expect("call must run named section as subroutine");
+    let out = run(
+        &bound_for_model(md),
+        "topic",
+        &[],
+        &store,
+        gatewayed(&gateway),
+    )
+    .await
+    .expect("call must run named section as subroutine");
     assert_eq!(out, "research-reply");
 }
 
@@ -81,8 +85,7 @@ return answer\n\
 /// args, not the run's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_call_without_input_inherits_the_chains_args() {
-    let gateway = ScriptedGateway::start(vec![resp_text("inner-reply")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("inner-reply")]);
     let md = flow_prompt!(
         "\
 ## Main\n\n\
@@ -103,7 +106,7 @@ Args: {{ args }}\n\n\
         "run-args",
         &[],
         &store,
-        gatewayed(addr),
+        gatewayed(&gateway),
     )
     .await
     .expect("the nested call must inherit the chain's args");
@@ -111,7 +114,7 @@ Args: {{ args }}\n\n\
     let body = gateway
         .last_request()
         .expect("the inner section's infer must reach the gateway");
-    let text = body.to_string();
+    let text = body.messages_json().to_string();
     assert!(
         text.contains("chain-args"),
         "the nested no-input call substitutes the chain's args: {text}"
@@ -167,8 +170,7 @@ return r[1].text\n\
 /// directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_works_inside_an_arm() {
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
@@ -182,7 +184,7 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
         "",
         &[],
         &TestStore::new(),
-        gatewayed(addr),
+        gatewayed(&gateway),
     )
     .await
     .expect("handle infer inside an arm must run");
@@ -191,9 +193,13 @@ return models.infer(models.get('writer'), 'ping about ' .. item)\n\
     let body = gateway
         .last_request()
         .expect("infer must reach the gateway");
-    assert_eq!(body["model"], "claude-sonnet-4-6");
-    let messages = body["messages"].as_array().expect("messages array");
-    let content = messages.last().expect("a user turn")["content"]
+    assert_eq!(body.options.model(), "claude-sonnet-4-6");
+    let messages = body.messages_json();
+    let content = messages
+        .as_array()
+        .expect("messages array")
+        .last()
+        .expect("a user turn")["content"]
         .as_str()
         .expect("content string");
     assert!(

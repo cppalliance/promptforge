@@ -188,11 +188,10 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
     // store write, reads the mid-flight status (running, blocked on
     // `chat`, inside its section, with its note), waits on it, and reads
     // the terminal status (done, ok).
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "slow answer",
         Duration::from_millis(400),
-    )])
-    .await;
+    )]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local fresh = tasks.status(t)\n\
@@ -222,7 +221,7 @@ async fn status_reports_a_parked_task_and_then_a_finished_one() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");

@@ -11,7 +11,7 @@ use super::*;
 use crate::lua::ToolSet;
 use crate::test_support::tokio_driver::TokioDriver;
 use promptforge_types::event::ReplyOrigin;
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge_types::metrics::{CallMetrics, ToolCallEvent, Usage};
 
 /// Records every observation and every content report as one rendered
 /// line: the boundary events, the turn numbers, the model name, the
@@ -116,24 +116,30 @@ impl Observer for RoundRecorder {
 
 /// A text reply with everything a round can report: a model name, a
 /// reasoning side channel, a finish reason, and usage metrics.
-fn rich_text_reply(content: &str) -> GatewayReply {
-    GatewayReply::Json(json!({
-        "model": "served-model",
-        "choices": [{
-            "finish_reason": "stop",
-            "message": {
-                "role": "assistant",
-                "reasoning_content": "let me think",
-                "content": content,
-            }
-        }],
-        "usage": { "prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5 }
-    }))
+fn rich_text_reply(content: &str) -> ScriptedReply {
+    ScriptedReply::Text {
+        model: "served-model".to_owned(),
+        content: content.to_owned(),
+        finish_reason: Some("stop".to_owned()),
+        reasoning: Some("let me think".to_owned()),
+        metrics: Some(Box::new(CallMetrics {
+            usage: Some(Usage {
+                prompt_tokens: 3,
+                completion_tokens: 2,
+                total_tokens: 5,
+                cached_tokens: None,
+                reasoning_tokens: None,
+            }),
+            llama: None,
+            vllm: None,
+            client: None,
+        })),
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
-    let gateway = ScriptedGateway::start(vec![rich_text_reply("final answer")]).await;
+    let gateway = ScriptedChat::new(vec![rich_text_reply("final answer")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('hello')\n\
@@ -150,7 +156,7 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("one text round ends the loop");
@@ -173,7 +179,7 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
     );
     assert!(thinking < reply, "thinking precedes the reply: {lines:?}");
     assert_eq!(
-        gateway.requests()[0]["tools"][0]["function"]["name"],
+        gateway.requests()[0].tools[0].name(),
         "echo",
         "the round advertises the section's scope"
     );
@@ -181,11 +187,10 @@ async fn a_text_round_reports_its_reply_and_the_loop_appends_it() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
         resp_text("done"),
-    ])
-    .await;
+    ]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('call the tool')\n\
@@ -205,7 +210,7 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the tool round and the closing reply run");
@@ -232,7 +237,7 @@ async fn a_tool_round_reports_the_batch_before_the_shim_dispatches_it() {
 async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     // Readable at the call site as the `out_of_scope_tool` kind with the
     // loop's exact message, and typed when it escapes the section.
-    let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "rogue", "{}")]).await;
+    let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('go rogue')\n\
@@ -247,7 +252,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -264,7 +269,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
         "the rejected call reports a failed tool call: {lines:?}"
     );
 
-    let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "rogue", "{}")]).await;
+    let gateway = ScriptedChat::new(vec![resp_tool_call("call_1", "rogue", "{}")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('go rogue')\n\
@@ -274,7 +279,7 @@ async fn an_out_of_scope_tool_name_fails_the_round_with_out_of_scope_tool() {
     let prompt = parse(&md);
     let (ctx, harness) =
         loop_context_observed(&prompt, echo_tools(), Arc::new(NullObserver::default()));
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("an uncaught out-of-scope call fails the section");
@@ -297,7 +302,7 @@ async fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_repl
     // The arm resumes the empty round with the reply absent and its finish
     // reason; with no answered tool call before it, the loop's exit rules
     // raise `empty_model_reply` carrying that finish reason.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text_finish("", "stop")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('say nothing')\n\
@@ -313,7 +318,7 @@ async fn an_empty_reply_is_a_completed_round_the_loop_raises_as_empty_model_repl
         ToolSet::default(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -339,7 +344,7 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
          end)\n\
          assert(not ok, 'the compactor raise ends the loop')\n\
          return seen";
-    let gateway = ScriptedGateway::start(vec![resp_text("unreachable")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("unreachable")]);
     let md = loop_prompt(&format!(
         "local msgs = messages.new()\n\
          msgs:user(string.rep('x', 100000))\n\
@@ -351,7 +356,7 @@ async fn a_context_overflow_resumes_with_its_reason_for_the_compactor() {
         ToolSet::default(),
         Arc::new(NullObserver::default()),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the compactor's raise is pcall-able");

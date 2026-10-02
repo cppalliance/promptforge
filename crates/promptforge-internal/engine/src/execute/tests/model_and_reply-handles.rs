@@ -6,13 +6,13 @@
 
 use super::*;
 
-/// Runs a parsed prompt against a scripted gateway with no external tools.
+/// Runs a parsed prompt against a scripted model with no external tools.
 async fn run_with_gateway(
     test: &TestPrompt,
-    addr: SocketAddr,
+    gateway: &ScriptedChat,
     store: &TestStore,
 ) -> Result<String> {
-    run(test, "", &[], store, gatewayed(addr)).await
+    run(test, "", &[], store, gatewayed(gateway)).await
 }
 
 /// Runs a prompt with hand-filled model bindings and no prepare pass: the
@@ -23,7 +23,7 @@ async fn run_with_gateway(
 async fn run_with_bindings(
     md: &str,
     bindings: &[(&str, &str)],
-    addr: SocketAddr,
+    gateway: &ScriptedChat,
     store: &TestStore,
 ) -> Result<String> {
     let prompt = parse(md);
@@ -39,7 +39,7 @@ async fn run_with_bindings(
             ),
         );
     }
-    let harness = RunHarness::new().client(gateway_client(addr));
+    let harness = RunHarness::new().client(gateway_client(gateway));
     match crate::test_support::run_harness(&prompt, "", ctx, harness).await {
         RunResult::Ok(out) => Ok(out),
         RunResult::Cancelled => Err(Error::Interrupted),
@@ -49,8 +49,7 @@ async fn run_with_bindings(
 
 #[tokio::test]
 async fn models_get_returns_a_handle_without_changing_the_section_model() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
@@ -64,7 +63,7 @@ Ask the model.\n\n\
     let out = run_with_bindings(
         md,
         &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        addr,
+        &gateway,
         &store,
     )
     .await
@@ -80,20 +79,20 @@ Ask the model.\n\n\
         .last_request()
         .expect("complete must reach the gateway");
     assert_eq!(
-        body["model"], "writer-model",
+        body.options.model(),
+        "writer-model",
         "models.get must not change the section's model"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn models_infer_uses_the_section_model_without_touching_reply() {
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\n\
 ```lua\nvar.r = models.infer('ping')\n```\n\n\
 ```lua\nreturn var.r .. ':' .. tostring(reply)\n```\n";
-    let out = run_with_gateway(&bound_for_model(md), addr, &TestStore::new())
+    let out = run_with_gateway(&bound_for_model(md), &gateway, &TestStore::new())
         .await
         .unwrap();
     assert_eq!(
@@ -104,22 +103,21 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");
-    assert_eq!(body["model"], "claude-sonnet-4-6");
+    assert_eq!(body.options.model(), "claude-sonnet-4-6");
     assert!(
-        body.get("tools").is_none(),
-        "models.infer advertises no tools: {body}"
+        body.tools.is_empty(),
+        "models.infer advertises no tools: {body:?}"
     );
     assert_eq!(
-        body["messages"].as_array().expect("messages array").len(),
+        body.messages.len(),
         1,
-        "models.infer runs on a fresh context: {body}"
+        "models.infer runs on a fresh context: {body:?}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
@@ -130,7 +128,7 @@ models.default('writer')\n\
     let out = run_with_bindings(
         md,
         &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        addr,
+        &gateway,
         &TestStore::new(),
     )
     .await
@@ -140,15 +138,15 @@ models.default('writer')\n\
         .last_request()
         .expect("complete must reach the gateway");
     assert_eq!(
-        body["model"], "analyst-model",
+        body.options.model(),
+        "analyst-model",
         "a leading handle must use the handle's model, not the section default"
     );
 }
 
 #[tokio::test]
 async fn models_use_reselection_steers_the_next_round() {
-    let gateway = ScriptedGateway::start(vec![resp_text("first"), resp_text("second")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("first"), resp_text("second")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {}\n  analyst: {}\n---\n\n\
 # T\n\n\
 ```lua\n\
@@ -164,7 +162,7 @@ return models.infer('ping')\n\
     let out = run_with_bindings(
         md,
         &[("writer", "writer-model"), ("analyst", "analyst-model")],
-        addr,
+        &gateway,
         &TestStore::new(),
     )
     .await
@@ -177,11 +175,13 @@ return models.infer('ping')\n\
         "both infer rounds must reach the gateway"
     );
     assert_eq!(
-        requests[0]["model"], "writer-model",
+        requests[0].options.model(),
+        "writer-model",
         "the first round uses the initial selection"
     );
     assert_eq!(
-        requests[1]["model"], "analyst-model",
+        requests[1].options.model(),
+        "analyst-model",
         "the second round uses the re-selected model"
     );
 }
@@ -217,18 +217,22 @@ async fn models_infer_without_use_or_default_errors() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn models_get_infer_works_without_any_section_model() {
-    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("pong")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst: {}\n---\n\n\
 # T\n\n\
 ## Only\n\n\
 ```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
-    let out = run_with_bindings(md, &[("analyst", "analyst-model")], addr, &TestStore::new())
-        .await
-        .unwrap();
+    let out = run_with_bindings(
+        md,
+        &[("analyst", "analyst-model")],
+        &gateway,
+        &TestStore::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(out, "pong");
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");
-    assert_eq!(body["model"], "analyst-model");
+    assert_eq!(body.options.model(), "analyst-model");
 }

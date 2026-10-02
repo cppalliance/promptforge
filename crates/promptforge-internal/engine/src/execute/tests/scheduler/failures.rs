@@ -176,11 +176,10 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     // shim that raised first would leak the sibling into `tasks_live`.
     // The 30-second sibling answer and the timeout guard prove the driver
     // never waits on the aborted arm.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("boom-answer"),
         resp_delayed_text("slow-answer", std::time::Duration::from_secs(30)),
-    ])
-    .await;
+    ]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -196,7 +195,7 @@ async fn fatal_arm_aborts_an_in_flight_sibling() {
     let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr()))).drive(),
+        TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway))).drive(),
     )
     .await
     .expect("the aborted sibling must not stall the driver");
@@ -251,12 +250,11 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
     // so an author `pcall` catches it; the run then continues - including
     // past a stale answer the aborted sibling's already-completed I/O task
     // may have posted, which the driver must discard rather than fail on.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("boom-answer"),
         resp_text("slow-answer"),
         resp_text("after-answer"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -274,7 +272,7 @@ async fn a_caught_fanout_failure_lets_the_caller_continue() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the caught fanout failure lets the caller continue");
@@ -296,11 +294,10 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     // settles each with one `abandoned` terminal naming the run's end -
     // not a cancel or a failure of the arm's own. The 30-second answers
     // and the timeout guard prove the aborted I/O is never awaited.
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+    let gateway = ScriptedChat::new(vec![resp_delayed_text(
         "too late",
         std::time::Duration::from_secs(30),
-    )])
-    .await;
+    )]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -313,7 +310,7 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         ```lua\nreturn models.infer('hang ' .. item)\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     let calls = Arc::clone(&gateway.calls);
     tokio::spawn(async move {
@@ -376,7 +373,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     // its block, and no TaskStarted or TaskCancelled fires for it: a task
     // that never ran reports no start and no terminal, though its slot
     // still reaches Cancelled.
-    let gateway = ScriptedGateway::start(vec![resp_text("after-answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("after-answer")]);
     let recorder = Arc::new(Recorder::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
@@ -390,7 +387,7 @@ async fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         ```lua\nreturn 'worked:' .. item\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context_on(&prompt, &TestStore::new(), recorder.clone());
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     // The root walk chain is id 0 and the first arm id 1; the second arm's
     // start trips the bound.
     scheduler.set_max_chains_for_test(2);
@@ -446,14 +443,14 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     // orphaned id (a fatal sibling's late I/O answer, covered by
     // `a_caught_fanout_failure_lets_the_caller_continue`) may be
     // discarded.
-    let gateway = ScriptedGateway::start(vec![resp_text("real-answer")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("real-answer")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Infer\n\n\
         ## Only\n\n\
         ```lua\nreturn models.infer('ask')\n```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     // Handed to the run before the drive: the phantom answer lands ahead
     // of the real infer's, on a run that has issued nothing.
     scheduler

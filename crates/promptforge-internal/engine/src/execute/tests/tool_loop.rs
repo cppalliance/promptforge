@@ -30,7 +30,7 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
      return msgs[#msgs].content";
 
 /// The tool set with the always-failing fixture bound as `echo` (the name
-/// the mock gateway's tool-call replies ask for) and in scope.
+/// the scripted tool-call replies ask for) and in scope.
 fn failing_echo_tools() -> FixtureTools {
     always_tool("echo", Arc::new(FailingTool))
 }
@@ -40,7 +40,7 @@ fn failing_echo_tools() -> FixtureTools {
 /// (each round is one `chat` over it), whose call ids must be unique - as a
 /// real backend's are - so a script replaying one id would be refused as a
 /// duplicate before the cap could fire.
-fn never_converging_script(rounds: usize) -> Vec<GatewayReply> {
+fn never_converging_script(rounds: usize) -> Vec<ScriptedReply> {
     (0..rounds)
         .map(|round| resp_tool_call(&format!("call_{round}"), "echo", "{\"value\":\"x\"}"))
         .collect()
@@ -51,10 +51,10 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // A small explicit cap: the loop must make exactly that many round
     // trips against a never-converging model, then exhaust.
     let cap = 3;
-    let gateway = ScriptedGateway::start(never_converging_script(cap)).await;
+    let gateway = ScriptedChat::new(never_converging_script(cap));
     let prompt = parse(&capped_loop_prompt(cap, LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("a never-converging model should exhaust the loop");
@@ -71,7 +71,7 @@ async fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges
     // The raise is pcall-able as the `tool_loop_exhausted` kind with the
     // typed error's exact message, and every round before it appended a
     // complete exchange: the list holds no half-answered batch at the cap.
-    let gateway = ScriptedGateway::start(never_converging_script(2)).await;
+    let gateway = ScriptedChat::new(never_converging_script(2));
     let md = capped_loop_prompt(
         2,
         "local msgs = messages.new()\n\
@@ -85,7 +85,7 @@ async fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -97,11 +97,10 @@ async fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges
 async fn tool_loop_uses_the_default_cap_when_unspecified() {
     // A prompt declaring no budget runs the limits default: exactly
     // `DEFAULT_MAX_TOOL_ITERATIONS` round trips.
-    let gateway =
-        ScriptedGateway::start(never_converging_script(DEFAULT_MAX_TOOL_ITERATIONS)).await;
+    let gateway = ScriptedChat::new(never_converging_script(DEFAULT_MAX_TOOL_ITERATIONS));
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("a never-converging model should exhaust the loop");
@@ -136,10 +135,10 @@ fn run_resolves_cap_from_frontmatter_else_default() {
 async fn tool_loop_dispatches_then_returns_text() {
     // One tool-call round and one text round: the terminal text is the
     // list's last record and the run's turn counter advanced twice.
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedChat::new(echo_then_text_script());
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop converges on the text round");
@@ -156,11 +155,10 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     // A bound tool's own failure is the call's result record - the ToolError
     // message, nonce-wrapped as untrusted - with TOOL_CALL_FAILED firing
     // alongside it, and the loop continues to the terminal reply.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_x", "echo", "{\"value\":\"x\"}"),
         resp_text("final answer"),
-    ])
-    .await;
+    ]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
@@ -175,7 +173,7 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
         failing_echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a tool's own failure becomes the call's result, not the loop's");
@@ -219,10 +217,10 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
     // keeps calling the failing tool never converges: the loop exits at
     // exactly `max_tool_iterations`.
     let cap = 3;
-    let gateway = ScriptedGateway::start(never_converging_script(cap)).await;
+    let gateway = ScriptedChat::new(never_converging_script(cap));
     let prompt = parse(&capped_loop_prompt(cap, LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, failing_echo_tools());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("a never-converging model should exhaust the loop");
@@ -236,8 +234,12 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
-    let gateway = ScriptedGateway::start(vec![resp_status(500, "private backend response")]).await;
-    let client = MockGatewayClient::new(gateway.addr(), "secret token");
+    let gateway = ScriptedChat::new(vec![resp_failure(
+        CompletionErrorKind::ServerError,
+        500,
+        "private backend response",
+    )]);
+    let client = gateway_client(&gateway);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('private model input')\n\
@@ -265,11 +267,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         vec![detail::MODEL_TURN_FAILED.to_string()]
     );
     let trace = format!("{:?}", recorder.events());
-    for payload in [
-        "private backend response",
-        "private model input",
-        "secret token",
-    ] {
+    for payload in ["private backend response", "private model input"] {
         assert!(!trace.contains(payload), "observation leaked {payload:?}");
     }
 }
@@ -279,11 +277,14 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
     // Same status class as a provider overflow, unrelated body: not context
     // overflow, so the bare rejection propagates and no compactor is
     // invoked.
-    let gateway =
-        ScriptedGateway::start(vec![resp_status(400, "invalid request: unknown field")]).await;
+    let gateway = ScriptedChat::new(vec![resp_failure(
+        CompletionErrorKind::Rejected,
+        400,
+        "invalid request: unknown field",
+    )]);
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("an ordinary backend rejection must propagate unchanged");
@@ -299,12 +300,11 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     // The loop's scope gate: a model call naming a declared-but-unscoped
     // alias fails with OutOfScopeToolCall holding the
     // declared-but-unscoped hint.
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![resp_tool_call(
         "call_1",
         "global_tool",
         "{\"value\":\"x\"}",
-    )])
-    .await;
+    )]);
     let tools = FixtureTools::new(
         vec![
             fixture_binding(
@@ -330,7 +330,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     );
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, tools);
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("model calling a global-but-unscoped tool must fail");
@@ -357,15 +357,14 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn model_calling_pure_unknown_tool_is_a_hard_error() {
-    let gateway = ScriptedGateway::start(vec![resp_tool_call(
+    let gateway = ScriptedChat::new(vec![resp_tool_call(
         "call_1",
         "nonexistent",
         "{\"value\":\"x\"}",
-    )])
-    .await;
+    )]);
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let error = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect_err("model calling a pure unknown tool must fail");
@@ -393,10 +392,10 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedChat::new(echo_then_text_script());
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, always_tool("echo", Arc::new(UntrustedEchoTool)));
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop converges");
@@ -422,15 +421,14 @@ async fn untrusted_nonce_is_stable_across_rounds() {
     // One nonce per run: every round's envelope in a single loop is
     // stamped with the same nonce, so identical content wraps
     // byte-identically and KV-cache prefixes stay shared across rounds.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_0", "echo", "{\"value\":\"hi\"}"),
         resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
         resp_text("final answer"),
-    ])
-    .await;
+    ]);
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, always_tool("echo", Arc::new(UntrustedEchoTool)));
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop converges");
@@ -449,10 +447,10 @@ async fn untrusted_nonce_is_stable_across_rounds() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedChat::new(echo_then_text_script());
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop converges");
@@ -473,11 +471,11 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 async fn cancel_during_in_flight_tool_call_returns_promptly() {
     use std::time::{Duration, Instant};
 
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedChat::new(echo_then_text_script());
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let (ctx, harness) = loop_context(&prompt, always_tool("echo", Arc::new(SlowTool)));
 
-    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut driver = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let canceller = driver.cancel_handle();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;

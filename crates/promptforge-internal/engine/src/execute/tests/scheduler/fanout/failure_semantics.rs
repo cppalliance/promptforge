@@ -124,11 +124,10 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
     // `TaskFailed` (the stub is the fanout's recovery, not the arm's), and
     // the sibling `TaskSucceeded`.
     let cap = 2;
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_0", "echo", "{\"value\":\"x\"}"),
         resp_tool_call("call_1", "echo", "{\"value\":\"x\"}"),
-    ])
-    .await;
+    ]);
     let md = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\nmax_tool_iterations: {cap}\n---\n\n\
         # Fanout\n\n\
@@ -160,7 +159,7 @@ async fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_land
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("an exhausted arm must not fail the fanout");

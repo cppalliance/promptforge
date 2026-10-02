@@ -22,13 +22,12 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
     // instead of parking: no timer is allocated (the owner's third child,
     // 0.2, never exists) and the run does not wait on `Parked` or the
     // timeout.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Parked\"}"),
         resp_tool_call("call_2", "task", "{\"target\":\"## Quick\"}"),
         resp_tool_call("call_3", "await_tasks", "{\"timeout\":30}"),
         resp_text("bye"),
-    ])
-    .await;
+    ]);
     let md = format!(
         "---\nname: mt\ndescription: d\npromptforge: 0\n---\n\n\
          # ModelTasks\n\n\
@@ -47,7 +46,7 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         Arc::new(SlowTool),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("a pending notice answers the call without a wait")
@@ -66,10 +65,7 @@ async fn await_tasks_answers_at_once_when_a_notice_is_already_pending() {
         Some(TaskState::Abandoned),
         "the live sibling was never waited on; the owner's end abandoned it"
     );
-    let round_4 = gateway.requests()[3]["messages"]
-        .as_array()
-        .expect("messages")
-        .len();
+    let round_4 = gateway.requests()[3].messages.len();
     assert_eq!(
         round_4, 7,
         "the notice was consumed by the call, not drained again into round 4"
@@ -84,12 +80,11 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     // 0.1) is `Cancelled` when the run ends, never `Done` (fired late) or
     // `Abandoned` (still running at the owner's end), and the transcript
     // shows one wake.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_tool_call("call_1", "task", "{\"target\":\"## Child\"}"),
         resp_tool_call("call_2", "await_tasks", "{\"timeout\":1}"),
         resp_delayed_text("bye", Duration::from_millis(1200)),
-    ])
-    .await;
+    ]);
     let md = owner_prompt(
         "",
         &loop_owner("return msgs[5].content .. '|' .. #msgs"),
@@ -102,7 +97,7 @@ async fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
         Arc::clone(&recorder) as Arc<dyn Observer>,
         DelayedTool::new(&[Duration::from_millis(300)]),
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = tokio::time::timeout(Duration::from_secs(5), scheduler.drive())
         .await
         .expect("the run does not wait out the cancelled timer")

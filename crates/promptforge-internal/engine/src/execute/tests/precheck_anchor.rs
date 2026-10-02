@@ -11,6 +11,7 @@ use super::*;
 use crate::lua::ToolSet;
 use crate::model::{ModelBinding, ModelInvocation};
 use crate::test_support::tokio_driver::TokioDriver;
+use promptforge_types::metrics::{CallMetrics, Usage};
 
 /// A text reply with the usage a provider would report for the round.
 fn reply_with_usage(
@@ -18,29 +19,34 @@ fn reply_with_usage(
     prompt: u32,
     completion: u32,
     reasoning: Option<u32>,
-) -> GatewayReply {
-    let mut usage = json!({
-        "prompt_tokens": prompt,
-        "completion_tokens": completion,
-        "total_tokens": prompt + completion,
-    });
-    if let Some(reasoning) = reasoning {
-        usage["completion_tokens_details"] = json!({ "reasoning_tokens": reasoning });
+) -> ScriptedReply {
+    ScriptedReply::Text {
+        model: MOCK_MODEL.to_owned(),
+        content: content.to_owned(),
+        finish_reason: None,
+        reasoning: None,
+        metrics: Some(Box::new(CallMetrics {
+            usage: Some(Usage {
+                prompt_tokens: prompt,
+                completion_tokens: completion,
+                total_tokens: prompt + completion,
+                cached_tokens: None,
+                reasoning_tokens: reasoning,
+            }),
+            llama: None,
+            vllm: None,
+            client: None,
+        })),
     }
-    GatewayReply::Json(json!({
-        "model": MOCK_MODEL,
-        "choices": [{ "message": { "role": "assistant", "content": content } }],
-        "usage": usage,
-    }))
 }
 
 /// Runs `lua` as the section of a loop prompt on the 4096-token window and
 /// returns what it returned, beside the gateway that served its rounds.
-async fn run_rounds(lua: &str, replies: Vec<GatewayReply>) -> (String, ScriptedGateway) {
-    let gateway = ScriptedGateway::start(replies).await;
+async fn run_rounds(lua: &str, replies: Vec<ScriptedReply>) -> (String, ScriptedChat) {
+    let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(lua));
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");
@@ -177,8 +183,8 @@ async fn a_merged_history_falls_back_to_the_estimate() {
 /// [`run_rounds`] with a third binding, `twin`: the default model under
 /// other invocation settings, so it shares `writer`'s tokenizer. `other`
 /// names a different model.
-async fn run_rounds_with_twin(lua: &str, replies: Vec<GatewayReply>) -> (String, ScriptedGateway) {
-    let gateway = ScriptedGateway::start(replies).await;
+async fn run_rounds_with_twin(lua: &str, replies: Vec<ScriptedReply>) -> (String, ScriptedChat) {
+    let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(lua));
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
     {
@@ -198,7 +204,7 @@ async fn run_rounds_with_twin(lua: &str, replies: Vec<GatewayReply>) -> (String,
         );
         models.bindings.push(twin);
     }
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");
@@ -206,11 +212,11 @@ async fn run_rounds_with_twin(lua: &str, replies: Vec<GatewayReply>) -> (String,
 }
 
 /// The model each request named, in the order they left.
-fn request_models(gateway: &ScriptedGateway) -> Vec<String> {
+fn request_models(gateway: &ScriptedChat) -> Vec<String> {
     gateway
         .requests()
         .iter()
-        .map(|body| body["model"].as_str().unwrap_or_default().to_owned())
+        .map(|body| body.options.model().to_owned())
         .collect()
 }
 
@@ -322,8 +328,8 @@ async fn a_return_to_the_first_model_uses_the_estimate() {
 
 /// Runs `lua` on a binding that sets `max_tokens`, over the 4096-token
 /// window.
-async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedGateway) {
-    let gateway = ScriptedGateway::start(vec![resp_text("ok")]).await;
+async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedChat) {
+    let gateway = ScriptedChat::new(vec![resp_text("ok")]);
     let prompt = parse(&loop_prompt(lua));
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
     {
@@ -337,7 +343,7 @@ async fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedGat
             });
         }
     }
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the section catches its own overflow");

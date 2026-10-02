@@ -108,14 +108,13 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
 # Test prompt\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
 ### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n\n```lua\nreturn models.infer(prose)\n```\n";
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let out = run(
         &bound_for_model(md),
         "",
         &[],
         &TestStore::new(),
-        gatewayed(addr),
+        gatewayed(&gateway),
     )
     .await
     .unwrap();
@@ -124,10 +123,10 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
     let body = gateway
         .last_request()
         .expect("complete must reach the gateway");
-    let user_content = body["messages"]
-        .as_array()
-        .and_then(|messages| messages.first())
-        .and_then(|message| message["content"].as_str())
+    let user_content = body
+        .messages
+        .first()
+        .map(crate::model::Message::content)
         .expect("first message must hold substituted prose");
     assert!(
         user_content.contains("Item: [7,\"x\"]."),

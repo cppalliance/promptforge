@@ -12,12 +12,10 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     // section's `models.use` sampling options on the chat body. Roles
     // declare no sampling fields, so a section on the prompt-wide default
     // sends none.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("hello from the mock"),
         resp_text("hello again"),
-    ])
-    .await;
-    let addr = gateway.addr();
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  analyst:\n    keywords: [no-thinking]\n---\n\n\
 # T\n\n\
 ```lua\nmodels.default('analyst')\n```\n\n\
@@ -39,7 +37,7 @@ Ask again.\n\n\
             ThinkingMode::Switchable,
         ),
     );
-    let harness = RunHarness::new().client(gateway_client(addr));
+    let harness = RunHarness::new().client(gateway_client(&gateway));
     let out = match crate::test_support::run_harness(&prompt, "", ctx, harness).await {
         RunResult::Ok(out) => out,
         other => panic!("the run must succeed: {other:?}"),
@@ -49,16 +47,25 @@ Ask again.\n\n\
     let requests = gateway.requests();
     assert_eq!(requests.len(), 2, "one round per section: {requests:?}");
     let selected = &requests[0];
-    assert_eq!(selected["model"], "analyst");
-    assert_eq!(selected["chat_template_kwargs"]["enable_thinking"], false);
-    assert_eq!(selected["temperature"], 0.0);
-    assert_eq!(selected["max_tokens"], 256);
+    assert_eq!(selected.options.model(), "analyst");
+    assert_eq!(selected.options.thinking(), Some(false));
+    assert_eq!(
+        selected
+            .options
+            .temperature()
+            .map(crate::model::Temperature::get),
+        Some(0.0)
+    );
+    assert_eq!(
+        selected.options.max_tokens().map(NonZeroU32::get),
+        Some(256)
+    );
     let defaulted = &requests[1];
-    assert_eq!(defaulted["model"], "analyst");
-    assert_eq!(defaulted["chat_template_kwargs"]["enable_thinking"], false);
+    assert_eq!(defaulted.options.model(), "analyst");
+    assert_eq!(defaulted.options.thinking(), Some(false));
     assert!(
-        defaulted.get("temperature").is_none() && defaulted.get("max_tokens").is_none(),
-        "a section on the prompt-wide default sends neither option: {defaulted}"
+        defaulted.options.temperature().is_none() && defaulted.options.max_tokens().is_none(),
+        "a section on the prompt-wide default sends neither option: {defaulted:?}"
     );
 }
 
@@ -67,8 +74,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     // `client: Some(..)` is what a caller configured from a file passes;
     // nothing here reads `PROMPTFORGE_*`, and the run still reaches a
     // gateway and reports its model turn.
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nreturn models.infer(prose)\n```\n";
     let recorder = Arc::new(Recorder::default());
@@ -80,7 +86,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         },
     )
@@ -141,8 +147,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 
 #[tokio::test]
 async fn epilog_runs_after_prose_and_can_return() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\n\
 local text = models.infer(prose)\n\
@@ -165,7 +170,7 @@ return 'epilog result'\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         },
     )
@@ -276,8 +281,7 @@ This prose must not reach a model.\n\n\
 
 #[tokio::test]
 async fn shared_helper_survives_prologue_model_and_epilog() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("hello from the mock")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
 # Test prompt\n\n\
 ```lua shared\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
@@ -293,7 +297,7 @@ Ask using {{ var.question }}.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         },
     )

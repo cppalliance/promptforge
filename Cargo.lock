@@ -4799,8 +4799,6 @@ name = "promptforge-engine"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "axum",
- "bytes",
  "criterion",
  "mlua",
  "promptforge",
@@ -4809,7 +4807,6 @@ dependencies = [
  "promptforge-parser",
  "promptforge-types",
  "promptforge-vfs",
- "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

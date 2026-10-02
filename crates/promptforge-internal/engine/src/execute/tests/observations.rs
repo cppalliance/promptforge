@@ -355,8 +355,7 @@ async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
 
 #[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
-    let gateway = ScriptedGateway::start(vec![resp_text("aliased final")]).await;
-    let addr = gateway.addr();
+    let gateway = ScriptedChat::new(vec![resp_text("aliased final")]);
     let tool = Arc::new(ScopedFixtureTool::new(
         "echo",
         "canonical_echo",
@@ -393,7 +392,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(gateway_client(addr)),
+            client: Some(gateway_client(&gateway)),
             debug: None,
         },
     )
@@ -439,7 +438,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     use super::models_loop::{echo_tools, loop_context_observed, loop_events, loop_prompt};
     use crate::test_support::tokio_driver::TokioDriver;
 
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedChat::new(echo_then_text_script());
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('ask the model')\n\
@@ -453,7 +452,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         echo_tools(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the loop converges");

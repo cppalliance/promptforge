@@ -187,7 +187,7 @@ pub(super) fn bound_with_tools(md: &str) -> TestPrompt {
 pub(super) struct RunOptions {
     pub(super) execution: &'static str,
     pub(super) observer: Arc<dyn Observer>,
-    pub(super) client: Option<MockGatewayClient>,
+    pub(super) client: Option<ScriptedChat>,
     pub(super) debug: Option<Arc<dyn DebugCapture>>,
 }
 
@@ -264,27 +264,31 @@ pub(super) fn silent() -> RunOptions {
     }
 }
 
-/// Builds a client pointed at the given scripted gateway.
-pub(super) fn gateway_client(addr: SocketAddr) -> MockGatewayClient {
-    MockGatewayClient::new(addr, "test")
+/// A client answering from the given scripted model, sharing its script,
+/// count, and record.
+pub(super) fn gateway_client(chat: &ScriptedChat) -> ScriptedChat {
+    chat.clone()
 }
 
-/// Options that report nowhere and point the run's client at the given
-/// scripted gateway.
-pub(super) fn gatewayed(addr: SocketAddr) -> RunOptions {
+/// Options that report nowhere and answer the run's rounds from the given
+/// scripted model.
+pub(super) fn gatewayed(chat: &ScriptedChat) -> RunOptions {
     RunOptions {
         execution: EXECUTION,
         observer: Arc::new(NullObserver::default()),
-        client: Some(gateway_client(addr)),
+        client: Some(gateway_client(chat)),
         debug: None,
     }
 }
 
-/// Options that point at a scripted gateway and record debug events.
-pub(super) fn gatewayed_with_debug(addr: SocketAddr, capture: Arc<dyn DebugCapture>) -> RunOptions {
+/// Options that answer from a scripted model and record debug events.
+pub(super) fn gatewayed_with_debug(
+    chat: &ScriptedChat,
+    capture: Arc<dyn DebugCapture>,
+) -> RunOptions {
     RunOptions {
         debug: Some(capture),
-        ..gatewayed(addr)
+        ..gatewayed(chat)
     }
 }
 

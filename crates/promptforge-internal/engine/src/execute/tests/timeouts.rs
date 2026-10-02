@@ -22,7 +22,7 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
     // The child parks on a slow model round; a 50ms wait times out and
     // returns nil, the child is still running, and a second untimed wait
     // delivers it - so nothing leaks at chain end.
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text("slow answer", SLOW)]).await;
+    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
     let md = tasks_prompt(
         "local t = tasks.spawn('## Child')\n\
          local first, ok, result = tasks.join_any({ t }, { timeout = 0.05 })\n\
@@ -42,7 +42,7 @@ async fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running()
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())));
+    let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let out = scheduler
         .drive()
         .await
@@ -114,7 +114,7 @@ async fn join_returns_timed_out_with_the_unfinished_members_absent() {
     // `join` returns Quick's entry, no entry for Slow, and
     // `timed_out = true`; Slow keeps running and a second untimed
     // `join` delivers it with `timed_out = false`.
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text("slow answer", SLOW)]).await;
+    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
     let md = tasks_prompt(
         "local q = tasks.spawn('## Quick')\n\
          local s = tasks.spawn('## Slow')\n\
@@ -138,7 +138,7 @@ async fn join_returns_timed_out_with_the_unfinished_members_absent() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a timed-out join leaks nothing");
@@ -191,7 +191,7 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
     // the child's status mid-wait and sees one owned task (the grandchild),
     // never the timer; the child's own `pending` mid-wait cannot be read,
     // so the parent's view is the proof.
-    let gateway = ScriptedGateway::start(vec![resp_delayed_text("slow answer", SLOW)]).await;
+    let gateway = ScriptedChat::new(vec![resp_delayed_text("slow answer", SLOW)]);
     let md = tasks_prompt(
         "local c = tasks.spawn('## Child')\n\
          store.write('park', 'x')\n\
@@ -218,7 +218,7 @@ async fn the_timer_is_invisible_to_pending_and_to_a_status_tasks_list() {
         &TestStore::new(),
         Arc::clone(&recorder) as Arc<dyn Observer>,
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the run completes");

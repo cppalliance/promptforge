@@ -33,9 +33,8 @@ pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
 
 /// What the test driver performs a `Chat` round on: a stand-in for the
 /// Harness's model client, which the Engine never holds and this crate
-/// never names. The suites' implementation speaks the wire vocabulary to
-/// an axum mock gateway over a dev-only HTTP client; a scripted
-/// implementation can answer from a table.
+/// never names. The suites' implementation answers each round from a
+/// script, in process.
 pub trait ChatClient: Send + Sync {
     /// Performs one round: sends `messages` (with `tools` advertised when
     /// non-empty) under `options`, bounded by `limits`' request timeout

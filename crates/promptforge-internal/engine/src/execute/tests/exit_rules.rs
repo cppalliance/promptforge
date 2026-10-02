@@ -172,15 +172,15 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// the section's result, the loop's observation sequence, and the run's
 /// turn count.
 async fn drive_loop(
-    replies: Vec<GatewayReply>,
+    replies: Vec<ScriptedReply>,
     tools: impl Into<FixtureTools>,
 ) -> (Result<String>, Vec<String>, u32) {
-    let gateway = ScriptedGateway::start(replies).await;
+    let gateway = ScriptedChat::new(replies);
     let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
     let recorder = Arc::new(Recorder::default());
     let (ctx, harness) =
         loop_context_observed(&prompt, tools, Arc::clone(&recorder) as Arc<dyn Observer>);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await;
     (
@@ -329,7 +329,7 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     // The raise is pcall-able as the `empty_model_reply` kind holding the
     // finish reason as its field and the client's phrase as its message,
     // and the rejected round leaves the author's list untouched.
-    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text_finish("", "stop")]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('say nothing')\n\
@@ -340,7 +340,7 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");
@@ -354,18 +354,13 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
 async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
     // The crate's own wording extends the fixed phrase after a colon, so the
     // author sees why the round counted as empty.
-    let gateway = ScriptedGateway::start(vec![GatewayReply::Json(serde_json::json!({
-        "model": MOCK_MODEL,
-        "choices": [{
-            "finish_reason": "stop",
-            "message": {
-                "role": "assistant",
-                "content": "",
-                "reasoning_content": "only thinking"
-            }
-        }]
-    }))])
-    .await;
+    let gateway = ScriptedChat::new(vec![ScriptedReply::Text {
+        model: MOCK_MODEL.to_owned(),
+        content: String::new(),
+        finish_reason: Some("stop".to_owned()),
+        reasoning: Some("only thinking".to_owned()),
+        metrics: None,
+    }]);
     let md = loop_prompt(
         "local msgs = messages.new()\n\
          msgs:user('think only')\n\
@@ -374,7 +369,7 @@ async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
     );
     let prompt = parse(&md);
     let (ctx, harness) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the call-site raise is pcall-able");

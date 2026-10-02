@@ -1,16 +1,10 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::Json;
-use axum::Router;
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::routing::post;
 use serde_json::{Value, json};
 
 use super::context::RunState;
@@ -21,9 +15,9 @@ use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelId, ModelSet, ThinkingMode};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
-use crate::test_support::mock_gateway_client::MockGatewayClient;
 use crate::test_support::recording::DebugCapture;
 use crate::test_support::recording::{NullObserver, Observation, Observer, detail, null_emitter};
+use crate::test_support::scripted_chat::{ScriptedCall, ScriptedChat, ScriptedReply};
 use crate::test_support::tokio_driver::TokioDriver;
 use crate::test_support::{RunHarness, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
@@ -207,7 +201,7 @@ impl TestTool for SlowTool {
         reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
-        // Matches the function name the mock gateway asks for.
+        // Matches the function name the scripted replies ask for.
         "echo"
     }
 
@@ -252,15 +246,15 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 
 // --- Guard-wrapping of untrusted tool results in the loop ---
 
-/// The content of the first `tool`-role message in the last recorded body.
+/// The content of the first `tool`-role message in the last recorded round.
 ///
-/// The second request the loop sends includes the dispatched tool's result;
+/// The second round the loop sends includes the dispatched tool's result;
 /// this pulls that result string back out so a test can assert on it.
-fn last_tool_turn_content(bodies: &[Value]) -> String {
+fn last_tool_turn_content(bodies: &[ScriptedCall]) -> String {
     let last = bodies.last().expect("the loop must send a second request");
-    last["messages"]
+    last.messages_json()
         .as_array()
-        .expect("a request body must include a messages array")
+        .expect("a round's messages serialize to an array")
         .iter()
         .find(|m| m["role"] == "tool")
         .expect("the re-sent conversation must include the tool turn")["content"]
@@ -269,12 +263,13 @@ fn last_tool_turn_content(bodies: &[Value]) -> String {
         .to_string()
 }
 
-/// Extracts the guard-tag nonce from every `tool`-role turn in the last body.
-fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
+/// Extracts the guard-tag nonce from every `tool`-role turn in the last
+/// recorded round.
+fn tool_turn_nonces(bodies: &[ScriptedCall]) -> Vec<String> {
     let last = bodies.last().expect("the loop must send a final request");
-    last["messages"]
+    last.messages_json()
         .as_array()
-        .expect("a request body must include a messages array")
+        .expect("a round's messages serialize to an array")
         .iter()
         .filter(|m| m["role"] == "tool")
         .filter_map(|m| m["content"].as_str())

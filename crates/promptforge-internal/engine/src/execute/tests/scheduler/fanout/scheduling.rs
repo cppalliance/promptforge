@@ -12,8 +12,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
     // Arm "two" finishes first (one infer) while arm "one" is still parked
     // on its second; the packed sequence must follow collection order. A
     // join that keyed results by completion order would return "r2|r1:r3".
-    let gateway =
-        ScriptedGateway::start(vec![resp_text("r1"), resp_text("r2"), resp_text("r3")]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("r1"), resp_text("r2"), resp_text("r3")]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -31,7 +30,7 @@ async fn fanout_results_follow_collection_order_not_finish_order() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -51,13 +50,12 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
     // driven sequentially would log `one:1`, `one:2` first. Each arm
     // returns its first answer, so the result is deterministic regardless
     // of which arm's second answer lands first.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("r1"),
         resp_text("r2"),
         resp_text("r3"),
         resp_text("r4"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -73,7 +71,7 @@ async fn fanout_arms_interleave_at_io_points_on_one_thread() {
         ```\n";
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the fanout completes on the scheduler");
@@ -95,15 +93,14 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
     // arms overlap would interleave the requests (x:a, y:a, ...). The
     // fanout spawns every arm up front, so the later arms wait queued,
     // holding no Lua VM, until the ceiling admits them.
-    let gateway = ScriptedGateway::start(vec![
+    let gateway = ScriptedChat::new(vec![
         resp_text("r1"),
         resp_text("r2"),
         resp_text("r3"),
         resp_text("r4"),
         resp_text("r5"),
         resp_text("r6"),
-    ])
-    .await;
+    ]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -122,7 +119,7 @@ async fn the_admission_limit_gates_the_arms_a_fanout_runs_at_once() {
         &prompt,
         RunLimits::new().max_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
     );
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("the ceilinged fanout completes on the scheduler");
@@ -197,7 +194,7 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
     // builds a VM per queued arm at spawn - all 1025 would complete
     // regardless - but the tally's peak sees it, because every VM would be
     // live at once.
-    let gateway = ScriptedGateway::start(vec![resp_text("r"); 1025]).await;
+    let gateway = ScriptedChat::new(vec![resp_text("r"); 1025]);
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Fanout\n\n\
         ## Parent\n\n\
@@ -215,7 +212,7 @@ async fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
     let prompt = parse(md);
     let (ctx, harness) = scheduler_context(&prompt);
     promptforge_lua::reset_section_vm_peak();
-    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)))
         .drive()
         .await
         .expect("a collection over the ceiling width completes");

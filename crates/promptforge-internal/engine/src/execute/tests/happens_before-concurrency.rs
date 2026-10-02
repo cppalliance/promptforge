@@ -100,7 +100,7 @@ async fn tokio_results_limited(
     prompt: &Prompt,
     store: &TestStore,
     limits: RunLimits,
-    client: impl Fn() -> Option<MockGatewayClient>,
+    client: impl Fn() -> Option<ScriptedChat>,
 ) -> Vec<Result<String>> {
     let mut results = Vec::new();
     for seed in TOKIO_SEEDS {
@@ -164,14 +164,13 @@ async fn an_arms_concurrency_limit_gates_its_fanout_and_the_whole_run() {
     for result in &serial_results_limited(&prompt, &store, ceiling_eight()) {
         assert_eq!(ok_text(result), expected);
     }
-    let gateway = ScriptedGateway::start(
+    let gateway = ScriptedChat::new(
         (1..=10)
             .map(|i| resp_text(&format!("r{i}")))
             .collect::<Vec<_>>(),
-    )
-    .await;
+    );
     for result in &tokio_results_limited(&prompt, &store, ceiling_eight(), || {
-        Some(gateway_client(gateway.addr()))
+        Some(gateway_client(&gateway))
     })
     .await
     {
