@@ -19,13 +19,11 @@ use std::net::SocketAddr;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use promptforge_model_client::Error as ClientError;
 use promptforge_model_client::client::{
-    ChunkSource, Completion, Message, ToolSchema, build_request_body, escape_controls,
-    read_body_capped, read_completion_stream,
+    ChunkSource, Completion, Message, ToolSchema, build_request_body, classify_http_failure,
+    escape_controls, read_body_capped, read_completion_stream,
 };
-use promptforge_model_client::detail::error_http;
-use promptforge_model_client::model::{CompletionError, CompletionOptions};
+use promptforge_model_client::model::{CompletionError, CompletionErrorKind, CompletionOptions};
 use promptforge_types::wire::StreamDelta;
 
 /// A chat client bound to one mock gateway's `/v1` root.
@@ -54,9 +52,10 @@ impl MockGatewayClient {
     /// and finishes the accumulation into the completion.
     ///
     /// # Errors
-    /// Returns the [`CompletionError`] the round failed with: `Transport`
-    /// for a send or read failure (a request past `timeout` included),
-    /// `Backend` for a non-success status with the bounded, escaped body,
+    /// Returns the [`CompletionError`] the round failed with: `Timeout` for
+    /// a request or read past `timeout`, `Transport` for any other send or
+    /// read failure, the kind [`classify_http_failure`] reads for a
+    /// non-success status (the bounded, escaped body is its detail),
     /// `MalformedResponse` for an oversize or truncated stream or a
     /// malformed chunk, and the reassembly's own errors otherwise.
     pub(crate) async fn complete(
@@ -86,10 +85,7 @@ impl MockGatewayClient {
         if !status.is_success() {
             let raw = read_body_capped(&mut chunks, content_length, max_bytes.get()).await?;
             let body = escape_controls(&String::from_utf8_lossy(&raw), 2000);
-            return Err(CompletionError::from(ClientError::Backend {
-                status: status.as_u16(),
-                body,
-            }));
+            return Err(classify_http_failure(status.as_u16(), &body));
         }
         read_completion_stream(
             &mut chunks,
@@ -114,12 +110,20 @@ impl ChunkSource for ResponseChunks {
     }
 }
 
-/// Wraps a transport failure, marking a timeout so `is_timeout` holds.
+/// Builds the failure for a send or read that went wrong: `Timeout` when
+/// the request ran out of time, `Transport` otherwise, with the transport's
+/// error kept as the source.
 fn http(error: reqwest::Error) -> CompletionError {
-    if error.is_timeout() {
-        return CompletionError::from(error_http(promptforge_model_client::Timeout(Box::new(
-            error,
-        ))));
-    }
-    CompletionError::from(error_http(error))
+    let (kind, message) = if error.is_timeout() {
+        (
+            CompletionErrorKind::Timeout,
+            "the model backend did not answer in time",
+        )
+    } else {
+        (
+            CompletionErrorKind::Transport,
+            "the connection to the model backend failed",
+        )
+    };
+    CompletionError::new(kind, message).with_source(error)
 }

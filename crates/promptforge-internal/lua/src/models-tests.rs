@@ -423,3 +423,25 @@ fn the_raw_id_fallback_still_validates_the_gateway_id() {
         "the raw path validates as a gateway id, not as an alias: {error}"
     );
 }
+
+#[test]
+fn a_poisoned_model_set_reaches_the_caller_as_a_lua_error() {
+    let (_, set, runtime) = models_vm();
+    runtime
+        .lock()
+        .expect("runtime lock")
+        .select("writer".to_owned(), UseOptions::default());
+    let poisoner = Arc::clone(&set);
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock();
+        panic!("poison the model set");
+    })
+    .join();
+
+    let error = crate::resolve_model_binding(set.as_ref(), &runtime)
+        .expect_err("a poisoned model set cannot resolve a binding");
+    assert!(
+        matches!(&error, crate::Error::Lua(message) if message == "model set mutex was poisoned"),
+        "the lock failure is a Lua error, not a model failure: {error:?}"
+    );
+}

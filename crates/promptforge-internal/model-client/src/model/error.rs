@@ -1,9 +1,8 @@
 //! The model failure vocabulary: the closed set of kinds a broker maps its
 //! failures into, and the error that carries one.
 
-use crate::classify::classify_http_failure;
-use crate::error::BoxedSource;
-use crate::{Error, Timeout};
+/// A type-erased owned error cause.
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
 /// What went wrong with a model round, as a closed set a caller can branch
 /// on without reading status codes or response text.
@@ -115,6 +114,11 @@ impl CompletionErrorKind {
 /// [`classify_http_failure`](crate::client::classify_http_failure) instead.
 /// `#[non_exhaustive]`.
 ///
+/// The message is the kind's fixed phrase. `MalformedResponse`,
+/// `EmptyReply`, and `Unavailable` may extend it with `: ` and a specific
+/// that the broker's own code wrote (for example the byte limit that was
+/// hit); provider text never goes in the message.
+///
 /// # Examples
 ///
 /// ```
@@ -148,15 +152,14 @@ pub struct CompletionError {
     finish_reason: Option<String>,
     detail: Option<String>,
     source: Option<BoxedSource>,
-    /// The HTTP status behind the failure, kept for [`status`](Self::status).
-    status: Option<u16>,
 }
 
 impl CompletionError {
     /// Builds a failure of `kind` with `message` as its display text.
     ///
-    /// A broker uses the fixed phrase for the kind; the message must not
-    /// carry provider text, which belongs in
+    /// A broker uses the fixed phrase for the kind, and may extend it with
+    /// `: ` and a specific its own code wrote. The message must not carry
+    /// provider text, which belongs in
     /// [`with_detail`](CompletionError::with_detail).
     #[must_use]
     pub fn new(kind: CompletionErrorKind, message: impl Into<String>) -> CompletionError {
@@ -168,7 +171,6 @@ impl CompletionError {
             finish_reason: None,
             detail: None,
             source: None,
-            status: None,
         }
     }
 
@@ -215,16 +217,24 @@ impl CompletionError {
         self
     }
 
-    /// Records the HTTP status behind the failure.
-    pub(crate) fn with_status(mut self, status: u16) -> CompletionError {
-        self.status = Some(status);
-        self
+    /// Builds a failure whose message is the kind's fixed phrase.
+    pub(crate) fn phrased(kind: CompletionErrorKind) -> CompletionError {
+        CompletionError::new(kind, kind.phrase())
     }
 
-    /// Keeps an already boxed cause.
-    fn with_boxed_source(mut self, source: BoxedSource) -> CompletionError {
-        self.source = Some(source);
-        self
+    /// Builds a failure whose message is the kind's fixed phrase extended
+    /// with `: ` and a specific this crate wrote.
+    pub(crate) fn specific(
+        kind: CompletionErrorKind,
+        specific: impl std::fmt::Display,
+    ) -> CompletionError {
+        CompletionError::new(kind, format!("{}: {specific}", kind.phrase()))
+    }
+
+    /// Builds a `MalformedResponse` failure naming what was wrong with the
+    /// reply.
+    pub(crate) fn malformed(specific: impl std::fmt::Display) -> CompletionError {
+        CompletionError::specific(CompletionErrorKind::MalformedResponse, specific)
     }
 
     /// Returns the closed classification of this failure.
@@ -277,30 +287,6 @@ impl CompletionError {
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
     }
-
-    /// Returns the bounded, control-escaped backend error body, when the
-    /// failure was a non-success backend status.
-    ///
-    /// The same text as [`detail`](CompletionError::detail) for an HTTP
-    /// status failure; `None` for every other failure.
-    #[must_use]
-    pub fn backend_body(&self) -> Option<&str> {
-        self.status.and(self.detail())
-    }
-
-    /// Returns the backend HTTP status behind the failure, when there was
-    /// one. A failure to read an error body keeps the status the backend had
-    /// already returned.
-    #[must_use]
-    pub fn status(&self) -> Option<u16> {
-        self.status
-    }
-
-    /// Returns `true` when the failure was a timeout.
-    #[must_use]
-    pub fn is_timeout(&self) -> bool {
-        self.kind == CompletionErrorKind::Timeout
-    }
 }
 
 impl std::fmt::Display for CompletionError {
@@ -315,74 +301,6 @@ impl std::error::Error for CompletionError {
             .as_deref()
             .map(|source| source as &(dyn std::error::Error + 'static))
     }
-}
-
-/// Classifies the crate's error type into a kind. A transport failure is a
-/// `Timeout` when the transport marked it with [`Timeout`] and a `Transport`
-/// failure otherwise; a backend status goes through the HTTP classifier; the
-/// environment, configuration, and lock variants are `Unavailable`. The
-/// variant's own text is kept as the detail.
-impl From<Error> for CompletionError {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::Backend { status, body } => classify_http_failure(status, &body),
-            Error::BackendBodyRead { status, source } => transport(source).with_status(status),
-            Error::Http(source) => transport(source),
-            Error::MalformedResponse(message) => {
-                CompletionError::phrased(CompletionErrorKind::MalformedResponse)
-                    .with_detail(message)
-            }
-            Error::MalformedResponseSource { message, source } => {
-                CompletionError::phrased(CompletionErrorKind::MalformedResponse)
-                    .with_detail(message)
-                    .with_boxed_source(source)
-            }
-            Error::EmptyModelReply {
-                detail,
-                finish_reason,
-            } => {
-                let error =
-                    CompletionError::phrased(CompletionErrorKind::EmptyReply).with_detail(detail);
-                match finish_reason {
-                    Some(reason) => error.with_finish_reason(reason),
-                    None => error,
-                }
-            }
-            Error::Config { message, source } => {
-                CompletionError::phrased(CompletionErrorKind::Unavailable)
-                    .with_detail(message)
-                    .with_boxed_source(source)
-            }
-            Error::GatewayDisabled => CompletionError::phrased(CompletionErrorKind::Unavailable),
-            error @ (Error::MissingEnv(_)
-            | Error::InvalidEnv(_)
-            | Error::InvalidConfig(_)
-            | Error::ModelSetLock(_)) => CompletionError::phrased(CompletionErrorKind::Unavailable)
-                .with_detail(error.to_string()),
-        }
-    }
-}
-
-impl CompletionError {
-    /// Builds a failure whose message is the kind's fixed phrase.
-    fn phrased(kind: CompletionErrorKind) -> CompletionError {
-        CompletionError::new(kind, kind.phrase())
-    }
-}
-
-/// A failed send or read: `Timeout` when the transport marked it (or the
-/// source is itself a `Timeout` failure), else `Transport`.
-fn transport(source: BoxedSource) -> CompletionError {
-    let timed_out = source.downcast_ref::<Timeout>().is_some()
-        || source
-            .downcast_ref::<CompletionError>()
-            .is_some_and(CompletionError::is_timeout);
-    let kind = if timed_out {
-        CompletionErrorKind::Timeout
-    } else {
-        CompletionErrorKind::Transport
-    };
-    CompletionError::phrased(kind).with_boxed_source(source)
 }
 
 #[cfg(test)]

@@ -11352,20 +11352,20 @@ Two limits guard every model call. Both apply to every round in the run, [`model
 
 ### The response cap
 
-A model reply may be up to 16 MiB (16,777,216 bytes) by default. A reply that would pass the response cap is refused as its bytes arrive, before any decoding, and the cap covers error replies as well as successful ones. The call fails with a malformed-response error whose message names the byte limit:
+A model reply may be up to 16 MiB (16,777,216 bytes) by default. A reply that would pass the response cap is refused as its bytes arrive, before any decoding, and the cap covers error replies as well as successful ones. The call fails with a malformed-response error whose message names the byte limit after the fixed phrase:
 
 ````text
-malformed response: response stream exceeds the {max_bytes}-byte limit
+the model backend sent a reply that could not be understood: response stream exceeds the {max_bytes}-byte limit
 ````
 
 An error reply over the cap names the limit the same way, as `response body exceeds the {cap}-byte limit` or `response body of {len} bytes exceeds the {cap}-byte limit`.
 
 ### The receive timeout
 
-Every model call has a receive timeout of 120 seconds by default. The call waits at most that long for the reply headers, and then at most that long for each next chunk of the body. Every arriving chunk restarts the wait, and there is no limit on the whole request, so a long reply that keeps streaming is never cut off. A reply that stalls fails the call as a transport failure:
+Every model call has a receive timeout of 120 seconds by default. The call waits at most that long for the reply headers, and then at most that long for each next chunk of the body. Every arriving chunk restarts the wait, and there is no limit on the whole request, so a long reply that keeps streaming is never cut off. A reply that stalls fails the call as a timeout:
 
 ````text
-http transport failure
+the model backend did not answer in time
 ````
 
 Both failures are model call failures: kind `internal` when caught, run error kind `Completion` when uncaught, and both count as transient, so the run may succeed when run again ([Model call and environment failures](#model-call-and-environment-failures)).
@@ -11512,7 +11512,7 @@ The message text is what tells them apart. A failed `store` operation is not in 
 
 `kind == 'internal'` marks a failure the prompt cannot fix:
 
-- a model call failure: an HTTP transport failure (a receive timeout included), a backend error status, a malformed reply (an oversized one included), a missing or invalid environment variable, invalid client configuration, or a disabled gateway
+- a model call failure: a connection failure, a receive timeout, a backend error status, a malformed reply (an oversized one included), or a disabled gateway
 - the missing-model error, raised when a model round has no model selected ([Choosing a section's model](10-models.md#choosing-a-sections-model))
 - a fault in the Engine or in the Lua runtime's own machinery
 
@@ -11569,7 +11569,7 @@ A failed run reports exactly one run error kind. The kind names what failed, and
 | `Parse` | the file failed to parse, or has no `promptforge:` key | the parse failure's own message |
 | `Version` | `promptforge:` declares a major version other than `0` | `unsupported promptforge version: {n} (this build supports major 0)` |
 | `Binding` | a model round had no model selected | `model binding required for section {section}` |
-| `Completion` | a model call failed, or an empty reply went uncaught | the call's own message, such as `non-success backend status {status}` |
+| `Completion` | a model call failed, or an empty reply went uncaught | the call's own message, such as `the model backend is overloaded (status 503)` |
 | `Tool` | a tool call failed, was out of scope, or named an unbound tool, or a `models.loop` call reached the round cap | `tool call failure: {message}`, or one of the other tool messages below |
 | `Vfs` | a `store` operation failed and went uncaught, or was caught and raised again, or the handle declares no store | the store failure's own message, such as `file not found in store: {path}` or `store operation failed` |
 | `Determinism` | two accesses unordered by happens-before touched one store region in conflicting ways | `store determinism violation: {detail}` |
@@ -11590,7 +11590,7 @@ Nothing reruns a failed run automatically. [Model call and environment failures]
 ### Model, tool, and input failures
 
 - `Binding`: a section sends prose to a model, or calls `models.infer` without a handle, while neither `models.use` nor a prompt-wide `models.default` is in effect ([Choosing a section's model](10-models.md#choosing-a-sections-model)). Caught with `pcall`, the same error is kind `internal`. The kind also covers a Harness tool whose schema the Harness cannot offer to the model, which nothing in a prompt causes.
-- `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, missing or invalid environment variables, invalid client configuration, and a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
+- `Completion`: a model call fails at the transport, backend, or decode layer and the prompt does not catch it, a disabled gateway included; or an `empty_model_reply` goes uncaught ([Empty and truncated replies](11-conversations.md#empty-and-truncated-replies)).
 - `Tool`: a dispatched tool fails ([Tool failures](12-tools.md#tool-failures)), a tool call is out of the section's scope ([Advertising tools to the model](12-tools.md#advertising-tools-to-the-model)), a call names a tool not bound in the run ([Calling tools from Lua](12-tools.md#calling-tools-from-lua)), or a `models.loop` call does not finish within the round cap ([The round cap](11-conversations.md#the-round-cap)), and the prompt does not catch it.
 - `ContextExhausted`: the selected compactor runs out of the model's context window and the prompt does not catch it ([Compactors and context exhaustion](11-conversations.md#compactors-and-context-exhaustion)).
 - A failed operator ask is a tool failure: when the Host cannot answer an [`input.ask()`](05-lua-environment.md#asking-the-operator-with-inputask) and the prompt does not catch it, the run ends as `Tool`. Caught with `pcall`, the same failure is kind `tool`.
@@ -11660,19 +11660,23 @@ Everything else keeps its own classification in the H1 pass:
 
 ## Model call and environment failures
 
-A model call that fails on the Harness's side reaches Lua as an error value of kind `internal` with no extra fields. Its message never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
+A model call that fails on the Harness's side reaches Lua as an error value of kind `internal` with no extra fields. Its message is one fixed phrase for the kind of failure, and it never includes the reply body, so a hostile or private payload cannot leak into a message or forge a log line:
 
 | Failure | Message |
 |---|---|
-| connection failure or receive timeout | `http transport failure` |
-| non-success status from the gateway | `non-success backend status {status}` |
-| oversized or undecodable reply | `malformed response: {message}` |
-| error reply whose body cannot be read | `unreadable backend error body (status {status})` |
-| gateway disabled by the Host | `gateway access is disabled` |
-| environment variable not set | `missing environment variable: {name}` |
-| environment variable not valid Unicode | `environment variable is set but not valid Unicode: {name}` |
+| connection failure, or an error reply whose body cannot be read | `the connection to the model backend failed` |
+| receive timeout | `the model backend did not answer in time` |
+| status 400 or 413 naming a context limit | `the request is larger than the model's context window (status {status})` |
+| status 429 | `the model backend is limiting the request rate (status 429)`, or `the model backend says the usage quota is spent (status 429)` when the body names a spent quota |
+| status 503 or 529, or a 5xx body naming an overload | `the model backend is overloaded (status {status})` |
+| any other status of 500 or higher | `the model backend reported a fault of its own (status {status})` |
+| status 401 or 403 | `the model backend did not accept the credentials (status {status})` |
+| status 400 naming a content policy | `the model backend refused the request on content policy grounds (status 400)` |
+| any other non-success status | `the model backend rejected the request (status {status})` |
+| oversized or undecodable reply | `the model backend sent a reply that could not be understood: {what was wrong}` |
+| gateway disabled by the Host | `model access is turned off or not configured` |
 
-A `models.loop` round answered with HTTP 500 raises `non-success backend status 500`, and a 502 whose body holds forged log text still shows only `502`. Left uncaught, every one of these ends the run as `Completion`, the environment, configuration, and gateway failures included; none of them has a separate setup kind.
+A `models.loop` round answered with HTTP 500 raises `the model backend reported a fault of its own (status 500)`, and a 502 whose body holds forged log text still shows only `502`. Left uncaught, every one of these ends the run as `Completion`. A `models.loop` round that overflows the context window never shows the first status row: the loop hands it to the compactor, which raises `context_exhausted` under the default policy ([Provider rejections](11-conversations.md#provider-rejections)).
 
 Catch them like any other error value:
 
@@ -11688,27 +11692,27 @@ end
 return reply
 ````
 
-A backend answering with status 503 makes this block return `skipped: non-success backend status 503`. The missing-model error is kind `internal` too, so the block also returns a `skipped: ` result in a section with no model selected.
+A backend answering with status 503 makes this block return `skipped: the model backend is overloaded (status 503)`. The missing-model error is kind `internal` too, so the block also returns a `skipped: ` result in a section with no model selected.
 
 ### Environment variables
 
-The Harness's model connection reads two environment variables. A prompt never reads them; it only sees the error when one is missing or invalid.
+A Host can build the Harness's model connection from two environment variables. A prompt never reads them, and a missing or invalid value is a setup error that the Host sees before any run starts, so no prompt catches it.
 
 - `PROMPTFORGE_GATEWAY_URL` is always required.
 - `PROMPTFORGE_GATEWAY_API_KEY` is required unless the URL's host is loopback: `127.0.0.1`, `::1`, or `localhost`. An empty key counts as unset.
 
-A run that needs an unset variable fails with a message naming it, and one set to a value that is not valid Unicode fails with the distinct message in the table above.
+An unset variable fails the setup with `missing environment variable: {name}`, and one set to a value that is not valid Unicode fails it with `environment variable is set but not valid Unicode: {name}`.
 
 ### Failures worth running again
 
 Nothing reruns a failed run or a failed model call automatically. A run that failed on a transient model call problem may succeed when run again, and these count as transient:
 
-- transport failures, a receive timeout included
+- connection failures and receive timeouts, an unreadable error body included
 - malformed or oversized replies
-- unreadable backend error bodies
+- rate limits (status 429 without a spent quota) and overloaded backends
 - backend statuses of 500 or higher
 
-A status below 500 is not transient, and neither is any other failure.
+Any other failure is not transient: a context overflow, a spent quota, a refused or rejected request, bad credentials, an empty reply, or a disabled gateway.
 
 ## Cancelling a run
 
@@ -12150,7 +12154,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 |---|---|---|---|
 | `Binding` | A section sends prose to a model or calls `models.infer` without a handle while no `models.use` or `models.default` is in effect | The section, in `model binding required for section {section}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | Cancelled outcome | The Host cancels the run, or a caught `cancelled` error value is raised again after another suspending call; a clean stop with no run error kind, not a failure | Nothing; the outcome carries no message | [Limits and Errors](16-limits-and-errors.md#cancelling-a-run) |
-| `Completion` | A model call fails at the transport, backend, or decode layer (a missing or invalid environment variable, invalid client configuration, or a disabled gateway included), or an empty reply, and the error goes uncaught | The backend status, the variable name, or the reply's detail phrase, depending on the failure | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
+| `Completion` | A model call fails at the transport, backend, or decode layer (a disabled gateway included), or an empty reply, and the error goes uncaught | The failure's fixed phrase, with the backend status when there is one | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `ContextExhausted` | A round overflows the model's context window under the selected compactor and goes uncaught | The reason, in `context exhausted: {reason}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Determinism` | Two accesses unordered by happens-before touch one store region in conflicting ways; the call never returns, so no `pcall` catches it, not even during a shared library load | The store path, both chains, and both claim kinds, in `store determinism violation: {detail}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Internal` | An Engine invariant breaks, a fault in the Engine rather than the prompt | The invariant, in `internal invariant violated: {message}` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
@@ -12158,7 +12162,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `Parse` | The file fails with any parse error kind, or has no `promptforge:` key | The parse error's own message, with its location beside it when known | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Quota` | The log event quota or the log byte quota runs out and the error goes uncaught | Nothing, as in `lua log event quota exceeded` or `lua log byte quota exceeded` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `RequirementsUnmet` | Prepare finds a required capability missing, two declared capabilities in conflict, or a model role requirement unmet, or an ordinary Lua error goes uncaught in the H1 pass | Each unmet requirement on its own line, or the Lua error text | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
-| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, an unreadable backend body, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](16-limits-and-errors.md#model-call-and-environment-failures) |
+| Retryable failures | `Completion` failures from a transport failure (a receive timeout included), a malformed or oversized reply, a rate limit or an overloaded backend, or a backend status of 500 or higher; nothing reruns a failed run automatically | The backend status, when there is one | [Limits and Errors](16-limits-and-errors.md#model-call-and-environment-failures) |
 | `Vfs` | An uncaught `store` failure, a caught one raised again, a run whose handle declares no store, or the Host's store backend failing outside any store call | The store failure's own text, as in `file not found in store: {path}` or `store operation failed` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Tool` | A tool fails, the model calls a tool outside the round's scope, a script calls an alias not bound in the run, or `models.loop` reaches its round cap, and the error goes uncaught | The tool's failure text, the requested name and the aliases in scope or bound, or nothing, as in `tool-call loop did not converge` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
 | `Version` | The `promptforge:` key declares a major version other than `0` | The declared version, in `unsupported promptforge version: {n} (this build supports major 0)` | [Limits and Errors](16-limits-and-errors.md#how-a-failed-run-is-classified) |
@@ -12170,7 +12174,7 @@ Parse error kinds classify a file that fails to parse, run error kinds classify 
 | `cancelled` | A Host cancel reaches running Lua or a waiting call, or a wait returns it, unraised, for a cancelled task | Nothing, as in `interrupted by Ctrl-C`, or the task, in `` task `{task}` was cancelled ``; field `task` | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `context_exhausted` | A `models.loop` round overflows the context window under `compactors.fail`, or a script calls `compactors.fail(tag)` | The reason in words, in `context exhausted: {reason}`; field `reason` is `"precheck"` or `"provider"` | [Conversations](11-conversations.md#compactors-and-context-exhaustion) |
 | `empty_model_reply` | A `models.loop` reply is empty and is not the clean exit | The message `the model replied with no text and no tool calls`; field `finish_reason` when the provider sent one | [Conversations](11-conversations.md#empty-and-truncated-replies) |
-| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a missing or invalid environment variable, invalid client configuration, a disabled gateway, the missing-model error, or an Engine fault | The backend status, the variable name, or the section, depending on the failure | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
+| `internal` | A failure outside the prompt: a model call's transport, backend, or decode failure, a disabled gateway, the missing-model error, or an Engine fault | The failure's fixed phrase with the backend status when there is one, or the section, depending on the failure | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `lua` | A runtime error, an Engine call's argument or misuse error, running out of memory, a spent log quota, or a failed substitution | The error's own text, such as the unknown field or the store path | [Limits and Errors](16-limits-and-errors.md#errors-caught-in-lua) |
 | `store` | A store call fails, except a claims conflict, which ends the run as `Determinism` without raising | The store's message, as in `file not found in store: {path}`; field `reason`, plus `path`, and `anchor` and `count` or `rule` | [The Store](09-the-store.md#store-errors) |
 | `out_of_scope_tool` | The model calls a name outside the round's scope | The requested name and the aliases in scope, in `tool "{name}" is not in this section's scope; in-scope aliases: [...]`; field `name` | [Tools](12-tools.md#model-tool-calls) |

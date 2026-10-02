@@ -1,10 +1,42 @@
-//! Client configuration: the redacted bearer secret and the validated
-//! gateway endpoint.
+//! Client configuration: the redacted bearer secret, the validated gateway
+//! endpoint, and the error a bad setup reports.
 
 use std::fmt;
 
-use promptforge::model::CompletionError;
-use promptforge::transport::ClientError as Error;
+/// Why the gateway client could not be set up: a missing or unusable
+/// environment variable, bearer key, or endpoint URL.
+///
+/// This is a setup error, not a model failure. It happens before any round
+/// is sent, so it never reaches the Engine and has no
+/// [`CompletionErrorKind`](crate::CompletionErrorKind). The message names
+/// the variable or the rule that failed, and never a key.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum GatewayConfigError {
+    /// A required environment variable was missing.
+    #[error("missing environment variable: {0}")]
+    MissingEnv(String),
+
+    /// An environment variable was set but its value was not valid Unicode.
+    #[error("environment variable is set but not valid Unicode: {0}")]
+    InvalidEnv(String),
+
+    /// A configuration value failed validation.
+    #[error("{0}")]
+    InvalidConfig(String),
+
+    /// A configuration input was invalid, and the concrete cause (a URL
+    /// parse failure, an unusable secret) is kept as the source instead of
+    /// being flattened into the message.
+    #[error("{message}")]
+    Config {
+        /// The human-readable diagnostic, with no raw source dump.
+        message: String,
+        /// The originating failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
 
 /// A bearer credential whose contents never appear in `Debug`, `Display`, or
 /// logs.
@@ -58,16 +90,15 @@ pub enum SecretError {
     Empty,
 }
 
-impl From<SecretError> for CompletionError {
-    fn from(error: SecretError) -> CompletionError {
-        // Classifies as `Unavailable`: an unusable credential is a client
-        // configuration problem, not a transport or backend failure. The
-        // concrete `SecretError` is preserved as the private source rather than
-        // flattened into a string (AUDIT-DISCARDED-SOURCE).
-        CompletionError::from(Error::Config {
+impl From<SecretError> for GatewayConfigError {
+    fn from(error: SecretError) -> GatewayConfigError {
+        // An unusable credential is a client setup problem. The concrete
+        // `SecretError` is preserved as the source rather than flattened
+        // into a string (AUDIT-DISCARDED-SOURCE).
+        GatewayConfigError::Config {
             message: "gateway bearer key is unusable".to_owned(),
             source: Box::new(error),
-        })
+        }
     }
 }
 
@@ -101,11 +132,11 @@ impl GatewayEndpoint {
     /// Validates and normalizes a gateway base URL.
     ///
     /// # Errors
-    /// Returns an `Unavailable`-kind [`CompletionError`] when `url` is not a valid
-    /// absolute URL, does not use an `http`/`https` scheme, names no host,
-    /// embeds credentials (a `user:pass@` component), or has a query or
-    /// fragment (an API root is a bare path). Parsing goes through a strict URL
-    /// type (F12) rather than a hand-rolled prefix/host scan.
+    /// Returns a [`GatewayConfigError`] when `url` is not a valid absolute
+    /// URL, does not use an `http`/`https` scheme, names no host, embeds
+    /// credentials (a `user:pass@` component), or has a query or fragment (an
+    /// API root is a bare path). Parsing goes through a strict URL type (F12)
+    /// rather than a hand-rolled prefix/host scan.
     ///
     /// # Examples
     ///
@@ -116,20 +147,14 @@ impl GatewayEndpoint {
     /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
     /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
     /// assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
-    /// # Ok::<(), harness_models::CompletionError>(())
+    /// # Ok::<(), harness_models::GatewayConfigError>(())
     /// ```
-    pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
-        GatewayEndpoint::parse(url).map_err(CompletionError::from)
-    }
-
-    /// The validation behind [`GatewayEndpoint::new`], in the client error
-    /// type the environment constructor reports.
-    pub(crate) fn parse(url: &str) -> std::result::Result<GatewayEndpoint, Error> {
-        let reject = |detail: String| Error::InvalidConfig(detail);
+    pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, GatewayConfigError> {
+        let reject = GatewayConfigError::InvalidConfig;
         let trimmed = url.trim();
         // Preserve the concrete `url::ParseError` as a private source rather than
         // flattening it into the message (AUDIT-DISCARDED-SOURCE).
-        let parsed = url::Url::parse(trimmed).map_err(|error| Error::Config {
+        let parsed = url::Url::parse(trimmed).map_err(|error| GatewayConfigError::Config {
             message: format!("gateway URL is not a valid URL: {trimmed:?}"),
             source: Box::new(error),
         })?;
@@ -190,7 +215,7 @@ impl GatewayEndpoint {
     /// assert!(GatewayEndpoint::new("http://localhost:8081/v1")?.is_loopback());
     /// assert!(!GatewayEndpoint::new("http://192.168.1.20:8081/v1")?.is_loopback());
     /// assert!(!GatewayEndpoint::new("https://gateway.example.com/v1")?.is_loopback());
-    /// # Ok::<(), harness_models::CompletionError>(())
+    /// # Ok::<(), harness_models::GatewayConfigError>(())
     /// ```
     #[must_use]
     pub fn is_loopback(&self) -> bool {
@@ -199,9 +224,9 @@ impl GatewayEndpoint {
 }
 
 impl TryFrom<&str> for GatewayEndpoint {
-    type Error = CompletionError;
+    type Error = GatewayConfigError;
 
-    fn try_from(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
+    fn try_from(url: &str) -> std::result::Result<GatewayEndpoint, GatewayConfigError> {
         GatewayEndpoint::new(url)
     }
 }

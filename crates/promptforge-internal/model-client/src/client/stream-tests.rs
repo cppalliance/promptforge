@@ -176,11 +176,10 @@ fn finish_fails_a_tool_call_batch_truncated_by_length_or_content_filter() {
             "finish_reason {reason:?}"
         );
         assert!(
-            error
-                .detail()
-                .is_some_and(|detail| detail.contains("truncated")),
-            "the error's detail names the truncation: {error:?}"
+            error.to_string().contains("truncated"),
+            "the error's message names the truncation: {error:?}"
         );
+        assert_eq!(error.detail(), None);
     }
 }
 
@@ -222,14 +221,12 @@ fn finish_hard_fails_on_an_empty_model_reply() {
         "the finish_reason must survive the conversion into CompletionError"
     );
     assert_eq!(
-        error.detail(),
-        Some("empty model reply: reasoning content was present but ignored"),
-        "the ignored-reasoning note stays in the detail"
-    );
-    assert_eq!(
         error.to_string(),
-        "the model replied with no text and no tool calls"
+        "the model replied with no text and no tool calls: \
+reasoning content was present but ignored",
+        "the ignored-reasoning note extends the message"
     );
+    assert_eq!(error.detail(), None);
 }
 
 #[test]
@@ -341,7 +338,6 @@ fn error_envelope_fails_the_stream_with_the_escaped_message_as_detail() {
         "the connection to the model backend failed"
     );
     assert_eq!(error.detail(), Some("upstream\\ndied"));
-    assert_eq!(error.status(), None);
 }
 
 #[test]
@@ -385,6 +381,13 @@ fn malformed_chunks_are_rejected_not_skipped() {
             CompletionErrorKind::MalformedResponse,
             "{label}: {error:?}"
         );
+        assert!(
+            error
+                .to_string()
+                .starts_with("the model backend sent a reply that could not be understood: "),
+            "{label}: the message extends the fixed phrase: {error}"
+        );
+        assert_eq!(error.detail(), None, "{label}");
     }
 }
 

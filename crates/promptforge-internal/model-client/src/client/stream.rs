@@ -28,9 +28,9 @@ use promptforge_types::wire::StreamDelta;
 use serde_json::{Map, Value};
 
 use super::Completion;
+use crate::Result;
 use crate::classify::classify_stream_error;
 use crate::model::CompletionError;
-use crate::{Error, Result};
 
 /// Splits a raw SSE byte stream into `data:` payloads.
 ///
@@ -160,11 +160,9 @@ impl StreamAccumulator {
         if data == "[DONE]" {
             return Ok(Applied::Done);
         }
-        let chunk: Value =
-            serde_json::from_str(data).map_err(|error| Error::MalformedResponseSource {
-                message: "stream chunk was not valid JSON".to_owned(),
-                source: Box::new(error),
-            })?;
+        let chunk: Value = serde_json::from_str(data).map_err(|error| {
+            CompletionError::malformed("stream chunk was not valid JSON").with_source(error)
+        })?;
         // A mid-stream `error` envelope is how the gateway (and llama.cpp)
         // report a failure after the 200 has already been sent: the
         // completion died in flight, so it is a transport failure unless
@@ -194,9 +192,9 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(Applied::Chunk { delta: false }),
             Some(Value::Array(choices)) => choices,
             Some(_) => {
-                return Err(CompletionError::from(Error::MalformedResponse(
-                    "stream chunk `choices` was present but not an array".into(),
-                )));
+                return Err(CompletionError::malformed(
+                    "stream chunk `choices` was present but not an array",
+                ));
             }
         };
         let mut held_delta = false;
@@ -211,8 +209,8 @@ impl StreamAccumulator {
     /// Applies one streamed choice, returning whether it held content.
     fn apply_choice(&mut self, choice: &Value, on_delta: &impl Fn(StreamDelta)) -> Result<bool> {
         let Some(index) = choice.get("index").and_then(Value::as_u64) else {
-            return Err(Error::MalformedResponse(
-                "stream choice had no integer index".into(),
+            return Err(CompletionError::malformed(
+                "stream choice had no integer index",
             ));
         };
         // Mirror the buffered normalizer: the first choice is the turn.
@@ -223,8 +221,8 @@ impl StreamAccumulator {
             None | Some(Value::Null) => {}
             Some(Value::String(reason)) => self.finish_reason = Some(reason.clone()),
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "stream choice `finish_reason` was present but not a string".into(),
+                return Err(CompletionError::malformed(
+                    "stream choice `finish_reason` was present but not a string",
                 ));
             }
         }
@@ -233,8 +231,8 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(false),
             Some(delta @ Value::Object(_)) => delta,
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "stream choice `delta` was present but not an object".into(),
+                return Err(CompletionError::malformed(
+                    "stream choice `delta` was present but not an object",
                 ));
             }
         };
@@ -264,8 +262,8 @@ impl StreamAccumulator {
                 }
             }
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "stream delta `tool_calls` was present but not an array".into(),
+                return Err(CompletionError::malformed(
+                    "stream delta `tool_calls` was present but not an array",
                 ));
             }
         }
@@ -275,8 +273,8 @@ impl StreamAccumulator {
     /// Merges one tool-call fragment into its index-keyed buffer.
     fn apply_tool_fragment(&mut self, fragment: &Value) -> Result<()> {
         let Some(index) = fragment.get("index").and_then(Value::as_u64) else {
-            return Err(Error::MalformedResponse(
-                "stream tool-call fragment had no integer index".into(),
+            return Err(CompletionError::malformed(
+                "stream tool-call fragment had no integer index",
             ));
         };
         let parts = self.tool_calls.entry(index).or_default();
@@ -284,8 +282,8 @@ impl StreamAccumulator {
             None | Some(Value::Null) => {}
             Some(Value::String(id)) => parts.id.push_str(id),
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "stream tool-call fragment `id` was not a string".into(),
+                return Err(CompletionError::malformed(
+                    "stream tool-call fragment `id` was not a string",
                 ));
             }
         }
@@ -293,8 +291,8 @@ impl StreamAccumulator {
             None | Some(Value::Null) => return Ok(()),
             Some(function @ Value::Object(_)) => function,
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "stream tool-call fragment `function` was not an object".into(),
+                return Err(CompletionError::malformed(
+                    "stream tool-call fragment `function` was not an object",
                 ));
             }
         };
@@ -306,7 +304,7 @@ impl StreamAccumulator {
                 None | Some(Value::Null) => {}
                 Some(Value::String(piece)) => slot.push_str(piece),
                 Some(_) => {
-                    return Err(Error::MalformedResponse(format!(
+                    return Err(CompletionError::malformed(format!(
                         "stream tool-call fragment `{key}` was not a string"
                     )));
                 }
@@ -342,10 +340,10 @@ impl StreamAccumulator {
             )
         {
             let reason = self.finish_reason.unwrap_or_default();
-            return Err(CompletionError::from(Error::MalformedResponse(format!(
+            return Err(CompletionError::malformed(format!(
                 "tool-call batch truncated by finish_reason {reason:?}: \
                  partial arguments must not execute"
-            ))));
+            )));
         }
         let response_body = self.into_body();
         let turn = crate::normalize::normalize(&response_body)?;
@@ -433,7 +431,7 @@ fn append_string_fragment(
             slot.get_or_insert_with(String::new).push_str(text);
             Ok(Some(text.clone()))
         }
-        Some(_) => Err(Error::MalformedResponse(format!(
+        Some(_) => Err(CompletionError::malformed(format!(
             "stream delta `{label}` was present but not a string"
         ))),
     }

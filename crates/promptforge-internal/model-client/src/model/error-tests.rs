@@ -1,9 +1,8 @@
 //! Tests for the failure vocabulary: retryability per kind, the fixed
-//! phrases, the detail channel, and the conversion from the crate's error.
+//! phrases, the specifics that extend them, and the detail channel.
 
 use super::*;
 use crate::client::classify_http_failure;
-use crate::detail::error_http;
 
 const ALL_KINDS: [CompletionErrorKind; 12] = [
     CompletionErrorKind::ContextOverflow,
@@ -125,8 +124,6 @@ fn a_new_error_has_no_extras() {
     assert_eq!(error.finish_reason(), None);
     assert_eq!(error.detail(), None);
     assert!(std::error::Error::source(&error).is_none());
-    assert_eq!(error.status(), None);
-    assert_eq!(error.backend_body(), None);
 }
 
 #[test]
@@ -153,138 +150,81 @@ fn with_finish_reason_is_read_back() {
 }
 
 #[test]
-fn a_timeout_marked_transport_failure_is_a_timeout() {
-    let timed_out = CompletionError::from(error_http(Timeout(Box::new(std::io::Error::new(
+fn a_timeout_and_a_transport_failure_are_built_from_a_kind_and_a_source() {
+    let timed_out = CompletionError::new(
+        CompletionErrorKind::Timeout,
+        "the model backend did not answer in time",
+    )
+    .with_source(std::io::Error::new(
         std::io::ErrorKind::TimedOut,
         "deadline",
-    )))));
+    ));
     assert_eq!(timed_out.kind(), CompletionErrorKind::Timeout);
-    assert!(timed_out.is_timeout());
     assert!(timed_out.is_retryable());
     assert_eq!(
         timed_out.to_string(),
         "the model backend did not answer in time"
     );
-    assert_eq!(timed_out.status(), None);
-    assert!(std::error::Error::source(&timed_out).is_some());
-
-    let plain = CompletionError::from(error_http(std::io::Error::other("reset")));
-    assert_eq!(plain.kind(), CompletionErrorKind::Transport);
-    assert!(!plain.is_timeout());
     assert_eq!(
-        plain.to_string(),
-        "the connection to the model backend failed"
+        std::error::Error::source(&timed_out)
+            .expect("the cause is kept")
+            .to_string(),
+        "deadline"
     );
 
-    let body_read = CompletionError::from(Error::BackendBodyRead {
-        status: 500,
-        source: Box::new(Timeout(Box::new(std::io::Error::other("slow")))),
-    });
-    assert_eq!(body_read.kind(), CompletionErrorKind::Timeout);
-    assert!(body_read.is_timeout());
-    assert_eq!(body_read.status(), Some(500));
-    assert_eq!(body_read.backend_body(), None);
+    let refused = CompletionError::new(
+        CompletionErrorKind::Transport,
+        "the connection to the model backend failed",
+    )
+    .with_source(std::io::Error::other("connection refused"));
+    assert_eq!(refused.kind(), CompletionErrorKind::Transport);
+    assert!(refused.is_retryable());
 }
 
 #[test]
-fn a_body_read_failure_boxing_a_timeout_error_is_a_timeout() {
-    let read_error = CompletionError::new(
-        CompletionErrorKind::Timeout,
-        "the model backend did not answer in time",
-    );
-    let error = CompletionError::from(Error::BackendBodyRead {
-        status: 502,
-        source: Box::new(read_error),
-    });
-    assert_eq!(error.kind(), CompletionErrorKind::Timeout);
-    assert_eq!(error.status(), Some(502));
-
-    let other = CompletionError::from(Error::BackendBodyRead {
-        status: 502,
-        source: Box::new(CompletionError::new(
-            CompletionErrorKind::Transport,
-            "reset",
-        )),
-    });
-    assert_eq!(other.kind(), CompletionErrorKind::Transport);
+fn a_phrased_failure_shows_only_the_fixed_phrase() {
+    for kind in ALL_KINDS {
+        let error = CompletionError::phrased(kind);
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.to_string(), kind.phrase());
+        assert_eq!(error.detail(), None);
+    }
 }
 
 #[test]
-fn a_backend_status_goes_through_the_classifier() {
-    let error = CompletionError::from(Error::Backend {
-        status: 503,
-        body: "busy".to_owned(),
-    });
-    assert_eq!(error.kind(), CompletionErrorKind::Overloaded);
-    assert_eq!(
-        error.to_string(),
-        "the model backend is overloaded (status 503)"
-    );
-    assert_eq!(error.status(), Some(503));
-    assert_eq!(error.backend_body(), Some("busy"));
-}
-
-#[test]
-fn malformed_and_empty_variants_keep_the_fixed_phrase_and_their_text_as_detail() {
-    let malformed = CompletionError::from(Error::MalformedResponse("no choices".to_owned()));
+fn a_specific_extends_the_phrase_after_a_colon_and_never_adds_detail() {
+    let malformed = CompletionError::malformed("no choices in response");
     assert_eq!(malformed.kind(), CompletionErrorKind::MalformedResponse);
     assert_eq!(
         malformed.to_string(),
-        "the model backend sent a reply that could not be understood"
+        "the model backend sent a reply that could not be understood: no choices in response"
     );
-    assert_eq!(malformed.detail(), Some("no choices"));
+    assert_eq!(malformed.message(), malformed.to_string());
+    assert_eq!(malformed.detail(), None);
+    assert!(malformed.is_retryable());
 
-    let decoded = CompletionError::from(Error::MalformedResponseSource {
-        message: "chunk was not valid JSON".to_owned(),
-        source: Box::new(std::io::Error::other("eof")),
-    });
-    assert_eq!(decoded.kind(), CompletionErrorKind::MalformedResponse);
-    assert_eq!(decoded.detail(), Some("chunk was not valid JSON"));
-    assert_eq!(
-        std::error::Error::source(&decoded)
-            .expect("the decode cause is kept")
-            .to_string(),
-        "eof"
-    );
-
-    let empty = CompletionError::from(Error::EmptyModelReply {
-        detail: "empty model reply",
-        finish_reason: Some("stop".to_owned()),
-    });
-    assert_eq!(empty.kind(), CompletionErrorKind::EmptyReply);
+    let empty = CompletionError::specific(
+        CompletionErrorKind::EmptyReply,
+        "reasoning content was present but ignored",
+    )
+    .with_finish_reason("stop");
     assert_eq!(
         empty.to_string(),
-        "the model replied with no text and no tool calls"
+        "the model replied with no text and no tool calls: \
+         reasoning content was present but ignored"
     );
     assert_eq!(empty.finish_reason(), Some("stop"));
-    assert_eq!(empty.detail(), Some("empty model reply"));
+    assert!(!empty.is_retryable());
 }
 
 #[test]
-fn every_environment_configuration_and_lock_variant_is_unavailable() {
-    for error in [
-        Error::MissingEnv("URL".to_owned()),
-        Error::InvalidEnv("URL".to_owned()),
-        Error::InvalidConfig("bad endpoint".to_owned()),
-        Error::Config {
-            message: "key is unusable".to_owned(),
-            source: Box::new(std::io::Error::other("empty")),
-        },
-        Error::GatewayDisabled,
-        Error::ModelSetLock("poisoned".to_owned()),
-    ] {
-        let label = format!("{error:?}");
-        let converted = CompletionError::from(error);
-        assert_eq!(
-            converted.kind(),
-            CompletionErrorKind::Unavailable,
-            "{label}"
-        );
-        assert_eq!(
-            converted.to_string(),
-            "model access is turned off or not configured",
-            "{label}"
-        );
-        assert!(!converted.is_retryable(), "{label}");
-    }
+fn provider_text_stays_in_the_detail_and_out_of_the_message() {
+    let error = classify_http_failure(503, "upstream <busy>");
+    assert!(
+        error
+            .to_string()
+            .starts_with(CompletionErrorKind::Overloaded.phrase())
+    );
+    assert!(!error.to_string().contains("upstream"));
+    assert_eq!(error.detail(), Some("upstream <busy>"));
 }

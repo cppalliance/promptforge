@@ -80,8 +80,6 @@ pub mod model {
 pub mod transport {
     #![doc = include_str!("transport.md")]
 
-    pub use promptforge_model_client::Error as ClientError;
-    pub use promptforge_model_client::Timeout as ClientTimeout;
     pub use promptforge_model_client::client::ChunkSource;
     pub use promptforge_model_client::client::build_request_body;
     pub use promptforge_model_client::client::classify_http_failure;

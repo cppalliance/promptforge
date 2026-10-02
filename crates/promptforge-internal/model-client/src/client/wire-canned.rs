@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use super::{Completion, CompletionResult, ToolCall};
-use crate::Error;
+use crate::model::CompletionError;
 use crate::normalize::{
     check_call_arguments, check_call_id, check_call_name, check_unique_call_id, empty_reply_error,
 };
@@ -22,13 +22,13 @@ impl Completion {
     /// and both bodies are JSON `null`. A text result is not validated.
     ///
     /// # Errors
-    /// Returns [`Error::EmptyModelReply`] for an empty tool-call batch, and
-    /// [`Error::MalformedResponse`] when two calls in the batch share an id,
-    /// as the wire decoder does.
+    /// Returns an `EmptyReply`-kind [`CompletionError`] for an empty
+    /// tool-call batch, and a `MalformedResponse`-kind one when two calls in
+    /// the batch share an id, as the wire decoder does.
     pub fn from_result(
         result: CompletionResult,
         model: impl Into<String>,
-    ) -> std::result::Result<Completion, Error> {
+    ) -> Result<Completion, CompletionError> {
         if let CompletionResult::ToolCalls(calls) = &result {
             if calls.is_empty() {
                 return Err(empty_reply_error(false, None));
@@ -59,13 +59,14 @@ impl ToolCall {
     /// payload, as the wire decoder would have left it.
     ///
     /// # Errors
-    /// Returns [`Error::MalformedResponse`] when `id` or `name` is blank or
-    /// `arguments` is not a JSON object, as the wire decoder does.
+    /// Returns a `MalformedResponse`-kind [`CompletionError`] when `id` or
+    /// `name` is blank or `arguments` is not a JSON object, as the wire
+    /// decoder does.
     pub fn from_parts(
         id: impl Into<String>,
         name: impl Into<String>,
         arguments: Value,
-    ) -> std::result::Result<ToolCall, Error> {
+    ) -> Result<ToolCall, CompletionError> {
         let id = id.into();
         let name = name.into();
         check_call_id(&id)?;

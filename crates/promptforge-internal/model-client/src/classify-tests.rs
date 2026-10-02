@@ -289,8 +289,6 @@ fn the_message_names_the_kind_and_the_status_and_keeps_the_body_as_detail() {
         !error.to_string().contains("upstream"),
         "Display never carries the body"
     );
-    assert_eq!(error.status(), Some(503));
-    assert_eq!(error.backend_body(), Some("upstream <busy>"));
 }
 
 #[test]
@@ -358,7 +356,10 @@ fn an_in_stream_envelope_naming_a_context_limit_is_an_overflow_without_a_status(
         error.to_string(),
         "the request is larger than the model's context window"
     );
-    assert_eq!(error.status(), None);
+    assert!(
+        !error.to_string().contains("status"),
+        "an in-stream envelope carries no status"
+    );
 }
 
 #[test]
@@ -386,6 +387,5 @@ fn an_in_stream_envelope_that_matches_no_rule_stays_a_transport_failure() {
         "the connection to the model backend failed"
     );
     assert_eq!(error.detail(), Some("upstream\\ndied"));
-    assert_eq!(error.status(), None);
     assert!(error.is_retryable());
 }

@@ -11,7 +11,6 @@ use serde_json::json;
 
 use super::*;
 use crate::client::CompletionResult;
-use crate::detail::error_http;
 use crate::model::CompletionErrorKind;
 use promptforge_types::metrics::ClientTiming;
 
@@ -73,13 +72,10 @@ fn read_body_capped_refuses_an_advertised_oversize_length_before_reading() {
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
     assert_eq!(
         err.to_string(),
-        "the model backend sent a reply that could not be understood"
+        "the model backend sent a reply that could not be understood: \
+response body of 100 bytes exceeds the 8-byte limit"
     );
-    assert!(
-        err.detail()
-            .is_some_and(|detail| detail.contains("100 bytes")),
-        "got {err:?}"
-    );
+    assert_eq!(err.detail(), None);
     assert_eq!(source.0.len(), 1, "nothing was read");
 }
 
@@ -89,9 +85,10 @@ fn read_body_capped_refuses_streamed_chunks_over_the_cap() {
     let err = block_on(read_body_capped(&mut source, None, 8))
         .expect_err("chunks past the cap are refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(
-        err.detail().is_some_and(|detail| detail.contains("8-byte")),
-        "got {err:?}"
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+response body exceeds the 8-byte limit"
     );
 }
 
@@ -211,9 +208,10 @@ fn read_completion_stream_refuses_a_stream_over_the_byte_cap() {
     ))
     .expect_err("an oversize stream is refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(
-        err.detail().is_some_and(|detail| detail.contains("8-byte")),
-        "got {err:?}"
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+response stream exceeds the 8-byte limit"
     );
 }
 
@@ -232,17 +230,20 @@ fn read_completion_stream_refuses_a_stream_without_the_sentinel() {
     ))
     .expect_err("a cut-off stream is refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(
-        err.detail().is_some_and(|detail| detail.contains("[DONE]")),
-        "got {err:?}"
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+completion stream ended without the [DONE] sentinel"
     );
+    assert_eq!(err.detail(), None);
 }
 
 #[test]
 fn read_completion_stream_returns_the_source_failure_as_is() {
-    let timed_out = CompletionError::from(error_http(crate::Timeout(Box::new(
-        std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
-    ))));
+    let timed_out =
+        CompletionError::new(CompletionErrorKind::Timeout, "no chunk in time").with_source(
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "deadline"),
+        );
     let mut source = Canned(VecDeque::from([
         Ok(sse(&[text_chunk("par")]).into_bytes()),
         Err(timed_out),
@@ -258,5 +259,6 @@ fn read_completion_stream_returns_the_source_failure_as_is() {
     ))
     .expect_err("a read failure fails the round");
     assert_eq!(err.kind(), CompletionErrorKind::Timeout);
-    assert!(err.is_timeout(), "the marker survives: {err:?}");
+    assert_eq!(err.to_string(), "no chunk in time");
+    assert!(std::error::Error::source(&err).is_some());
 }

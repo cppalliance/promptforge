@@ -4,7 +4,6 @@
 use harness_runner::spawn::spawn_tagged;
 pub(crate) use harness_runner::test_support::mock_tag;
 use promptforge::model::CompletionOptions;
-use promptforge::transport::ClientError as Error;
 use serde_json::Value;
 
 use super::*;
@@ -111,7 +110,7 @@ fn keyed_client(base: &str) -> GatewayClient {
 
 fn lookup_from<'a>(
     pairs: &'a [(&'a str, &'a str)],
-) -> impl Fn(&str) -> Result<Option<String>, Error> + 'a {
+) -> impl Fn(&str) -> Result<Option<String>, GatewayConfigError> + 'a {
     let pairs: Vec<(String, String)> = pairs
         .iter()
         .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))

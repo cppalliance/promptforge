@@ -5,22 +5,25 @@ use harness_runner::spawn::spawn_tagged;
 use promptforge::model::Message;
 
 use super::*;
-use crate::CompletionErrorKind;
 use crate::config::SecretError;
 
 #[test]
 fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
     let err = from_env_with(|name| {
         if name == "PROMPTFORGE_GATEWAY_URL" {
-            Err(Error::InvalidEnv(name.to_owned()))
+            Err(GatewayConfigError::InvalidEnv(name.to_owned()))
         } else {
             Ok(Some("tok".to_owned()))
         }
     })
     .expect_err("a non-Unicode variable must be surfaced, not treated as missing");
     assert!(
-        matches!(err, Error::InvalidEnv(ref name) if name == "PROMPTFORGE_GATEWAY_URL"),
+        matches!(err, GatewayConfigError::InvalidEnv(ref name) if name == "PROMPTFORGE_GATEWAY_URL"),
         "expected an explicit InvalidEnv error, got {err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "environment variable is set but not valid Unicode: PROMPTFORGE_GATEWAY_URL"
     );
 }
 
@@ -28,9 +31,13 @@ fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
 fn from_env_missing_gateway_url() {
     let err = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "tok")]))
         .expect_err("missing URL must fail");
+    assert_eq!(
+        err.to_string(),
+        "missing environment variable: PROMPTFORGE_GATEWAY_URL"
+    );
     assert!(matches!(
         err,
-        Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_URL"
+        GatewayConfigError::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_URL"
     ));
 }
 
@@ -55,7 +62,7 @@ fn from_env_missing_gateway_key() {
         let err = from_env_with(lookup_from(&key_pairs))
             .expect_err("missing key against a non-loopback gateway must fail");
         assert!(
-            matches!(err, Error::MissingEnv(ref name) if name == "PROMPTFORGE_GATEWAY_API_KEY"),
+            matches!(err, GatewayConfigError::MissingEnv(ref name) if name == "PROMPTFORGE_GATEWAY_API_KEY"),
             "expected MissingEnv for {key_pairs:?}, got {err:?}"
         );
     }
@@ -223,14 +230,15 @@ fn secret_string_construction_rejects_an_empty_credential() {
 }
 
 #[test]
-fn an_unusable_secret_classifies_as_unavailable_and_keeps_its_cause() {
-    // AUDIT-DISCARDED-SOURCE: the SecretError survives as the public
-    // CompletionError's source, classified as Unavailable.
+fn an_unusable_secret_is_a_config_error_that_keeps_its_cause() {
+    // AUDIT-DISCARDED-SOURCE: the SecretError survives as the config
+    // error's source.
     let secret_error = SecretString::new("").expect_err("blank key is rejected");
-    let completion = crate::CompletionError::from(secret_error);
-    assert_eq!(completion.kind(), CompletionErrorKind::Unavailable);
+    let config = GatewayConfigError::from(secret_error);
+    assert_eq!(config.to_string(), "gateway bearer key is unusable");
     assert!(
-        std::error::Error::source(&completion).is_some(),
+        std::error::Error::source(&config)
+            .is_some_and(|source| source.downcast_ref::<SecretError>().is_some()),
         "the SecretError cause must survive"
     );
 }
@@ -239,7 +247,10 @@ fn an_unusable_secret_classifies_as_unavailable_and_keeps_its_cause() {
 fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
     for url in ["ftp://example.com/v1", "not-a-url", "http://", ""] {
         let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
-        assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
+        assert!(
+            error.to_string().starts_with("gateway URL"),
+            "the message names the rule that failed: {error}"
+        );
         assert!(!error.to_string().contains("missing environment variable"));
     }
 }
@@ -248,9 +259,13 @@ fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
 fn gateway_endpoint_keeps_the_url_parse_cause() {
     // AUDIT-DISCARDED-SOURCE: the url::ParseError survives as the source.
     let url_error = GatewayEndpoint::new("not a url").expect_err("malformed URL is rejected");
-    assert_eq!(url_error.kind(), CompletionErrorKind::Unavailable);
+    assert_eq!(
+        url_error.to_string(),
+        "gateway URL is not a valid URL: \"not a url\""
+    );
     assert!(
-        std::error::Error::source(&url_error).is_some(),
+        std::error::Error::source(&url_error)
+            .is_some_and(|source| source.downcast_ref::<url::ParseError>().is_some()),
         "the url::ParseError cause must survive"
     );
 }
@@ -266,7 +281,10 @@ fn gateway_endpoint_rejects_credentials_query_and_fragment() {
         "http://host/v1#frag",
     ] {
         let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
-        assert_eq!(error.kind(), CompletionErrorKind::Unavailable);
+        assert!(
+            error.to_string().starts_with("gateway URL must"),
+            "the message names the rule that failed: {error}"
+        );
         assert!(!error.to_string().contains("missing environment variable"));
     }
     // A clean http(s) API root is still accepted and normalized.

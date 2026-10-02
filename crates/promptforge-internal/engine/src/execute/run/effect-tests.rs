@@ -5,10 +5,10 @@
 //! serde, as a run log and a replay depend on.
 
 use promptforge_model_client::client::StreamAccumulator;
+use promptforge_model_client::model::CompletionErrorKind;
 use serde_json::json;
 
 use super::*;
-use promptforge_model_client::Error as ClientError;
 
 /// Serializes the record and reads it back.
 fn round_trip(record: &AnswerRecord) -> AnswerRecord {
@@ -106,9 +106,18 @@ fn a_canned_chat_answer_records_no_finish_reason() {
 
 #[test]
 fn a_failed_chat_answer_records_the_errors_display_text() {
-    let error = CompletionError::from(ClientError::GatewayDisabled);
+    let error = CompletionError::new(
+        CompletionErrorKind::MalformedResponse,
+        "the model backend sent a reply that could not be understood: \
+         completion stream ended without the [DONE] sentinel",
+    )
+    .with_detail("provider said <hidden>");
     let expected = error.to_string();
-    assert!(!expected.is_empty(), "the error displays as something");
+    assert!(
+        expected.ends_with("without the [DONE] sentinel"),
+        "the recorded text keeps the crate-authored specific: {expected}"
+    );
+    assert!(!expected.contains("hidden"), "the detail is never recorded");
     let record = EffectAnswer::Chat(Err(error)).record();
     assert_eq!(record, AnswerRecord::Chat(Err(expected)));
     assert_eq!(round_trip(&record), record);

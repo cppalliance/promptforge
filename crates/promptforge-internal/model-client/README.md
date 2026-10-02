@@ -30,3 +30,11 @@ from there and does not re-export them. A
 malformed metadata section degrades to `None` with a diagnostic line that
 the Engine reports as a `model_metadata_degraded` event; it never fails
 the call.
+
+A failed round is a `CompletionError`: a closed `CompletionErrorKind`
+(`ContextOverflow`, `RateLimited`, `Timeout`, `Transport`, and the rest)
+with retryability fixed per kind, a message that is the kind's fixed
+phrase, and an opt-in `detail` for the provider's bounded, escaped text.
+`classify_http_failure` reads a non-success status and body into one. A
+poisoned model-set lock is not a model failure: `ModelView` returns the
+one-purpose `ModelSetError` for it.

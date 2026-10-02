@@ -17,7 +17,6 @@ use promptforge_types::wire::StreamDelta;
 use serde_json::Value;
 
 use super::{Applied, Completion, SseScanner, StreamAccumulator};
-use crate::Error;
 use crate::model::CompletionError;
 
 /// A response body read one chunk at a time: the part of a model round a
@@ -40,12 +39,10 @@ pub trait ChunkSource {
     /// Returns the next chunk, or `None` once the body is exhausted.
     ///
     /// A read failure is the transport's own error, reported as the
-    /// [`CompletionError`] the round fails with: box it into
-    /// [`ClientError::Http`](crate::Error::Http) and convert with
-    /// [`CompletionError::from`]. Wrap a timeout in
-    /// [`ClientTimeout`](crate::Timeout) before boxing it, so
-    /// [`CompletionError::is_timeout`] still holds after the concrete type
-    /// is erased.
+    /// [`CompletionError`] the round fails with: a `Timeout`-kind error
+    /// when the read ran out of time and a `Transport`-kind error otherwise,
+    /// each built with [`CompletionError::new`] and given the transport's
+    /// error through [`CompletionError::with_source`].
     fn next_chunk(
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Chunk>, CompletionError>> + Send;
@@ -73,17 +70,17 @@ pub async fn read_body_capped<S: ChunkSource>(
     if let Some(len) = content_length
         && len > cap
     {
-        return Err(CompletionError::from(Error::MalformedResponse(format!(
+        return Err(CompletionError::malformed(format!(
             "response body of {len} bytes exceeds the {cap}-byte limit"
-        ))));
+        )));
     }
     let mut body: Vec<u8> = Vec::new();
     while let Some(chunk) = source.next_chunk().await? {
         let bytes = chunk.as_ref();
         if body.len() as u64 + bytes.len() as u64 > cap {
-            return Err(CompletionError::from(Error::MalformedResponse(format!(
+            return Err(CompletionError::malformed(format!(
                 "response body exceeds the {cap}-byte limit"
-            ))));
+            )));
         }
         body.extend_from_slice(bytes);
     }
@@ -132,9 +129,9 @@ pub async fn read_completion_stream<S: ChunkSource>(
         let bytes = chunk.as_ref();
         received += bytes.len() as u64;
         if received > max_bytes {
-            return Err(CompletionError::from(Error::MalformedResponse(format!(
+            return Err(CompletionError::malformed(format!(
                 "response stream exceeds the {max_bytes}-byte limit"
-            ))));
+            )));
         }
         scanner.extend(bytes);
         while let Some(data) = scanner.next_data() {
@@ -157,9 +154,9 @@ pub async fn read_completion_stream<S: ChunkSource>(
     // accumulation may be missing the tail, so it must never pass for a
     // complete turn.
     if !done {
-        return Err(CompletionError::from(Error::MalformedResponse(
-            "completion stream ended without the [DONE] sentinel".into(),
-        )));
+        return Err(CompletionError::malformed(
+            "completion stream ended without the [DONE] sentinel",
+        ));
     }
     let client_timing = ClientTiming {
         ttft_ms: first_delta.map(|at| duration_ms(at.duration_since(started))),

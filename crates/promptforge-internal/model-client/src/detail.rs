@@ -5,14 +5,12 @@
 //! otherwise be an inherent method or a public field on a facade-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
 //! a message holds, reading a tool schema's wire parts, reading the
-//! metadata diagnostics and taking the raw JSON bodies a completion holds,
-//! and wrapping a transport failure.
+//! metadata diagnostics and taking the raw JSON bodies a completion holds.
 
 use promptforge_types::metrics::VllmMetrics;
 use serde_json::Value;
 
 use crate::client::{Completion, CompletionResult, Message, ToolCall, ToolSchema, ToolSchemaError};
-use crate::error::Error;
 
 /// Constructs a message from parts a caller has already validated.
 ///
@@ -150,14 +148,4 @@ pub fn completion_take_request_body(completion: &mut Completion) -> Value {
 #[must_use]
 pub fn completion_take_response_body(completion: &mut Completion) -> Value {
     std::mem::take(&mut completion.response_body)
-}
-
-/// Wraps a transport-layer error, hiding its concrete type.
-///
-/// A transport that knows the failure was a timeout wraps it in
-/// [`Timeout`](crate::Timeout) first, so
-/// [`CompletionError::is_timeout`](crate::model::CompletionError::is_timeout)
-/// can say so without this crate naming the HTTP client.
-pub fn error_http(source: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::Http(Box::new(source))
 }

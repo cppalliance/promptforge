@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::detail::{message_from_validated_parts, tool_schema_new};
+use crate::model::CompletionErrorKind;
 
 #[test]
 fn from_validated_parts_serializes_role_and_content_verbatim() {
@@ -82,11 +83,10 @@ fn from_parts_refuses_a_blank_id_a_blank_name_and_non_object_arguments() {
         ),
         ("call_1", "fetch", serde_json::json!([1]), "array arguments"),
     ] {
-        assert!(
-            matches!(
-                ToolCall::from_parts(id, name, arguments),
-                Err(crate::Error::MalformedResponse(_))
-            ),
+        let error = ToolCall::from_parts(id, name, arguments).expect_err(label);
+        assert_eq!(
+            error.kind(),
+            CompletionErrorKind::MalformedResponse,
             "{label} must be refused"
         );
     }
@@ -96,19 +96,18 @@ fn from_parts_refuses_a_blank_id_a_blank_name_and_non_object_arguments() {
 
 #[test]
 fn from_result_refuses_an_empty_batch_and_duplicate_ids_and_accepts_text() {
-    assert!(matches!(
-        Completion::from_result(CompletionResult::ToolCalls(Vec::new()), "m"),
-        Err(crate::Error::EmptyModelReply {
-            finish_reason: None,
-            ..
-        })
-    ));
+    let empty = Completion::from_result(CompletionResult::ToolCalls(Vec::new()), "m")
+        .expect_err("an empty batch is refused");
+    assert_eq!(empty.kind(), CompletionErrorKind::EmptyReply);
+    assert_eq!(empty.finish_reason(), None);
     let call = ToolCall::from_parts("call_1", "fetch", json_object()).expect("a whole call");
     let twice = CompletionResult::ToolCalls(vec![call.clone(), call.clone()]);
-    assert!(matches!(
-        Completion::from_result(twice, "m"),
-        Err(crate::Error::MalformedResponse(message)) if message.contains("\"call_1\"")
-    ));
+    let duplicate = Completion::from_result(twice, "m").expect_err("a duplicate id is refused");
+    assert_eq!(duplicate.kind(), CompletionErrorKind::MalformedResponse);
+    assert!(
+        duplicate.to_string().contains("\"call_1\""),
+        "the message names the repeated id: {duplicate}"
+    );
     let text = Completion::from_result(CompletionResult::Text("pong".to_owned()), "m")
         .expect("a text result is accepted");
     assert_eq!(text.model(), "m");

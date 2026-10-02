@@ -3,10 +3,10 @@
 use std::num::NonZeroU32;
 
 use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge::transport::{ClientError as Error, classify_http_failure};
+use promptforge::transport::classify_http_failure;
 use serde::Deserialize;
 
-use crate::transport::{http, transport_source};
+use crate::failure::{malformed, transport_failure};
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
 ///
@@ -54,16 +54,16 @@ async fn read_catalog_body_capped(
     if let Some(len) = response.content_length()
         && len > cap
     {
-        return Err(CompletionError::from(Error::MalformedResponse(format!(
+        return Err(malformed(format!(
             "model list body of {len} bytes exceeds the {cap}-byte limit"
-        ))));
+        )));
     }
     let mut body: Vec<u8> = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(http)? {
+    while let Some(chunk) = response.chunk().await.map_err(transport_failure)? {
         if body.len() as u64 + chunk.len() as u64 > cap {
-            return Err(CompletionError::from(Error::MalformedResponse(format!(
+            return Err(malformed(format!(
                 "model list body exceeds the {cap}-byte limit"
-            ))));
+            )));
         }
         body.extend_from_slice(&chunk);
     }
@@ -138,19 +138,14 @@ async fn get_authed(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(http)?;
+        .map_err(transport_failure)?;
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
     let body = match read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await {
         Ok(body) => body,
-        Err(source) => {
-            return Err(CompletionError::from(Error::BackendBodyRead {
-                status: status.as_u16(),
-                source: transport_source(source),
-            }));
-        }
+        Err(source) => return Err(transport_failure(source)),
     };
     Err(classify_http_failure(status.as_u16(), &body))
 }
@@ -192,10 +187,7 @@ pub async fn fetch_model_catalog(
         // MODEL-009: keep the decode error as a private `#[source]` cause instead
         // of flattening it into the message, while the classification stays
         // `MalformedResponse`.
-        CompletionError::from(Error::MalformedResponseSource {
-            message: "model list response was not valid JSON".to_owned(),
-            source: Box::new(error),
-        })
+        malformed("model list response was not valid JSON").with_source(error)
     })?;
     let mut descriptors = Vec::with_capacity(list.data.len());
     for entry in list.data {
@@ -206,21 +198,19 @@ pub async fn fetch_model_catalog(
             continue;
         };
         let id = ModelId::gateway(entry.id).map_err(|error| {
-            CompletionError::from(Error::MalformedResponse(format!(
-                "model catalog entry has an invalid id: {error}"
-            )))
+            malformed(format!("model catalog entry has an invalid id: {error}"))
         })?;
         let context = NonZeroU32::new(context).ok_or_else(|| {
-            CompletionError::from(Error::MalformedResponse(format!(
+            malformed(format!(
                 "model {} declares a zero-token context window",
                 id.name()
-            )))
+            ))
         })?;
         let thinking = entry.thinking.ok_or_else(|| {
-            CompletionError::from(Error::MalformedResponse(format!(
+            malformed(format!(
                 "model {} declares a context window but no thinking mode",
                 id.name()
-            )))
+            ))
         })?;
         descriptors.push(ModelDescriptor::new(
             id,
@@ -230,9 +220,9 @@ pub async fn fetch_model_catalog(
         ));
     }
     ModelCatalog::new(descriptors).map_err(|error| {
-        CompletionError::from(Error::MalformedResponse(format!(
+        malformed(format!(
             "gateway returned an inconsistent model catalog: {error}"
-        )))
+        ))
     })
 }
 
@@ -302,10 +292,10 @@ mod tests {
             .expect_err("an oversized success body must be refused");
         assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
         assert!(
-            err.detail()
-                .is_some_and(|detail| detail.contains("exceeds")),
+            err.to_string().contains("exceeds"),
             "the bound must report the size limit, got {err:?}"
         );
+        assert_eq!(err.detail(), None, "our own wording is not provider text");
     }
 
     #[tokio::test]
@@ -400,11 +390,7 @@ mod tests {
             .await
             .expect_err("a zero context window is malformed");
         assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-        assert!(
-            err.detail()
-                .is_some_and(|detail| detail.contains("zero-token")),
-            "got {err:?}"
-        );
+        assert!(err.to_string().contains("zero-token"), "got {err:?}");
     }
 
     #[tokio::test]
@@ -433,7 +419,10 @@ mod tests {
             .await
             .expect_err("a truncated error body must surface as an error");
         assert_eq!(err.kind(), CompletionErrorKind::Transport);
-        assert_eq!(err.status(), Some(500));
+        assert_eq!(
+            err.to_string(),
+            "the connection to the model backend failed"
+        );
         let source =
             std::error::Error::source(&err).expect("the read failure must be a preserved source");
         assert!(

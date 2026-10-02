@@ -15,11 +15,12 @@ use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
 };
 use promptforge::transport::{
-    ChunkSource, ClientError as Error, ClientTimeout, build_request_body, classify_http_failure,
-    escape_controls, read_body_capped, read_completion_stream,
+    ChunkSource, build_request_body, classify_http_failure, escape_controls, read_body_capped,
+    read_completion_stream,
 };
 
-use crate::config::{GatewayEndpoint, SecretString};
+use crate::config::{GatewayConfigError, GatewayEndpoint, SecretString};
+use crate::failure::{elapsed, transport_failure, unavailable};
 
 /// A chat completions client bound to one gateway URL and, usually, the
 /// gateway's shared bearer key.
@@ -53,33 +54,6 @@ enum GatewayTransport {
     Disabled,
 }
 
-/// Wraps a transport-layer failure into the client's internal error type,
-/// marking a timeout so [`CompletionError::is_timeout`] holds through the
-/// type erasure.
-pub(crate) fn http(error: reqwest::Error) -> Error {
-    Error::Http(transport_source(error))
-}
-
-/// Boxes a transport-layer failure as an error-chain source, wrapped in
-/// the vocabulary's timeout marker when it was one.
-///
-/// Every internal error variant that erases a `reqwest::Error` (`Http`,
-/// `BackendBodyRead`) boxes it through here, so `is_timeout` holds under
-/// each of them and the marker cannot be forgotten on one path.
-pub(crate) fn transport_source(error: reqwest::Error) -> Box<dyn std::error::Error + Send + Sync> {
-    if error.is_timeout() {
-        return Box::new(ClientTimeout(Box::new(error)));
-    }
-    Box::new(error)
-}
-
-/// Wraps an elapsed receive deadline as a transport failure under the
-/// vocabulary's timeout marker, so it reports exactly as a `reqwest`
-/// timeout does.
-fn elapsed(error: tokio::time::error::Elapsed) -> Error {
-    Error::Http(Box::new(ClientTimeout(Box::new(error))))
-}
-
 /// A [`reqwest::Response`] body as the reassembly's chunk source, with each
 /// receive bounded by the client's timeout.
 struct ResponseChunks {
@@ -93,8 +67,8 @@ impl ChunkSource for ResponseChunks {
     async fn next_chunk(&mut self) -> Result<Option<Self::Chunk>, CompletionError> {
         tokio::time::timeout(self.timeout, self.response.chunk())
             .await
-            .map_err(|error| CompletionError::from(elapsed(error)))?
-            .map_err(|error| CompletionError::from(http(error)))
+            .map_err(elapsed)?
+            .map_err(transport_failure)
     }
 }
 
@@ -118,7 +92,7 @@ impl GatewayClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # async fn run() -> Result<(), harness_models::CompletionError> {
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// use harness_models::{GatewayClient, GatewayEndpoint, SecretString};
     /// use promptforge::model::{CompletionOptions, Message};
     ///
@@ -151,7 +125,7 @@ impl GatewayClient {
     /// gateway on the same machine, which trusts keyless loopback callers by
     /// default (and, on a shared machine, every other OS account there)
     /// unless its operator set `trust_loopback = false`; against any other
-    /// gateway the requests fail with a `Backend` 401. Nothing here checks
+    /// gateway the requests fail with an `Unavailable` 401. Nothing here checks
     /// the endpoint's host - the caller decides, and
     /// [`GatewayClient::from_env`] decides by [`GatewayEndpoint::is_loopback`].
     ///
@@ -163,7 +137,7 @@ impl GatewayClient {
     /// let endpoint = GatewayEndpoint::new("http://127.0.0.1:8081/v1")?;
     /// let client = GatewayClient::keyless(endpoint);
     /// let _ = client;
-    /// # Ok::<(), harness_models::CompletionError>(())
+    /// # Ok::<(), harness_models::GatewayConfigError>(())
     /// ```
     #[must_use]
     pub fn keyless(endpoint: GatewayEndpoint) -> GatewayClient {
@@ -263,20 +237,20 @@ impl GatewayClient {
     ///   `Unavailable` 401.
     ///
     /// # Errors
-    /// Returns a [`CompletionError`] with `Unavailable` kind when
-    /// `PROMPTFORGE_GATEWAY_URL` is unset or invalid, when either variable is
-    /// set to a non-Unicode value, or when the URL's host is not loopback (a
-    /// LAN or remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is unset or
-    /// empty.
-    pub fn from_env() -> Result<GatewayClient, CompletionError> {
+    /// Returns a [`GatewayConfigError`] when `PROMPTFORGE_GATEWAY_URL` is
+    /// unset or invalid, when either variable is set to a non-Unicode value,
+    /// or when the URL's host is not loopback (a LAN or remote gateway) and
+    /// `PROMPTFORGE_GATEWAY_API_KEY` is unset or empty.
+    pub fn from_env() -> Result<GatewayClient, GatewayConfigError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
             Err(std::env::VarError::NotPresent) => Ok(None),
             // A set-but-non-Unicode value is a real misconfiguration, surfaced
             // explicitly instead of being silently treated as "not set".
-            Err(std::env::VarError::NotUnicode(_)) => Err(Error::InvalidEnv(name.to_owned())),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err(GatewayConfigError::InvalidEnv(name.to_owned()))
+            }
         })
-        .map_err(CompletionError::from)
     }
 
     /// Sends a list of messages and returns the model's accumulated outcome.
@@ -326,7 +300,7 @@ impl GatewayClient {
         on_delta: impl Fn(StreamDelta),
     ) -> Result<Completion, CompletionError> {
         let GatewayTransport::Http(http) = &self.transport else {
-            return Err(CompletionError::from(Error::GatewayDisabled));
+            return Err(unavailable());
         };
         let request_body = build_request_body(messages, tools, options);
 
@@ -344,7 +318,7 @@ impl GatewayClient {
         let response = tokio::time::timeout(self.request_timeout, request.send())
             .await
             .map_err(elapsed)?
-            .map_err(self::http)?;
+            .map_err(transport_failure)?;
 
         let status = response.status();
         let content_length = response.content_length();
@@ -388,18 +362,20 @@ impl GatewayClient {
 /// counts as unset ([`SecretString::new`] refuses only an empty secret, and
 /// `Result::ok` folds that refusal into `None`).
 pub(crate) fn from_env_with(
-    lookup: impl Fn(&str) -> Result<Option<String>, Error>,
-) -> Result<GatewayClient, Error> {
+    lookup: impl Fn(&str) -> Result<Option<String>, GatewayConfigError>,
+) -> Result<GatewayClient, GatewayConfigError> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
-        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
-    let endpoint = GatewayEndpoint::parse(&base_url)?;
+        .ok_or_else(|| GatewayConfigError::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
+    let endpoint = GatewayEndpoint::new(&base_url)?;
     let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
         .map(SecretString::new)
         .and_then(Result::ok);
     match key {
         Some(key) => Ok(GatewayClient::new(endpoint, key)),
         None if endpoint.is_loopback() => Ok(GatewayClient::keyless(endpoint)),
-        None => Err(Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY".into())),
+        None => Err(GatewayConfigError::MissingEnv(
+            "PROMPTFORGE_GATEWAY_API_KEY".into(),
+        )),
     }
 }
 

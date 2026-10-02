@@ -4,7 +4,7 @@
 //! variant it stands in for.
 
 use promptforge_lua::Error as LuaError;
-use promptforge_model_client::Error as GatewayClientError;
+use promptforge_model_client::model::ModelSetError;
 use promptforge_parser::Error as ParserError;
 use promptforge_types::ids::TaskId;
 
@@ -86,17 +86,12 @@ impl From<crate::subst::SubstitutionError> for Error {
     }
 }
 
-/// Maps the gateway-client error type onto this one. `ModelSetLock` is the
-/// run's own mutex failing, not a model failure, so it flattens to
-/// [`Error::Lua`]; every other variant is classified into a
-/// [`CompletionError`](crate::model::CompletionError) and becomes
+/// Maps a poisoned model-set lock onto [`Error::Lua`]. The lock is the
+/// run's own mutex failing, not a model failure, so it never becomes an
 /// [`Error::Completion`].
-impl From<GatewayClientError> for Error {
-    fn from(error: GatewayClientError) -> Error {
-        match error {
-            GatewayClientError::ModelSetLock(message) => Error::Lua(message),
-            other => Error::Completion(crate::model::CompletionError::from(other)),
-        }
+impl From<ModelSetError> for Error {
+    fn from(error: ModelSetError) -> Error {
+        Error::Lua(error.to_string())
     }
 }
 

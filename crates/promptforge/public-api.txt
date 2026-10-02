@@ -22,7 +22,6 @@
 #[non_exhaustive] pub enum promptforge::tools::ToolCatalogErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolIdErrorKind
-#[non_exhaustive] pub enum promptforge::transport::ClientError
 #[non_exhaustive] pub enum promptforge::vfs::FileType
 #[non_exhaustive] pub enum promptforge::vfs::PathReason
 #[non_exhaustive] pub enum promptforge::vfs::VfsError
@@ -172,8 +171,6 @@ auto promptforge::tools::ToolId: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwin
 auto promptforge::tools::ToolIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::ToolIdErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::ToolOutput: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::transport::ClientError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
-auto promptforge::transport::ClientTimeout: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::Access: !Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::AcquireContext: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -294,8 +291,6 @@ derives promptforge::tools::ToolId: Clone, Debug, Deserialize, Eq, Hash, Ord, Pa
 derives promptforge::tools::ToolIdError: Clone, Debug, Eq, PartialEq
 derives promptforge::tools::ToolIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::tools::ToolOutput: Clone, Debug, Eq, PartialEq
-derives promptforge::transport::ClientError: Debug
-derives promptforge::transport::ClientTimeout: Debug
 derives promptforge::vfs::Access: Debug
 derives promptforge::vfs::AcquireContext: Clone, Debug
 derives promptforge::vfs::AllowAll: Debug, Default
@@ -322,7 +317,6 @@ derives promptforge::vfs::VfsRef: Clone, Debug, Default
 derives promptforge::vfs::VfsRefBuilder: Debug
 impl core::convert::From<&promptforge::model::Completion> for promptforge::effect::ChatAnswerRecord
 impl core::convert::From<promptforge::ids::ChainId> for promptforge::ids::TaskId
-impl core::convert::From<promptforge::transport::ClientError> for promptforge::model::CompletionError
 impl core::convert::From<promptforge::vfs::VfsPath> for promptforge::vfs::VfsPathBuf
 impl core::convert::TryFrom<f64> for promptforge::model::Temperature
 impl core::convert::TryFrom<f64> for promptforge::model::Temperature { type Error = promptforge::model::TemperatureError }
@@ -338,8 +332,6 @@ impl core::error::Error for promptforge::model::TemperatureError
 impl core::error::Error for promptforge::tools::ToolCatalogError
 impl core::error::Error for promptforge::tools::ToolError
 impl core::error::Error for promptforge::tools::ToolIdError
-impl core::error::Error for promptforge::transport::ClientError
-impl core::error::Error for promptforge::transport::ClientTimeout
 impl core::error::Error for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::ParseError
 impl core::fmt::Display for promptforge::RunError
@@ -361,8 +353,6 @@ impl core::fmt::Display for promptforge::tools::ToolCatalogError
 impl core::fmt::Display for promptforge::tools::ToolError
 impl core::fmt::Display for promptforge::tools::ToolId
 impl core::fmt::Display for promptforge::tools::ToolIdError
-impl core::fmt::Display for promptforge::transport::ClientError
-impl core::fmt::Display for promptforge::transport::ClientTimeout
 impl core::fmt::Display for promptforge::vfs::PathReason
 impl core::fmt::Display for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::vfs::VfsPath
@@ -499,23 +489,20 @@ pub fn promptforge::ids::TaskOrigin::from_tag(tag: &str) -> core::option::Option
 pub fn promptforge::ids::TaskOrigin::tag(self) -> &'static str
 pub fn promptforge::model::Completion::client_timing(&self) -> core::option::Option<&promptforge::metrics::ClientTiming>
 pub fn promptforge::model::Completion::finish_reason(&self) -> core::option::Option<&str>
-pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::Completion, promptforge::transport::ClientError>
+pub fn promptforge::model::Completion::from_result(result: promptforge::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<promptforge::model::Completion, promptforge::model::CompletionError>
 pub fn promptforge::model::Completion::llama_timings(&self) -> core::option::Option<&promptforge::metrics::LlamaTimings>
 pub fn promptforge::model::Completion::model(&self) -> &str
 pub fn promptforge::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
 pub fn promptforge::model::Completion::result(&self) -> &promptforge::model::CompletionResult
 pub fn promptforge::model::Completion::usage(&self) -> core::option::Option<&promptforge::metrics::Usage>
-pub fn promptforge::model::CompletionError::backend_body(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::detail(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
 pub fn promptforge::model::CompletionError::is_retryable(&self) -> bool
-pub fn promptforge::model::CompletionError::is_timeout(&self) -> bool
 pub fn promptforge::model::CompletionError::kind(&self) -> promptforge::model::CompletionErrorKind
 pub fn promptforge::model::CompletionError::message(&self) -> &str
 pub fn promptforge::model::CompletionError::new(kind: promptforge::model::CompletionErrorKind, message: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::overflow(&self) -> (core::option::Option<u32>, core::option::Option<u32>)
-pub fn promptforge::model::CompletionError::status(&self) -> core::option::Option<u16>
 pub fn promptforge::model::CompletionError::with_detail(self, text: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::with_finish_reason(self, reason: impl core::convert::Into<alloc::string::String>) -> promptforge::model::CompletionError
 pub fn promptforge::model::CompletionError::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>>) -> promptforge::model::CompletionError
@@ -565,7 +552,7 @@ pub fn promptforge::model::ToolArguments::is_empty(&self) -> bool
 pub fn promptforge::model::ToolArguments::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn promptforge::model::ToolArguments::to_json_string(&self) -> alloc::string::String
 pub fn promptforge::model::ToolCall::arguments(&self) -> promptforge::model::ToolArguments<'_>
-pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> core::result::Result<promptforge::model::ToolCall, promptforge::transport::ClientError>
+pub fn promptforge::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> core::result::Result<promptforge::model::ToolCall, promptforge::model::CompletionError>
 pub fn promptforge::model::ToolCall::id(&self) -> &str
 pub fn promptforge::model::ToolCall::name(&self) -> &str
 pub fn promptforge::prompt::ArgDecl::default(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
@@ -1241,35 +1228,6 @@ pub promptforge::tools::ToolIdErrorKind::Control
 pub promptforge::tools::ToolIdErrorKind::Empty
 pub promptforge::tools::ToolIdErrorKind::SegmentCount
 pub promptforge::tools::ToolIdErrorKind::Separator
-pub promptforge::transport::ClientError::Backend { .. }
-pub promptforge::transport::ClientError::Backend::body: alloc::string::String
-pub promptforge::transport::ClientError::Backend::status: u16
-pub promptforge::transport::ClientError::BackendBodyRead { .. }
-pub promptforge::transport::ClientError::BackendBodyRead::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
-pub promptforge::transport::ClientError::BackendBodyRead::status: u16
-pub promptforge::transport::ClientError::Config { .. }
-pub promptforge::transport::ClientError::Config::message: alloc::string::String
-pub promptforge::transport::ClientError::Config::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
-pub promptforge::transport::ClientError::EmptyModelReply { .. }
-pub promptforge::transport::ClientError::EmptyModelReply::detail: &'static str
-pub promptforge::transport::ClientError::EmptyModelReply::finish_reason: core::option::Option<alloc::string::String>
-pub promptforge::transport::ClientError::GatewayDisabled
-pub promptforge::transport::ClientError::Http(..)
-pub promptforge::transport::ClientError::Http::0: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
-pub promptforge::transport::ClientError::InvalidConfig(..)
-pub promptforge::transport::ClientError::InvalidConfig::0: alloc::string::String
-pub promptforge::transport::ClientError::InvalidEnv(..)
-pub promptforge::transport::ClientError::InvalidEnv::0: alloc::string::String
-pub promptforge::transport::ClientError::MalformedResponse(..)
-pub promptforge::transport::ClientError::MalformedResponse::0: alloc::string::String
-pub promptforge::transport::ClientError::MalformedResponseSource { .. }
-pub promptforge::transport::ClientError::MalformedResponseSource::message: alloc::string::String
-pub promptforge::transport::ClientError::MalformedResponseSource::source: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
-pub promptforge::transport::ClientError::MissingEnv(..)
-pub promptforge::transport::ClientError::MissingEnv::0: alloc::string::String
-pub promptforge::transport::ClientError::ModelSetLock(..)
-pub promptforge::transport::ClientError::ModelSetLock::0: alloc::string::String
-pub promptforge::transport::ClientTimeout::0: alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>
 pub promptforge::vfs::Entry::description: core::option::Option<alloc::string::String>
 pub promptforge::vfs::Entry::name: alloc::string::String
 pub promptforge::vfs::Entry::stat: promptforge::vfs::Stat
@@ -1410,7 +1368,6 @@ pub struct promptforge::model::ModelInvocation { .. }
 pub struct promptforge::model::Temperature(/* private fields */)
 pub struct promptforge::replay::Flags(/* private fields */)
 pub struct promptforge::timestamp::Timestamp(/* private fields */)
-pub struct promptforge::transport::ClientTimeout(..)
 pub struct promptforge::vfs::Access { /* private fields */ }
 pub struct promptforge::vfs::AcquireContext { /* private fields */ }
 pub struct promptforge::vfs::AllowAll;

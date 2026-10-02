@@ -3,6 +3,18 @@
 
 use super::*;
 
+const EMPTY_REPLY_PHRASE: &str = "the model replied with no text and no tool calls";
+
+/// Whether `result` failed as a `MalformedResponse`.
+fn is_malformed<T>(result: Result<T>) -> bool {
+    result.is_err_and(|error| error.kind() == CompletionErrorKind::MalformedResponse)
+}
+
+/// Whether `result` failed as an `EmptyReply`.
+fn is_empty_reply<T>(result: Result<T>) -> bool {
+    result.is_err_and(|error| error.kind() == CompletionErrorKind::EmptyReply)
+}
+
 /// Wraps one assistant message in the gateway's one-choice envelope.
 fn one_choice(message: impl Into<Value>) -> Value {
     let message = message.into();
@@ -107,7 +119,7 @@ fn malformed_tool_arguments_are_rejected_not_coerced() {
     }));
 
     assert!(
-        matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+        is_malformed(normalize(&body)),
         "invalid-JSON tool arguments must be rejected, never coerced to a string"
     );
 }
@@ -120,7 +132,7 @@ fn non_string_tool_arguments_are_rejected() {
         "function": { "name": "web_fetch", "arguments": { "url": "x" } }
     }));
 
-    assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    assert!(is_malformed(normalize(&body)));
 }
 
 #[test]
@@ -132,7 +144,7 @@ fn absent_tool_arguments_are_rejected() {
     }));
 
     assert!(
-        matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+        is_malformed(normalize(&body)),
         "missing tool arguments must be rejected, not coerced to null"
     );
 }
@@ -146,7 +158,7 @@ fn non_object_decoded_arguments_are_rejected() {
     }));
 
     assert!(
-        matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+        is_malformed(normalize(&body)),
         "arguments that decode to a non-object must be rejected"
     );
 }
@@ -158,7 +170,7 @@ fn blank_tool_call_id_is_rejected() {
         "type": "function",
         "function": { "name": "ping", "arguments": "{}" }
     }));
-    assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    assert!(is_malformed(normalize(&body)));
 }
 
 #[test]
@@ -175,7 +187,7 @@ fn duplicate_tool_call_ids_are_rejected() {
             }
         }]
     });
-    assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    assert!(is_malformed(normalize(&body)));
 }
 
 #[test]
@@ -185,7 +197,7 @@ fn wrong_type_type_field_is_rejected() {
         "type": "not_function",
         "function": { "name": "ping", "arguments": "{}" }
     }));
-    assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    assert!(is_malformed(normalize(&body)));
 }
 
 #[test]
@@ -201,59 +213,42 @@ fn missing_or_null_type_field_is_rejected() {
             call["type"] = value;
         }
         let body = one_tool_call(call);
-        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+        assert!(is_malformed(normalize(&body)));
     }
 }
 
 #[test]
 fn wrong_typed_top_level_fields_are_malformed() {
     // choices not an array
-    assert!(matches!(
-        normalize(&serde_json::json!({ "choices": {} })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(
+        &serde_json::json!({ "choices": {} })
+    )));
     // message not an object
-    assert!(matches!(
-        normalize(&serde_json::json!({ "choices": [{ "message": 7 }] })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(
+        &serde_json::json!({ "choices": [{ "message": 7 }] })
+    )));
     // finish_reason not a string
-    assert!(matches!(
-        normalize(&serde_json::json!({
-            "choices": [{ "message": { "content": "hi" }, "finish_reason": 3 }]
-        })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(&serde_json::json!({
+        "choices": [{ "message": { "content": "hi" }, "finish_reason": 3 }]
+    }))));
     // content wrong type
-    assert!(matches!(
-        normalize(&serde_json::json!({
-            "choices": [{ "message": { "content": [] } }]
-        })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(&serde_json::json!({
+        "choices": [{ "message": { "content": [] } }]
+    }))));
     // tool_calls wrong type
-    assert!(matches!(
-        normalize(&serde_json::json!({
-            "choices": [{ "message": { "content": null, "tool_calls": {} } }]
-        })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(&serde_json::json!({
+        "choices": [{ "message": { "content": null, "tool_calls": {} } }]
+    }))));
     // reasoning wrong type
-    assert!(matches!(
-        normalize(&serde_json::json!({
-            "choices": [{ "message": { "content": "hi", "reasoning_content": 5 } }]
-        })),
-        Err(Error::MalformedResponse(_))
-    ));
+    assert!(is_malformed(normalize(&serde_json::json!({
+        "choices": [{ "message": { "content": "hi", "reasoning_content": 5 } }]
+    }))));
 }
 
 #[test]
 fn whitespace_only_content_is_empty_reply() {
     let body = one_choice(serde_json::json!({ "content": "   \n\t " }));
-    assert!(matches!(
-        normalize(&body),
-        Err(Error::EmptyModelReply { .. })
-    ));
+    assert!(is_empty_reply(normalize(&body)));
 }
 
 #[test]
@@ -269,20 +264,17 @@ fn empty_content_with_reasoning_is_error() {
         }]
     });
 
-    match normalize(&body) {
-        Err(Error::EmptyModelReply {
-            detail,
-            finish_reason,
-        }) => {
-            assert_eq!(detail, EMPTY_REPLY_REASONING_IGNORED);
-            assert_eq!(
-                finish_reason.as_deref(),
-                Some("stop"),
-                "the choice's finish_reason must survive on the error"
-            );
-        }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
-    }
+    let error = normalize(&body).expect_err("an empty turn must fail");
+    assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+    assert_eq!(
+        error.to_string(),
+        format!("{EMPTY_REPLY_PHRASE}: reasoning content was present but ignored")
+    );
+    assert_eq!(
+        error.finish_reason(),
+        Some("stop"),
+        "the choice's finish_reason must survive on the error"
+    );
 }
 
 #[test]
@@ -292,16 +284,10 @@ fn empty_string_content_without_tools_is_error() {
         "content": ""
     }));
 
-    match normalize(&body) {
-        Err(Error::EmptyModelReply {
-            detail,
-            finish_reason,
-        }) => {
-            assert_eq!(detail, EMPTY_REPLY);
-            assert_eq!(finish_reason, None, "no finish_reason on the wire");
-        }
-        other => panic!("expected EmptyModelReply, got {other:?}"),
-    }
+    let error = normalize(&body).expect_err("an empty turn must fail");
+    assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+    assert_eq!(error.to_string(), EMPTY_REPLY_PHRASE);
+    assert_eq!(error.finish_reason(), None, "no finish_reason on the wire");
 }
 
 #[test]
@@ -311,36 +297,30 @@ fn null_content_without_tools_is_error() {
         "content": null
     }));
 
-    match normalize(&body) {
-        Err(Error::EmptyModelReply { detail, .. }) => assert_eq!(detail, EMPTY_REPLY),
-        other => panic!("expected EmptyModelReply, got {other:?}"),
-    }
+    let error = normalize(&body).expect_err("an empty turn must fail");
+    assert_eq!(error.kind(), CompletionErrorKind::EmptyReply);
+    assert_eq!(error.to_string(), EMPTY_REPLY_PHRASE);
 }
 
 #[test]
 fn empty_reply_error_stores_the_finish_reason() {
     let with_reason = empty_reply_error(false, Some("length".to_owned()));
-    assert!(
-        matches!(
-            with_reason,
-            Error::EmptyModelReply {
-                finish_reason: Some(ref reason),
-                ..
-            } if reason == "length"
-        ),
+    assert_eq!(
+        with_reason.finish_reason(),
+        Some("length"),
         "a supplied finish_reason must be stored: {with_reason:?}"
     );
+    assert_eq!(with_reason.to_string(), EMPTY_REPLY_PHRASE);
 
     let without_reason = empty_reply_error(true, None);
-    assert!(
-        matches!(
-            without_reason,
-            Error::EmptyModelReply {
-                finish_reason: None,
-                ..
-            }
-        ),
+    assert_eq!(
+        without_reason.finish_reason(),
+        None,
         "a missing finish_reason stays missing: {without_reason:?}"
+    );
+    assert_eq!(
+        without_reason.to_string(),
+        format!("{EMPTY_REPLY_PHRASE}: reasoning content was present but ignored")
     );
 }
 
@@ -377,16 +357,13 @@ fn empty_reasoning_synonym_falls_through() {
 fn missing_content_and_tools_is_empty_model_reply() {
     let body = one_choice(serde_json::json!({ "role": "assistant" }));
 
-    assert!(matches!(
-        normalize(&body),
-        Err(Error::EmptyModelReply { .. })
-    ));
+    assert!(is_empty_reply(normalize(&body)));
 }
 
 #[test]
 fn no_choices_is_malformed() {
     let body = serde_json::json!({ "choices": [] });
-    assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    assert!(is_malformed(normalize(&body)));
 }
 
 #[test]

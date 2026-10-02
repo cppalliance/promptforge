@@ -6,8 +6,6 @@ use std::sync::Mutex;
 
 use promptforge_types::models::ModelId;
 
-use crate::{Error, Result};
-
 /// The largest sampling temperature the backend accepts.
 const TEMPERATURE_MAX: f64 = 2.0;
 
@@ -300,6 +298,17 @@ impl ModelSet {
     }
 }
 
+/// The run's model-set lock was poisoned.
+///
+/// This is the run's own mutex failing, not a model failure, so it has no
+/// [`CompletionErrorKind`](crate::model::CompletionErrorKind) and no retry
+/// advice. The Engine and Lua crates map it to their Lua error, and the
+/// facade does not re-export it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("model set mutex was poisoned")]
+#[non_exhaustive]
+pub struct ModelSetError;
+
 /// The read-only view over the run's [`ModelSet`].
 ///
 /// The run context shares the set as `Arc<dyn ModelView>`; the live H1 pass
@@ -311,40 +320,40 @@ pub trait ModelView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///
     /// # Errors
-    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
-    fn bindings(&self) -> Result<Vec<ModelBinding>>;
+    /// Returns [`ModelSetError`] if the set's mutex is poisoned.
+    fn bindings(&self) -> Result<Vec<ModelBinding>, ModelSetError>;
 
     /// Returns the prompt-wide default alias set by `models.default`, if any.
     ///
     /// # Errors
-    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
-    fn default(&self) -> Result<Option<String>>;
+    /// Returns [`ModelSetError`] if the set's mutex is poisoned.
+    fn default(&self) -> Result<Option<String>, ModelSetError>;
 
     /// Returns an owned clone of the binding for `alias`, if it was
     /// declared.
     ///
     /// # Errors
-    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
-    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>>;
+    /// Returns [`ModelSetError`] if the set's mutex is poisoned.
+    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>, ModelSetError>;
 }
 
-/// Maps a poisoned set lock to the crate's model-set lock error, matching the
-/// wording every other mutex behind the Engine globals uses.
-fn lock_model_set(set: &Mutex<ModelSet>) -> Result<std::sync::MutexGuard<'_, ModelSet>> {
-    set.lock()
-        .map_err(|_| Error::ModelSetLock("model set mutex was poisoned".to_owned()))
+/// Maps a poisoned set lock to [`ModelSetError`].
+fn lock_model_set(
+    set: &Mutex<ModelSet>,
+) -> Result<std::sync::MutexGuard<'_, ModelSet>, ModelSetError> {
+    set.lock().map_err(|_| ModelSetError)
 }
 
 impl ModelView for Mutex<ModelSet> {
-    fn bindings(&self) -> Result<Vec<ModelBinding>> {
+    fn bindings(&self) -> Result<Vec<ModelBinding>, ModelSetError> {
         Ok(lock_model_set(self)?.bindings.clone())
     }
 
-    fn default(&self) -> Result<Option<String>> {
+    fn default(&self) -> Result<Option<String>, ModelSetError> {
         Ok(lock_model_set(self)?.default.clone())
     }
 
-    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>> {
+    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>, ModelSetError> {
         Ok(lock_model_set(self)?.binding(alias).cloned())
     }
 }
@@ -352,6 +361,37 @@ impl ModelView for Mutex<ModelSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model set whose mutex a panicking thread poisoned.
+    fn poisoned_set() -> Mutex<ModelSet> {
+        let set = Mutex::new(ModelSet::default());
+        std::thread::scope(|scope| {
+            let _ = scope
+                .spawn(|| {
+                    let _guard = set.lock();
+                    panic!("poison the set");
+                })
+                .join();
+        });
+        set
+    }
+
+    #[test]
+    fn a_poisoned_model_set_reports_the_lock_error_from_every_view_method() {
+        let set = poisoned_set();
+        assert_eq!(set.bindings(), Err(ModelSetError));
+        assert_eq!(ModelView::default(&set), Err(ModelSetError));
+        assert_eq!(set.binding("writer"), Err(ModelSetError));
+        assert_eq!(ModelSetError.to_string(), "model set mutex was poisoned");
+    }
+
+    #[test]
+    fn a_healthy_model_set_answers_every_view_method() {
+        let set = Mutex::new(ModelSet::default());
+        assert_eq!(set.bindings(), Ok(Vec::new()));
+        assert_eq!(ModelView::default(&set), Ok(None));
+        assert_eq!(set.binding("writer"), Ok(None));
+    }
 
     #[test]
     fn model_invocation_equality_is_not_reflexive_for_nan() {

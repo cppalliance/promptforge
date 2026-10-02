@@ -168,7 +168,7 @@ Answering a round feels like proxying an HTTP call: forward the request, wrap th
 use std::sync::Arc;
 use promptforge::effect::{Effect, EffectAnswer};
 use promptforge::model::{Completion, CompletionError, CompletionResult};
-use promptforge::{transport::ClientError, vfs::perform_vfs_op};
+use promptforge::{transport::classify_http_failure, vfs::perform_vfs_op};
 use promptforge::{Run, RunErrorKind, RunResult, Step};
 
 // 1. Each run prepares the greeter from the last tour with `model`, and its section asks `writer` once.
@@ -206,7 +206,7 @@ assert!(matches!(result, RunResult::Ok(text) if text == "hello world"));
 
 // 4. Run it again, and answer with a failed round: the backend returned status 503.
 let result = run_greeter(&prompt, &fast, |_served| {
-    Err(ClientError::Backend { status: 503, body: "overloaded".to_owned() }.into())
+    Err(classify_http_failure(503, "overloaded"))
 });
 let RunResult::Failure(error) = result else { panic!("a failed round fails the run") };
 assert_eq!(error.kind(), RunErrorKind::Completion);
@@ -215,8 +215,8 @@ assert_eq!(error.kind(), RunErrorKind::Completion);
 
 1. Step 1 defines `run_greeter`. It gives the context the model, prepares the two-role greeter from the previous section, and creates a fresh run each time you call it. The `""` passed to [`Run::new`](crate::Run::new) is the run's arguments string, empty because the greeter takes none. One prompt serves both answers below, because your program chooses each answer per round.
 2. Step 2 answers each store effect with [`perform_vfs_op`](crate::vfs::perform_vfs_op), as on the [crate page](crate#run-a-prompt). It answers each chat effect with [`EffectAnswer::Chat`](crate::effect::EffectAnswer::Chat), holding whatever `chat` returns. [`EffectAnswer::Dropped`](crate::effect::EffectAnswer::Dropped) answers any other effect without performing it, and a chain waiting on it resumes with a cancelled error; that arm never runs for the greeter. A live Harness sends the effect's `messages`, `tools`, and `options` to its backend, but not its `stream` flag. The options name the model by its id's [`name()`](ModelId::name), not the role name or the server part, so the `writer` role bound to `gateway/fast` reaches your backend as model `fast`.
-3. Step 3 builds the reply with [`Completion::from_result`] and [`CompletionResult::Text`], then boxes it, and the run ends with [`RunResult::Ok`](crate::RunResult::Ok) holding `hello world`. `from_result` is the only way to build a completion without a transport; a live Harness gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). Pass the model name your backend reported as the second argument, because [`Completion::model`] records the model that served the round, which can differ from the one requested. This canned Harness has no backend to report one, so step 2 passes the requested name, `binding.id().name()`; a live Harness passes the name from its backend's response. The `?` turns the constructor's error into a `CompletionError` through `From`.
-4. Step 4 converts [`ClientError::Backend`](crate::transport::ClientError::Backend) with status 503 into a `CompletionError` with `into()`, and answers the round with `Err`. The run ends with [`RunResult::Failure`](crate::RunResult::Failure) of kind [`RunErrorKind::Completion`](crate::RunErrorKind::Completion). The run needs the failure itself, not a missing answer, so answer a failed round with `EffectAnswer::Chat(Err(error))`.
+3. Step 3 builds the reply with [`Completion::from_result`] and [`CompletionResult::Text`], then boxes it, and the run ends with [`RunResult::Ok`](crate::RunResult::Ok) holding `hello world`. `from_result` is the only way to build a completion without a transport; a live Harness gets its completion from [`read_completion_stream`](crate::transport::read_completion_stream). Pass the model name your backend reported as the second argument, because [`Completion::model`] records the model that served the round, which can differ from the one requested. This canned Harness has no backend to report one, so step 2 passes the requested name, `binding.id().name()`; a live Harness passes the name from its backend's response. When `from_result` refuses a batch, it returns a `CompletionError`, so the `?` passes it on as the round's answer.
+4. Step 4 builds a `CompletionError` from status 503 and the body `overloaded` with [`classify_http_failure`](crate::transport::classify_http_failure), and answers the round with `Err`. The run ends with [`RunResult::Failure`](crate::RunResult::Failure) of kind [`RunErrorKind::Completion`](crate::RunErrorKind::Completion). The run needs the failure itself, not a missing answer, so answer a failed round with `EffectAnswer::Chat(Err(error))`.
 
 When the model asks for tools instead, build each call with [`ToolCall::from_parts`]. Pass its arguments as a parsed JSON object, not the encoded string the wire carries, and wrap the calls in [`CompletionResult::ToolCalls`]. `from_result` refuses an empty batch and two calls that share an id, but not an empty text reply. A live reply whose text is empty or only whitespace is an `EmptyReply` failure, and `from_result` accepts both, so check `text.trim().is_empty()` yourself when your backend can return one.
 
@@ -239,7 +239,7 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 
 ## CompletionError
 
-[`CompletionError`] reports why a model round or a catalog fetch failed. Answer a chat effect with one to fail the round, and match [`kind()`](CompletionError::kind) for the cause. Retry only when [`is_retryable()`](CompletionError::is_retryable) is true, which the kind fixes. A broker builds one with [`new`](CompletionError::new) or [`context_overflow`](CompletionError::context_overflow), or from an HTTP status with [`classify_http_failure`](crate::transport::classify_http_failure). Converting a [`ClientError`](crate::transport::ClientError) through `From` builds one the same way, which is what step 4's `into()` does. [Answer a model round](#answer-a-model-round) teaches it.
+[`CompletionError`] reports why a model round or a catalog fetch failed. Answer a chat effect with one to fail the round, and match [`kind()`](CompletionError::kind) for the cause. Retry only when [`is_retryable()`](CompletionError::is_retryable) is true, which the kind fixes. A broker builds one with [`new`](CompletionError::new) or [`context_overflow`](CompletionError::context_overflow), or from an HTTP status with [`classify_http_failure`](crate::transport::classify_http_failure), which is what step 4 does. [Answer a model round](#answer-a-model-round) teaches it.
 
 - [`new`](CompletionError::new): builds a failure from a kind and its message. Use the kind's fixed phrase from the table below, and put provider text in the detail.
 - [`context_overflow`](CompletionError::context_overflow): builds a `ContextOverflow` failure with the prompt and window token counts, each `None` when the provider did not state it.
@@ -247,9 +247,6 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 - [`message`](CompletionError::message): the text `Display` shows, never the detail.
 - [`detail`](CompletionError::detail): the provider's bounded, escaped text behind the failure, such as the body of a non-success status; the error's `Display` never includes it.
 - [`overflow`](CompletionError::overflow): the `(prompt_tokens, window)` counts of a context overflow, each `None` when unknown.
-- [`backend_body`](CompletionError::backend_body): the same text as `detail`, for a non-success status only.
-- [`status`](CompletionError::status): the HTTP status from a status failure or a failed body read; do not infer the kind from it.
-- [`is_timeout`](CompletionError::is_timeout): true only for `Timeout` kind.
 - [`finish_reason`](CompletionError::finish_reason): `Some` only for an empty reply; after successful tool calls, `Some("stop")` exits cleanly, and a missing or `"length"` reason fails hard.
 
 ## CompletionOptions
@@ -358,7 +355,7 @@ Answer each round with a whole completion or its error. The [Reference](#referen
 | [`EmptyReply`](CompletionErrorKind::EmptyReply) | The model returned no tool calls and no text other than whitespace. | no |
 | [`Unavailable`](CompletionErrorKind::Unavailable) | Model access is turned off or not configured. | no |
 
-Each kind has one fixed message, written for a model reader, and an HTTP failure appends ` (status N)`:
+Each kind has one fixed message, written for a model reader, and an HTTP failure appends ` (status N)`. `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the message with `: ` and a specific the broker's own code wrote, such as the byte limit that was hit. Provider text is never in the message; it goes in the error's `detail`:
 
 | Kind | Message |
 |---|---|
@@ -374,6 +371,7 @@ Each kind has one fixed message, written for a model reader, and an HTTP failure
 | `MalformedResponse` | `the model backend sent a reply that could not be understood` |
 | `EmptyReply` | `the model replied with no text and no tool calls` |
 | `Unavailable` | `model access is turned off or not configured`, or `the model backend did not accept the credentials` for a 401 or 403 |
+
 ## CompletionResult
 
 [`CompletionResult`] holds the outcome of a model round: [`Text`](CompletionResult::Text), a final text reply, or [`ToolCalls`](CompletionResult::ToolCalls), a batch of tool calls the model asked for. You build one to answer a chat effect, or read one from a [`Completion`]. It is `#[non_exhaustive]`, so a `match` needs a `_` arm. [`Completion::from_result`] rejects an empty `ToolCalls` batch but accepts an empty `Text`. [Answer a model round](#answer-a-model-round) teaches it.

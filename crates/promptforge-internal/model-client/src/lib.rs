@@ -41,9 +41,8 @@
 mod classify;
 pub mod client;
 pub mod detail;
-mod error;
 pub mod model;
 mod normalize;
 
-pub(crate) use crate::error::Result;
-pub use crate::error::{Error, Timeout};
+/// Crate-internal result alias over the failure a model round reports.
+pub(crate) type Result<T> = std::result::Result<T, model::CompletionError>;

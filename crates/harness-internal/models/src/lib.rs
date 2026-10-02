@@ -36,11 +36,12 @@
 
 mod catalog;
 mod config;
+mod failure;
 mod performer;
 mod transport;
 
 pub use catalog::fetch_model_catalog;
-pub use config::{GatewayEndpoint, SecretError, SecretString};
+pub use config::{GatewayConfigError, GatewayEndpoint, SecretError, SecretString};
 pub use performer::{DeltaSink, GatewayChatPerformer};
 pub use promptforge::model::{CompletionError, CompletionErrorKind};
 pub use transport::GatewayClient;

@@ -3,7 +3,7 @@
 //! The wire canonicalization and the empty-response invariant live here so the
 //! rest of the runtime can stay model-agnostic. A normalized turn must yield
 //! either non-empty tool calls or non-empty text; anything else is
-//! [`Error::EmptyModelReply`], holding the choice's `finish_reason` so the
+//! an `EmptyReply`-kind failure, holding the choice's `finish_reason` so the
 //! tool loop can classify the empty turn. The loop may still accept such a
 //! turn as its clean exit - empty text with `finish_reason == "stop"` after
 //! at least one successful tool dispatch - but normalization always raises
@@ -23,14 +23,13 @@ use promptforge_types::metrics::{LlamaTimings, Usage, VllmMetrics};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::Result;
 use crate::client::{CompletionResult, ToolCall};
-use crate::{Error, Result};
+use crate::model::{CompletionError, CompletionErrorKind};
 
-/// Fixed detail when the turn had no product and no reasoning side channel.
-const EMPTY_REPLY: &str = "empty model reply";
-/// Fixed detail when reasoning was present but ignored as answer text.
-const EMPTY_REPLY_REASONING_IGNORED: &str =
-    "empty model reply: reasoning content was present but ignored";
+/// The specific added to an empty reply when reasoning was present but
+/// ignored as answer text.
+const REASONING_IGNORED: &str = "reasoning content was present but ignored";
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,43 +56,41 @@ pub(crate) struct TurnContext<'a> {
 /// Extracts and shape-validates the first choice's per-turn context.
 ///
 /// # Errors
-/// Returns [`Error::MalformedResponse`] when `choices` is missing or not a
+/// Returns a `MalformedResponse`-kind failure when `choices` is missing or not a
 /// non-empty array of objects, `finish_reason` is a present non-string,
 /// `message` is missing or not an object, or a reasoning field has the wrong
 /// type.
 pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>> {
     let choices = match body.get("choices") {
-        None => return Err(Error::MalformedResponse("no choices in response".into())),
+        None => return Err(CompletionError::malformed("no choices in response")),
         Some(Value::Array(choices)) => choices,
         Some(_) => {
-            return Err(Error::MalformedResponse(
-                "`choices` was present but not an array".into(),
+            return Err(CompletionError::malformed(
+                "`choices` was present but not an array",
             ));
         }
     };
     let choice = choices
         .first()
-        .ok_or_else(|| Error::MalformedResponse("response had zero choices".into()))?;
+        .ok_or_else(|| CompletionError::malformed("response had zero choices"))?;
     if !choice.is_object() {
-        return Err(Error::MalformedResponse(
-            "`choices[0]` was not an object".into(),
-        ));
+        return Err(CompletionError::malformed("`choices[0]` was not an object"));
     }
     let finish_reason = match choice.get("finish_reason") {
         None | Some(Value::Null) => None,
         Some(Value::String(reason)) => Some(reason.clone()),
         Some(_) => {
-            return Err(Error::MalformedResponse(
-                "`finish_reason` was present but not a string".into(),
+            return Err(CompletionError::malformed(
+                "`finish_reason` was present but not a string",
             ));
         }
     };
     let message = choice
         .get("message")
-        .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
+        .ok_or_else(|| CompletionError::malformed("choice had no message"))?;
     if !message.is_object() {
-        return Err(Error::MalformedResponse(
-            "`message` was present but not an object".into(),
+        return Err(CompletionError::malformed(
+            "`message` was present but not an object",
         ));
     }
     let reasoning_content = extract_reasoning(message)?;
@@ -107,22 +104,25 @@ pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>> {
 /// The empty-reply error for a turn with no product, noting whether an ignored
 /// reasoning side channel was present and holding the choice's
 /// `finish_reason` so the tool loop can classify the empty turn.
-pub(crate) fn empty_reply_error(reasoning_present: bool, finish_reason: Option<String>) -> Error {
-    Error::EmptyModelReply {
-        detail: if reasoning_present {
-            EMPTY_REPLY_REASONING_IGNORED
-        } else {
-            EMPTY_REPLY
-        },
-        finish_reason,
+pub(crate) fn empty_reply_error(
+    reasoning_present: bool,
+    finish_reason: Option<String>,
+) -> CompletionError {
+    let error = if reasoning_present {
+        CompletionError::specific(CompletionErrorKind::EmptyReply, REASONING_IGNORED)
+    } else {
+        CompletionError::phrased(CompletionErrorKind::EmptyReply)
+    };
+    match finish_reason {
+        Some(reason) => error.with_finish_reason(reason),
+        None => error,
     }
 }
-
 /// Turns a chat-completions response body into a [`NormalizedTurn`].
 ///
 /// # Errors
-/// Returns [`Error::MalformedResponse`] when the body has no usable choice
-/// shape, and [`Error::EmptyModelReply`] when the choice has neither
+/// Returns a `MalformedResponse`-kind failure when the body has no usable
+/// choice shape, and an `EmptyReply`-kind one when the choice has neither
 /// non-empty tool calls nor non-empty text.
 pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
     let TurnContext {
@@ -137,8 +137,8 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
         None | Some(Value::Null) => None,
         Some(Value::Array(calls)) => Some(calls),
         Some(_) => {
-            return Err(Error::MalformedResponse(
-                "`tool_calls` was present but not an array".into(),
+            return Err(CompletionError::malformed(
+                "`tool_calls` was present but not an array",
             ));
         }
     };
@@ -157,8 +157,8 @@ pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
         None | Some(Value::Null) => None,
         Some(Value::String(text)) => Some(text.as_str()),
         Some(_) => {
-            return Err(Error::MalformedResponse(
-                "`content` was present but not a string".into(),
+            return Err(CompletionError::malformed(
+                "`content` was present but not a string",
             ));
         }
     };
@@ -191,9 +191,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
     let mut seen_ids = HashSet::new();
     for raw in raw_calls {
         if !raw.is_object() {
-            return Err(Error::MalformedResponse(
-                "tool call was not an object".into(),
-            ));
+            return Err(CompletionError::malformed("tool call was not an object"));
         }
         // `type` must be present and name a function call: the OpenAI protocol
         // invariant requires `"type": "function"`, so a missing, null,
@@ -201,29 +199,29 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
         match raw.get("type") {
             Some(Value::String(kind)) if kind == "function" => {}
             _ => {
-                return Err(Error::MalformedResponse(
-                    "tool call `type` must be the string \"function\"".into(),
+                return Err(CompletionError::malformed(
+                    "tool call `type` must be the string \"function\"",
                 ));
             }
         }
         let id = raw
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no string id".into()))?;
+            .ok_or_else(|| CompletionError::malformed("tool call had no string id"))?;
         check_call_id(id)?;
         check_unique_call_id(&mut seen_ids, id)?;
         let function = raw
             .get("function")
-            .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
+            .ok_or_else(|| CompletionError::malformed("tool call had no function"))?;
         if !function.is_object() {
-            return Err(Error::MalformedResponse(
-                "tool call `function` was not an object".into(),
+            return Err(CompletionError::malformed(
+                "tool call `function` was not an object",
             ));
         }
         let name = function
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no string name".into()))?;
+            .ok_or_else(|| CompletionError::malformed("tool call had no string name"))?;
         check_call_name(name)?;
         // OpenAI encodes `function.arguments` as a JSON string. It must be
         // present, a string, and decode to a JSON object - the shape tools
@@ -232,7 +230,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
         let arguments = match function.get("arguments") {
             Some(Value::String(raw_args)) => {
                 let decoded = serde_json::from_str::<Value>(raw_args).map_err(|error| {
-                    Error::MalformedResponse(format!(
+                    CompletionError::malformed(format!(
                         "tool call arguments were not valid JSON: {error}"
                     ))
                 })?;
@@ -240,13 +238,13 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
                 decoded
             }
             None | Some(Value::Null) => {
-                return Err(Error::MalformedResponse(
-                    "tool call arguments were missing".into(),
+                return Err(CompletionError::malformed(
+                    "tool call arguments were missing",
                 ));
             }
             Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "tool call arguments were not a JSON-encoded string".into(),
+                return Err(CompletionError::malformed(
+                    "tool call arguments were not a JSON-encoded string",
                 ));
             }
         };
@@ -262,7 +260,7 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
 /// Refuses a blank tool-call id.
 pub(crate) fn check_call_id(id: &str) -> Result<()> {
     if id.trim().is_empty() {
-        return Err(Error::MalformedResponse("tool call id was blank".into()));
+        return Err(CompletionError::malformed("tool call id was blank"));
     }
     Ok(())
 }
@@ -270,7 +268,7 @@ pub(crate) fn check_call_id(id: &str) -> Result<()> {
 /// Refuses a blank tool-call name.
 pub(crate) fn check_call_name(name: &str) -> Result<()> {
     if name.trim().is_empty() {
-        return Err(Error::MalformedResponse("tool call name was blank".into()));
+        return Err(CompletionError::malformed("tool call name was blank"));
     }
     Ok(())
 }
@@ -279,8 +277,8 @@ pub(crate) fn check_call_name(name: &str) -> Result<()> {
 /// accept.
 pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
     if !arguments.is_object() {
-        return Err(Error::MalformedResponse(
-            "tool call arguments were not a JSON object".into(),
+        return Err(CompletionError::malformed(
+            "tool call arguments were not a JSON object",
         ));
     }
     Ok(())
@@ -289,7 +287,7 @@ pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
 /// Records `id` in `seen`, refusing an id another call in the turn has.
 pub(crate) fn check_unique_call_id<'a>(seen: &mut HashSet<&'a str>, id: &'a str) -> Result<()> {
     if !seen.insert(id) {
-        return Err(Error::MalformedResponse(format!(
+        return Err(CompletionError::malformed(format!(
             "duplicate tool call id {id:?} within one turn"
         )));
     }
@@ -302,7 +300,7 @@ pub(crate) fn check_unique_call_id<'a>(seen: &mut HashSet<&'a str>, id: &'a str)
 /// malformed shape; whitespace-only strings are treated as absent.
 ///
 /// # Errors
-/// Returns [`Error::MalformedResponse`] when a present reasoning field is not a
+/// Returns a `MalformedResponse`-kind failure when a present reasoning field is not a
 /// string or null.
 pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
     for key in ["reasoning_content", "reasoning", "thinking"] {
@@ -314,7 +312,7 @@ pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
                 }
             }
             Some(_) => {
-                return Err(Error::MalformedResponse(format!(
+                return Err(CompletionError::malformed(format!(
                     "`{key}` reasoning field was present but not a string"
                 )));
             }

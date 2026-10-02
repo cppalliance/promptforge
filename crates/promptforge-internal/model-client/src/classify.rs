@@ -93,7 +93,6 @@ pub fn classify_http_failure(status: u16, body: &str) -> CompletionError {
                 CompletionErrorKind::ContextOverflow.phrase()
             ),
         )
-        .with_status(status)
         .with_detail(body.to_owned());
     }
     match status {
@@ -157,10 +156,9 @@ pub fn classify_stream_error(body: &str) -> CompletionError {
     error.with_detail(body.to_owned())
 }
 
-/// Builds an HTTP failure: `phrase` with the status appended, and the status
-/// kept for the accessor that is still public.
+/// Builds an HTTP failure: `phrase` with the status appended.
 fn http_error(kind: CompletionErrorKind, phrase: &str, status: u16) -> CompletionError {
-    CompletionError::new(kind, format!("{phrase} (status {status})")).with_status(status)
+    CompletionError::new(kind, format!("{phrase} (status {status})"))
 }
 
 fn names_any(lower: &str, words: &[&str]) -> bool {

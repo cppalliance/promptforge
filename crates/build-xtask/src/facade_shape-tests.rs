@@ -118,7 +118,7 @@ fn every_allowed_form_passes() {
     let text = r#"#![doc = include_str!("lib.md")]
 
 pub use promptforge_engine::Run;
-pub use promptforge_model_client::Error as ClientError;
+pub use promptforge_model_client::model::CompletionError as ModelFailure;
 pub use ::promptforge_engine::Step;
 
 /// The effects a run issues.

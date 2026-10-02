@@ -73,7 +73,13 @@ async fn complete_hard_fails_on_empty_model_reply() {
     );
     assert_eq!(
         err.to_string(),
-        "the model replied with no text and no tool calls"
+        "the model replied with no text and no tool calls: \
+         reasoning content was present but ignored"
+    );
+    assert_eq!(
+        err.detail(),
+        None,
+        "the specific is ours, not provider text"
     );
 }
 
@@ -241,9 +247,8 @@ async fn truncated_tool_call_batch_fails_the_completion() {
             "finish_reason {reason:?}"
         );
         assert!(
-            err.detail()
-                .is_some_and(|detail| detail.contains("truncated")),
-            "the error's detail names the truncation: {err:?}"
+            err.to_string().contains("truncated"),
+            "the error's message names the truncation: {err:?}"
         );
     }
 }
@@ -287,5 +292,9 @@ async fn mid_stream_error_envelope_is_a_transport_failure() {
         .await
         .expect_err("an error envelope must fail the completion");
     assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    assert_eq!(
+        err.to_string(),
+        "the connection to the model backend failed"
+    );
     assert_eq!(err.detail(), Some("upstream died"));
 }

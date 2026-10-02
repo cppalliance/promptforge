@@ -114,21 +114,20 @@ fn typed_error_survives_the_lua_external_boundary() {
 }
 
 #[test]
-fn config_errors_preserve_their_causes_across_the_error_type_bridge() {
-    // A transport's configuration failure (an unusable credential, a
-    // bad endpoint URL) arrives as the client error type's `Config`
-    // variant with its concrete cause attached; the cause survives both
-    // the public CompletionError::source and the mapping onto this
-    // crate's error type, classified as Unavailable.
+fn completion_errors_preserve_their_causes_across_the_error_type_bridge() {
+    // A broker's failure arrives as a `CompletionError` with its concrete
+    // cause attached; the cause survives both the public
+    // `CompletionError::source` and the mapping onto this crate's error
+    // type.
     use crate::model::CompletionError;
-    use promptforge_model_client::Error as ClientError;
     use promptforge_model_client::model::CompletionErrorKind;
 
-    let cause = std::io::Error::other("gateway URL is not a valid URL");
-    let completion = CompletionError::from(ClientError::Config {
-        message: "gateway endpoint is unusable".to_owned(),
-        source: Box::new(cause),
-    });
+    let cause = std::io::Error::other("connection refused");
+    let completion = CompletionError::new(
+        CompletionErrorKind::Unavailable,
+        "model access is turned off or not configured",
+    )
+    .with_source(cause);
     assert_eq!(completion.kind(), CompletionErrorKind::Unavailable);
     assert!(
         std::error::Error::source(&completion).is_some(),
@@ -229,4 +228,29 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
     assert!(!run_error.is_retryable());
     assert!(run_error.location().is_none());
     assert!(run_error.to_string().contains("analyst"));
+}
+
+#[test]
+fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
+    // The run's own model-set mutex failing is not a model failure: it
+    // keeps the Lua mapping it always had, and a Host never sees it as a
+    // retryable completion kind.
+    use crate::model::{ModelSet, ModelView};
+    use std::sync::{Arc, Mutex};
+
+    let set = Arc::new(Mutex::new(ModelSet::default()));
+    let poisoner = Arc::clone(&set);
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock();
+        panic!("poison the model set");
+    })
+    .join();
+
+    let failure = set.bindings().expect_err("a poisoned set cannot be read");
+    let error = Error::from(failure);
+    assert!(
+        matches!(&error, Error::Lua(message) if message == "model set mutex was poisoned"),
+        "the lock failure is a Lua error: {error:?}"
+    );
+    assert!(!crate::RunError::from(error).is_retryable());
 }

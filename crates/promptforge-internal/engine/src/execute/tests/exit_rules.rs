@@ -349,3 +349,38 @@ async fn an_empty_reply_is_readable_at_the_call_site_and_appends_nothing() {
         "empty_model_reply|stop|the model replied with no text and no tool calls"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_empty_reply_that_ignored_reasoning_says_so_at_the_call_site() {
+    // The crate's own wording extends the fixed phrase after a colon, so the
+    // author sees why the round counted as empty.
+    let gateway = ScriptedGateway::start(vec![GatewayReply::Json(serde_json::json!({
+        "model": MOCK_MODEL,
+        "choices": [{
+            "finish_reason": "stop",
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "only thinking"
+            }
+        }]
+    }))])
+    .await;
+    let md = loop_prompt(
+        "local msgs = messages.new()\n\
+         msgs:user('think only')\n\
+         local ok, err = pcall(models.loop, msgs)\n\
+         return err.kind .. '|' .. tostring(err)",
+    );
+    let prompt = parse(&md);
+    let (ctx, harness) = loop_context(&prompt, ToolSet::default());
+    let out = TokioDriver::new(&ctx, harness, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the call-site raise is pcall-able");
+    assert_eq!(
+        out,
+        "empty_model_reply|the model replied with no text and no tool calls: \
+         reasoning content was present but ignored"
+    );
+}

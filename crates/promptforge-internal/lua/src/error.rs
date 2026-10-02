@@ -9,7 +9,7 @@
 //! not re-export it, and it is not marked `#[non_exhaustive]`, so the
 //! mapping stays total.
 
-use promptforge_model_client::Error as GatewayClientError;
+use promptforge_model_client::model::ModelSetError;
 
 /// A type-erased owned error cause used by the internal error type.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -215,17 +215,12 @@ impl Error {
     }
 }
 
-/// Maps the gateway-client error type onto this one. `ModelSetLock`
-/// flattens to [`Error::Lua`], matching the mapping `promptforge-engine`
-/// has always applied. Any remaining transport variant is unreachable on the
-/// model-resolution path and degrades to its display string rather than
-/// fabricating a classification.
-impl From<GatewayClientError> for Error {
-    fn from(error: GatewayClientError) -> Error {
-        match error {
-            GatewayClientError::ModelSetLock(message) => Error::Lua(message),
-            other => Error::Lua(other.to_string()),
-        }
+/// Maps a poisoned model-set lock onto [`Error::Lua`], the mapping
+/// `promptforge-engine` applies too: the lock is the run's own mutex
+/// failing, not a model failure.
+impl From<ModelSetError> for Error {
+    fn from(error: ModelSetError) -> Error {
+        Error::Lua(error.to_string())
     }
 }
 

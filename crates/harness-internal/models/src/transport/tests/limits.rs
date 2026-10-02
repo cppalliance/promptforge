@@ -18,6 +18,11 @@ async fn complete_on_a_disabled_client_is_an_unavailable_error() {
         .await
         .expect_err("a disabled client cannot complete");
     assert_eq!(err.kind(), CompletionErrorKind::Unavailable);
+    assert_eq!(
+        err.to_string(),
+        "model access is turned off or not configured"
+    );
+    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -81,6 +86,11 @@ async fn complete_refuses_a_success_stream_over_the_size_cap() {
         .await
         .expect_err("an oversize stream must be refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+         response stream exceeds the 8-byte limit"
+    );
 }
 
 #[tokio::test]
@@ -101,6 +111,7 @@ async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
         .await
         .expect_err("an oversize error body must be refused");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(err.detail(), None, "the refused body is never kept");
 }
 
 #[tokio::test]
@@ -263,13 +274,13 @@ async fn a_stream_that_stalls_after_the_headers_is_a_timeout_failure() {
 }
 
 #[tokio::test]
-async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
+async fn a_body_read_timeout_is_a_timeout_failure() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    // The catalog fetch boxes a failed error-body read as `BackendBodyRead`
-    // through the same marking as a send failure, so a timeout during that
-    // read still classifies as `Timeout`, as the marker's contract promises.
-    // The server answers a 500 with a large promised body, then stalls.
+    // The catalog fetch builds a failed error-body read through the same
+    // helper as a send failure, so a timeout during that read is still a
+    // `Timeout`. The server answers a 500 with a large promised body, then
+    // stalls.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     spawn_tagged(mock_tag(), async move {
@@ -297,16 +308,37 @@ async fn a_body_read_timeout_keeps_its_marker_under_backend_body_read() {
         .expect_err("the body read stalls past the timeout");
     assert!(read.is_timeout(), "reqwest reports the read as a timeout");
 
-    let err = CompletionError::from(Error::BackendBodyRead {
-        status: 500,
-        source: transport_source(read),
-    });
+    let err = transport_failure(read);
     assert_eq!(
         err.kind(),
         CompletionErrorKind::Timeout,
-        "the marker must survive under BackendBodyRead: {err:?}"
+        "a timed-out body read is a Timeout: {err:?}"
     );
-    assert_eq!(err.status(), Some(500));
+    assert_eq!(err.to_string(), "the model backend did not answer in time");
+    assert!(
+        std::error::Error::source(&err)
+            .is_some_and(|source| source.downcast_ref::<reqwest::Error>().is_some()),
+        "the reqwest error is kept as the source"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_connection_is_a_transport_failure() {
+    // Bind a port, then drop the listener so nothing accepts on it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let err = keyed_client(&format!("http://{addr}/v1"))
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("nothing listens on the port");
+    assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    assert_eq!(
+        err.to_string(),
+        "the connection to the model backend failed"
+    );
+    assert!(err.is_retryable());
+    assert!(std::error::Error::source(&err).is_some());
 }
 
 #[tokio::test]
@@ -362,8 +394,9 @@ async fn stream_without_done_sentinel_is_malformed() {
         .await
         .expect_err("a truncated stream must fail");
     assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-    assert!(
-        err.detail().is_some_and(|detail| detail.contains("[DONE]")),
-        "the error's detail names the missing sentinel: {err:?}"
+    assert_eq!(
+        err.to_string(),
+        "the model backend sent a reply that could not be understood: \
+         completion stream ended without the [DONE] sentinel"
     );
 }

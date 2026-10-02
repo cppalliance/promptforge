@@ -284,10 +284,10 @@ Primer sources: none
 - Diagram: none
 
 Owns:
-- item: promptforge::transport::ClientTimeout
-- item: promptforge::transport::ClientError
 - item: promptforge::transport::ChunkSource
 - item: promptforge::transport::build_request_body
+- item: promptforge::transport::classify_http_failure
+- item: promptforge::transport::classify_stream_error
 - item: promptforge::transport::escape_controls
 - item: promptforge::transport::read_body_capped
 - item: promptforge::transport::read_completion_stream
