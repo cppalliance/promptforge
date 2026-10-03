@@ -10,7 +10,7 @@ description = "PromptForge Gateway client: the inference broker a Host hands the
 readme = "README.md"
 keywords = ["promptforge", "llm", "gateway", "openai", "sse"]
 categories = ["web-programming::http-client"]
-documentation = "https://cppalliance.github.io/promptforge/"
+documentation = "https://cppalliance.github.io/promptforge/harness-gateway-client/harness_gateway_client/index.html"
 
 [dependencies]
 # The Harness public API: the `InferenceBroker` trait the Gateway broker

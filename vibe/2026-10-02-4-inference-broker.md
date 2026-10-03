@@ -444,7 +444,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-5>
 
-### Step 5: Docs, site entries, and exit criteria
+### Step 5: Docs, site entries, and exit criteria [completed]
 
 - Component: Docs and exit criteria
 - Depends on: steps 3 and 4.

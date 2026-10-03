@@ -10,7 +10,7 @@ description = "PromptForge promptforge/web capability: the web fetch tool and a 
 readme = "README.md"
 keywords = ["promptforge", "llm", "tools", "web", "ssrf"]
 categories = ["web-programming::http-client", "api-bindings"]
-documentation = "https://cppalliance.github.io/promptforge/"
+documentation = "https://cppalliance.github.io/promptforge/harness-web/harness_web/index.html"
 
 [dependencies]
 # The Harness public API: the capability, tool, and service vocabulary.

@@ -340,11 +340,13 @@ fn the_crate_page_uses_the_underscored_crate_name() {
 }
 
 #[test]
-fn the_harness_site_documents_the_harness_facade() {
-    assert!(
-        RUSTDOC_SITES.contains(&("harness", "harness")),
-        "the harness/ folder documents the crate harness: {RUSTDOC_SITES:?}"
-    );
+fn the_harness_sites_document_each_public_harness_crate() {
+    for krate in ["harness", "harness-gateway-client", "harness-web"] {
+        assert!(
+            RUSTDOC_SITES.contains(&(krate, krate)),
+            "the {krate}/ folder documents the crate {krate}: {RUSTDOC_SITES:?}"
+        );
+    }
 }
 
 #[test]

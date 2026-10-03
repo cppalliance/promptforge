@@ -8,7 +8,7 @@ A Rust developer building a program that runs agents through the Harness for a p
 
 <plan-example>
 
-`desk`, a small Host that runs the built-in `chat` agent for one operator. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost gives canned replies, so each example runs offline.
+`desk`, a small Host that runs the built-in `chat` agent for one operator. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A real `desk` hands the Harness a broker that reaches the Gateway. Each example builds the Harness on a hidden offline broker instead, so it compiles against the facade alone, and each tour describes what `desk` sees from a broker that echoes the last message back.
 
 </plan-example>
 
@@ -16,7 +16,7 @@ A Rust developer building a program that runs agents through the Harness for a p
 
 - agent: a prompt file your program can launch by name. Owner: lib.md
 - session: one launched agent that keeps running until it finishes or you close it. Owner: lib.md
-- gateway: the model server that answers every model call a session makes. Owner: lib.md
+- broker: the object your program hands the Harness to answer every model call a session makes and to list the models a run can bind. Owner: lib.md
 - operator: the person your program puts in front of a session to answer its questions. Owner: lib.md
 - wait: an open question a session has asked the operator and is waiting on. Owner: lib.md
 - delta: one small piece of a reply, sent while the model is still writing. Owner: lib.md
@@ -42,10 +42,10 @@ Builds on: none
 Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04-how-a-prompt-runs.md, guide/src/language/05-lua-environment.md, guide/src/language/10-models.md
 
 ### Tour: Launch an agent
-- How: How do I set up the Harness, point it at a model server, and launch an agent by name?
-- What if: What happens when I launch before any model server is bound?
+- How: How do I set up the Harness, hand it a broker, and launch an agent by name?
+- What if: What happens when I launch and the broker cannot list its models, or its list lacks the selected model?
 - Why: Why must I wait for the session to close before I read its output text?
-- Example: build the Harness over an agents folder, bind the stub model server and a selected model, launch `chat` with one line of input, wait for `Closed`, and assert the output text.
+- Example: build the Harness over an agents folder on `desk`'s broker, select the broker's model, launch `chat` with one line of input, wait for `Closed`, and assert the output text.
 - Diagram: none
 
 ### Tour: Stream a reply
@@ -66,7 +66,7 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 - How: How do I stop the current turn without ending the whole session?
 - What if: What happens when a model call fails partway through a turn?
 - Why: Why does a stopped turn start the agent again over what it already said, instead of ending the session?
-- Example: cancel a turn while the stub model server hangs, watch the open question come back, then close the session for good.
+- Example: cancel a turn while a broker that never finishes the round hangs, watch the open question come back, then close the session for good.
 - Diagram: none
 
 ### Tour: Reattach after a disconnect
@@ -79,22 +79,23 @@ Primer sources: guide/src/language/01-what-a-prompt-is.md, guide/src/language/04
 ### Tour: The complete program
 - How: How do the pieces from every tour fit into one Host?
 - What if: What happens when my program never answers an open question?
-- Why: Why does the Harness take its model server and model choice as values you push in, rather than reading them itself?
+- Why: Why does the Harness reach every model through the broker you hand it and take its model choice as a value you push in, rather than finding either itself?
 - Example: the whole `desk` Host, every line visible.
 - Diagram: the Host loop, from launch to streaming, answering, and closing.
 
 Owns:
-- item: harness::CatalogBinding
+- item: harness::BoxFuture
 - item: harness::Delta
 - item: harness::DeltaKind
 - item: harness::FailureKind
-- item: harness::GatewayBinding
 - item: harness::Harness
 - item: harness::HarnessConfig
 - item: harness::HostSnapshot
+- item: harness::InferenceBroker
 - item: harness::LaunchError
 - item: harness::LaunchOptions
 - item: harness::LaunchRequest
+- item: harness::OnDelta
 - item: harness::OutputError
 - item: harness::Session
 - item: harness::SessionEvent
