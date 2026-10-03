@@ -6,13 +6,13 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Poll;
 
 use harness_runner::performers::{
-    BoxFuture, ChatPerformer, Performers, TimerPerformer, ToolPerformer,
+    BoxFuture, InferenceBroker, OnDelta, Performers, TimerPerformer, ToolPerformer,
 };
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::timestamp::Timestamp;
 use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
@@ -101,17 +101,27 @@ pub(crate) const TIMED_MAIN: &str = "local t = tasks.spawn('## Child')\n\
 /// reaching one is the test's failure.
 pub(crate) struct Unused;
 
-impl ChatPerformer for Unused {
+impl InferenceBroker for Unused {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        unreachable!("the effect loop never lists models")
+    }
+
     fn chat(
         &self,
         _binding: ModelBinding,
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
-        _stream: bool,
+        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("no test issues a Chat effect")
     }
+}
+
+/// A delta callback that keeps nothing, for a run whose rounds no test
+/// watches.
+pub(crate) fn no_deltas() -> OnDelta {
+    Arc::new(|_delta| {})
 }
 
 impl ToolPerformer for Unused {
@@ -136,7 +146,8 @@ impl TimerPerformer for Unused {
 pub(crate) fn unused() -> Performers {
     let unused = Arc::new(Unused);
     Performers {
-        chat: unused.clone(),
+        broker: unused.clone(),
+        on_delta: no_deltas(),
         tool: unused.clone(),
         timer: unused,
     }

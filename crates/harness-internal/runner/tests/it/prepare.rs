@@ -29,7 +29,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 
-use crate::support::Unused;
+use crate::support::{Unused, no_deltas};
 
 #[path = "prepare-files.rs"]
 mod files;
@@ -102,7 +102,8 @@ fn services(recorder: &Arc<MemoryRecorder>, registry: Option<Arc<CapabilityRegis
         input_text: None,
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
-        chat: Arc::new(Unused),
+        broker: Arc::new(Unused),
+        on_delta: no_deltas(),
         input: None,
         session_id: "session-1".to_owned(),
         agent: "prepare-test".to_owned(),

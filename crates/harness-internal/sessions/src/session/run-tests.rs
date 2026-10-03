@@ -1,12 +1,16 @@
-//! Tests that run failures pushed to the client keep their cause chain.
+//! Tests that run failures pushed to the client keep their cause chain,
+//! and that the run's delta callback feeds a listening session and drops
+//! deltas once the session stops listening.
 
 use std::io;
 use std::path::PathBuf;
 
 use harness_runner::display_chain;
 use harness_runner::prepare::PrepareError;
+use promptforge::model::StreamDelta;
+use tokio::sync::mpsc;
 
-use super::RunFailure;
+use super::{RunFailure, delta_callback};
 
 #[test]
 fn a_prepare_failure_pushed_to_the_client_keeps_its_cause_chain() {
@@ -28,4 +32,34 @@ fn a_prepare_failure_pushed_to_the_client_keeps_its_cause_chain() {
         1,
         "the transparent wrapper does not double the preparation text: {rendered}"
     );
+}
+
+#[test]
+fn the_delta_callback_hands_each_delta_to_a_listening_session() {
+    let (deltas, mut heard) = mpsc::unbounded_channel();
+    let on_delta = delta_callback(deltas);
+
+    on_delta(StreamDelta::Text("one ".to_owned()));
+    on_delta(StreamDelta::Text("two".to_owned()));
+    assert_eq!(
+        heard.try_recv().ok(),
+        Some(StreamDelta::Text("one ".to_owned()))
+    );
+    assert_eq!(
+        heard.try_recv().ok(),
+        Some(StreamDelta::Text("two".to_owned()))
+    );
+}
+
+#[test]
+fn a_session_that_stopped_listening_drops_deltas_without_failing_the_round() {
+    let (deltas, heard) = mpsc::unbounded_channel();
+    let on_delta = delta_callback(deltas.clone());
+    drop(heard);
+    assert!(deltas.is_closed(), "the session's receiver is gone");
+
+    // A panic here would abort the round's future mid-stream; returning
+    // is the callback dropping the delta.
+    on_delta(StreamDelta::Text("unheard".to_owned()));
+    on_delta(StreamDelta::Text("still unheard".to_owned()));
 }

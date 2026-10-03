@@ -44,4 +44,4 @@ pub mod runtime;
 pub mod session;
 pub mod transition;
 
-pub use performer::{DeltaSink, GatewayChatPerformer};
+pub use performer::GatewayChatPerformer;

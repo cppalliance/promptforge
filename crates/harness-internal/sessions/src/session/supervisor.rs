@@ -11,7 +11,7 @@
 //! synthetic terminal frame for that interrupt is decided by
 //! [`effective_interrupt`] and rendered in one place, after the drain.
 //!
-//! The raw deltas the chat performers stream are drained here too,
+//! The raw deltas each run's delta callback sends are drained here too,
 //! stamped with the session's current round, ahead of the run future in
 //! the select order so a round's chunks are broadcast before the event
 //! that supersedes them is applied.

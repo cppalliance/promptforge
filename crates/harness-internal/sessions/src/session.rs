@@ -284,7 +284,7 @@ pub(crate) struct SessionCore {
     deltas: broadcast::Sender<Delta>,
     /// The session's failure reports.
     pub(crate) errors: broadcast::Sender<SessionFailure>,
-    /// The sink the chat performers stream raw deltas to; the supervisor
+    /// The sink each run's delta callback sends raw deltas to; the supervisor
     /// drains its receiver and stamps each delta. Held here so the
     /// channel never closes while the session lives.
     pub(crate) delta_source: mpsc::UnboundedSender<StreamDelta>,

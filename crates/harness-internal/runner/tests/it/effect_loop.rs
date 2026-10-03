@@ -4,7 +4,8 @@
 //! performer that panics drops its effect rather than stranding the run;
 //! and a refused recorder write ends the drive with the recorder's error
 //! and aborts the performers still out. The Vfs effect the loop answers
-//! inline has its own module, `vfs`.
+//! inline has its own module, `vfs`, and the `Chat` effect the inference
+//! broker answers has `broker`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,8 @@ use crate::support::{
     run_over, run_with_child, unused,
 };
 
+#[path = "effect_loop-broker.rs"]
+mod broker;
 #[path = "effect_loop-recorder.rs"]
 mod recorder_failures;
 #[path = "effect_loop-vfs.rs"]

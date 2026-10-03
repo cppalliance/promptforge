@@ -19,6 +19,7 @@ use axum::routing::post;
 use harness_capabilities::HostServices;
 use harness_gateway_client::{GatewayClient, GatewayEndpoint, SecretString};
 use harness_runner::effect_loop::drive_run;
+use harness_runner::performers::OnDelta;
 use harness_runner::prepare::{Prepared, Services, prepare_run};
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
 use harness_runner::spawn::spawn_tagged;
@@ -91,9 +92,9 @@ fn reply_stream() -> String {
 }
 
 /// Serves the mock gateway on a loopback port, spawned under the
-/// Harness's tagged wrapper, and returns a keyed client at its `/v1`
+/// Harness's tagged wrapper, and returns a performer keyed for its `/v1`
 /// root beside what it saw.
-async fn mock_gateway() -> (GatewayClient, Seen) {
+async fn mock_gateway() -> (GatewayChatPerformer, Seen) {
     async fn completions(
         State(seen): State<Seen>,
         headers: HeaderMap,
@@ -116,11 +117,15 @@ async fn mock_gateway() -> (GatewayClient, Seen) {
     spawn_tagged(mock_tag(), async move {
         axum::serve(listener, app).await.unwrap();
     });
+    let api_root = format!("http://{addr}/v1");
     let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        GatewayEndpoint::new(&api_root).expect("valid test endpoint"),
         SecretString::new("tok").expect("non-empty test key"),
     );
-    (client, seen)
+    (
+        GatewayChatPerformer::new(client, api_root, "tok".to_owned()),
+        seen,
+    )
 }
 
 /// The Host's current model: what every declared role binds to.
@@ -314,9 +319,14 @@ fn assert_task_columns(records: &[Record], main_task: &str) {
     );
 }
 
-/// The fixture's preparation services over `recorder` and `chat`, with no
-/// capabilities, no Host services, and the bound model.
-fn services(recorder: &Arc<MemoryRecorder>, chat: GatewayChatPerformer) -> Services {
+/// The fixture's preparation services over `recorder`, `broker`, and
+/// `on_delta`, with no capabilities, no Host services, and the bound
+/// model.
+fn services(
+    recorder: &Arc<MemoryRecorder>,
+    broker: GatewayChatPerformer,
+    on_delta: OnDelta,
+) -> Services {
     Services {
         registry: None,
         services: HostServices::new(),
@@ -324,7 +334,8 @@ fn services(recorder: &Arc<MemoryRecorder>, chat: GatewayChatPerformer) -> Servi
         input_text: None,
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
-        chat: Arc::new(chat),
+        broker: Arc::new(broker),
+        on_delta,
         input: None,
         session_id: "session-e2e".to_owned(),
         agent: "end-to-end".to_owned(),
@@ -337,9 +348,12 @@ fn services(recorder: &Arc<MemoryRecorder>, chat: GatewayChatPerformer) -> Servi
 async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
-    let (client, seen) = mock_gateway().await;
+    let (broker, seen) = mock_gateway().await;
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
-    let services = services(&recorder, GatewayChatPerformer::new(client, deltas));
+    let on_delta: OnDelta = Arc::new(move |delta| {
+        let _ = deltas.send(delta);
+    });
+    let services = services(&recorder, broker, on_delta);
 
     let Prepared {
         run,
@@ -400,7 +414,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     );
     assert!(
         delta_rx.try_recv().is_err(),
-        "a nested infer has no live consumer, so no delta reaches the sink"
+        "a nested infer has no live consumer, so no delta reaches the callback"
     );
 
     // The whole record stream: events, effects, and answers.

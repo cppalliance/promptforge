@@ -338,10 +338,11 @@ impl<'a> Driver<'a> {
                 stream,
             } => {
                 let answer = Answering::new(self.tx.clone(), id);
+                let on_delta = stream.then(|| self.performers.on_delta.clone());
                 let round = self
                     .performers
-                    .chat
-                    .chat(binding, messages, tools, options, stream);
+                    .broker
+                    .chat(binding, messages, tools, options, on_delta);
                 spawn_tagged(tag, async move {
                     answer.post(EffectAnswer::Chat(round.await));
                 })

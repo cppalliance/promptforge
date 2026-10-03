@@ -1,59 +1,75 @@
-//! The `Chat` performer: one model round through the gateway client, with
-//! the round's live deltas streamed to the session as they arrive.
+//! The inference broker over the gateway client: one model round per
+//! `Chat` effect, with a section's live deltas handed to the round's
+//! callback as they arrive, and the gateway's model list.
 //!
 //! The run's `Event` sink receives what the Engine reports once it applies
 //! the round's answer (the turn, the reply, the tool calls); the deltas
-//! are the live view of the reply forming, and they travel on their own
-//! channel so a session can render them without a fragment ever reaching
-//! the Host's recorder.
+//! are the live view of the reply forming, and they travel through their
+//! own callback so a session can render them without a fragment ever
+//! reaching the Host's recorder.
 
-use harness_gateway_client::GatewayClient;
-use harness_runner::performers::{BoxFuture, ChatPerformer};
+use std::fmt;
+
+use harness_gateway_client::{GatewayClient, fetch_model_catalog};
+use harness_runner::performers::{BoxFuture, InferenceBroker, OnDelta};
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, StreamDelta, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
-use tokio::sync::mpsc;
 
-/// Where a chat round's live deltas go: the send half of an unbounded
-/// channel the session drains.
-///
-/// Unbounded so a slow consumer never stalls a model round; the volume is
-/// bounded already by the run's response byte cap. A closed receiver
-/// drops the deltas rather than failing the round, since the completed
-/// reply travels in the effect's answer regardless.
-pub type DeltaSink = mpsc::UnboundedSender<StreamDelta>;
-
-/// Performs the Engine's `Chat` effects on a [`GatewayClient`], streaming
-/// each delta of a section's own round to a [`DeltaSink`].
+/// Performs the Engine's `Chat` effects on a [`GatewayClient`] and lists
+/// the models of the gateway at `api_root`.
 ///
 /// The client arrives configured: the caller applies the run's request
 /// limits before constructing the performer, because a `Chat` effect
 /// has no limits of its own.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GatewayChatPerformer {
     client: GatewayClient,
-    deltas: DeltaSink,
+    api_root: String,
+    key: String,
 }
 
-impl GatewayChatPerformer {
-    /// A performer over `client` whose live deltas go to `deltas`.
-    #[must_use]
-    pub fn new(client: GatewayClient, deltas: DeltaSink) -> Self {
-        Self { client, deltas }
+impl fmt::Debug for GatewayChatPerformer {
+    /// The bearer key is never written to logs or `Debug` output.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GatewayChatPerformer")
+            .field("client", &self.client)
+            .field("api_root", &self.api_root)
+            .field("key", &"<redacted>")
+            .finish()
     }
 }
 
-impl ChatPerformer for GatewayChatPerformer {
+impl GatewayChatPerformer {
+    /// A performer whose rounds run on `client` and whose model list is
+    /// fetched from `api_root` under `key`.
+    #[must_use]
+    pub fn new(client: GatewayClient, api_root: String, key: String) -> Self {
+        Self {
+            client,
+            api_root,
+            key,
+        }
+    }
+}
+
+impl InferenceBroker for GatewayChatPerformer {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        let api_root = self.api_root.clone();
+        let key = self.key.clone();
+        Box::pin(async move { fetch_model_catalog(&api_root, &key).await })
+    }
+
     fn chat(
         &self,
         _binding: ModelBinding,
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
-        stream: bool,
+        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let client = self.client.clone();
-        let deltas = self.deltas.clone();
         Box::pin(async move {
             // An empty advertisement sends no `tools` field at all, the
             // plain chat-completions shape.
@@ -61,10 +77,9 @@ impl ChatPerformer for GatewayChatPerformer {
             client
                 .complete(&messages, tools, &options, |delta| {
                     // Only a section's own round has a live consumer; a
-                    // nested infer's fragments drop here. A closed sink is
-                    // a session that stopped listening, not a failure.
-                    if stream {
-                        let _ = deltas.send(delta);
+                    // nested infer's round arrives with no callback.
+                    if let Some(on_delta) = &on_delta {
+                        on_delta(delta);
                     }
                 })
                 .await

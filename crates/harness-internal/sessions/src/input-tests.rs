@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 use harness_capabilities::{CapabilityRegistry, HostServices, InputBroker, UserInput};
 use harness_runner::effect_loop::drive_run;
-use harness_runner::performers::{BoxFuture, ChatPerformer};
+use harness_runner::performers::{BoxFuture, InferenceBroker, OnDelta};
 use harness_runner::prepare::{Services, prepare_source};
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
 use harness_runner::spawn::spawn_tagged;
 use harness_runner::test_support::mock_tag;
 use promptforge::cancel::CancelHandle;
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::vfs::VfsRef;
 
@@ -253,17 +253,21 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     );
 }
 
-/// A chat performer for a run that makes no model round.
+/// An inference broker for a run that makes no model round.
 struct NoChat;
 
-impl ChatPerformer for NoChat {
+impl InferenceBroker for NoChat {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        unreachable!("the run lists no models")
+    }
+
     fn chat(
         &self,
         _binding: ModelBinding,
         _messages: Vec<Message>,
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
-        _stream: bool,
+        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("the prompt makes no model round")
     }
@@ -292,7 +296,8 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
         input_text: None,
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
-        chat: Arc::new(NoChat),
+        broker: Arc::new(NoChat),
+        on_delta: Arc::new(|_delta| {}),
         input: Some(broker),
         session_id: "session-1".to_owned(),
         agent: "ask".to_owned(),

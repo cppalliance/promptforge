@@ -43,15 +43,15 @@ use sha2::{Digest as _, Sha256};
 use crate::display_chain::display_chain;
 use crate::effect_loop::failed_outcome;
 use crate::files::{InputFileError, stage_input};
-use crate::performers::{ActivatedTools, ChatPerformer, Performers, TokioTimer};
+use crate::performers::{ActivatedTools, InferenceBroker, OnDelta, Performers, TokioTimer};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunMeta, RunOutcome, RunRecorder};
 use crate::spawn::spawn_blocking_launch;
 
 /// What the caller owns and preparation borrows: the registry of
 /// installed capabilities and the Host's services, the real directories,
-/// the run's cancel flag, the recorder, the chat performer and the
-/// optional input broker that reach beyond the runner, and the session's
-/// identity for the run's metadata.
+/// the run's cancel flag, the recorder, the inference broker, its delta
+/// callback, and the optional input broker that reach beyond the runner,
+/// and the session's identity for the run's metadata.
 pub struct Services {
     /// The installed capabilities the prompt's declarations resolve
     /// against; `None` is a Harness with no capabilities, where every
@@ -73,7 +73,9 @@ pub struct Services {
     /// The recorder the run begins at and the loop will write to.
     pub recorder: Arc<dyn RunRecorder>,
     /// Performs the run's `Chat` effects.
-    pub chat: Arc<dyn ChatPerformer>,
+    pub broker: Arc<dyn InferenceBroker>,
+    /// Receives the live deltas of the run's streaming `Chat` effects.
+    pub on_delta: OnDelta,
     /// The operator's input broker, when the Host has someone to ask:
     /// handed to every capability activated for the run. `None` is a Host
     /// with nobody to ask.
@@ -116,8 +118,9 @@ pub struct Prepared {
     pub seed: u64,
     /// The start the run was given, as handed to the recorder.
     pub started_at: Timestamp,
-    /// The performers for the run: the caller's chat performer beside the
-    /// runner's own over the activated tools, the VFS, and tokio's timer.
+    /// The performers for the run: the caller's inference broker and delta
+    /// callback beside the runner's own over the activated tools and
+    /// tokio's timer.
     pub performers: Performers,
     /// What parsing reported, already recorded ahead of the run's own
     /// events; the caller hands them to its sink so the session sees them
@@ -241,6 +244,10 @@ pub async fn prepare_run(
     clippy::result_large_err,
     reason = "the error is returned once per launch and carries the events recorded before the failure"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preparation is one linear ceremony whose every stage ends the same begun run on failure"
+)]
 pub async fn prepare_source(
     source: &str,
     prompt_path: &Path,
@@ -254,7 +261,8 @@ pub async fn prepare_source(
         input_text,
         cancel,
         recorder,
-        chat,
+        broker,
+        on_delta,
         input,
         session_id,
         agent,
@@ -354,7 +362,8 @@ pub async fn prepare_source(
 
     let run = Run::new(Arc::new(prompt), args, ctx);
     let performers = Performers {
-        chat,
+        broker,
+        on_delta,
         tool: Arc::new(ActivatedTools::new(activation.tools)),
         timer: Arc::new(TokioTimer),
     };

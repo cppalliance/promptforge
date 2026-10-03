@@ -15,10 +15,13 @@ use std::sync::Arc;
 
 use harness_gateway_client::GatewayClient;
 use harness_runner::effect_loop::{DriveError, drive_run};
+use harness_runner::performers::OnDelta;
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
 use harness_runner::recorder::{RunOutcome, RunRecorder};
 use promptforge::RunLimits;
 use promptforge::event::Event;
+use promptforge::model::StreamDelta;
+use tokio::sync::mpsc;
 
 use crate::GatewayChatPerformer;
 use crate::discovery::AgentSource;
@@ -82,6 +85,9 @@ pub(crate) async fn run_once(
     let cancel = core.arm_cancel(run);
     let limits = RunLimits::new();
     let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
+    let binding = gateway.binding();
+    let broker = GatewayChatPerformer::new(client, binding.api_root(), binding.key.clone());
+    let on_delta = delta_callback(core.delta_source.clone());
     let vfs = core.files.run_vfs();
     let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);
     let services = Services {
@@ -91,7 +97,8 @@ pub(crate) async fn run_once(
         input_text: core.files.input_text(),
         cancel: cancel.clone(),
         recorder: Arc::clone(&recorder),
-        chat: Arc::new(GatewayChatPerformer::new(client, core.delta_source.clone())),
+        broker: Arc::new(broker),
+        on_delta,
         input: Some(Arc::new(SessionInputBroker::new(
             Arc::clone(&core.waits),
             core.wait_frames.clone(),
@@ -133,6 +140,16 @@ pub(crate) async fn run_once(
             .await;
     }
     Ok(outcome)
+}
+
+/// The run's delta callback: each delta goes to the session's delta
+/// channel.
+fn delta_callback(deltas: mpsc::UnboundedSender<StreamDelta>) -> OnDelta {
+    // A closed receiver is a session that stopped listening, not a
+    // failure: the completed reply travels in the effect's answer.
+    Arc::new(move |delta| {
+        let _ = deltas.send(delta);
+    })
 }
 
 /// Notes the run a failed preparation began and ended, and hands the sink

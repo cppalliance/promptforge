@@ -18,14 +18,15 @@
 //! The runner supplies two performers itself - [`TokioTimer`] and
 //! [`ActivatedTools`] - because each is machinery it already holds:
 //! tokio's timer wheel and the tool table run preparation activated. The
-//! chat performer lives with what it reaches, the gateway client.
+//! Host supplies the [`InferenceBroker`].
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog,
+    StreamDelta, ToolSchema,
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::Value;
@@ -42,19 +43,26 @@ pub use tools::ActivatedTools;
 /// returns and the loop spawns.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// Performs a `Chat` effect: one model round over `messages` with `tools`
-/// advertised, under `binding`'s frozen `options`.
-pub trait ChatPerformer: Send + Sync {
-    /// Runs the round. `stream` says whether the round's live deltas have
-    /// a consumer (a section's `chat` round) or only the completed reply
-    /// does (a nested `models.infer`).
+/// Receives each live piece of a streaming model round as it arrives.
+pub type OnDelta = Arc<dyn Fn(StreamDelta) + Send + Sync>;
+
+/// The Host's inference: lists the models it serves and performs a `Chat`
+/// effect as one model round over `messages` with `tools` advertised,
+/// under `binding`'s frozen `options`.
+pub trait InferenceBroker: Send + Sync {
+    /// Lists the models the broker serves.
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>>;
+
+    /// Runs the round. `on_delta` is present when the round's live deltas
+    /// have a consumer (a section's `chat` round) and `None` when only the
+    /// completed reply does (a nested `models.infer`).
     fn chat(
         &self,
         binding: ModelBinding,
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
-        stream: bool,
+        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>>;
 }
 
@@ -79,15 +87,18 @@ pub trait TimerPerformer: Send + Sync {
 }
 
 /// The Harness's performers: one for each chat, tool-call, and timer
-/// effect. The loop answers a `Vfs` effect inline and has no performer
-/// for it.
+/// effect, and the callback a streaming chat round's deltas go to. The
+/// loop answers a `Vfs` effect inline and has no performer for it.
 ///
 /// Shared handles, so the loop can move a performer into the task it
 /// spawns for each effect while the bundle stays whole.
 #[derive(Clone)]
 pub struct Performers {
     /// Performs `Chat` effects.
-    pub chat: Arc<dyn ChatPerformer>,
+    pub broker: Arc<dyn InferenceBroker>,
+    /// Receives the live deltas of each `Chat` effect whose `stream` is
+    /// true.
+    pub on_delta: OnDelta,
     /// Performs `ToolCall` effects.
     pub tool: Arc<dyn ToolPerformer>,
     /// Performs `Timer` effects.
