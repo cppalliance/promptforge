@@ -1,7 +1,9 @@
 //! Boot planning and one-shot launch coverage.
 
 use std::cell::Cell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gateway_api_discovery::{CancellationToken, GatewayDiscoveryFile, HealthError, ProbeError};
@@ -13,7 +15,7 @@ use super::{
 #[cfg(windows)]
 use crate::gateway::boot::spawn_detached_windows_with;
 use crate::gateway::boot::{
-    GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway,
+    GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway, spawn_detached,
 };
 use crate::gateway::identity::GatewayAttachment;
 use crate::gateway::supervisor::{
@@ -283,7 +285,8 @@ fn probe_timeout(url: &str, status_line: String) -> HealthError {
     }
 }
 
-/// Runs the launch wait against the test binary's own process image.
+/// Runs the launch wait against the test binary's own process image, for a
+/// launched child that never exits.
 fn launch_wait_with<Clock, Health>(
     run_dir: &Path,
     budget: Duration,
@@ -294,6 +297,23 @@ where
     Clock: WaitClock,
     Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), HealthError>,
 {
+    launch_wait_exiting(run_dir, budget, clock, health, || None)
+}
+
+/// Runs the launch wait against the test binary's own process image, with
+/// the launched child's exit status read from `exited`.
+fn launch_wait_exiting<Clock, Health, Exited>(
+    run_dir: &Path,
+    budget: Duration,
+    clock: &Clock,
+    health: Health,
+    exited: Exited,
+) -> anyhow::Result<GatewayDiscoveryFile>
+where
+    Clock: WaitClock,
+    Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), HealthError>,
+    Exited: FnMut() -> Option<ExitStatus>,
+{
     wait_for_launched_file_cancellable_with(
         run_dir,
         budget,
@@ -301,7 +321,30 @@ where
         clock,
         health,
         |run_dir, _| probe_own_image(run_dir),
+        exited,
     )
+}
+
+/// The exit status of a child that exited with `code`.
+#[cfg(windows)]
+fn exit_status(code: u32) -> ExitStatus {
+    std::os::windows::process::ExitStatusExt::from_raw(code)
+}
+
+/// The exit status of a child that exited with `code`.
+#[cfg(unix)]
+fn exit_status(code: i32) -> ExitStatus {
+    std::os::unix::process::ExitStatusExt::from_raw(code << 8)
+}
+
+/// A program that exits by itself once it reads end of input from a null
+/// stdin.
+fn self_exiting_program() -> PathBuf {
+    if cfg!(windows) {
+        std::env::var_os("ComSpec").map_or_else(|| PathBuf::from("cmd.exe"), PathBuf::from)
+    } else {
+        PathBuf::from("/bin/sh")
+    }
 }
 
 fn launch_wait(run_dir: &Path, budget: Duration) -> anyhow::Result<GatewayDiscoveryFile> {
@@ -455,6 +498,81 @@ fn the_launch_wait_fails_at_its_budget_with_the_last_probe_error() {
         )),
         "the error reports the last probe: {message}"
     );
+}
+
+#[test]
+fn the_launch_wait_fails_at_the_first_poll_after_the_gateway_exits_without_a_file() {
+    let state = tempfile::TempDir::new().expect("tempdir");
+    let run_dir = state.path().join("run");
+    std::fs::create_dir(&run_dir).expect("create the run directory");
+    let clock = FakeClock::new();
+
+    let error = launch_wait_exiting(
+        &run_dir,
+        Duration::from_secs(30),
+        &clock,
+        |_, _, _| panic!("no discovery file means no health probe"),
+        || (clock.pauses() >= 2).then(|| exit_status(1)),
+    )
+    .expect_err("a gateway that exits without a file must not hold boot for the budget");
+
+    assert_eq!(
+        clock.pauses(),
+        2,
+        "the poll after the exit fails, long before the budget"
+    );
+    let message = error.to_string();
+    assert!(
+        message.contains(&format!("exited ({})", exit_status(1))),
+        "the error names the exit status: {message}"
+    );
+    assert!(
+        message.contains(
+            &state
+                .path()
+                .join("logs")
+                .join("gateway.log")
+                .display()
+                .to_string()
+        ),
+        "the error names the gateway log: {message}"
+    );
+}
+
+#[test]
+fn the_launch_wait_attaches_to_the_owner_a_launched_gateway_handed_off_to() {
+    let run = tempfile::TempDir::new().expect("tempdir");
+    let owner = live_file(fixture_gateway("key"), "key");
+    owner
+        .write_to(run.path())
+        .expect("the owner publishes before the handed-off launch exits");
+
+    let waited = launch_wait_exiting(
+        run.path(),
+        Duration::from_secs(5),
+        &FakeClock::new(),
+        gateway_api_discovery::wait_for_health_cancellable,
+        || Some(exit_status(0)),
+    )
+    .expect("an exited launch still attaches to the owner's file");
+
+    assert_eq!(waited, owner);
+}
+
+#[test]
+fn the_reaper_records_the_exit_status_of_a_detached_child() {
+    let exit = Arc::new(OnceLock::new());
+    spawn_detached(&self_exiting_program(), Arc::clone(&exit))
+        .expect("spawn a child that exits by itself");
+
+    let deadline = Instant::now() + FIXTURE_PHASE_TIMEOUT;
+    while exit.get().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "the reaper records the child's exit within {FIXTURE_PHASE_TIMEOUT:?}"
+        );
+        std::thread::sleep(RECOVERY_POLL_INTERVAL);
+    }
 }
 
 #[test]
