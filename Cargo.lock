@@ -2598,6 +2598,7 @@ dependencies = [
  "harness-runner",
  "harness-sessions",
  "promptforge",
+ "tempfile",
  "tokio",
  "workspace-hack",
 ]
@@ -2621,6 +2622,7 @@ version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",
+ "harness",
  "promptforge",
  "reqwest",
  "serde",
@@ -2654,9 +2656,7 @@ name = "harness-sessions"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "axum",
  "harness-capabilities",
- "harness-gateway-client",
  "harness-runner",
  "promptforge",
  "rand 0.9.5",

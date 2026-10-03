@@ -1,10 +1,10 @@
-//! Agent-run supervision across cancellation and binding generations:
+//! Agent-run supervision across cancellation and catalog generations:
 //! the one task per session that collects events, feeds the pure reducer
 //! ([`transition`]), and executes the effect it selects.
 //!
-//! Each run freezes one gateway generation and one catalog generation;
-//! cancellation or a genuinely new usable generation relaunches over the
-//! retained transcript. A requested close cancels the run and then drains
+//! Each run freezes one catalog generation; cancellation or a genuinely
+//! new usable generation relaunches over the retained transcript. A
+//! requested close cancels the run and then drains
 //! it: the effect loop answers every outstanding effect `Dropped` and
 //! steps the run to `Done` before the session reports `Closed`, so
 //! nothing is left in flight when the session leaves its Harness. The
@@ -24,7 +24,7 @@ use harness_runner::recorder::RunOutcome;
 use promptforge::model::StreamDelta;
 use tokio::sync::{mpsc, watch};
 
-use crate::environment::{Bindings, CatalogBinding, GatewayResources};
+use crate::environment::{Bindings, CatalogBinding};
 use crate::transition::{
     CancelOrigin, CatalogDisposition, CloseReason, EffectiveInterrupt, HistoryEffect, Interrupt,
     RelaunchEffect, RunCompletion, RunId, SupervisorEffect, SupervisorEvent, SupervisorState,
@@ -46,10 +46,6 @@ enum Collected {
         event: SupervisorEvent,
         snapshot: Option<CatalogBinding>,
     },
-    Gateway {
-        event: SupervisorEvent,
-        resources: Arc<GatewayResources>,
-    },
     Run {
         run: RunId,
         result: Result<RunOutcome, RunFailure>,
@@ -70,13 +66,10 @@ pub(crate) struct Supervisor {
     table: Arc<SessionTable>,
     lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
     cancellations: mpsc::Receiver<SupervisorEvent>,
-    gateway_watch: watch::Receiver<Option<u64>>,
     catalog_watch: watch::Receiver<Option<u64>>,
     /// The raw delta stream; `None` once it closes, which cannot happen
     /// while the core holds its sender.
     raw_deltas: Option<mpsc::UnboundedReceiver<StreamDelta>>,
-    latest_gateway: Arc<GatewayResources>,
-    active_gateway: Option<Arc<GatewayResources>>,
     latest_catalog: Option<CatalogBinding>,
     active_catalog: Option<CatalogBinding>,
     active_run: Option<RunFuture>,
@@ -95,18 +88,11 @@ pub(crate) struct SupervisorParts {
     pub(crate) lifecycle: mpsc::UnboundedReceiver<SupervisorEvent>,
     pub(crate) cancellations: mpsc::Receiver<SupervisorEvent>,
     pub(crate) raw_deltas: mpsc::UnboundedReceiver<StreamDelta>,
-    /// The gateway snapshot the launch checked for usability.
-    pub(crate) gateway: Arc<GatewayResources>,
-    /// The gateway watch, subscribed by the launch before it read
-    /// `gateway`, so a replacement landing after the read wakes the
-    /// supervisor.
-    pub(crate) gateway_watch: watch::Receiver<Option<u64>>,
 }
 
 impl Supervisor {
     /// Subscribes to the catalog watch before reading its snapshot, so a
-    /// replacement cannot disappear between the two; the gateway pair
-    /// arrives already ordered the same way by the launch.
+    /// replacement cannot disappear between the two.
     pub(crate) fn new(parts: SupervisorParts) -> Self {
         let SupervisorParts {
             core,
@@ -115,8 +101,6 @@ impl Supervisor {
             lifecycle,
             cancellations,
             raw_deltas,
-            gateway,
-            gateway_watch,
         } = parts;
         let catalog_watch = bindings.subscribe_catalog();
         let latest_catalog = bindings.catalog();
@@ -126,11 +110,8 @@ impl Supervisor {
             table,
             lifecycle,
             cancellations,
-            gateway_watch,
             catalog_watch,
             raw_deltas: Some(raw_deltas),
-            latest_gateway: gateway,
-            active_gateway: None,
             latest_catalog,
             active_catalog: None,
             active_run: None,
@@ -142,7 +123,7 @@ impl Supervisor {
     /// Supervises the session until it closes, then drains its last run
     /// and removes the session from its Harness.
     pub(crate) async fn run(mut self) {
-        let mut state = SupervisorState::new(self.latest_gateway.generation());
+        let mut state = SupervisorState::new();
         let mut pending = Some(self.initial_catalog_event());
         loop {
             let collected = match pending.take() {
@@ -180,11 +161,6 @@ impl Supervisor {
                     return Collected::Supervisor(event);
                 }
                 () = changed(&mut self.catalog_watch) => return self.catalog_event(),
-                () = changed(&mut self.gateway_watch) => {
-                    if let Some(collected) = self.gateway_event() {
-                        return collected;
-                    }
-                }
                 received = recv_or_pending(&mut self.raw_deltas) => match received {
                     Some(delta) => self.core.publish_delta(delta),
                     None => self.raw_deltas = None,
@@ -205,16 +181,6 @@ impl Supervisor {
         Collected::Catalog { event, snapshot }
     }
 
-    /// The gateway resources behind the watch that just changed.
-    fn gateway_event(&mut self) -> Option<Collected> {
-        self.gateway_watch.borrow_and_update();
-        let resources = self.bindings.gateway()?;
-        Some(Collected::Gateway {
-            event: SupervisorEvent::GatewayGeneration(resources.generation()),
-            resources,
-        })
-    }
-
     /// Applies collected runtime data and returns only the pure event.
     fn event_from(&mut self, collected: Collected) -> SupervisorEvent {
         match collected {
@@ -231,10 +197,6 @@ impl Supervisor {
                     self.active_catalog.clone_from(&snapshot);
                 }
                 self.latest_catalog = snapshot;
-                event
-            }
-            Collected::Gateway { event, resources } => {
-                self.latest_gateway = resources;
                 event
             }
             Collected::Run { run, result } => {
@@ -301,42 +263,25 @@ impl Supervisor {
         }
     }
 
-    /// Resolves and launches one reducer-selected binding generation.
+    /// Resolves and launches one reducer-selected catalog generation.
     fn relaunch(&mut self, relaunch: RelaunchEffect) -> Outcome {
         let catalog = self
             .latest_catalog
             .as_ref()
             .filter(|catalog| catalog.generation == relaunch.catalog_generation)
             .cloned();
-        let gateway = (self.latest_gateway.generation() == relaunch.gateway_generation)
-            .then(|| Arc::clone(&self.latest_gateway))
-            .or_else(|| {
-                self.active_gateway
-                    .clone()
-                    .filter(|gateway| gateway.generation() == relaunch.gateway_generation)
-            });
-        let (Some(catalog), Some(gateway)) = (catalog, gateway) else {
+        let Some(catalog) = catalog else {
             return self.failed_relaunch(
                 relaunch.run,
                 "agent supervisor lost a reducer-selected binding",
             );
         };
-        let Some(client) = gateway.client().cloned() else {
-            return self.failed_relaunch(
-                relaunch.run,
-                "the replacement Gateway credentials cannot make a model client",
-            );
-        };
         match relaunch.history {
             HistoryEffect::Preserve => {}
         }
-        self.active_catalog = Some(catalog.clone());
-        self.active_gateway = Some(Arc::clone(&gateway));
+        self.active_catalog = Some(catalog);
         let inputs = RunInputs {
             run: relaunch.run,
-            gateway,
-            client,
-            catalog: Some(catalog),
             host: self.bindings.host(),
         };
         let core = Arc::clone(&self.core);
@@ -368,10 +313,6 @@ impl Supervisor {
             CancelOrigin::Catalog => tracing::debug!(
                 session = %self.core.id,
                 "agent run retired for a new catalog generation"
-            ),
-            CancelOrigin::Gateway => tracing::debug!(
-                session = %self.core.id,
-                "agent run retired for a new gateway generation"
             ),
         }
     }

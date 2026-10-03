@@ -1,8 +1,8 @@
 This crate lets your program run PromptForge agents as long-running sessions that a person talks to.
 
-Your program tells the [`Harness`] where models live, launches agents by name, and relays what each running agent says and asks. That is the whole job of a Host. The Harness owns the running work, and your program owns everything around it: the settings, the person at the screen, and when anything changes.
+Your program hands the [`Harness`] the broker that reaches its models, launches agents by name, and relays what each running agent says and asks. That is the whole job of a Host. The Harness owns the running work, and your program owns everything around it: the models, the settings, the person at the screen, and when anything changes.
 
-By the end of this page you will have built `desk`, a Host that runs the built-in `chat` agent for one person. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A stub model server on localhost stands in for a real one. It answers each model round with `You said: ` and the last message. It also lists `stub-model` in its model list, with a context window of at least 32768 tokens, because `chat` declares that minimum and a smaller window refuses the run.
+By the end of this page you will have built `desk`, a Host that runs the built-in `chat` agent for one person. Each tour adds one idea: launch an agent and read its result, stream its replies, answer its questions, stop a turn, and reattach after a disconnect. A real `desk` passes `harness_gateway_client::GatewayBroker`, which reaches the PromptForge Gateway. The examples on this page compile against this crate alone, so their hidden lines define `Offline`, a broker that lists no model and refuses every round. The tours describe what `desk` sees with a broker that answers each model round with `You said: ` and the last message, and lists `stub-model` with a context window of at least 32768 tokens, because `chat` declares that minimum and a smaller window refuses the run.
 
 # Before you start
 
@@ -11,7 +11,7 @@ A PromptForge agent is a Markdown prompt file. Its Lua code holds the logic, and
 - A prompt file your program can launch by name is an *agent*.
 - One launched agent, which keeps running until it finishes or you close it, is a *session*.
 - One execution of the agent file, from its start to its end, is a *run*. A session makes its first run once a catalog with at least one model is bound, which is at launch when you pushed one first, and a new run each time it restarts, as later tours show. Every run adds to the same history.
-- The model server that answers every model call a session makes is the *gateway*.
+- The object your program hands the Harness to answer every model call a session makes, and to list the models a run can bind, is the *broker*.
 - The person your program puts in front of a session to answer its questions is the *operator*.
 - An open question that a session has asked the operator, and is waiting on, is a *wait*.
 - One small piece of a reply, sent while the model is still writing, is a *delta*.
@@ -26,6 +26,18 @@ use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig};
 use std::fs;
 use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 
 // 1. Make desk's agents folder.
 let desk = std::env::temp_dir().join("desk-before-you-start");
@@ -50,10 +62,10 @@ let hello = concat!(
 );
 fs::write(agents.join("hello.md"), hello)?;
 
-// 3. Build a harness over the folder that offers the operator-input capability, recording runs in memory.
+// 3. Build a harness over the folder on desk's broker that offers the operator-input capability, recording runs in memory.
 let mut capabilities = CapabilityRegistry::new();
 capabilities.register(Arc::new(UserInput::new()))?;
-let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
+let harness = Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 
 // 4. The harness offers `hello` next to the built-in `chat`.
 assert_eq!(harness.discover(), ["chat", "hello"]);
@@ -62,22 +74,33 @@ Ok::<(), Box<dyn std::error::Error>>(())
 
 1. Step 1 makes a folder for `desk`'s agents. An agent is just a file in a folder that the Harness reads by path.
 2. Step 2 writes `hello.md`. Its frontmatter holds the three keys every agent needs: `name`, `description`, and `promptforge: 0`. Then come one H1 title and one section whose Lua returns a fixed text. The source is built with `concat!` so that rustdoc keeps its `# Hello` line. The smallest agent needs no model, no tool, and no operator.
-3. Step 3 builds a Harness over the folder with [`Harness::new`]. It takes a [`HarnessConfig`], a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory, a [`CapabilityRegistry`](capability::CapabilityRegistry) of the capabilities your agents may declare, and the [`HostServices`](capability::HostServices) those capabilities read. `desk` registers [`UserInput`](capability::UserInput), the `promptforge/user-input` capability that the built-in `chat` declares to ask the operator, and provides no services. `chat` also requires `promptforge/web`, its fetch and search tools, which a real `desk` registers as `harness_web::Web` from the `harness-web` crate, beside the search provider and tokio runtime handle that capability reads. The examples on this page compile against this crate alone, so they leave web out, and a `desk` built from them has every `chat` run refused as it prepares. Building a Harness touches no folder, so only the registration can fail, and only for an id already registered. [Recording runs](record) shows how to bring your own recorder, and [Capabilities](capability) shows how to offer capabilities of your own.
+3. Step 3 builds a Harness over the folder with [`Harness::new`]. It takes a [`HarnessConfig`], a [`MemoryRecorder`](record::MemoryRecorder), which keeps each run's history in memory, the broker as an [`InferenceBroker`], a [`CapabilityRegistry`](capability::CapabilityRegistry) of the capabilities your agents may declare, and the [`HostServices`](capability::HostServices) those capabilities read. Here the broker is the hidden `Offline`, which `hello` never calls, because it makes no model round. `desk` registers [`UserInput`](capability::UserInput), the `promptforge/user-input` capability that the built-in `chat` declares to ask the operator, and provides no services. `chat` also requires `promptforge/web`, its fetch and search tools, which a real `desk` registers as `harness_web::Web` from the `harness-web` crate, beside the search provider and tokio runtime handle that capability reads. The examples on this page compile against this crate alone, so they leave web out, and a `desk` built from them has every `chat` run refused as it prepares. Building a Harness touches no folder and calls no broker, so only the registration can fail, and only for an id already registered. [Recording runs](record) shows how to bring your own recorder, and [Capabilities](capability) shows how to offer capabilities of your own.
 4. Step 4 asserts that [`Harness::discover`] lists `chat` and `hello`, sorted. The file stem is the name a launch asks for, and it sits next to the built-in `chat`.
 
 # Launch an agent
 
-You have an agent and a model server, and you want your program to run the agent and read its answer. Your program tells the Harness where the model server is, then launches agents by name. Each launch becomes a session that runs on its own.
+You have an agent and a broker that reaches a model, and you want your program to run the agent and read its answer. Your program hands the Harness its broker, then launches agents by name. Each launch becomes a session that runs on its own.
 
 Launching feels like [`tokio::spawn`](https://docs.rs/tokio/latest/tokio/fn.spawn.html): you get a handle back at once, and the work is already running. Unlike a spawned task, you watch its state and then read its output.
 
 ````
-use harness::{display_chain, CatalogBinding, GatewayBinding, HostSnapshot, LaunchRequest, SessionState};
+use harness::{display_chain, CatalogBinding, HostSnapshot, LaunchRequest, SessionState};
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{Harness, HarnessConfig};
+# use harness::{BoxFuture, Harness, HarnessConfig, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # use std::error::Error;
 # use std::sync::Arc;
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 # let desk = std::env::temp_dir().join("desk-launch-an-agent");
 # let agents = desk.join("agents");
 # std::fs::create_dir_all(&agents)?;
@@ -96,18 +119,14 @@ let greet = concat!(
 );
 std::fs::write(agents.join("greet.md"), greet)?;
 
-// 2. Build one harness with desk's capabilities over a memory recorder, and share it behind an `Arc`.
-let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new()));
+// 2. Build one harness on desk's broker with desk's capabilities over a memory recorder, and share it behind an `Arc`.
+let harness = Arc::new(Harness::new(HarnessConfig { agents_path: agents }, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new()));
 
-// 3. Push the stub model server at generation 1, without `/v1`.
-let stub = "http://127.0.0.1:8080";
-harness.set_gateway(GatewayBinding { base_url: stub.into(), key: "desk-key".into(), generation: 1 });
-
-// 4. Push the stub's model list at generation 1, and select its model.
+// 3. Push the model list at generation 1, and select the broker's model.
 harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 
-// 5. Launch by name with the operator's line, wait for `Closed`, then read the output.
+// 4. Launch by name with the operator's line, wait for `Closed`, then read the output.
 async fn ask(harness: &Harness, line: &str) -> Result<String, Box<dyn Error>> {
     let request = LaunchRequest { agent: "greet".into(), args: String::new(), input_text: Some(line.into()) };
     let session = harness.launch(request).await.map_err(|refusal| display_chain(&refusal))?;
@@ -117,29 +136,22 @@ async fn ask(harness: &Harness, line: &str) -> Result<String, Box<dyn Error>> {
     Ok(reply)
 }
 
-// 6. `greet` is launchable, the push took, and a logged binding hides its key.
+// 5. `greet` is launchable next to the built-in `chat`.
 assert_eq!(harness.discover(), ["chat", "greet"]);
-assert_eq!(harness.gateway().map(|gateway| gateway.generation), Some(1));
-assert!(format!("{:?}", harness.gateway()).contains("<redacted>"));
 # Ok::<(), Box<dyn Error>>(())
 ````
 
 1. Step 1 writes `greet.md`. `models: { writer: {} }` declares a model role labelled `writer`, and every declared role is also a Lua global of that name. `input:` and `output:` name the files the agent reads and writes. `models.infer(writer, text)` sends one model round with that text and returns the reply as a string. `store.read` and `store.write` use the session's store, where the Harness puts the `input:` file and looks for the `output:` file.
-2. Step 2 builds one [`Harness`] from a [`HarnessConfig`], a recorder, and the capabilities and services that [Before you start](#before-you-start) built, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder, and resolves its declared capabilities against that registry.
-3. Step 3 pushes the stub model server with [`Harness::set_gateway`], as a [`GatewayBinding`]. Leave `/v1` off its `base_url`, because the Harness appends it. Give every new binding a higher `generation` than the last.
-4. Step 4 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array; the Harness takes the model's name from its `"id"` string.
-5. Step 5 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs the live stub, so the example never calls it.
-6. Step 6 asserts that `greet` is launchable, that [`Harness::gateway`] holds the generation 1 binding, and that `{:?}` prints the key as `"<redacted>"`, so a binding is safe to log.
+2. Step 2 builds one [`Harness`] from a [`HarnessConfig`], a recorder, `desk`'s broker, and the capabilities and services that [Before you start](#before-you-start) built, and shares it behind an [`Arc`](std::sync::Arc), because one Harness serves every session your program launches. Every run it makes is written to that recorder, sends every model round to that broker, and resolves its declared capabilities against that registry.
+3. Step 3 pushes a [`CatalogBinding`], your program's list of chat-capable models, through [`Harness::set_catalog`], and selects `stub-model` with [`Harness::set_host`] and a [`HostSnapshot`]. Each `models` entry is one raw JSON object, a [`serde_json::Value`](https://docs.rs/serde_json/latest/serde_json/enum.Value.html), here `{"id": "stub-model"}` built from a one-pair array. A session runs only once a push holds at least one entry. The model itself comes from the broker: each run asks the broker for its model list and binds the selected `stub-model` from it.
+4. Step 4 defines `ask`. [`Harness::launch`] takes a [`LaunchRequest`] naming an agent from [`Harness::discover`], and writes its `input_text` to the agent's declared input file. `ask` waits for [`SessionState::Closed`] on [`Session::subscribe_state`] before it calls [`Session::output_text`], which returns [`OutputError::Unfinished`] until a run has completed. A completed or failed run closes the session by itself. `ask` needs a broker that answers with `You said: ` and the line, so the example never calls it.
+5. Step 5 asserts that `greet` is launchable next to `chat`.
 
-What a gateway push does depends on its generation:
+The Harness keeps its broker for its whole life and asks it again for every model round. To move sessions to a different model server, change what your broker reaches: the next round of every running session goes there, with no restart and no cancelled question.
 
-- A push with the same generation is ignored entirely, so a rotated key never takes effect.
-- A lower one is stored and new launches use it, but running sessions ignore it and keep the old gateway.
-- A higher one reaches every running session, and [The complete program](#the-complete-program) shows what that does.
+A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. A launch never calls the broker: a broker that cannot list its models, or whose list lacks the selected model, fails the run as it starts, and the session reports [`FailureKind::RunFailed`] and closes.
 
-The Harness checks the name before the gateway. A name that `discover` does not list, a path included, is refused with [`LaunchError::UnknownAgent`]. No gateway, or one whose URL does not parse or whose key is empty, fails with [`LaunchError::GatewayUnusable`].
-
-You might expect [`Harness::new`] to check your folders and connect to the model server. Instead, it touches nothing, so a bad name or an unusable gateway arrives as a [`LaunchError`] from `launch`. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch. A capability an agent requires and your registry lacks fails the run the same way, as it prepares.
+You might expect [`Harness::new`] to check your folders and ask the broker for its models. Instead, it touches nothing, so a bad name arrives as a [`LaunchError`] from `launch`, and a broker that cannot serve arrives as a failed run. A launch opens no file either: the recorder is yours, and a recorder that refuses a write fails the run, which the session reports, rather than the launch. A capability an agent requires and your registry lacks fails the run the same way, as it prepares.
 
 A missing or empty catalog raises no error: the session stays `Alive` and waits until a catalog with at least one model arrives.
 
@@ -147,7 +159,7 @@ Start catalog generations at 1. A session launched before any catalog counts gen
 
 Each run reads the Host snapshot as it starts, so a new selection reaches a running session only when its run restarts, never in the middle of a reply.
 
-Push the gateway and the catalog, launch by name, wait for `Closed`, then read the output. `chat` loops on `input.ask()` forever, so it never closes by itself, and later tours close it. Next, [Stream a reply](#stream-a-reply) shows a reply while the model writes it.
+Hand over the broker, push the catalog, launch by name, wait for `Closed`, then read the output. `chat` loops on `input.ask()` forever, so it never closes by itself, and later tours close it. Next, [Stream a reply](#stream-a-reply) shows a reply while the model writes it.
 
 # Stream a reply
 
@@ -161,7 +173,7 @@ Deltas feel like an [`mpsc`](https://docs.rs/tokio/latest/tokio/sync/mpsc/index.
 use harness::DeltaKind;
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
+# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::collections::HashMap;
 # use std::error::Error;
 # use std::future::{poll_fn, Future};
@@ -169,11 +181,22 @@ use harness::DeltaKind;
 # use std::sync::Arc;
 # use std::task::Poll;
 # fn desk() -> Harness {
+#     use harness::{BoxFuture, InferenceBroker, OnDelta};
+#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+#     struct Offline;
+#     impl InferenceBroker for Offline {
+#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#             Box::pin(async { Ok(ModelCatalog::empty()) })
+#         }
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#             let kind = CompletionErrorKind::Unavailable;
+#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#         }
+#     }
 #     let mut capabilities = CapabilityRegistry::new();
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
-#     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
@@ -242,7 +265,7 @@ async fn stream() -> Result<(), Box<dyn Error>> {
 }
 ````
 
-1. Read the hidden `say(&session, "Hello, desk.")` as the operator typing `Hello, desk.`. You do not need its body to follow this tour. Step 1 builds `desk`'s Harness through the hidden `desk` function, which pushes the stub gateway, the generation 1 catalog, and the selected model, as [Launch an agent](#launch-an-agent) taught. It launches `chat`, then calls [`Session::subscribe_deltas`] and [`Session::subscribe_events`] before the hidden `say` answers `chat`'s first question. `chat` starts by asking the operator a question and pauses until it gets an answer. The hidden `say` answers it the way the next tour teaches, and that answer starts the first model round. Each receiver gets only what is sent after it subscribes, and the session is already running when `launch` returns. Subscribing right after launch catches every piece of the first reply.
+1. Read the hidden `say(&session, "Hello, desk.")` as the operator typing `Hello, desk.`. You do not need its body to follow this tour. Step 1 builds `desk`'s Harness through the hidden `desk` function, which hands it `desk`'s broker and pushes the generation 1 catalog and the selected model, as [Launch an agent](#launch-an-agent) taught. It launches `chat`, then calls [`Session::subscribe_deltas`] and [`Session::subscribe_events`] before the hidden `say` answers `chat`'s first question. `chat` starts by asking the operator a question and pauses until it gets an answer. The hidden `say` answers it the way the next tour teaches, and that answer starts the first model round. Each receiver gets only what is sent after it subscribes, and the session is already running when `launch` returns. Subscribing right after launch catches every piece of the first reply.
 2. Step 2 prints each [`DeltaKind::Text`] piece, the answer, and collects it under its `reply` number. It sends each [`DeltaKind::Reasoning`] piece, the model's reasoning, to stderr, because the operator usually sees these in different places. A wildcard arm ignores kinds added later, because [`DeltaKind`] is `#[non_exhaustive]`. The hidden `first` stands in for [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html) over the two receivers.
 3. Step 3 ignores the error a lagging delta receiver gets for the pieces it lost, and does not retry. A missed piece costs the operator a moment of streaming, never text, because the finished event holds the whole reply.
 4. Step 4 stops at the `assistant_reply` event, and takes its `reply` number and its finished `text`. Only thinking, reply, and tool-call events carry a `reply` number, so a [`SessionEvent`] whose `reply` is `None` is something other than model text. You can route events without parsing every one.
@@ -270,15 +293,26 @@ Binding a tool is not the same as offering it: the agent's Lua offers the alias 
 use harness::{WaitError, WaitFrame};
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session};
+# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     use harness::{BoxFuture, InferenceBroker, OnDelta};
+#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+#     struct Offline;
+#     impl InferenceBroker for Offline {
+#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#             Box::pin(async { Ok(ModelCatalog::empty()) })
+#         }
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#             let kind = CompletionErrorKind::Unavailable;
+#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#         }
+#     }
 #     let mut capabilities = CapabilityRegistry::new();
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
-#     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
@@ -330,7 +364,7 @@ async fn answer() -> Result<(), Box<dyn Error>> {
 2. Step 2 returns the token of the first [`WaitFrame::Required`]. That single-use token ties an answer to the question that asked for it. For each [`WaitFrame::Cancelled`], `question` drops the prompt, because that question ended unanswered and an answer to it would be refused.
 3. Step 3 launches `chat` from the hidden `desk`, subscribes to events, and answers `chat`'s first question by token with [`Session::send_input`]. Pass the operator's text as typed: the agent receives it byte for byte, with no trimming, so trim it yourself if the agent expects that. `send_input` calls its closure once before it hands over the text, and the closure runs even when the call goes on to fail. Pass `|| {}` unless you track turns, and do not take a call to the closure as proof that the answer was accepted.
 4. Step 4 answers the same token again, and gets [`WaitError::UnknownToken`], with the text discarded. Treat that error as a normal race: the token was already answered, cancelled, or never issued. An answered wait sends no `Cancelled`, so `desk` clears its prompt itself once `send_input` returns `Ok`.
-5. Step 5 waits for the next `assistant_reply` event and asserts that its text is `You said: Hello, desk.`, the stub's echo of the answer. The operator's answer reached the agent and drove its next model turn.
+5. Step 5 waits for the next `assistant_reply` event and asserts that its text is `You said: Hello, desk.`, the echoing broker's reply to the answer. The operator's answer reached the agent and drove its next model turn.
 
 Here is the whole question loop, from the agent asking to the agent resuming:
 
@@ -357,7 +391,7 @@ Subscribe, resend, and answer by token. Next, [Stop a turn](#stop-a-turn) ends a
 
 # Stop a turn
 
-The model is stuck or heading the wrong way, and the operator wants to stop this answer but keep the conversation. Stopping the turn is different from stopping the session: [`Session::cancel`] stops the turn, and [`Session::close`] stops the session. This tour's example assumes a different stub, one that never answers the round the first answer starts, so the turn hangs until you cancel it. The example compiles but never runs, so that stub's setup is not shown.
+The model is stuck or heading the wrong way, and the operator wants to stop this answer but keep the conversation. Stopping the turn is different from stopping the session: [`Session::cancel`] stops the turn, and [`Session::close`] stops the session. This tour's example assumes a different broker, one that never finishes the round the first answer starts, so the turn hangs until you cancel it. The example compiles but never runs, so that broker is not shown.
 
 Cancelling a turn feels like aborting a tokio task. Unlike an aborted task, the session is not gone: the agent starts again over the conversation so far.
 
@@ -365,15 +399,26 @@ Cancelling a turn feels like aborting a tokio task. Unlike an aborted task, the 
 use harness::{FailureKind, SessionFailure, SessionState};
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitError, WaitFrame};
+# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitError, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     use harness::{BoxFuture, InferenceBroker, OnDelta};
+#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+#     struct Offline;
+#     impl InferenceBroker for Offline {
+#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#             Box::pin(async { Ok(ModelCatalog::empty()) })
+#         }
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#             let kind = CompletionErrorKind::Unavailable;
+#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#         }
+#     }
 #     let mut capabilities = CapabilityRegistry::new();
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
-#     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
@@ -406,7 +451,7 @@ async fn stop() -> Result<(), Box<dyn Error>> {
     let session = harness.launch(chat()).await?;
     let mut failures = session.subscribe_errors();
 
-    // 3. Answer the first question; in this tour the stub model server hangs on this reply.
+    // 3. Answer the first question; in this tour the broker hangs on this reply.
     let first = question(&session).await?;
     session.send_input(&first, "Take your time.".into(), || {})?;
 
@@ -452,15 +497,26 @@ A session id feels like a database key. Unlike a row, what it names keeps runnin
 use harness::SessionId;
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
+# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, Session, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     use harness::{BoxFuture, InferenceBroker, OnDelta};
+#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+#     struct Offline;
+#     impl InferenceBroker for Offline {
+#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#             Box::pin(async { Ok(ModelCatalog::empty()) })
+#         }
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#             let kind = CompletionErrorKind::Unavailable;
+#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#         }
+#     }
 #     let mut capabilities = CapabilityRegistry::new();
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
-#     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
@@ -538,33 +594,31 @@ Keep the id, subscribe first, then replay and re-announce. Next, [The complete p
 
 # The complete program
 
-Here is the whole `desk` Host, every line visible: your program owns the settings and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
+Here is the whole `desk` Host, every line visible: your program owns the broker, the settings, and the operator, the Harness owns the sessions, and the two meet through pushes, launches, and subscriptions.
 
 ````
 use harness::capability::{CapabilityRegistry, HostServices, RegistryError, UserInput};
 use harness::record::MemoryRecorder;
 use harness::{
-    display_chain, CatalogBinding, DeltaKind, GatewayBinding, Harness, HarnessConfig,
-    HostSnapshot, LaunchRequest, Session, SessionState, WaitError, WaitFrame,
+    display_chain, CatalogBinding, DeltaKind, Harness, HarnessConfig, HostSnapshot,
+    InferenceBroker, LaunchRequest, Session, SessionState, WaitError, WaitFrame,
 };
 use std::error::Error;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-// desk's stub model server on localhost answers every round with "You said: " and the last message.
-const STUB: &str = "http://127.0.0.1:8080";
-
 // A task desk hands to its runtime, such as `tokio::spawn`.
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-// 1. desk owns every setting, its recorder, and its capabilities, and pushes each setting into the harness at generation 1.
-fn build_harness() -> Result<Arc<Harness>, RegistryError> {
+// 1. desk hands the harness its broker, owns every setting, its recorder, and its capabilities, and pushes each setting at generation 1.
+fn build_harness(broker: Arc<dyn InferenceBroker>) -> Result<Arc<Harness>, RegistryError> {
     let mut capabilities = CapabilityRegistry::new();
     capabilities.register(Arc::new(UserInput::new()))?;
     let harness = Arc::new(Harness::new(
         HarnessConfig { agents_path: "desk/agents".into() },
         Arc::new(MemoryRecorder::new()),
+        broker,
         capabilities,
         HostServices::new(),
     ));
@@ -575,11 +629,6 @@ fn build_harness() -> Result<Arc<Harness>, RegistryError> {
     harness.set_catalog(CatalogBinding {
         generation: 1,
         models: vec![[("id", "stub-model")].into_iter().collect()],
-    });
-    harness.set_gateway(GatewayBinding {
-        base_url: STUB.into(),
-        key: "desk-key".into(),
-        generation: 1,
     });
     Ok(harness)
 }
@@ -645,8 +694,8 @@ async fn answer(session: &Session, text: &str) -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
-    let harness = build_harness()?;
+async fn desk(broker: Arc<dyn InferenceBroker>, spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
+    let harness = build_harness(broker)?;
 
     // 6. Launch `chat` by name, and start the tasks before its first turn.
     let request = LaunchRequest { agent: "chat".into(), args: String::new(), input_text: None };
@@ -659,12 +708,7 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
     session.cancel();
     answer(&session, "Shorter, please.").await?;
 
-    // 8. The model server and the model list change while the session runs, each at a higher generation.
-    harness.set_gateway(GatewayBinding {
-        base_url: "http://127.0.0.1:8081".into(),
-        key: "desk-key-2".into(),
-        generation: 2,
-    });
+    // 8. The model list changes while the session runs, at a higher generation.
     harness.set_catalog(CatalogBinding {
         generation: 2,
         models: vec![
@@ -693,25 +737,25 @@ async fn desk(spawn: impl Fn(Task)) -> Result<(), Box<dyn Error>> {
 }
 ````
 
-1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). It registers [`UserInput`](capability::UserInput) because `chat` declares `promptforge/user-input`, and a run whose agent requires a capability the registry lacks is refused. A real `desk` also registers `harness_web::Web` with its two services, because `chat` requires `promptforge/web`, as [Before you start](#before-you-start) explains. You might expect the Harness to find its model server and model in the environment or a config file. Instead, it holds only what your program pushes, and it starts with no gateway at all. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a gateway push, or a catalog push whose model list changed, restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
+1. Step 1 is `build_harness`, from [Launch an agent](#launch-an-agent). It registers [`UserInput`](capability::UserInput) because `chat` declares `promptforge/user-input`, and a run whose agent requires a capability the registry lacks is refused. A real `desk` also registers `harness_web::Web` with its two services, because `chat` requires `promptforge/web`, as [Before you start](#before-you-start) explains. You might expect the Harness to find its model server and model in the environment or a config file. Instead, it reaches models only through the broker your program hands [`Harness::new`], and holds only the settings your program pushes. `desk` takes its broker as a parameter: a real `desk` passes `harness_gateway_client::GatewayBroker`, built from the Gateway's API root and key. So `desk` pushes each setting as a value. Your program already owns the operator's settings and knows when they change. Only a catalog push whose model list changed restarts a session's run, and only when its generation is above the last one that session saw. A `set_host` push restarts nothing, and a running session picks it up at its next restart. Taking values you push leaves your program in control of when a change lands.
 2. Step 2 is `stream`, from [Stream a reply](#stream-a-reply). It owns its own delta receiver and a state watch, prints `Text` pieces, and shrugs off a lag error while the session runs. It ends once the state is `Closed`.
 3. Step 3 is `show_replies`, which prints each `assistant_reply` event. That finished text replaces the pieces `stream` printed under the same reply number.
 4. Step 4 is `report_close`, which holds its own clone of the [`Session`]. `report_close` keeps a handle because [`Harness::close`] removes the session from the Harness while it is still `Closing`.
 5. Step 5 is `answer`, from [Answer the operator](#answer-the-operator). It subscribes, re-announces, and answers by token. When a restart cancelled the question under it, [`WaitError::UnknownToken`] sends it around again for the new question.
 6. Step 6 launches `chat` by name, shows any refusal through [`display_chain`], and spawns `stream` and `report_close` at once, because the session is already running when `launch` returns.
 7. Step 7 answers `chat`'s first question, cancels the slow turn as [Stop a turn](#stop-a-turn) taught, and answers the new question `chat` asks after its run starts again.
-8. Step 8 pushes a new gateway and a changed model list, each at generation 2, above what the session has seen. A gateway push with a higher generation cancels every running session's current turn at once. Its open questions get [`WaitFrame::Cancelled`], and its run restarts over its transcript on the new gateway.
+8. Step 8 pushes a changed model list at generation 2, above what the session has seen, so the session's run restarts as the next paragraph describes. To move the session to a different model server instead, `desk` changes what its broker reaches: the next model round goes there, with no restart and no cancelled question.
 9. Step 9 drops the handle and looks the session up by id, as [Reattach after a disconnect](#reattach-after-a-disconnect) taught. It subscribes through `show_replies` before it reads `transcript(0)`, and asserts that the history's indexes run from zero with no gap.
 10. Step 10 lists the open tokens with [`Session::unresolved_waits`], closes the session with `Harness::close`, asserts that it is gone from the Harness at once, and waits for `Closed`. An open question keeps its agent waiting until `desk` answers it, cancels the turn, or closes the session, so `desk` decides when to give up.
 
-A catalog push with a changed model list, under a higher generation, restarts the run, and with no answer in progress it cancels the current turn at once, as a gateway push does. When the operator's answer has already been accepted, the restart waits for that turn to settle at the first `assistant_reply` event or the first `ModelTurnFailed` or `ToolCallFailed` report, without waiting for the agent to ask again. Every catalog push replaces the stored catalog, but a session acts only on a generation above the last one it saw.
+A catalog push with a changed model list, under a higher generation, restarts the run, and with no answer in progress it cancels the current turn at once. Its open questions get [`WaitFrame::Cancelled`], and its run restarts over its transcript. When the operator's answer has already been accepted, the restart waits for that turn to settle at the first `assistant_reply` event or the first `ModelTurnFailed` or `ToolCallFailed` report, without waiting for the agent to ask again. Every catalog push replaces the stored catalog, but a session acts only on a generation above the last one it saw.
 
 The Host loop, from launch to streaming, answering, and closing:
 
 ````text
    desk                                      harness and session
    ────                                      ───────────────────
-   set_host, set_catalog, set_gateway ─────> holds the settings desk pushed
+   new(broker), set_host, set_catalog ─────> holds the broker and the settings
    launch("chat") ─────────────────────────> a session starts running
    stream task       <─────────────────────  Delta pieces, live only
    answer()          <─────────────────────  WaitFrame::Required { token }
@@ -722,16 +766,20 @@ The Host loop, from launch to streaming, answering, and closing:
    close(&id) ─────────────────────────────> Closing, then Closed
 ````
 
-Push settings, launch by name, relay what each session says and asks, and close it when you are done. [Where to go next](#where-to-go-next) lists the module pages.
+Hand over a broker, push settings, launch by name, relay what each session says and asks, and close it when you are done. [Where to go next](#where-to-go-next) lists the module pages.
 
 # Reference
+
+## BoxFuture
+
+[`BoxFuture`] is the boxed, sendable, `'static` future every [`InferenceBroker`] method returns. Build one with `Box::pin(async move { ... })`, and move what the future needs into it, because the Harness runs it as its own task after the call returns. [Before you start](#before-you-start) shows one in the hidden `Offline` broker.
 
 ## CatalogBinding
 
 [`CatalogBinding`] carries one generation of your program's chat-capable model list into the Harness. Push it through [`Harness::set_catalog`] whenever that list changes; every push replaces the stored catalog. When no chat-capable model exists, push an empty `models` list under a new, higher generation rather than skipping the push. A running session keeps its current run, but its next restart waits until a later push brings models back under a higher generation. [Launch an agent](#launch-an-agent) shows the first push.
 
 - `generation`: nothing rejects a repeat, but sessions ignore a catalog not above the last one they saw, so start at 1 and raise it.
-- `models`: raw JSON model entries; with no selected model, a launch binds the `"id"` string of the first entry.
+- `models`: raw JSON model entries; a session runs only while the latest push holds at least one. The model a run binds comes from the broker's list, not from these entries.
 - [`CatalogBinding::default()`](CatalogBinding::default): generation 0 with an empty `models` list.
 
 ## Delta
@@ -756,38 +804,38 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 | `RunFailed` | The run itself ended in error. |
 | `Interrupted` | A close you asked for ended the run before it finished on its own. |
 
-## GatewayBinding
-
-[`GatewayBinding`] tells the Harness which model server to use and the key that goes with it. Push it through [`Harness::set_gateway`] at startup and whenever the server or key changes. A binding whose URL does not parse or whose key is empty still installs, and launches under it fail with [`LaunchError::GatewayUnusable`]; pushed under a higher generation, it also ends every running session, which reports [`FailureKind::RunFailed`] and closes. Push a corrected binding under a higher generation. [Launch an agent](#launch-an-agent) teaches this.
-
-- `generation`: a push with the current one is ignored. A different one replaces the stored binding, but running sessions switch only to a higher one.
-- [`GatewayBinding::api_root`]: `base_url` with trailing slashes trimmed and `/v1` always appended, so leave `/v1` off `base_url`.
-- `key`: `Debug` prints it as `"<redacted>"`, so you can log a binding safely.
-
 ## Harness
 
-[`Harness`] runs every session your program launches. Build one per program, share it behind an [`Arc`](std::sync::Arc), push the gateway, catalog, and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] in this order: an unknown name, even with no gateway bound, then an unusable gateway, or an unreadable agent source. Fix them in the order reported. [Launch an agent](#launch-an-agent) teaches this.
+[`Harness`] runs every session your program launches. Build one per program on your broker, share it behind an [`Arc`](std::sync::Arc), push the catalog and Host settings, then launch agents by name. [`Harness::launch`] refuses with a [`LaunchError`] for an unknown name, checked first, or an unreadable agent source; a broker that cannot serve never refuses a launch, and fails the run instead. [Launch an agent](#launch-an-agent) teaches this.
 
-- [`Harness::new`]: takes the config, an `Arc<dyn RunRecorder>`, a [`CapabilityRegistry`](capability::CapabilityRegistry), and [`HostServices`](capability::HostServices), and touches no filesystem. The Harness writes every run it makes to that recorder, opens no file at launch, and resolves every run's declared capabilities against that registry alone, handing them those services. [Recording runs](record) teaches the recorder, and [Capabilities](capability) the registry and services.
+- [`Harness::new`]: takes the config, an `Arc<dyn RunRecorder>`, an `Arc<dyn InferenceBroker>`, a [`CapabilityRegistry`](capability::CapabilityRegistry), and [`HostServices`](capability::HostServices), and touches no filesystem and calls no broker. The Harness writes every run it makes to that recorder, sends every model round to that broker, opens no file at launch, and resolves every run's declared capabilities against that registry alone, handing them those services. [Recording runs](record) teaches the recorder, and [Capabilities](capability) the registry and services.
 - [`Harness::discover`]: the `.md` file stems in `agents_path` plus the built-in `chat`, sorted.
 - `launch`: returns a session already registered and running, with [`LaunchOptions::default()`](LaunchOptions::default), so each run works in a fresh memory store.
-- [`Harness::set_gateway`]: a push with the current generation does nothing, so [`Harness::gateway`] keeps returning the earlier URL and key.
+- [`Harness::set_catalog`] and [`Harness::set_host`]: each push replaces the stored value; the broker stays the one `new` took for the Harness's whole life.
 - [`Harness::close`]: removes the session at once, while it is still `Closing`, and returns whether a session was ended.
 
 ## HarnessConfig
 
-[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder, capability registry, and services. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
+[`HarnessConfig`] tells the Harness where the agents live. Write it as a struct literal and pass it to [`Harness::new`] beside your recorder, broker, capability registry, and services. The path is not checked then, so a bad path shows up at launch, not at construction. [Launch an agent](#launch-an-agent) teaches this.
 
 - `agents_path`: the folder whose `.md` files are the launchable agents; launching `name` reads `<agents_path>/<name>.md`.
 
 ## HostSnapshot
 
-[`HostSnapshot`] carries your program's selected model and workspace roots into the Harness. Push it through [`Harness::set_host`] when the operator changes either one. Each run reads it as it starts, so a new selection reaches a running session at its next restart, never a turn in progress; with no selection, a launch binds the first model of the latest [`CatalogBinding`]. The Harness starts with [`HostSnapshot::default()`](HostSnapshot::default): no selection and no roots. [Launch an agent](#launch-an-agent) teaches this.
+[`HostSnapshot`] carries your program's selected model and workspace roots into the Harness. Push it through [`Harness::set_host`] when the operator changes either one. Each run reads it as it starts, so a new selection reaches a running session at its next restart, never a turn in progress; with no selection, a run binds the first model its broker lists. The Harness starts with [`HostSnapshot::default()`](HostSnapshot::default): no selection and no roots. [Launch an agent](#launch-an-agent) teaches this.
 
-- `selected_model`: never swapped for another; a model the gateway lacks, or an unfetchable list, fails the run with [`FailureKind::RunFailed`], closing the session; `launch` succeeds.
+- `selected_model`: never swapped for another; a model the broker does not list, or a list the broker cannot fetch, fails the run with [`FailureKind::RunFailed`], closing the session; `launch` succeeds.
 
 - [`HostSnapshot::ui`]: returns `{ "selected_model", "workspace_root" }`, each `null` when absent.
 - `workspace_roots`: only the first root reaches the prompt's `ui()` global.
+
+## InferenceBroker
+
+[`InferenceBroker`] is the trait your program implements, or takes from a crate, to give the Harness its models. Pass it to [`Harness::new`] as an `Arc<dyn InferenceBroker>`; one broker serves every round of every session, so it is `Send` and `Sync`. A real `desk` passes `harness_gateway_client::GatewayBroker`, which reaches the PromptForge Gateway. Each method returns a [`BoxFuture`]. [Before you start](#before-you-start) shows an offline one.
+
+- `models`: lists the models the broker serves. Each run calls it once as it starts, and binds the selected model from the list, or its first model with no selection. A failed call, or a selection the list lacks, fails the run with [`FailureKind::RunFailed`].
+- `chat`: performs one model round over the messages with the tools advertised, under the round's options. An error it returns fails that round, and the agent receives it.
+- `on_delta`: `chat`'s callback for the reply's live pieces, an [`OnDelta`]; it is `None` when nothing reads the pieces.
 
 ## LaunchError
 
@@ -796,7 +844,6 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 | Variant | Meaning |
 |---|---|
 | `UnknownAgent` | The name is not a discovered agent; `name` holds what you asked for. Pick a name from [`Harness::discover`]. |
-| `GatewayUnusable` | No gateway is bound, or the bound one could not make a model client. Push a valid URL and a non-empty key under a higher generation. |
 | [`SessionState`](LaunchError::SessionState) | This variant shares its name with the [`SessionState`] enum but has nothing to do with it: the agent's source file could not be read. `source` holds the filesystem failure, also reachable through [`Error::source`](std::error::Error::source). |
 
 
@@ -813,6 +860,10 @@ A [`Delta`] is one live piece of a model round's reply, sent through [`Session::
 - `agent`: a bare agent name as [`Harness::discover`] returns it; anything else, such as a path, is refused.
 - `args`: the run's argument text, handed to the prompt as `args`, and empty when absent from serialized input.
 - `input_text`: staged at the prompt's declared `input:` file before each run; left out of serialized output when `None`.
+
+## OnDelta
+
+[`OnDelta`] is the callback a broker hands each live piece of a reply to, as a [`StreamDelta`](promptforge::model::StreamDelta). The Harness passes one to [`InferenceBroker::chat`] only for a section's own chat round, and `None` for a nested `models.infer` round, so a broker sends pieces only where something reads them. Each piece reaches [`Session::subscribe_deltas`] as a [`Delta`]. Call it inline as each piece arrives; it neither blocks nor fails, even with no client subscribed, and a broker must not panic inside it mid-round. [Stream a reply](#stream-a-reply) shows where the pieces end up.
 
 ## OutputError
 
@@ -833,7 +884,7 @@ A [`Session`] is the handle to one running agent. Every clone names the same ses
 - `send_input`: delivers `text` byte-exact; when it fails, the turn it accepted is settled again, so you need no cleanup.
 - [`Session::cancel`]: stops the current turn with no failure report; open waits get `Cancelled`, and the agent restarts over its transcript.
 - [`Session::close`]: ends the session for good; outstanding work is dropped, and once the run is done the state is `Closed`.
-- `cancel`, `close`, and a restart forced by a gateway or model list push all set `Closing`; the state alone cannot tell them apart.
+- `cancel`, `close`, and a restart forced by a model list push all set `Closing`; the state alone cannot tell them apart.
 
 ## SessionEvent
 

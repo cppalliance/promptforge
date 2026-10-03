@@ -19,12 +19,9 @@ async-trait.workspace = true
 # run, and the `InputBroker` trait and error vocabulary the session's
 # input broker implements.
 harness-capabilities.workspace = true
-# The gateway model client the chat performer runs rounds on, rebuilt
-# when the gateway generation changes, and the catalog fetch.
-harness-gateway-client.workspace = true
 # The effect loop a session drives its runs through, run preparation,
-# the recorder seam a Host's recorder implements, and the instrumented
-# spawn wrapper.
+# the recorder and inference broker seams a Host implements, and the
+# instrumented spawn wrapper.
 harness-runner.workspace = true
 # The Engine's public API: the run context, the run limits, the events
 # and deltas a session forwards, and the run's VFS handle.
@@ -36,17 +33,14 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 # `sync` for the supervisor's typed event queues (`mpsc`), the wait
-# registry's `oneshot` and `broadcast` channels, and the binding
-# generation watches.
+# registry's `oneshot` and `broadcast` channels, and the catalog
+# generation watch.
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 workspace-hack.workspace = true
 
 [dev-dependencies]
-# The loopback mock gateways the mixed-session, chat performer, and
-# end-to-end suites drive real model rounds against, and the tag fixture
-# their servers are spawned under.
-axum.workspace = true
+# The tag fixture the input tests spawn their waiting calls under.
 harness-runner = { workspace = true, features = ["test-support"] }
 # The discovery and session suites seed an agents directory on disk.
 tempfile.workspace = true

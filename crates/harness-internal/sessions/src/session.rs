@@ -38,6 +38,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_capabilities::{CapabilityRegistry, HostServices};
+use harness_runner::performers::InferenceBroker;
 use harness_runner::recorder::{RunId as RecordedRun, RunRecorder};
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
@@ -297,6 +298,9 @@ pub(crate) struct SessionCore {
     state: watch::Sender<SessionState>,
     /// The Host's recorder every run of the session is written to.
     pub(crate) recorder: Arc<dyn RunRecorder>,
+    /// The Host's inference: every run's model rounds and the model list
+    /// its launch resolves against.
+    pub(crate) broker: Arc<dyn InferenceBroker>,
     /// The Host's capabilities every run resolves its declarations against.
     pub(crate) capabilities: Arc<CapabilityRegistry>,
     /// The Host's services every run's capabilities read.
@@ -313,6 +317,7 @@ pub(crate) struct SessionSeed {
     pub(crate) files: SessionFiles,
     pub(crate) lifecycle: Arc<RunLifecycle>,
     pub(crate) recorder: Arc<dyn RunRecorder>,
+    pub(crate) broker: Arc<dyn InferenceBroker>,
     pub(crate) capabilities: Arc<CapabilityRegistry>,
     pub(crate) services: HostServices,
 }
@@ -344,6 +349,7 @@ impl SessionCore {
             runs: Mutex::new(Vec::new()),
             state: watch::Sender::new(SessionState::Alive),
             recorder: seed.recorder,
+            broker: seed.broker,
             capabilities: seed.capabilities,
             services: seed.services,
         });

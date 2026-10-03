@@ -9,8 +9,9 @@
 //! `Interrupted` failure - sits in the `close` child module, the
 //! capabilities runs resolve against in the `capabilities` child module,
 //! the prompt's declared input and output files in the `files` child
-//! module, and the recorder's own failures and the transcript of a failed
-//! run in the `record` child module.
+//! module, the model a launch binds through the broker in the `model`
+//! child module, and the recorder's own failures and the transcript of a
+//! failed run in the `record` child module.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,13 +20,15 @@ use std::time::Duration;
 
 use harness_capabilities::{CapabilityRegistry, HostServices, USER_INPUT_ASK_TOOL, UserInput};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunOutcome, RunRecorder};
-use harness_sessions::environment::{CatalogBinding, GatewayBinding};
+use harness_sessions::environment::CatalogBinding;
 use harness_sessions::input::{WaitError, WaitFrame};
 use harness_sessions::protocol::{LaunchRequest, SessionEvent, SessionId};
 use harness_sessions::runtime::{Harness, HarnessConfig, LaunchError};
 use harness_sessions::session::Session;
 use harness_sessions::transition::SessionState;
 use tokio::sync::broadcast;
+
+use crate::support::OfflineBroker;
 
 #[path = "session-capabilities.rs"]
 mod capabilities;
@@ -39,6 +42,9 @@ mod files;
 #[path = "session-infer.rs"]
 mod infer;
 
+#[path = "session-model.rs"]
+mod model;
+
 #[path = "session-record.rs"]
 mod record;
 
@@ -51,8 +57,8 @@ const ASKS: &str = "---\nname: asks\ndescription: asks the operator\npromptforge
 const PATIENCE: Duration = Duration::from_secs(10);
 
 /// A chat-capable catalog entry with no `id`: usable, so a session
-/// launches under it, yet binding no model, so the gateway is never
-/// contacted.
+/// launches under it. Model resolution reads the broker's list, not this
+/// entry, so the offline broker leaves every run without a model.
 fn idless_chat_model() -> serde_json::Value {
     serde_json::json!({ "kind": "chat" })
 }
@@ -66,7 +72,7 @@ fn user_input_registry() -> CapabilityRegistry {
 
 /// A Harness over a fresh agents directory holding `asks.md`, recording
 /// through `recorder` and resolving capabilities against `capabilities`,
-/// with a usable (never contacted) gateway and no catalog bound yet.
+/// on the offline broker and with no catalog bound yet.
 fn unbound_harness_over(
     dir: &Path,
     recorder: Arc<dyn RunRecorder>,
@@ -75,20 +81,15 @@ fn unbound_harness_over(
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join("asks.md"), ASKS).unwrap();
-    let harness = Harness::new(
+    Harness::new(
         HarnessConfig {
             agents_path: agents,
         },
         recorder,
+        Arc::new(OfflineBroker),
         capabilities,
         HostServices::new(),
-    );
-    harness.set_gateway(GatewayBinding {
-        base_url: "http://127.0.0.1:9".to_owned(),
-        key: "k".to_owned(),
-        generation: 1,
-    });
-    harness
+    )
 }
 
 /// [`unbound_harness_over`] a fresh [`MemoryRecorder`] and user input.
@@ -195,7 +196,7 @@ async fn wait_for(session: &Session, state: SessionState) {
 }
 
 #[tokio::test]
-async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
+async fn an_unknown_agent_is_refused_at_launch() {
     let dir = tempfile::tempdir().unwrap();
     let harness = harness(dir.path());
     let error = harness
@@ -207,22 +208,6 @@ async fn an_unknown_agent_and_an_unbound_gateway_are_refused_at_launch() {
         .await
         .expect_err("a path-shaped name is not a discovered agent");
     assert!(matches!(error, LaunchError::UnknownAgent { .. }), "{error}");
-
-    let unbound = Harness::new(
-        harness.config().clone(),
-        Arc::new(MemoryRecorder::new()),
-        user_input_registry(),
-        HostServices::new(),
-    );
-    let error = unbound
-        .launch(LaunchRequest {
-            agent: "asks".to_owned(),
-            args: String::new(),
-            input_text: None,
-        })
-        .await
-        .expect_err("no gateway means no model round could ever complete");
-    assert!(matches!(error, LaunchError::GatewayUnusable), "{error}");
 }
 
 #[tokio::test]
@@ -414,9 +399,8 @@ async fn a_catalog_with_different_models_retires_the_run() {
     assert_eq!(session.unresolved_waits(), vec![first_token.clone()]);
 
     // Different models: the frozen bindings are stale, so the run is
-    // retired and the program relaunched under the new catalog. The entry
-    // still omits `id`, so the relaunch binds no model and never
-    // contacts the gateway.
+    // retired and the program relaunched under the new catalog. The
+    // offline broker lists no model, so the relaunch binds none.
     harness.set_catalog(CatalogBinding {
         generation: 3,
         models: vec![serde_json::json!({ "kind": "chat", "description": "other" })],

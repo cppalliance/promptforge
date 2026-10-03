@@ -10,9 +10,14 @@ use std::time::Duration;
 use harness::capability::HostServices;
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::{
-    CatalogBinding, GatewayBinding, Harness, HarnessConfig, LaunchRequest, SessionState,
+    BoxFuture, CatalogBinding, Harness, HarnessConfig, InferenceBroker, LaunchRequest, OnDelta,
+    SessionState,
 };
+use harness_gateway_client::{CompletionError, CompletionErrorKind};
 use harness_web::{SEARCH_PROVIDER, TOKIO_RUNTIME};
+use promptforge::model::{
+    Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
+};
 use workshop_registry::Registry;
 
 use super::{capabilities, services};
@@ -22,9 +27,30 @@ const BROWSES: &str = "---\nname: browses\ndescription: needs web\npromptforge: 
     capabilities:\n  - promptforge/web\n---\n\n\
     # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n";
 
+/// Lists no model and refuses every round as `Unavailable`, so a launch
+/// binds no model and nothing is fetched.
+struct OfflineBroker;
+
+impl InferenceBroker for OfflineBroker {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        Box::pin(async { Ok(ModelCatalog::empty()) })
+    }
+
+    fn chat(
+        &self,
+        _binding: ModelBinding,
+        _messages: Vec<Message>,
+        _tools: Vec<ToolSchema>,
+        _options: CompletionOptions,
+        _on_delta: Option<OnDelta>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        let kind = CompletionErrorKind::Unavailable;
+        Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+    }
+}
+
 /// A Harness over the server's capabilities and `services`, with `browses`
-/// discoverable, a usable but never contacted gateway, and a catalog whose
-/// one model has no id, so a launch resolves no model and fetches nothing.
+/// discoverable, the offline broker, and a usable catalog.
 fn harness_over(dir: &Path, services: HostServices, recorder: Arc<MemoryRecorder>) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).expect("the agents directory creates");
@@ -34,14 +60,10 @@ fn harness_over(dir: &Path, services: HostServices, recorder: Arc<MemoryRecorder
             agents_path: agents,
         },
         recorder,
+        Arc::new(OfflineBroker),
         capabilities(),
         services,
     );
-    harness.set_gateway(GatewayBinding {
-        base_url: "http://127.0.0.1:9".to_owned(),
-        key: "k".to_owned(),
-        generation: 1,
-    });
     harness.set_catalog(CatalogBinding {
         generation: 1,
         models: vec![serde_json::json!({ "kind": "chat" })],

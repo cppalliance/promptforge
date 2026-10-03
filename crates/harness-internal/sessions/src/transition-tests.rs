@@ -16,17 +16,16 @@ fn completed(run: RunId, result: RunCompletion) -> SupervisorEvent {
     SupervisorEvent::RunCompleted { run, result }
 }
 
-fn relaunch(run: RunId, catalog: u64, gateway: u64) -> SupervisorEffect {
+fn relaunch(run: RunId, catalog: u64) -> SupervisorEffect {
     SupervisorEffect::Relaunch(RelaunchEffect {
         run,
         catalog_generation: catalog,
-        gateway_generation: gateway,
         history: HistoryEffect::Preserve,
     })
 }
 
-fn apply(gateway: u64, events: &[SupervisorEvent]) -> (SupervisorState, Vec<SupervisorEffect>) {
-    let mut state = SupervisorState::new(gateway);
+fn apply(events: &[SupervisorEvent]) -> (SupervisorState, Vec<SupervisorEffect>) {
+    let mut state = SupervisorState::new();
     let effects = events
         .iter()
         .map(|event| {
@@ -47,7 +46,7 @@ struct Scenario {
 
 fn assert_scenarios(scenarios: Vec<Scenario>) {
     for scenario in scenarios {
-        let (state, effects) = apply(7, &scenario.events);
+        let (state, effects) = apply(&scenario.events);
         assert_eq!(effects, scenario.effects, "{}", scenario.name);
         assert_eq!(state.phase, scenario.phase, "{}", scenario.name);
     }
@@ -57,17 +56,12 @@ fn assert_scenarios(scenarios: Vec<Scenario>) {
 fn transition_table_covers_wait_cancel_and_relaunch_effects() {
     assert_scenarios(vec![
         Scenario {
-            name: "delayed catalog follows the latest gateway",
+            name: "a delayed catalog launches on its first usable generation",
             events: vec![
                 catalog(1, CatalogDisposition::Unavailable),
-                SupervisorEvent::GatewayGeneration(8),
                 catalog(2, CatalogDisposition::Retained),
             ],
-            effects: vec![
-                SupervisorEffect::Wait(WaitFor::Catalog),
-                SupervisorEffect::Wait(WaitFor::Catalog),
-                relaunch(RUN_1, 2, 8),
-            ],
+            effects: vec![SupervisorEffect::Wait(WaitFor::Catalog), relaunch(RUN_1, 2)],
             phase: Phase::Running,
         },
         Scenario {
@@ -79,10 +73,10 @@ fn transition_table_covers_wait_cancel_and_relaunch_effects() {
                 completed(RUN_1, RunCompletion::Interrupted),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Cancel(CancelOrigin::Catalog),
                 SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-                relaunch(RUN_2, 3, 7),
+                relaunch(RUN_2, 3),
             ],
             phase: Phase::Running,
         },
@@ -98,13 +92,13 @@ fn transition_table_covers_wait_cancel_and_relaunch_effects() {
                 catalog(4, CatalogDisposition::Retained),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Preserve(PreserveReason::CurrentRun),
                 SupervisorEffect::Wait(WaitFor::TerminalSettlement),
                 SupervisorEffect::Wait(WaitFor::TerminalSettlement),
                 SupervisorEffect::Cancel(CancelOrigin::Catalog),
                 SupervisorEffect::Wait(WaitFor::Catalog),
-                relaunch(RUN_2, 4, 7),
+                relaunch(RUN_2, 4),
             ],
             phase: Phase::Running,
         },
@@ -123,32 +117,10 @@ fn transition_table_covers_preservation_and_immediate_retirement() {
                 SupervisorEvent::TerminalSettlement(RUN_1),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Preserve(PreserveReason::CurrentRun),
                 SupervisorEffect::Preserve(PreserveReason::CurrentRun),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-            ],
-            phase: Phase::Running,
-        },
-        Scenario {
-            name: "gateway replacement coalesces the latest retained catalog",
-            events: vec![
-                catalog(1, CatalogDisposition::Retained),
-                SupervisorEvent::AcceptedInput(RUN_1),
-                catalog(2, CatalogDisposition::Replacement),
-                catalog(3, CatalogDisposition::Retained),
-                SupervisorEvent::GatewayGeneration(8),
-                SupervisorEvent::TerminalSettlement(RUN_1),
-                completed(RUN_1, RunCompletion::Interrupted),
-            ],
-            effects: vec![
-                relaunch(RUN_1, 1, 7),
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-                SupervisorEffect::Wait(WaitFor::TerminalSettlement),
-                SupervisorEffect::Wait(WaitFor::TerminalSettlement),
-                SupervisorEffect::Cancel(CancelOrigin::Gateway),
-                SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-                relaunch(RUN_2, 3, 8),
             ],
             phase: Phase::Running,
         },
@@ -160,9 +132,9 @@ fn transition_table_covers_preservation_and_immediate_retirement() {
                 completed(RUN_1, RunCompletion::Interrupted),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Cancel(CancelOrigin::Operator),
-                relaunch(RUN_2, 1, 7),
+                relaunch(RUN_2, 1),
             ],
             phase: Phase::Running,
         },
@@ -179,7 +151,7 @@ fn transition_table_covers_terminal_close_and_stale_events() {
                 completed(RUN_1, RunCompletion::Completed),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Close(CloseReason::RunCompleted),
             ],
             phase: Phase::Closed,
@@ -191,7 +163,7 @@ fn transition_table_covers_terminal_close_and_stale_events() {
                 completed(RUN_1, RunCompletion::Failed),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Close(CloseReason::RunFailed),
             ],
             phase: Phase::Closed,
@@ -211,20 +183,18 @@ fn transition_table_covers_terminal_close_and_stale_events() {
             phase: Phase::Closed,
         },
         Scenario {
-            name: "stale run events and current gateway preserve ownership",
+            name: "stale run events preserve ownership",
             events: vec![
                 catalog(1, CatalogDisposition::Retained),
                 SupervisorEvent::AcceptedInput(RunId(99)),
                 SupervisorEvent::TerminalSettlement(RunId(99)),
                 completed(RunId(99), RunCompletion::Interrupted),
-                SupervisorEvent::GatewayGeneration(7),
             ],
             effects: vec![
-                relaunch(RUN_1, 1, 7),
+                relaunch(RUN_1, 1),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
                 SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
             ],
             phase: Phase::Running,
         },
@@ -243,7 +213,7 @@ fn deferred_catalog_settlement_cancels_and_relaunches_exactly_once() {
         completed(RUN_1, RunCompletion::Interrupted),
         completed(RUN_1, RunCompletion::Interrupted),
     ];
-    let (state, effects) = apply(7, &events);
+    let (state, effects) = apply(&events);
     assert_eq!(
         effects
             .iter()
@@ -268,13 +238,11 @@ fn deferred_catalog_settlement_cancels_and_relaunches_exactly_once() {
 fn overlapping_retirement_causes_cancel_only_the_owned_run() {
     let events = [
         catalog(1, CatalogDisposition::Retained),
-        SupervisorEvent::GatewayGeneration(8),
-        SupervisorEvent::GatewayGeneration(9),
         SupervisorEvent::OperatorCancellation,
         catalog(2, CatalogDisposition::Replacement),
         completed(RUN_1, RunCompletion::Interrupted),
     ];
-    let (state, effects) = apply(7, &events);
+    let (state, effects) = apply(&events);
     assert_eq!(
         effects
             .iter()
@@ -285,8 +253,8 @@ fn overlapping_retirement_causes_cancel_only_the_owned_run() {
     );
     assert_eq!(
         effects.last(),
-        Some(&relaunch(RUN_2, 2, 9)),
-        "the one replacement consumes the latest catalog and Gateway generations"
+        Some(&relaunch(RUN_2, 2)),
+        "the one replacement consumes the latest catalog generation"
     );
     assert_eq!(state.active_run, Some(RUN_2));
 }
@@ -303,7 +271,7 @@ fn terminal_settlement_is_scoped_to_the_run_that_accepted_input() {
         SupervisorEvent::TerminalSettlement(RUN_2),
         SupervisorEvent::TerminalSettlement(RUN_2),
     ];
-    let (state, effects) = apply(7, &events);
+    let (state, effects) = apply(&events);
 
     assert_eq!(
         effects[5],
@@ -331,7 +299,7 @@ fn close_effect_is_emitted_exactly_once() {
         completed(RUN_1, RunCompletion::Interrupted),
         completed(RUN_1, RunCompletion::Completed),
     ];
-    let (state, effects) = apply(7, &events);
+    let (state, effects) = apply(&events);
 
     assert_eq!(
         effects

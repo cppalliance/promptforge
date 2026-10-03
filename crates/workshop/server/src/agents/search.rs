@@ -2,7 +2,7 @@
 //! call runs through the current Gateway generation's web search relay.
 //!
 //! The provider holds the server's [`Registry`] and reads the gateway
-//! handles through it on every search, as `push_bindings` does, so a
+//! handles through it on every search, as the inference broker does, so a
 //! replaced gateway serves the next search. It keeps the client of the
 //! last generation it searched under. The paths into `harness_gateway_client`
 //! stay qualified, because `workshop_gateway` has a `GatewayClient` too.
@@ -15,7 +15,7 @@ use harness_web::{
 use workshop_gateway::GatewayHandles;
 use workshop_registry::Registry;
 
-use super::bindings::gateway_binding;
+use super::gateway::UsableGateway;
 
 /// The message a search fails with when no usable Gateway client exists,
 /// so no endpoint or key detail reaches the model.
@@ -51,21 +51,16 @@ impl GatewaySearchProvider {
         if !handles.health().is_reachable() {
             return Err(no_gateway());
         }
-        let snapshot = handles.binding().snapshot();
+        let gateway = UsableGateway::read(&handles).ok_or_else(no_gateway)?;
         // A poisoned lock holds a pair written whole by one store.
         let mut cached = self.cached.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((generation, client)) = cached.as_ref()
-            && *generation == snapshot.generation()
+            && *generation == gateway.generation
         {
             return Ok(client.clone());
         }
-        let binding = gateway_binding(&snapshot);
-        let endpoint = harness_gateway_client::GatewayEndpoint::new(&binding.api_root())
-            .map_err(|_| no_gateway())?;
-        let key =
-            harness_gateway_client::SecretString::new(binding.key).map_err(|_| no_gateway())?;
-        let client = harness_gateway_client::GatewaySearch::new(endpoint, key);
-        *cached = Some((binding.generation, client.clone()));
+        let client = harness_gateway_client::GatewaySearch::new(gateway.endpoint, gateway.key);
+        *cached = Some((gateway.generation, client.clone()));
         Ok(client)
     }
 }

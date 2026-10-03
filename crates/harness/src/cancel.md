@@ -17,15 +17,26 @@ use harness::cancel::{self, CancelHandle};
 use harness::Session;
 # use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{CatalogBinding, GatewayBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
+# use harness::{CatalogBinding, Harness, HarnessConfig, HostSnapshot, LaunchRequest, WaitFrame};
 # use std::error::Error;
 # use std::sync::Arc;
 # fn desk() -> Harness {
+#     use harness::{BoxFuture, InferenceBroker, OnDelta};
+#     use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+#     struct Offline;
+#     impl InferenceBroker for Offline {
+#         fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#             Box::pin(async { Ok(ModelCatalog::empty()) })
+#         }
+#         fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#             let kind = CompletionErrorKind::Unavailable;
+#             Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#         }
+#     }
 #     let mut capabilities = CapabilityRegistry::new();
 #     capabilities.register(Arc::new(UserInput::new())).expect("an empty registry takes user input");
 #     let config = HarnessConfig { agents_path: "desk/agents".into() };
-#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, HostServices::new());
-#     harness.set_gateway(GatewayBinding { base_url: "http://127.0.0.1:8080".into(), key: "desk-key".into(), generation: 1 });
+#     let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, HostServices::new());
 #     harness.set_catalog(CatalogBinding { generation: 1, models: vec![[("id", "stub-model")].into_iter().collect()] });
 #     harness.set_host(HostSnapshot { selected_model: Some("stub-model".into()), ..HostSnapshot::default() });
 #     harness
@@ -85,7 +96,7 @@ async fn stop_on_ctrl_c() -> Result<(), Box<dyn Error>> {
 assert!(cancel::current().is_none() && !cancel::is_cancelled());
 ````
 
-The doc test wraps this block in its own `main` and never calls `desk_loop` or `stop_on_ctrl_c`, which need the main page's stub model server at `http://127.0.0.1:8080`, so only step 6's `assert!` runs.
+The doc test wraps this block in its own `main` and never calls `desk_loop` or `stop_on_ctrl_c`, so only step 6's `assert!` runs. The hidden `desk` builds the Harness on an offline broker that lists no model and refuses every round, and counting a finished reply needs a broker that answers.
 
 1. Step 1 defines `desk_loop`, which races each event from [`Session::subscribe_events`](crate::Session::subscribe_events) against [`wait_cancelled`] in [`tokio::select!`](https://docs.rs/tokio/latest/tokio/macro.select.html), and returns when the wait completes. Each [`SessionEvent`](crate::SessionEvent) carries the event as JSON in its `event` field, and a `kind` of `assistant_reply` marks one finished model answer, so the loop counts finished replies. The loop takes no flag, yet reaches the installed one, and stops only between events.
 2. Step 2 makes one flag with [`CancelHandle::new`], the same as [`Default`], and a clone for the Ctrl-C task. Cancelling any clone cancels them all.

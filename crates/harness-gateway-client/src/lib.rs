@@ -1,10 +1,15 @@
 //! harness-gateway-client - the standard way a Host talks to the
-//! PromptForge Gateway: the HTTP client that sends a `Chat` effect's round
-//! to the Gateway and fetches its model catalog, and the OpenAI
-//! chat-completions wire code under it that turns the round into a
-//! request body, a streamed reply into a
-//! [`Completion`](promptforge::model::Completion), and a failed response
-//! into the [`CompletionError`] the round carries.
+//! PromptForge Gateway: the inference broker a Host hands the Harness, the
+//! HTTP client that sends a `Chat` effect's round to the Gateway and
+//! fetches its model catalog, and the OpenAI chat-completions wire code
+//! under it that turns the round into a request body, a streamed reply
+//! into a [`Completion`](promptforge::model::Completion), and a failed
+//! response into the [`CompletionError`] the round carries.
+//!
+//! [`GatewayBroker`] is the [`harness::InferenceBroker`] a Gateway Host
+//! passes to `Harness::new`: it runs every model round on a
+//! [`GatewayClient`] under the Engine's default run limits and lists the
+//! Gateway's models through [`fetch_model_catalog`].
 //!
 //! [`GatewayClient`] speaks the always-streaming `/chat/completions` SSE
 //! shape to one Gateway URL with, usually, the Gateway's shared bearer
@@ -34,7 +39,7 @@
 //! ## Invariants
 //!
 //! - Family: Harness, at the `crates/` root beside `harness`; may depend
-//!   on: `promptforge` and third-party crates only. Never on `harness` or
+//!   on: `promptforge`, `harness`, and third-party crates only. Never on
 //!   any `crates/harness-internal` crate. `cargo test -p build-xtask`
 //!   enforces the product and container boundaries.
 //! - Every `Completion` and `ToolCall` is built through the public
@@ -51,6 +56,7 @@
 //! - Every file in this crate stays under 500 lines; split first, then
 //!   edit.
 
+mod broker;
 mod catalog;
 mod config;
 mod failure;
@@ -58,6 +64,7 @@ mod search;
 mod transport;
 mod wire;
 
+pub use broker::GatewayBroker;
 pub use catalog::fetch_model_catalog;
 pub use config::GatewayConfigError;
 pub use config::GatewayEndpoint;

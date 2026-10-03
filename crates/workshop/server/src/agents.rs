@@ -9,12 +9,14 @@
 //! Agent sessions run in the Harness. The composition root constructs a
 //! [`Harness`] from `harness` and registers it like every other
 //! subsystem handle; this module reaches it through the registry and opens
-//! every session through it. Everything the Harness knows about the server
+//! every session through it. The Harness reaches the gateway only through
+//! the server's inference broker ([`broker`]), which follows the live
+//! gateway binding. Everything else the Harness knows about the server
 //! arrives as data pushed through its public API ([`bindings`]): the
-//! gateway endpoint and bearer, the chat-capable catalog, and the Host
-//! snapshot (the menu's selection and the workspace's granted roots).
-//! Status-bar reporting stays in the server (`status`): a per-session
-//! reporter derives it from the session's events, deltas, and error reports.
+//! chat-capable catalog and the Host snapshot (the menu's selection and
+//! the workspace's granted roots). Status-bar reporting stays in the
+//! server (`status`): a per-session reporter derives it from the session's
+//! events, deltas, and error reports.
 //!
 //! **Registry carve-out.** Sessions survive socket disconnect and sockets
 //! attach and detach (`socket`), so the Harness keeps the session table
@@ -23,6 +25,8 @@
 //! socket; an agent session is longer-lived than any socket on purpose.
 
 mod bindings;
+mod broker;
+mod gateway;
 pub(crate) mod relay;
 mod search;
 pub(crate) mod socket;
@@ -44,6 +48,8 @@ use workshop_support::{Config, ReconnectBackoff};
 #[cfg(feature = "test-fixtures")]
 pub(crate) use bindings::forward as forward_bindings;
 use bindings::push_bindings;
+use broker::WorkshopBroker;
+use gateway::usable_gateway;
 use search::GatewaySearchProvider;
 pub(crate) use state::{SessionsState, register, register_tasks};
 
@@ -51,16 +57,16 @@ pub(crate) use state::{SessionsState, register, register_tasks};
 /// the `runs.db` every agent session's runs are recorded in.
 const HARNESS_STATE_DIR: &str = "harness";
 
-/// The Harness every agent session runs in, built for `config` with the
-/// server's current state already pushed through its public API: the
-/// gateway endpoint and bearer, the chat catalog, and the Host snapshot,
-/// each read through `registry` from the subsystems registered before it.
-/// Its capabilities are [`capabilities`] and its services
-/// [`services`]. The composition root registers the returned handle and
-/// the forwarder task ([`register_tasks`]) that keeps the bindings current
-/// from the buses once the server serves. Nothing touches the filesystem
-/// here: the run log opens under the state directory when the first run
-/// starts.
+/// The Harness every agent session runs in, built for `config` over the
+/// server's inference broker, which reaches the gateway `registry` holds,
+/// with the server's current state already pushed through its public API:
+/// the chat catalog and the Host snapshot, each read through `registry`
+/// from the subsystems registered before it. Its capabilities are
+/// [`capabilities`] and its services [`services`]. The composition root
+/// registers the returned handle and the forwarder task
+/// ([`register_tasks`]) that keeps the bindings current from the buses
+/// once the server serves. Nothing touches the filesystem here: the run
+/// log opens under the state directory when the first run starts.
 pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> {
     let harness = Arc::new(Harness::new(
         HarnessConfig {
@@ -69,6 +75,7 @@ pub(crate) fn harness_for(config: &Config, registry: &Registry) -> Arc<Harness> 
         Arc::new(TursoRecorder::new(
             config.server.state_dir.join(HARNESS_STATE_DIR),
         )),
+        Arc::new(WorkshopBroker::new(registry.clone())),
         capabilities(),
         services(registry),
     ));
@@ -162,8 +169,8 @@ impl AgentSessions {
             .map_or_else(Vec::new, |harness| harness.discover())
     }
 
-    /// Pushes the server's current gateway, catalog, and Host state into
-    /// the Harness, so the next run the Harness prepares reads them.
+    /// Pushes the server's current catalog and Host state into the
+    /// Harness, so the next run the Harness prepares reads them.
     pub(crate) fn sync_bindings(&self) {
         if let Some(harness) = self.harness() {
             push_bindings(&self.inner.registry, &harness);
@@ -177,15 +184,22 @@ impl AgentSessions {
     ///
     /// The server's bindings are pushed first, so the launch reads the
     /// current selection and roots even when the forwarder task has not
-    /// caught up with the latest replacement.
+    /// caught up with the latest replacement. A launch with no usable
+    /// gateway is refused before it reaches the Harness, since its every
+    /// model round would fail.
     ///
     /// # Errors
     /// Returns [`LaunchRefusal::Unavailable`] when no Harness is
-    /// registered, and the Harness's own [`LaunchError`] otherwise: an
-    /// unknown agent, an unusable gateway, or unreadable agent source.
+    /// registered, [`LaunchRefusal::GatewayUnusable`] when no gateway is
+    /// registered or its URL or key cannot build, and the Harness's own
+    /// [`LaunchError`] otherwise: an unknown agent or unreadable agent
+    /// source.
     pub(crate) async fn launch(&self, name: &str) -> Result<Session, LaunchRefusal> {
         let harness = self.harness().ok_or(LaunchRefusal::Unavailable)?;
         push_bindings(&self.inner.registry, &harness);
+        if usable_gateway(&self.inner.registry).is_none() {
+            return Err(LaunchRefusal::GatewayUnusable);
+        }
         let session = harness
             .launch(LaunchRequest {
                 agent: name.to_owned(),
@@ -244,6 +258,10 @@ pub(crate) enum LaunchRefusal {
     /// The composition root registered no Harness.
     #[error("agent sessions are unavailable")]
     Unavailable,
+    /// No gateway is registered, or the registered gateway's URL or key
+    /// cannot build, so no agent could complete a model round.
+    #[error("agent sessions need a usable gateway binding; check the gateway base URL and key")]
+    GatewayUnusable,
     /// The Harness refused the launch.
     #[error(transparent)]
     Refused(#[from] LaunchError),

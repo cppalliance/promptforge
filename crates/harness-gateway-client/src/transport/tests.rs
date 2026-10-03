@@ -10,16 +10,21 @@ mod env;
 mod limits;
 mod streaming;
 
-/// Serves `app` on a loopback port and returns a keyed client pointed at
-/// its `/v1` root.
-pub(crate) async fn client_for(app: axum::Router) -> GatewayClient {
+/// Serves `app` on a loopback port and returns its `/v1` root.
+pub(crate) async fn serve(app: axum::Router) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
+    format!("http://{addr}/v1")
+}
+
+/// Serves `app` on a loopback port and returns a keyed client pointed at
+/// its `/v1` root.
+pub(crate) async fn client_for(app: axum::Router) -> GatewayClient {
     GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        GatewayEndpoint::new(&serve(app).await).expect("valid test endpoint"),
         SecretString::new("tok").expect("non-empty test key"),
     )
 }
@@ -36,13 +41,12 @@ pub(crate) fn sse_body(events: &[Value]) -> String {
     body
 }
 
-/// A client pointed at a mock gateway that answers every completion with
-/// the given SSE body.
-pub(crate) async fn sse_client(body: String) -> GatewayClient {
+/// A mock gateway that answers every completion with the given SSE body.
+pub(crate) fn sse_app(body: String) -> axum::Router {
     use axum::Router;
     use axum::routing::post;
 
-    let app = Router::new().route(
+    Router::new().route(
         "/v1/chat/completions",
         post(move || {
             let body = body.clone();
@@ -53,8 +57,13 @@ pub(crate) async fn sse_client(body: String) -> GatewayClient {
                 )
             }
         }),
-    );
-    client_for(app).await
+    )
+}
+
+/// A client pointed at a mock gateway that answers every completion with
+/// the given SSE body.
+pub(crate) async fn sse_client(body: String) -> GatewayClient {
+    client_for(sse_app(body)).await
 }
 
 /// One streamed chunk with a content fragment.

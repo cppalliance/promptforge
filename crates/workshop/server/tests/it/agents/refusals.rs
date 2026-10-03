@@ -1,7 +1,32 @@
 //! Protocol refusals over `/agents/ws`: every malformed or out-of-turn
-//! frame is an error frame, and the socket survives its refusals.
+//! frame is an error frame, the socket survives its refusals, and a launch
+//! with no usable gateway is refused.
 
 use super::*;
+
+#[tokio::test]
+async fn a_launch_with_no_usable_gateway_is_refused_with_the_refusal_text() {
+    let (base, _dir, state) = spawn_agent_server().await;
+    replace_fixture_gateway(&gateway_updater(&state), "http://127.0.0.1:9", "")
+        .expect("a keyless replacement still publishes");
+    let mut socket = connect(&base).await;
+
+    socket
+        .send_json(&json!({ "type": "launch", "agent": "echo" }))
+        .await;
+    let frame = socket
+        .recv_until(Duration::from_secs(10), |frame| frame["type"] == "error")
+        .await;
+    assert!(
+        frame["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(
+                "agent sessions need a usable gateway binding; check the gateway base URL and key"
+            )),
+        "a gateway with an empty key refuses the launch: {frame}"
+    );
+    socket.close().await;
+}
 
 #[tokio::test]
 async fn refusals_are_error_frames_and_the_socket_survives() {

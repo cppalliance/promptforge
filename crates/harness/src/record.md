@@ -23,6 +23,18 @@ use harness::{Harness, HarnessConfig};
 use std::error::Error;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
+# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 # #[tokio::main(flavor = "current_thread")]
 # async fn main() -> Result<(), Box<dyn Error>> {
 
@@ -69,7 +81,7 @@ impl RunRecorder for DeskRecorder {
 let recorder = Arc::new(DeskRecorder::default());
 let shared: Arc<dyn RunRecorder> = recorder.clone();
 let config = HarnessConfig { agents_path: "desk/agents".into() };
-let harness = Harness::new(config, shared, CapabilityRegistry::new(), HostServices::new());
+let harness = Harness::new(config, shared, Arc::new(Offline), CapabilityRegistry::new(), HostServices::new());
 assert_eq!(harness.discover(), ["chat"]);
 
 // 6. Call the recorder the way the Harness does: begin, append, end.
@@ -103,7 +115,7 @@ assert_eq!(
 2. Step 2 implements `begin_run`. It receives a [`RunMeta`], what the Harness knows when a run starts, and returns the [`RunId`] the run will carry in every later call. The recorder picks the number, so a database can hand out its own row ids.
 3. Step 3 implements `append`, which receives one [`Record`] for every effect the Engine issues, every answer the Harness gives it, and every event it reports. `desk` keeps only the kind. A real store would keep the `payload`, which is JSON.
 4. Step 4 implements `end_run`, which receives how the run ended as a [`RunOutcome`].
-5. Step 5 builds the Harness with `Arc<dyn RunRecorder>` as its second argument, between the config and the capability registry and services, here both empty, and keeps a typed handle to read the store back. [`Harness::new`](crate::Harness::new) touches no file, and neither does a launch, because the recorder is yours.
+5. Step 5 builds the Harness with `Arc<dyn RunRecorder>` as its second argument, between the config and the broker, here `Offline`, an offline broker the example defines in hidden lines. The capability registry and services follow, here both empty. Step 5 keeps a typed handle to read the store back. [`Harness::new`](crate::Harness::new) touches no file, and neither does a launch, because the recorder is yours.
 6. Step 6 calls the recorder by hand in the order the Harness does, and asserts the three lines. The hand-written calls stand in for a launched run, which needs a live model.
 
 The Harness awaits each call before it goes on, so the order you see is the order the run took:
@@ -130,6 +142,18 @@ use harness::record::{MemoryRecorder, RunId, RunMeta, RunOutcome, RunRecorder};
 use harness::{Harness, HarnessConfig};
 use std::error::Error;
 use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 # #[tokio::main(flavor = "current_thread")]
 # async fn main() -> Result<(), Box<dyn Error>> {
 
@@ -137,7 +161,7 @@ use std::sync::Arc;
 let recorder = Arc::new(MemoryRecorder::new());
 let shared: Arc<dyn RunRecorder> = recorder.clone();
 let config = HarnessConfig { agents_path: "desk/agents".into() };
-let harness = Harness::new(config, shared, CapabilityRegistry::new(), HostServices::new());
+let harness = Harness::new(config, shared, Arc::new(Offline), CapabilityRegistry::new(), HostServices::new());
 
 // 2. Summarize runs by the ids a session reports through `Session::run_ids`.
 fn summary(recorder: &MemoryRecorder, runs: &[RunId]) -> Vec<String> {
@@ -202,6 +226,18 @@ use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig, SessionId};
 use std::error::Error;
 use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 
 // desk's client comes back: read what its session sent while the client was away.
 async fn catch_up(
@@ -226,7 +262,7 @@ async fn catch_up(
 
 // 5. A Harness has no session for an id it never issued.
 let config = HarnessConfig { agents_path: "desk/agents".into() };
-let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), CapabilityRegistry::new(), HostServices::new());
+let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), CapabilityRegistry::new(), HostServices::new());
 assert!(harness.session(&SessionId::new("never-issued")).is_none());
 ````
 

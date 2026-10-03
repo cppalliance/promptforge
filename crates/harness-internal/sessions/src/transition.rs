@@ -8,8 +8,6 @@ pub enum CancelOrigin {
     Operator,
     /// A usable catalog generation replaced the run's frozen bindings.
     Catalog,
-    /// The Host published a new Gateway generation.
-    Gateway,
 }
 
 /// One run's terminal result.
@@ -55,8 +53,6 @@ pub enum SupervisorEvent {
         /// Whether the frozen run can retain its bindings.
         disposition: CatalogDisposition,
     },
-    /// The atomically published Gateway generation changed.
-    GatewayGeneration(u64),
     /// The operator cancelled the current turn.
     OperatorCancellation,
     /// A durable input event resumed this run.
@@ -103,8 +99,6 @@ pub struct RelaunchEffect {
     pub run: RunId,
     /// Catalog generation frozen by the replacement.
     pub catalog_generation: u64,
-    /// Gateway generation frozen by the replacement.
-    pub gateway_generation: u64,
     /// Event-log treatment across replacement.
     pub history: HistoryEffect,
 }
@@ -153,14 +147,13 @@ pub struct SupervisorState {
     catalog_generation: Option<u64>,
     observed_catalog_generation: Option<u64>,
     catalog_retirement_pending: bool,
-    gateway_generation: u64,
     accepted_run: Option<RunId>,
 }
 
 impl SupervisorState {
     /// Starts supervision before a usable chat catalog exists.
     #[must_use]
-    pub fn new(gateway_generation: u64) -> Self {
+    pub fn new() -> Self {
         Self {
             phase: Phase::WaitingForCatalog,
             active_run: None,
@@ -168,9 +161,14 @@ impl SupervisorState {
             catalog_generation: None,
             observed_catalog_generation: None,
             catalog_retirement_pending: false,
-            gateway_generation,
             accepted_run: None,
         }
+    }
+}
+
+impl Default for SupervisorState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -195,7 +193,6 @@ pub fn transition(state: SupervisorState, event: SupervisorEvent) -> SupervisorT
             generation,
             disposition,
         } => catalog_changed(state, generation, disposition),
-        SupervisorEvent::GatewayGeneration(generation) => gateway_changed(state, generation),
         SupervisorEvent::OperatorCancellation => operator_cancelled(state),
         SupervisorEvent::AcceptedInput(run) => input_accepted(state, run),
         SupervisorEvent::TerminalSettlement(run) => turn_settled(state, run),
@@ -248,31 +245,6 @@ fn catalog_changed(
                 }
             }
         },
-        Phase::Cancelling => changed(
-            state,
-            SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-        ),
-        Phase::Closed => changed(state, SupervisorEffect::Preserve(PreserveReason::Closed)),
-    }
-}
-
-fn gateway_changed(mut state: SupervisorState, generation: u64) -> SupervisorTransition {
-    if generation <= state.gateway_generation {
-        let reason = if state.phase == Phase::Cancelling {
-            PreserveReason::CancellationPending
-        } else {
-            PreserveReason::CurrentRun
-        };
-        return changed(state, SupervisorEffect::Preserve(reason));
-    }
-    state.gateway_generation = generation;
-    match state.phase {
-        Phase::WaitingForCatalog => changed(state, SupervisorEffect::Wait(WaitFor::Catalog)),
-        Phase::Running => {
-            state.accepted_run = None;
-            state.phase = Phase::Cancelling;
-            changed(state, SupervisorEffect::Cancel(CancelOrigin::Gateway))
-        }
         Phase::Cancelling => changed(
             state,
             SupervisorEffect::Preserve(PreserveReason::CancellationPending),
@@ -384,7 +356,6 @@ fn relaunch(mut state: SupervisorState) -> SupervisorTransition {
     let effect = RelaunchEffect {
         run,
         catalog_generation,
-        gateway_generation: state.gateway_generation,
         history: HistoryEffect::Preserve,
     };
     changed(state, SupervisorEffect::Relaunch(effect))

@@ -63,6 +63,6 @@ async fn a_harness_whose_registry_lacks_web_refuses_an_agent_requiring_it() {
                 - missing required capability: promptforge/web"
                 .to_owned(),
         }),
-        "a gateway binding adds no web of its own to the Host's registry"
+        "the Harness adds no web of its own to the Host's registry"
     );
 }

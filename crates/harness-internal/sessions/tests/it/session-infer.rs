@@ -1,15 +1,11 @@
-//! The mock-gateway session round trip: a model-backed agent prompt drives
-//! real inference- and chat-origin `assistant_reply` events through the
-//! Harness, and the tool-less infer reproduction pins the reply between the
-//! completed turn and the section chunk success.
+//! The scripted-broker session round trip: a model-backed agent prompt
+//! drives real inference- and chat-origin `assistant_reply` events through
+//! the Harness, and the tool-less infer reproduction pins the reply between
+//! the completed turn and the section chunk success.
 
 use super::*;
 
-use axum::Router;
-use axum::http::header::CONTENT_TYPE;
-use axum::routing::{get, post};
-use harness_runner::spawn::spawn_tagged;
-use harness_runner::test_support::mock_tag;
+use crate::support::ScriptedBroker;
 
 /// A session program that infers once, then chats once: the mixed
 /// model-round sequence the reply-id rule must number in order. The second
@@ -29,70 +25,17 @@ const MIXED: &str = "---\nname: mixed\ndescription: infers then chats\npromptfor
     return inferred .. '|' .. msgs[#msgs].content\n\
     ```\n";
 
-/// The model id the mock gateway advertises and the catalog binds.
+/// The model id the scripted broker lists and the catalog names.
 const MOCK_MODEL: &str = "mock-model";
 
-/// The reply the mock gateway streams for every round.
-const MOCK_REPLY: &str = "from the mock";
-
-/// One round's stream: the reply in one content chunk, then a stop.
-fn reply_stream() -> String {
-    let mut body = String::new();
-    for event in [
-        serde_json::json!({
-            "model": MOCK_MODEL,
-            "choices": [{ "index": 0, "delta": { "content": MOCK_REPLY }, "finish_reason": null }]
-        }),
-        serde_json::json!({
-            "model": MOCK_MODEL,
-            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
-        }),
-    ] {
-        body.push_str("data: ");
-        body.push_str(&event.to_string());
-        body.push_str("\n\n");
-    }
-    body.push_str("data: [DONE]\n\n");
-    body
-}
-
-/// The catalog the mock gateway serves at `GET /v1/models`: the one
-/// inference model the Harness binds its roles to.
-fn catalog_body() -> serde_json::Value {
-    serde_json::json!({
-        "data": [{
-            "id": MOCK_MODEL,
-            "description": "the mock model",
-            "context": 131_072,
-            "thinking": "switchable",
-        }]
-    })
-}
-
-/// Serves the model catalog and a streaming chat completion on a loopback
-/// port, returning the base URL to bind a Harness to.
-async fn mock_gateway() -> String {
-    async fn models() -> axum::Json<serde_json::Value> {
-        axum::Json(catalog_body())
-    }
-    async fn completions() -> ([(axum::http::HeaderName, &'static str); 1], String) {
-        ([(CONTENT_TYPE, "text/event-stream")], reply_stream())
-    }
-    let app = Router::new()
-        .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(completions));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    format!("http://{addr}")
-}
+/// The reply the scripted broker gives every round.
+const MOCK_REPLY: &str = "from the broker";
 
 /// A Harness over a fresh `<dir>/agents` directory holding `name.md` with
-/// `program`, bound to `base_url` with a catalog whose one chat-capable entry
-/// names the mock gateway's model.
-fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness {
+/// `program`, on a scripted broker that lists [`MOCK_MODEL`] alone and
+/// answers [`MOCK_REPLY`], with a catalog whose one chat-capable entry names
+/// that model.
+fn harness_for(dir: &Path, name: &str, program: &str) -> Harness {
     let agents = dir.join("agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(agents.join(format!("{name}.md")), program).unwrap();
@@ -101,14 +44,10 @@ fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness
             agents_path: agents,
         },
         Arc::new(MemoryRecorder::new()),
+        Arc::new(ScriptedBroker::new(&[MOCK_MODEL], MOCK_REPLY, MOCK_MODEL)),
         user_input_registry(),
         HostServices::new(),
     );
-    harness.set_gateway(GatewayBinding {
-        base_url: base_url.to_owned(),
-        key: "k".to_owned(),
-        generation: 1,
-    });
     harness.set_catalog(CatalogBinding {
         generation: 1,
         models: vec![serde_json::json!({ "kind": "chat", "id": MOCK_MODEL })],
@@ -117,8 +56,8 @@ fn harness_for(dir: &Path, base_url: &str, name: &str, program: &str) -> Harness
 }
 
 /// A Harness holding `mixed.md`: [`harness_for`] with [`MIXED`].
-fn mixed_harness(dir: &Path, base_url: &str) -> Harness {
-    harness_for(dir, base_url, "mixed", MIXED)
+fn mixed_harness(dir: &Path) -> Harness {
+    harness_for(dir, "mixed", MIXED)
 }
 
 /// A session program whose only model call is a tool-less `models.infer`:
@@ -131,15 +70,14 @@ const INFERS: &str = "---\nname: infers\ndescription: infers only\npromptforge: 
 
 /// A Harness holding `infers.md` that makes one tool-less infer call and
 /// returns: [`harness_for`] with [`INFERS`].
-fn infer_harness(dir: &Path, base_url: &str) -> Harness {
-    harness_for(dir, base_url, "infers", INFERS)
+fn infer_harness(dir: &Path) -> Harness {
+    harness_for(dir, "infers", INFERS)
 }
 
 #[tokio::test]
 async fn a_mixed_infer_then_chat_session_numbers_each_reply_in_round_order() {
     let dir = tempfile::tempdir().unwrap();
-    let base = mock_gateway().await;
-    let harness = mixed_harness(dir.path(), &base);
+    let harness = mixed_harness(dir.path());
     let session = launch_agent(&harness, "mixed").await;
     let mut waits = session.subscribe_waits();
     let first = required_token(&mut waits).await;
@@ -182,8 +120,7 @@ async fn a_mixed_infer_then_chat_session_numbers_each_reply_in_round_order() {
 #[tokio::test]
 async fn an_infer_reply_settles_the_accepted_turn_so_a_new_catalog_retires_the_run() {
     let dir = tempfile::tempdir().unwrap();
-    let base = mock_gateway().await;
-    let harness = mixed_harness(dir.path(), &base);
+    let harness = mixed_harness(dir.path());
     let session = launch_agent(&harness, "mixed").await;
     let mut waits = session.subscribe_waits();
     let first = required_token(&mut waits).await;
@@ -230,8 +167,7 @@ async fn a_tool_less_infer_reply_sits_between_the_completed_turn_and_the_chunk_s
     // section's chunk success, with the model's text and an infer origin
     // (not a chat turn).
     let dir = tempfile::tempdir().unwrap();
-    let base = mock_gateway().await;
-    let harness = infer_harness(dir.path(), &base);
+    let harness = infer_harness(dir.path());
     let session = launch_agent(&harness, "infers").await;
     wait_for(&session, SessionState::Closed).await;
 
@@ -295,8 +231,7 @@ async fn a_tool_less_infer_reply_sits_between_the_completed_turn_and_the_chunk_s
 #[tokio::test]
 async fn a_transcript_from_any_index_equals_the_live_stream_with_its_reply_stamps() {
     let dir = tempfile::tempdir().unwrap();
-    let base = mock_gateway().await;
-    let harness = mixed_harness(dir.path(), &base);
+    let harness = mixed_harness(dir.path());
     let session = launch_agent(&harness, "mixed").await;
     let mut live = session.subscribe_events();
     let mut waits = session.subscribe_waits();

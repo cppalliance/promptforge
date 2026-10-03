@@ -23,6 +23,18 @@ use harness::record::MemoryRecorder;
 use harness::{Harness, HarnessConfig};
 use std::error::Error;
 use std::sync::Arc;
+# use harness::{BoxFuture, InferenceBroker, OnDelta};
+# use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
+# struct Offline;
+# impl InferenceBroker for Offline {
+#     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+#         Box::pin(async { Ok(ModelCatalog::empty()) })
+#     }
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         let kind = CompletionErrorKind::Unavailable;
+#         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+#     }
+# }
 
 // 1. desk's word limit is a service: an id bound to the type desk provides.
 const WORD_LIMIT: ServiceKey<u32> = ServiceKey::new("com.example.desk/word-limit");
@@ -65,9 +77,9 @@ let mut services = HostServices::new();
 services.provide(&WORD_LIMIT, Arc::new(200))?;
 assert!(services.provides(&WORD_LIMIT.id()));
 
-// 5. Hand both to the Harness, beside the config and the recorder.
+// 5. Hand both to the Harness, beside the config, the recorder, and the broker.
 let config = HarnessConfig { agents_path: "desk/agents".into() };
-let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), capabilities, services);
+let harness = Harness::new(config, Arc::new(MemoryRecorder::new()), Arc::new(Offline), capabilities, services);
 assert_eq!(harness.discover(), ["chat"]);
 # Ok::<(), Box<dyn Error>>(())
 ````
@@ -76,7 +88,7 @@ assert_eq!(harness.discover(), ["chat"]);
 2. Step 2 implements [`Capability`] for `Limits`. [`Capability::needs`] lists the [`ServiceId`] of every service it reads. [`Capability::create`] runs once for each run that declares `com.example.desk/limits`, reads the limit from the [`RunServices`] it is given, and returns a [`Contribution`]. Its `prelude` is Lua every section of the run installs, so the agent reads `desk.word_limit`. A capability can also contribute [`Tool`]s, which the agent binds under `tools:`.
 3. Step 3 registers [`UserInput`], the `promptforge/user-input` capability `chat` declares, and `Limits` under `com.example.desk/limits`. [`CapabilityRegistry::register`] refuses a second capability with the same id, or one whose id differs from a registered one only by `-`, `_`, or `.`, with a [`RegistryError`].
 4. Step 4 provides the limit with [`HostServices::provide`], which refuses an id that is not `namespace/name`, or one already provided, with a [`ServiceError`]. [`HostServices::provides`] confirms the service is there under the key's type.
-5. Step 5 builds the Harness with both. It keeps them for as long as it lives, and every run of every session resolves against them.
+5. Step 5 builds the Harness with both, after the broker, here `Offline`, an offline broker the example defines in hidden lines. It keeps them for as long as it lives, and every run of every session resolves against them.
 
 The Harness supplies one service itself: each session hands its runs the operator's input handler, which `UserInput` reads. You register `UserInput`, and the session does the rest, so an agent that calls `input.ask()` reaches your operator through [`Session::subscribe_waits`](crate::Session::subscribe_waits).
 

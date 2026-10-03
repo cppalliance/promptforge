@@ -1,4 +1,5 @@
-//! The facade's integration suite, written against `harness` paths only.
+//! The facade's integration suite, written against `harness` paths, with
+//! the Engine's model vocabulary through `promptforge`.
 
-mod gateway;
+mod broker;
 mod launch;

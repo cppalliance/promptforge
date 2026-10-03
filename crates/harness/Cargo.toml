@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Harness public API: the surface through which Workshop and other clients configure the Harness, push the gateway binding, and drive agent sessions"
+description = "PromptForge Harness public API: the surface through which Workshop and other clients configure the Harness, supply its inference broker, and drive agent sessions"
 documentation = "https://cppalliance.github.io/promptforge/harness/harness/index.html"
 
 # Every crate that defines a re-exported item: each `pub use` names the
@@ -19,10 +19,12 @@ harness-sessions.workspace = true
 promptforge.workspace = true
 workspace-hack.workspace = true
 
-# The doc examples run a Host on tokio, as a real Host does; the facade's
-# own items name no tokio type.
+# The doc examples and the suite run a Host on tokio, as a real Host
+# does; the facade's own items name no tokio type. The broker suite
+# seeds an agents directory on disk.
 [dev-dependencies]
-tokio = { workspace = true, features = ["signal"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "signal", "time"] }
 
 [lints]
 workspace = true

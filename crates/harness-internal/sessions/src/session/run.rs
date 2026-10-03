@@ -1,8 +1,9 @@
 //! One run of a session's program on the effect loop: resolve the
-//! client's current model, arm the run's cancel flag, build the session's
-//! performers, prepare the run (beginning it at the Host's recorder and
-//! staging the declared input file), drive it to its end, and read the
-//! declared output file once it completes.
+//! client's current model through the Host's broker, arm the run's cancel
+//! flag, prepare the run over the broker and the session's delta callback
+//! (beginning it at the Host's recorder and staging the declared input
+//! file), drive it to its end, and read the declared output file once it
+//! completes.
 //!
 //! Every event the run reports goes through the session core's sink once
 //! the recorder has taken it, so the recorder, the live broadcast, and the
@@ -13,21 +14,16 @@
 
 use std::sync::Arc;
 
-use harness_gateway_client::GatewayClient;
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::performers::OnDelta;
 use harness_runner::prepare::{PrepareError, Services, prepare_source};
 use harness_runner::recorder::{RunOutcome, RunRecorder};
-use promptforge::RunLimits;
 use promptforge::event::Event;
 use promptforge::model::StreamDelta;
 use tokio::sync::mpsc;
 
-use crate::GatewayChatPerformer;
 use crate::discovery::AgentSource;
-use crate::environment::{
-    CatalogBinding, CurrentModelError, GatewayResources, HostSnapshot, current_model,
-};
+use crate::environment::{CurrentModelError, HostSnapshot, current_model};
 use crate::input::SessionInputBroker;
 use crate::transition::RunId;
 
@@ -51,17 +47,11 @@ pub(crate) enum RunFailure {
     Drive(DriveError),
 }
 
-/// What one run needs beyond the session: the frozen bindings the reducer
-/// selected for it.
+/// What one run needs beyond the session: the reducer's identity for it
+/// and the Host state read at launch.
 pub(crate) struct RunInputs {
     /// The reducer's identity for the run.
     pub(crate) run: RunId,
-    /// The gateway generation the run is frozen to.
-    pub(crate) gateway: Arc<GatewayResources>,
-    /// The model client built for that generation.
-    pub(crate) client: GatewayClient,
-    /// The catalog generation the run is frozen to.
-    pub(crate) catalog: Option<CatalogBinding>,
     /// The Host snapshot read at launch.
     pub(crate) host: HostSnapshot,
 }
@@ -72,21 +62,11 @@ pub(crate) async fn run_once(
     core: Arc<SessionCore>,
     inputs: RunInputs,
 ) -> Result<RunOutcome, RunFailure> {
-    let RunInputs {
-        run,
-        gateway,
-        client,
-        catalog,
-        host,
-    } = inputs;
-    let model = current_model(&host, catalog.as_ref(), gateway.binding())
+    let RunInputs { run, host } = inputs;
+    let model = current_model(&host, &*core.broker)
         .await
         .map_err(RunFailure::Model)?;
     let cancel = core.arm_cancel(run);
-    let limits = RunLimits::new();
-    let client = client.with_request_limits(limits.timeout(), limits.response_bytes());
-    let binding = gateway.binding();
-    let broker = GatewayChatPerformer::new(client, binding.api_root(), binding.key.clone());
     let on_delta = delta_callback(core.delta_source.clone());
     let vfs = core.files.run_vfs();
     let recorder: Arc<dyn RunRecorder> = Arc::clone(&core.recorder);
@@ -97,7 +77,7 @@ pub(crate) async fn run_once(
         input_text: core.files.input_text(),
         cancel: cancel.clone(),
         recorder: Arc::clone(&recorder),
-        broker: Arc::new(broker),
+        broker: Arc::clone(&core.broker),
         on_delta,
         input: Some(Arc::new(SessionInputBroker::new(
             Arc::clone(&core.waits),

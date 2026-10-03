@@ -1,40 +1,33 @@
 //! Checkpoint 4: a fixture prompt through `prepare_run` and `drive_run`
-//! with the real chat performer against the axum mock gateway and an
-//! in-memory recorder. The prompt writes to the store, spawns a task, waits
-//! on it, and asks the model once, so the record stream holds two effects
-//! under the main task and a second task's events beside them. The suite
-//! asserts the whole stream: the run's outcome, one answer record per
-//! effect, the `Provenance` fields per task, the payloads the effects
-//! and answers record, and that every recorded event reached the sink.
+//! with a scripted inference broker and an in-memory recorder. The prompt
+//! writes to the store, spawns a task, waits on it, and asks the model
+//! once, so the record stream holds two effects under the main task and a
+//! second task's events beside them. The suite asserts the whole stream:
+//! the run's outcome, one answer record per effect, the `Provenance`
+//! fields per task, the payloads the effects and answers record, and that
+//! every recorded event reached the sink.
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use axum::Router;
-use axum::extract::{Json, State};
-use axum::http::HeaderMap;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::routing::post;
 use harness_capabilities::HostServices;
-use harness_gateway_client::{GatewayClient, GatewayEndpoint, SecretString};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::OnDelta;
 use harness_runner::prepare::{Prepared, Services, prepare_run};
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
-use harness_runner::spawn::spawn_tagged;
-use harness_runner::test_support::mock_tag;
-use harness_sessions::GatewayChatPerformer;
 use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge::model::{ModelDescriptor, ModelId, ThinkingMode};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-/// The reply the mock gateway streams for every round.
-const REPLY: &str = "hello from the mock";
+use crate::support::{Round, ScriptedBroker};
 
-/// The model name the mock gateway's chunks report.
+/// The reply the scripted broker gives every round.
+const REPLY: &str = "hello from the broker";
+
+/// The model name the scripted broker's completions report.
 const SERVED_MODEL: &str = "qwen3-30b";
 
 /// The fixture: the `writer` role parked as the default, a main section
@@ -54,78 +47,6 @@ fn prompt_file(dir: &Path) -> PathBuf {
     let path = dir.join("agent.md");
     std::fs::write(&path, FIXTURE).expect("the fixture prompt is written");
     path
-}
-
-/// One round as the mock gateway saw it: the bearer and the request body.
-type Request = (Option<String>, Value);
-
-/// What the mock gateway saw, in arrival order.
-#[derive(Clone, Default)]
-struct Seen {
-    requests: Arc<Mutex<Vec<Request>>>,
-}
-
-/// Renders `events` as SSE `data:` lines closed by the `[DONE]` sentinel.
-fn sse_body(events: &[Value]) -> String {
-    let mut body = String::new();
-    for event in events {
-        body.push_str("data: ");
-        body.push_str(&event.to_string());
-        body.push_str("\n\n");
-    }
-    body.push_str("data: [DONE]\n\n");
-    body
-}
-
-/// One round's stream: the reply in one content chunk, then a stop.
-fn reply_stream() -> String {
-    sse_body(&[
-        json!({
-            "model": SERVED_MODEL,
-            "choices": [{ "index": 0, "delta": { "content": REPLY }, "finish_reason": null }]
-        }),
-        json!({
-            "model": SERVED_MODEL,
-            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
-        }),
-    ])
-}
-
-/// Serves the mock gateway on a loopback port, spawned under the
-/// Harness's tagged wrapper, and returns a performer keyed for its `/v1`
-/// root beside what it saw.
-async fn mock_gateway() -> (GatewayChatPerformer, Seen) {
-    async fn completions(
-        State(seen): State<Seen>,
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> ([(axum::http::HeaderName, &'static str); 1], String) {
-        let bearer = headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        seen.requests.lock().unwrap().push((bearer, body));
-        ([(CONTENT_TYPE, "text/event-stream")], reply_stream())
-    }
-
-    let seen = Seen::default();
-    let app = Router::new()
-        .route("/v1/chat/completions", post(completions))
-        .with_state(seen.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    spawn_tagged(mock_tag(), async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    let api_root = format!("http://{addr}/v1");
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&api_root).expect("valid test endpoint"),
-        SecretString::new("tok").expect("non-empty test key"),
-    );
-    (
-        GatewayChatPerformer::new(client, api_root, "tok".to_owned()),
-        seen,
-    )
 }
 
 /// The Host's current model: what every declared role binds to.
@@ -241,10 +162,10 @@ fn assert_parse_events_lead_and_the_run_continues_their_sequence(
 }
 
 /// Asserts the effects in loop order (the store write, then the model
-/// round whose messages are `request`'s) and each one's answer payload,
+/// round whose messages are `round`'s) and each one's answer payload,
 /// and returns the main task's id, which both effects name: the child
 /// issued none.
-fn assert_effects_and_answers(records: &[Record], request: &Value) -> String {
+fn assert_effects_and_answers(records: &[Record], round: &Round) -> String {
     let effects = of_kind(records, RecordKind::Effect);
     assert_eq!(effects.len(), 2, "one store effect, one chat effect");
     let store = effects[0];
@@ -258,8 +179,8 @@ fn assert_effects_and_answers(records: &[Record], request: &Value) -> String {
     assert_eq!(chat.payload["Chat"]["tools"], json!([]));
     assert_eq!(
         chat.payload["Chat"]["messages"].as_array().map(Vec::len),
-        request["messages"].as_array().map(Vec::len),
-        "the record's messages are the request's"
+        Some(round.messages.len()),
+        "the record's messages are the round's"
     );
     assert_eq!(
         store.task_id, chat.task_id,
@@ -322,11 +243,7 @@ fn assert_task_columns(records: &[Record], main_task: &str) {
 /// The fixture's preparation services over `recorder`, `broker`, and
 /// `on_delta`, with no capabilities, no Host services, and the bound
 /// model.
-fn services(
-    recorder: &Arc<MemoryRecorder>,
-    broker: GatewayChatPerformer,
-    on_delta: OnDelta,
-) -> Services {
+fn services(recorder: &Arc<MemoryRecorder>, broker: ScriptedBroker, on_delta: OnDelta) -> Services {
     Services {
         registry: None,
         services: HostServices::new(),
@@ -348,7 +265,8 @@ fn services(
 async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     let dir = tempfile::tempdir().unwrap();
     let recorder = Arc::new(MemoryRecorder::new());
-    let (broker, seen) = mock_gateway().await;
+    let broker = ScriptedBroker::new(&[], REPLY, SERVED_MODEL);
+    let rounds = broker.rounds();
     let (deltas, mut delta_rx) = mpsc::unbounded_channel();
     let on_delta: OnDelta = Arc::new(move |delta| {
         let _ = deltas.send(delta);
@@ -393,24 +311,21 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     assert_eq!(meta.session_id, "session-e2e");
     assert_eq!(meta.agent, "end-to-end");
 
-    // The mock gateway saw one round, keyed, for the bound model.
-    let requests = seen.requests.lock().unwrap().clone();
-    assert_eq!(requests.len(), 1, "the one infer is the one round");
-    let (bearer, body) = &requests[0];
-    assert_eq!(bearer.as_deref(), Some("Bearer tok"));
-    assert_eq!(body["model"], "m", "the round names the bound model");
-    let asked = body["messages"]
-        .as_array()
-        .expect("the request includes messages")
-        .iter()
-        .any(|message| {
-            message["content"]
-                .as_str()
-                .is_some_and(|content| content.contains("Ask the model."))
-        });
+    // The broker saw one round, for the bound model, with no callback.
+    let rounds = rounds.lock().unwrap().clone();
+    assert_eq!(rounds.len(), 1, "the one infer is the one round");
+    let round = &rounds[0];
+    assert_eq!(round.model, "m", "the round names the bound model");
     assert!(
-        asked,
-        "the section's prose is what the model was asked: {body}"
+        round
+            .messages
+            .iter()
+            .any(|content| content.contains("Ask the model.")),
+        "the section's prose is what the model was asked: {round:?}"
+    );
+    assert!(
+        !round.streamed,
+        "a nested infer's round is handed no delta callback"
     );
     assert!(
         delta_rx.try_recv().is_err(),
@@ -433,7 +348,7 @@ async fn a_prepared_run_drives_end_to_end_and_records_the_whole_stream() {
     assert_parse_events_lead_and_the_run_continues_their_sequence(&records, parse_events.len());
     assert_provenance_orders_each_task(&records);
 
-    let main_task = assert_effects_and_answers(&records, body);
+    let main_task = assert_effects_and_answers(&records, round);
     assert_task_columns(&records, &main_task);
 
     // Every logged event reached the sink after the parse events, in order.

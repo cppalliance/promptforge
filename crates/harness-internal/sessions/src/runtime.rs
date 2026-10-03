@@ -1,14 +1,14 @@
 //! The Harness handle: its configuration, the Host's run recorder,
-//! capability registry, and services, the bindings a client pushes
-//! through the public API, and the sessions it serves.
+//! inference broker, capability registry, and services, the bindings a
+//! client pushes through the public API, and the sessions it serves.
 //!
 //! One [`Harness`] serves every session a client launches. The client
-//! holds it behind an `Arc`, pushes the gateway binding at startup and on
-//! every replacement (the model client is rebuilt when the generation
-//! changes), pushes its chat catalog and Host snapshot as they change,
-//! and launches sessions by discovered agent name. Sessions outlive
-//! client connections: a client that reattaches looks its session up by
-//! id and reads the transcript past its cursor.
+//! holds it behind an `Arc`, hands it the inference broker every run's
+//! model rounds and model resolution go through, pushes its chat catalog
+//! and Host snapshot as they change, and launches sessions by discovered
+//! agent name. Sessions outlive client connections: a client that
+//! reattaches looks its session up by id and reads the transcript past
+//! its cursor.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -17,13 +17,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use harness_capabilities::{CapabilityRegistry, HostServices};
+use harness_runner::performers::InferenceBroker;
 use harness_runner::recorder::RunRecorder;
 use harness_runner::spawn::{spawn_blocking_launch, spawn_session};
 use promptforge::vfs::VfsRef;
 use tokio::sync::mpsc;
 
 use crate::discovery::{agent_source, discover_agents};
-use crate::environment::{Bindings, CatalogBinding, GatewayBinding, HostSnapshot};
+use crate::environment::{Bindings, CatalogBinding, HostSnapshot};
 use crate::lifecycle::{CANCELLATION_CAPACITY, RunLifecycle};
 use crate::protocol::{LaunchRequest, SessionId};
 use crate::session::files::SessionFiles;
@@ -64,10 +65,6 @@ pub enum LaunchError {
         /// The name that was requested.
         name: String,
     },
-    /// No gateway is bound, or the bound gateway's settings could not
-    /// make a model client, so no agent could complete a model round.
-    #[error("agent sessions need a usable gateway binding; check the gateway base URL and key")]
-    GatewayUnusable,
     /// The agent's program source could not be read.
     #[error("agent session state unavailable")]
     SessionState {
@@ -118,6 +115,9 @@ pub struct Harness {
     bindings: Arc<Bindings>,
     /// The Host's recorder: every run of every session writes to it.
     recorder: Arc<dyn RunRecorder>,
+    /// The Host's inference: every run's model rounds and the model list
+    /// each launch resolves against.
+    broker: Arc<dyn InferenceBroker>,
     /// The Host's installed capabilities, which every run resolves its
     /// declarations against.
     capabilities: Arc<CapabilityRegistry>,
@@ -140,17 +140,19 @@ impl fmt::Debug for Harness {
 }
 
 impl Harness {
-    /// A Harness over `config` with no gateway bound yet, which records
-    /// every run it makes through `recorder`, resolves every run's
-    /// declared capabilities against `capabilities` alone, and hands
-    /// `services` to the capabilities it activates. Nothing touches the
-    /// filesystem here, and the Harness opens no file at launch either:
+    /// A Harness over `config`, which records every run it makes through
+    /// `recorder`, performs every model round and resolves every run's
+    /// model through `broker`, resolves every run's declared capabilities
+    /// against `capabilities` alone, and hands `services` to the
+    /// capabilities it activates. Nothing touches the filesystem or the
+    /// broker here, and the Harness opens no file at launch either:
     /// discovery reads the agents directory per request, and the recorder
     /// is the Host's own.
     #[must_use]
     pub fn new(
         config: HarnessConfig,
         recorder: Arc<dyn RunRecorder>,
+        broker: Arc<dyn InferenceBroker>,
         capabilities: CapabilityRegistry,
         services: HostServices,
     ) -> Self {
@@ -158,6 +160,7 @@ impl Harness {
             config,
             bindings: Arc::new(Bindings::new()),
             recorder,
+            broker,
             capabilities: Arc::new(capabilities),
             services,
             sessions: Arc::new(SessionTable::default()),
@@ -168,22 +171,6 @@ impl Harness {
     #[must_use]
     pub fn config(&self) -> &HarnessConfig {
         &self.config
-    }
-
-    /// Replaces the gateway binding; the latest call wins. The model
-    /// client is rebuilt when `binding.generation` differs from the
-    /// current one, and every session observes the new generation.
-    pub fn set_gateway(&self, binding: GatewayBinding) {
-        self.bindings.set_gateway(binding);
-    }
-
-    /// The most recently set gateway binding, or `None` before the first
-    /// [`Harness::set_gateway`].
-    #[must_use]
-    pub fn gateway(&self) -> Option<GatewayBinding> {
-        self.bindings
-            .gateway()
-            .map(|resources| resources.binding().clone())
     }
 
     /// Replaces the chat catalog binding; every session observes the new
@@ -215,11 +202,10 @@ impl Harness {
     /// # Errors
     /// Returns [`LaunchError::UnknownAgent`] when the name is not a
     /// discovered agent (which also refuses names that look like paths:
-    /// discovery yields bare file stems), [`LaunchError::GatewayUnusable`]
-    /// when no usable gateway is bound, and [`LaunchError::SessionState`]
-    /// when the agent's source cannot be read. A recorder that refuses a
-    /// write never refuses the launch: it fails the run, which the session
-    /// reports.
+    /// discovery yields bare file stems), and [`LaunchError::SessionState`]
+    /// when the agent's source cannot be read. Neither a recorder that
+    /// refuses a write nor a broker that cannot list or serve models ever
+    /// refuses the launch: each fails the run, which the session reports.
     pub async fn launch(&self, request: LaunchRequest) -> Result<Session, LaunchError> {
         self.launch_with(request, LaunchOptions::default()).await
     }
@@ -254,20 +240,6 @@ impl Harness {
         if !known.contains(&agent) {
             return Err(LaunchError::UnknownAgent { name: agent });
         }
-        // Subscribe before reading the snapshot: `watch::Sender::subscribe`
-        // marks every earlier send as seen, so a replacement landing
-        // between the two calls would otherwise never wake the supervisor
-        // and the session would stay on the stale generation.
-        let gateway_watch = self.bindings.subscribe_gateway();
-        // The client is checked at launch, not at startup: a client whose
-        // gateway settings cannot make a model client still runs, but an
-        // agent run would fail its first model round, so the launch
-        // refuses instead.
-        let gateway = self
-            .bindings
-            .gateway()
-            .filter(|resources| resources.client().is_some())
-            .ok_or(LaunchError::GatewayUnusable)?;
         // The source read is filesystem work too; a worker that cannot
         // report is the same unavailable state as an unreadable file.
         let agents_path = self.config.agents_path.clone();
@@ -289,6 +261,7 @@ impl Harness {
             files: SessionFiles::new(vfs, input_text),
             lifecycle: Arc::new(RunLifecycle::new(events, cancellations)),
             recorder: Arc::clone(&self.recorder),
+            broker: Arc::clone(&self.broker),
             capabilities: Arc::clone(&self.capabilities),
             services: self.services.clone(),
         });
@@ -300,8 +273,6 @@ impl Harness {
             lifecycle: lifecycle_rx,
             cancellations: cancellations_rx,
             raw_deltas,
-            gateway,
-            gateway_watch,
         });
         spawn_session(id.as_str(), supervisor.run());
         Ok(Session::new(core))

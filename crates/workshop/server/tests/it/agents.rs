@@ -16,9 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::Body;
-use axum::http::header;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::post;
 use serde_json::json;
 use tokio::sync::Notify;
@@ -73,17 +71,6 @@ async fn echo_completions(body: String) -> Response {
     echo_stream("test-model", text)
 }
 
-/// Accepts one completion and then leaves its SSE body open forever.
-fn hanging_completions(started: &Notify) -> Response {
-    started.notify_one();
-    let stream = futures_util::stream::pending::<Result<String, std::io::Error>>();
-    (
-        [(header::CONTENT_TYPE, "text/event-stream")],
-        Body::from_stream(stream),
-    )
-        .into_response()
-}
-
 /// Adds the typed `/v1/models` catalog holding every id these tests
 /// select; a mock without this route fails the launch with the reported
 /// catalog-fetch cause.
@@ -100,36 +87,6 @@ fn record_request(requests: &Mutex<Vec<serde_json::Value>>, body: &str) {
         .lock()
         .expect("the request capture lock is healthy")
         .push(serde_json::from_str(body).expect("the request is JSON"));
-}
-
-/// Asserts one replacement request and its fresh-history boundary: the
-/// relaunched chat run starts a new message list, because history sits in
-/// the section's Lua state until the deferred persistence work lands.
-fn assert_replacement_request(
-    requests: &Mutex<Vec<serde_json::Value>>,
-    model: &str,
-    current_input: &str,
-) {
-    let requests = requests
-        .lock()
-        .expect("the request capture lock is healthy");
-    assert_eq!(requests.len(), 1, "one replacement run dispatches");
-    assert_eq!(
-        requests[0]["model"], model,
-        "the replacement request reads the live selection"
-    );
-    let messages = requests[0]["messages"]
-        .as_array()
-        .expect("the request includes a messages array");
-    assert_eq!(
-        messages.len(),
-        1,
-        "the relaunched run starts a fresh message list"
-    );
-    assert_eq!(
-        messages[0]["content"], current_input,
-        "the fresh list opens with the new turn's input"
-    );
 }
 
 /// Binds the workshop router against an echoing SSE mock gateway, with

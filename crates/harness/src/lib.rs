@@ -2,8 +2,10 @@
 
 pub use harness_capabilities::USER_INPUT_ASK_TOOL;
 pub use harness_runner::display_chain;
+pub use harness_runner::performers::BoxFuture;
+pub use harness_runner::performers::InferenceBroker;
+pub use harness_runner::performers::OnDelta;
 pub use harness_sessions::environment::CatalogBinding;
-pub use harness_sessions::environment::GatewayBinding;
 pub use harness_sessions::environment::HostSnapshot;
 pub use harness_sessions::input::WaitError;
 pub use harness_sessions::input::WaitFrame;

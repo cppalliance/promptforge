@@ -1,83 +1,33 @@
-//! Tests for gateway binding changes rebuilding the environment's client,
-//! the binding's redacted `Debug`, the Host snapshot, and model
-//! resolution with nothing to resolve.
+//! Tests for the Host snapshot and for model resolution with nothing to
+//! resolve.
+
+use harness_runner::performers::{BoxFuture, OnDelta};
+use promptforge::model::{
+    Completion, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog,
+    ToolSchema,
+};
 
 use super::*;
 
-fn binding(generation: u64) -> GatewayBinding {
-    GatewayBinding {
-        base_url: format!("http://127.0.0.1:{}", 8000 + generation),
-        key: format!("key-{generation}"),
-        generation,
+/// Lists no model; a round is never made.
+struct EmptyBroker;
+
+impl InferenceBroker for EmptyBroker {
+    fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
+        Box::pin(async { Ok(ModelCatalog::empty()) })
     }
-}
 
-#[test]
-fn a_generation_change_rebuilds_the_client() {
-    let bindings = Bindings::new();
-    assert!(bindings.set_gateway(binding(1)), "the first push builds");
-    let first = bindings.gateway().expect("resources exist after a push");
-    assert_eq!(first.generation(), 1);
-    assert!(
-        first.client().is_some(),
-        "a valid binding builds the client"
-    );
-
-    assert!(
-        bindings.set_gateway(binding(2)),
-        "a new generation rebuilds"
-    );
-    let second = bindings.gateway().expect("resources exist after a rebuild");
-    assert_eq!(second.generation(), 2);
-    assert_eq!(second.binding().base_url, "http://127.0.0.1:8002");
-    assert!(
-        !Arc::ptr_eq(&first, &second),
-        "the resources are a fresh build, not the first generation's"
-    );
-    assert_eq!(
-        *bindings.subscribe_gateway().borrow(),
-        Some(2),
-        "the watch holds the rebuilt generation"
-    );
-}
-
-#[test]
-fn a_repeated_generation_keeps_the_built_resources() {
-    let bindings = Bindings::new();
-    assert!(bindings.set_gateway(binding(3)));
-    let built = bindings.gateway().expect("resources exist");
-    assert!(
-        !bindings.set_gateway(GatewayBinding {
-            base_url: "http://127.0.0.1:9999".to_owned(),
-            ..binding(3)
-        }),
-        "the same generation is the client's word that nothing changed"
-    );
-    let kept = bindings.gateway().expect("resources still exist");
-    assert!(
-        Arc::ptr_eq(&built, &kept),
-        "no rebuild happened for a repeated generation"
-    );
-}
-
-#[test]
-fn an_unusable_binding_builds_no_client() {
-    let resources = GatewayResources::build(GatewayBinding {
-        base_url: "not a url".to_owned(),
-        key: String::new(),
-        generation: 1,
-    });
-    assert!(resources.client().is_none(), "no client from an empty key");
-}
-
-#[test]
-fn a_gateway_binding_never_prints_its_key() {
-    let rendered = format!("{:?}", binding(7));
-    assert!(
-        !rendered.contains("key-7"),
-        "the bearer key leaked into Debug output: {rendered}"
-    );
-    assert!(rendered.contains("generation: 7"));
+    fn chat(
+        &self,
+        _binding: ModelBinding,
+        _messages: Vec<Message>,
+        _tools: Vec<ToolSchema>,
+        _options: CompletionOptions,
+        _on_delta: Option<OnDelta>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        let kind = CompletionErrorKind::Unavailable;
+        Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
+    }
 }
 
 #[test]
@@ -98,16 +48,11 @@ fn the_host_snapshot_serves_the_first_root_and_the_selection() {
 }
 
 #[tokio::test]
-async fn no_selection_and_no_catalog_binds_no_model_without_a_fetch() {
-    // No selection and an empty catalog: nothing to resolve, so nothing
-    // is fetched from the (unreachable) gateway and the roles stay
-    // unbound.
-    let model = current_model(
-        &HostSnapshot::default(),
-        Some(&CatalogBinding::default()),
-        &binding(1),
-    )
-    .await
-    .expect("no fetch is attempted");
+async fn no_selection_and_an_empty_broker_catalog_bind_no_model() {
+    // No selection and a broker that lists nothing: nothing to resolve,
+    // so the roles stay unbound rather than the run failing.
+    let model = current_model(&HostSnapshot::default(), &EmptyBroker)
+        .await
+        .expect("an empty list is not a failure");
     assert!(model.is_none());
 }

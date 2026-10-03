@@ -1,62 +1,22 @@
 //! The session run's environment: the bindings a client pushes through
-//! the public API (the gateway, the chat catalog, the Host snapshot), the
-//! resources the Harness builds from one gateway generation (the model
-//! client), and the launch-time resolution of the client's selected model
-//! into the run's context.
+//! the public API (the chat catalog and the Host snapshot) and the
+//! launch-time resolution of the client's selected model, through the
+//! Host's inference broker, into the run's context.
 //!
-//! Everything here arrives as data. The Harness never resolves a gateway,
-//! reads a menu, or names a workspace crate: the client pushes a
-//! [`GatewayBinding`] at startup and on every replacement, a
-//! [`CatalogBinding`] whenever its chat-capable model list changes, and a
-//! [`HostSnapshot`] whenever its selection or roots change. Sessions
-//! observe generation changes through watches and read the latest value
-//! at launch.
+//! Everything here arrives as data or through the broker. The Harness
+//! never resolves a gateway, reads a menu, or names a workspace crate: the
+//! client pushes a [`CatalogBinding`] whenever its chat-capable model list
+//! changes and a [`HostSnapshot`] whenever its selection or roots change.
+//! Sessions observe catalog generation changes through a watch and read
+//! the latest value at launch.
 
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{PoisonError, RwLock};
 
-use harness_gateway_client::{
-    CompletionError, GatewayClient, GatewayEndpoint, SecretString, fetch_model_catalog,
-};
-use promptforge::model::{ModelDescriptor, ModelId};
+use harness_runner::performers::InferenceBroker;
+use promptforge::model::{CompletionError, ModelDescriptor, ModelId};
 use tokio::sync::watch;
-
-/// One generation of the gateway a client has bound the Harness to.
-///
-/// The client pushes a binding at startup and on every gateway
-/// replacement; the Harness rebuilds its model client when `generation`
-/// changes. The binding is data pushed through the public API: the
-/// Harness never resolves a gateway itself.
-#[derive(Clone, PartialEq, Eq)]
-pub struct GatewayBinding {
-    /// The gateway's base URL.
-    pub base_url: String,
-    /// The bearer key paired with `base_url`.
-    pub key: String,
-    /// Monotonic generation the client assigns to each replacement.
-    pub generation: u64,
-}
-
-impl GatewayBinding {
-    /// The gateway's OpenAI-compatible API root: `base_url` with `/v1`.
-    #[must_use]
-    pub fn api_root(&self) -> String {
-        format!("{}/v1", self.base_url.trim_end_matches('/'))
-    }
-}
-
-impl fmt::Debug for GatewayBinding {
-    /// The bearer key is never written to logs or `Debug` output.
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("GatewayBinding")
-            .field("base_url", &self.base_url)
-            .field("key", &"<redacted>")
-            .field("generation", &self.generation)
-            .finish()
-    }
-}
 
 /// One generation of the client's chat-capable model catalog.
 ///
@@ -98,86 +58,13 @@ impl HostSnapshot {
     }
 }
 
-/// Builds the model client for one gateway binding, or `None` - reported
-/// as an unusable gateway at launch - when the key or URL cannot build
-/// one.
-#[must_use]
-pub fn gateway_client(binding: &GatewayBinding) -> Option<GatewayClient> {
-    let key = match SecretString::new(binding.key.as_str()) {
-        Ok(key) => key,
-        Err(error) => {
-            tracing::warn!(%error, "agent sessions disabled: gateway API key unusable");
-            return None;
-        }
-    };
-    let endpoint = match GatewayEndpoint::new(&binding.api_root()) {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            tracing::warn!(%error, "agent sessions disabled: gateway URL unusable");
-            return None;
-        }
-    };
-    Some(GatewayClient::new(endpoint, key))
-}
-
-/// What the Harness builds from one gateway generation and shares across
-/// every run launched under it: the model client. Rebuilt whole when the
-/// generation changes.
-#[derive(Clone)]
-pub struct GatewayResources {
-    binding: GatewayBinding,
-    client: Option<GatewayClient>,
-}
-
-impl fmt::Debug for GatewayResources {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("GatewayResources")
-            .field("binding", &self.binding)
-            .field("client", &self.client.is_some())
-            .finish()
-    }
-}
-
-impl GatewayResources {
-    /// Builds the resources for `binding`. A binding that cannot build a
-    /// client leaves the client `None`, so a launch under it is refused
-    /// with the reason.
-    #[must_use]
-    pub fn build(binding: GatewayBinding) -> Self {
-        let client = gateway_client(&binding);
-        Self { binding, client }
-    }
-
-    /// The binding these resources were built from.
-    #[must_use]
-    pub fn binding(&self) -> &GatewayBinding {
-        &self.binding
-    }
-
-    /// The generation these resources were built for.
-    #[must_use]
-    pub fn generation(&self) -> u64 {
-        self.binding.generation
-    }
-
-    /// The model client, when the binding could build it.
-    #[must_use]
-    pub fn client(&self) -> Option<&GatewayClient> {
-        self.client.as_ref()
-    }
-}
-
 /// The bindings one Harness holds for every session it serves, each
-/// replaceable by the client and each watched by the sessions.
+/// replaceable by the client.
 ///
-/// A generation watch holds the latest generation (`None` before the
-/// first push); a session that observes a change reads the value behind
-/// it. The gateway's resources are rebuilt only when its generation
-/// changes: pushing the same generation twice is a no-op.
+/// The catalog's generation watch holds the latest generation (`None`
+/// before the first push); a session that observes a change reads the
+/// catalog behind it.
 pub struct Bindings {
-    gateway: RwLock<Option<Arc<GatewayResources>>>,
-    gateway_generation: watch::Sender<Option<u64>>,
     catalog: RwLock<Option<CatalogBinding>>,
     catalog_generation: watch::Sender<Option<u64>>,
     host: RwLock<HostSnapshot>,
@@ -187,7 +74,6 @@ impl fmt::Debug for Bindings {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Bindings")
-            .field("gateway", &self.gateway())
             .field("catalog_generation", &self.catalog().map(|c| c.generation))
             .field("host", &self.host())
             .finish()
@@ -205,53 +91,10 @@ impl Bindings {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            gateway: RwLock::new(None),
-            gateway_generation: watch::Sender::new(None),
             catalog: RwLock::new(None),
             catalog_generation: watch::Sender::new(None),
             host: RwLock::new(HostSnapshot::default()),
         }
-    }
-
-    /// Replaces the gateway binding. The client is rebuilt when
-    /// `binding.generation` differs from the current one; returns whether
-    /// it was. A repeated generation is a no-op, since the generation is
-    /// the client's word that the gateway changed.
-    pub fn set_gateway(&self, binding: GatewayBinding) -> bool {
-        let generation = binding.generation;
-        // The write lock is held across the check, the build, and the
-        // store, and the watch is sent under it too: two concurrent pushes
-        // with different generations then serialize, so the stored
-        // resources and the watched generation always come from the same
-        // caller. The build does no I/O, so holding the lock is cheap.
-        // A poisoned lock holds a value written whole by a single store,
-        // so it is intact and the poison is safe to clear.
-        let mut current = self.gateway.write().unwrap_or_else(PoisonError::into_inner);
-        if current
-            .as_ref()
-            .is_some_and(|resources| resources.generation() == generation)
-        {
-            return false;
-        }
-        *current = Some(Arc::new(GatewayResources::build(binding)));
-        self.gateway_generation.send_replace(Some(generation));
-        true
-    }
-
-    /// The resources of the most recently pushed gateway generation, or
-    /// `None` before the first push.
-    #[must_use]
-    pub fn gateway(&self) -> Option<Arc<GatewayResources>> {
-        self.gateway
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-
-    /// A watch on the gateway generation.
-    #[must_use]
-    pub fn subscribe_gateway(&self) -> watch::Receiver<Option<u64>> {
-        self.gateway_generation.subscribe()
     }
 
     /// Replaces the chat catalog binding and wakes the sessions watching
@@ -298,8 +141,8 @@ impl Bindings {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CurrentModelError {
-    /// The gateway's model catalog could not be fetched; the fetch
-    /// failure is the source.
+    /// The broker's model list could not be fetched; the broker's failure
+    /// is the source.
     #[error("the model catalog could not be fetched")]
     CatalogFetchFailed(#[source] CompletionError),
     /// The selected id is absent from the fetched catalog.
@@ -307,49 +150,43 @@ pub enum CurrentModelError {
     SelectionAbsent(String),
 }
 
-/// Resolves the client's current model for one run's context. The
-/// selection is read at launch, so a selection change takes effect on the
-/// next run. A launch with no selection yet binds the retained catalog's
-/// first chat-capable model, the same fallback a client's menu applies.
-/// The typed descriptor comes from the gateway's model list through
-/// [`fetch_model_catalog`].
+/// Resolves the client's current model for one run's context through
+/// `broker`'s model list. The selection is read at launch, so a selection
+/// change takes effect on the next run. A launch with no selection binds
+/// the first model the broker lists.
 ///
-/// Returns `Ok(None)` only when neither a selection nor a catalog model
-/// exists, or the id is not representable; the prompt's declared roles
-/// then stay unbound. A failed catalog fetch or a selection absent from
-/// the fetched catalog is a reported [`CurrentModelError`], never a
+/// Returns `Ok(None)` only when there is no selection and the broker
+/// lists no model, or the selected id is not representable; the prompt's
+/// declared roles then stay unbound. A failed listing or a selection
+/// absent from the list is a reported [`CurrentModelError`], never a
 /// fabricated fallback descriptor.
 ///
 /// # Errors
-/// Returns [`CurrentModelError::CatalogFetchFailed`] when the gateway's
+/// Returns [`CurrentModelError::CatalogFetchFailed`] when the broker's
 /// model list cannot be fetched and [`CurrentModelError::SelectionAbsent`]
 /// when the selected id is not in it.
 pub async fn current_model(
     host: &HostSnapshot,
-    catalog: Option<&CatalogBinding>,
-    gateway: &GatewayBinding,
+    broker: &dyn InferenceBroker,
 ) -> Result<Option<ModelDescriptor>, CurrentModelError> {
-    let Some(selected) = host.selected_model.clone().or_else(|| {
-        catalog?
-            .models
-            .first()?
-            .get("id")?
-            .as_str()
-            .map(str::to_owned)
-    }) else {
-        return Ok(None);
+    let selection = match host.selected_model.clone() {
+        None => None,
+        Some(selected) => match ModelId::gateway(&selected) {
+            Ok(id) => Some((selected, id)),
+            Err(error) => {
+                tracing::warn!(%error, "the selected model id is invalid");
+                return Ok(None);
+            }
+        },
     };
-    let id = match ModelId::gateway(&selected) {
-        Ok(id) => id,
-        Err(error) => {
-            tracing::warn!(%error, "the selected model id is invalid");
-            return Ok(None);
-        }
-    };
-    let fetched = fetch_model_catalog(&gateway.api_root(), &gateway.key)
+    let catalog = broker
+        .models()
         .await
         .map_err(CurrentModelError::CatalogFetchFailed)?;
-    let descriptor = fetched
+    let Some((selected, id)) = selection else {
+        return Ok(catalog.models().first().cloned());
+    };
+    let descriptor = catalog
         .get(&id)
         .cloned()
         .ok_or_else(|| CurrentModelError::SelectionAbsent(selected))?;

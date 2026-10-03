@@ -321,7 +321,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-2>
 
-### Step 2: The Host's broker replaces the gateway binding
+### Step 2: The Host's broker replaces the gateway binding [completed]
 
 - Component: Broker seam
 - Depends on: step 1.
