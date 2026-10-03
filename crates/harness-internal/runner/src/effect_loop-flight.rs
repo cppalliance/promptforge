@@ -67,6 +67,11 @@ impl Flights {
         self.effects.is_empty()
     }
 
+    /// How many effects are owed an answer.
+    pub(super) fn len(&self) -> usize {
+        self.effects.len()
+    }
+
     /// Puts `answer`, the performer future of effect `id`, in flight under
     /// `provenance`, inside a span that records the effect id, the task
     /// path, and the task-local sequence, so a run's effects trace as a

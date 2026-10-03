@@ -14,32 +14,27 @@ use harness_runner::recorder::MemoryRecorder;
 use promptforge::model::{Completion, CompletionResult, ToolCall};
 use serde_json::json;
 
-use super::{PendingTimer, RunOutcome, answers_to, answers_where, request, run_beside, until};
+use super::{
+    PendingTimer, RunOutcome, answers_to, answers_where, calls, request, run_beside, until,
+};
 use crate::scripted::{
     Held, HeldTimer, MODEL, Operator, ScriptedBroker, held_broker, hold_registry, reply,
 };
 
-/// A main section parked on a 30-second timed wait over two children:
-/// one parked on a model round, the other on a held tool call, each
-/// under a `pcall` that reports how the call ended. The run joins
-/// whichever child the timed wait did not deliver and returns both
-/// children's reports.
+/// A main section parked under a `pcall` on a 30-second timed wait over
+/// two children: one parked on a model round, the other on a held tool
+/// call, each under a `pcall` that reports how the call ended. The run
+/// then joins both children and returns how its own wait ended beside
+/// both children's reports.
 const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
     capabilities:\n  - tests/harness\nmodels:\n  writer: {}\n---\n\n\
     # Stops\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\
     local chat = tasks.spawn('## Chat')\n\
     local tool = tasks.spawn('## Tool')\n\
-    local first, _ok, first_result = tasks.join_any({ chat, tool }, { timeout = 30 })\n\
-    local results = {}\n\
-    if first then results[first.task] = first_result end\n\
-    for _, t in ipairs({ chat, tool }) do\n\
-    \x20 if results[t.task] == nil then\n\
-    \x20   local _t, _t_ok, result = tasks.join_any({ t })\n\
-    \x20   results[t.task] = result\n\
-    \x20 end\n\
-    end\n\
-    return results[chat.task] .. '|' .. results[tool.task]\n```\n\n\
+    local ok, err = pcall(tasks.join_any, { chat, tool }, { timeout = 30 })\n\
+    local results = tasks.join({ chat, tool })\n\
+    return tostring(ok) .. ':' .. err.kind .. '|' .. results[1].result .. '|' .. results[2].result\n```\n\n\
     ## Chat\n\n```lua\n\
     local ok, err = pcall(models.infer, 'held')\n\
     return 'chat:' .. tostring(ok) .. ':' .. err.kind\n```\n\n\
@@ -101,9 +96,10 @@ async fn a_stop_drops_a_chat_round_a_tool_call_and_a_timer_and_a_pcall_keeps_the
     assert_eq!(
         report.outcome,
         RunOutcome::Completed {
-            final_text: "chat:false:cancelled|tool:false:cancelled".to_owned()
+            final_text: "false:cancelled|chat:false:cancelled|tool:false:cancelled".to_owned()
         },
-        "each child's pcall caught its dropped call, and the run went on to its end"
+        "the main's pcall caught its interrupted wait, each child's pcall caught its dropped \
+         call, and the run went on to its end"
     );
     for (held, what) in [(&chat, "round"), (&tool, "tool call"), (&timer, "timer")] {
         assert_eq!(held.started(), 1, "the {what} started once");
@@ -160,11 +156,6 @@ fn calls_hold_once() -> ScriptedBroker {
             Completion::from_result(CompletionResult::ToolCalls(vec![call]), MODEL).map(Box::new)
         })
     })
-}
-
-/// Whether a `ToolCall` effect body calls `tool`.
-fn calls(tool: &'static str) -> impl Fn(&serde_json::Value) -> bool {
-    move |body| body["tool"] == tool
 }
 
 #[tokio::test]

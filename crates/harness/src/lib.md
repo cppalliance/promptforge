@@ -200,13 +200,32 @@ use harness::{Harness, HostSnapshot, RunRequest};
 use std::sync::Arc;
 # use harness::{BoxFuture, InferenceBroker, Timer};
 # use promptforge::model::{Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema};
-# struct Stuck;
+# use std::sync::Mutex;
+# use std::task::{Poll, Waker};
+# struct Started(Mutex<(bool, Option<Waker>)>);
+# impl Started {
+#     fn raise(&self) {
+#         let mut state = self.0.lock().unwrap();
+#         state.0 = true;
+#         if let Some(waker) = state.1.take() { waker.wake(); }
+#     }
+#     async fn wait(&self) {
+#         std::future::poll_fn(|cx| {
+#             let mut state = self.0.lock().unwrap();
+#             if state.0 { return Poll::Ready(()); }
+#             state.1 = Some(cx.waker().clone());
+#             Poll::Pending
+#         }).await
+#     }
+# }
+# struct Stuck(Arc<Started>);
 # impl InferenceBroker for Stuck {
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         let model = ModelId::gateway("stub-model").map(|id| ModelDescriptor::new(id, "stub", std::num::NonZeroU32::MIN.saturating_add(131_071), ThinkingMode::Never));
 #         Box::pin(async move { Ok(ModelCatalog::new(model.into_iter()).unwrap_or_else(|_| ModelCatalog::empty())) })
 #     }
 #     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#         self.0.raise();
 #         Box::pin(std::future::pending())
 #     }
 # }
@@ -216,8 +235,10 @@ use std::sync::Arc;
 #         Box::pin(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
 #     }
 # }
-# fn desk() -> Harness {
-#     Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Stuck), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new())
+# fn desk() -> (Harness, Arc<Started>) {
+#     let started = Arc::new(Started(Mutex::new((false, None))));
+#     let harness = Harness::new(Arc::new(MemoryRecorder::new()), Arc::new(Stuck(Arc::clone(&started))), Arc::new(Clock), CapabilityRegistry::new(), HostServices::new());
+#     (harness, started)
 # }
 # #[tokio::main(flavor = "current_thread")]
 # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -240,15 +261,17 @@ let request = || RunRequest {
     host: HostSnapshot::default(),
 };
 
-// 2. Take the control before the run, then stop the round: the pcall catches the dropped call.
-let harness = desk();
+// 2. Take the control before the run, then stop the round once it is in flight: the pcall catches the dropped call.
+let (harness, round_started) = desk();
 let control = harness.control();
-control.stop_round();
-let report = harness.run(request()).await?;
-assert_eq!(report.outcome, RunOutcome::Completed { final_text: "cancelled".into() });
+let (report, ()) = tokio::join!(harness.run(request()), async {
+    round_started.wait().await;
+    control.stop_round();
+});
+assert_eq!(report?.outcome, RunOutcome::Completed { final_text: "cancelled".into() });
 
 // 3. Cancel a run before it begins: it ends cancelled, and the recorder never hears of it.
-let harness = desk();
+let (harness, _) = desk();
 harness.control().cancel();
 let report = harness.run(request()).await?;
 assert_eq!(report.outcome, RunOutcome::Cancelled);
@@ -257,8 +280,8 @@ assert_eq!(report.run_id, None);
 # }
 ````
 
-1. Step 1 writes `patient`, whose one round runs under a `pcall`, Lua's protected call, so the prompt sees a failed call as a value instead of an error. The hidden `Stuck` broker lists `stub-model` and never answers a round, and the hidden `desk` builds a Harness over it.
-2. Step 2 takes the run's control with [`Harness::control`] before it calls `run`, which consumes the Harness, and raises a stop. A stop raised while nothing is in flight drops what is in flight when the run next waits, here the stuck round, so the example raises it before the run starts. A real `desk` keeps the control in its window and raises the stop from there while the round runs. The dropped round reaches the prompt as an error whose `kind` is `cancelled`, the `pcall` catches it, and the run goes on to its end. An uncaught one would end the run with the outcome `Cancelled`.
+1. Step 1 writes `patient`, whose one round runs under a `pcall`, Lua's protected call, so the prompt sees a failed call as a value instead of an error. The hidden `Stuck` broker lists `stub-model` and never answers a round, and the hidden `desk` builds a Harness over it and hands back `round_started`, which the broker raises as a round reaches it.
+2. Step 2 takes the run's control with [`Harness::control`] before it calls `run`, which consumes the Harness, and raises a stop once the round is in flight. A stop reaches only the work in flight when the run sees it, so a stop raised before the run starts, or while nothing is in flight, changes nothing. A real `desk` keeps the control in its window and raises the stop from there while the round runs. The dropped round reaches the prompt as an error whose `kind` is `cancelled`, the `pcall` catches it, and the run goes on to its end. An uncaught one would end the run with the outcome `Cancelled`.
 3. Step 3 cancels before the run begins. The run ends `Cancelled` with no `run_id`, because the recorder never began it. A cancel while the run is going answers every effect in flight `Dropped`, a question to the operator included, and ends the run `Cancelled`.
 
 A stop drops every effect in flight except a question to the operator: model rounds, tool calls, and timers. An open question stays open, so the operator can still answer it. The run's cancel flag stays clear, and the next round starts fresh.

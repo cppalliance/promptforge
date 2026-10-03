@@ -36,8 +36,11 @@ impl RunControl {
     /// answers each `Dropped`. The run's cancel flag stays clear, so the
     /// run goes on: a `pcall` around the dropped call catches the
     /// cancelled error, and an uncaught one ends the run cancelled. A stop
-    /// raised while nothing is in flight drops what is in flight when the
-    /// run next waits.
+    /// reaches only what is in flight when the run's loop sees it, which
+    /// it does as it waits for an answer and before it starts a step's
+    /// effects, so a stop raised while nothing it drops is in flight
+    /// changes nothing, and no stop reaches an effect started after the
+    /// loop saw it.
     pub fn stop_round(&self) {
         self.stop.raise();
     }
@@ -70,7 +73,8 @@ impl fmt::Debug for RunControl {
     }
 }
 
-/// A stop raised from any thread and taken by the run's effect loop.
+/// A stop raised from any thread and lowered by the run's effect loop once
+/// it has dropped what the stop reached.
 #[derive(Default)]
 pub(crate) struct StopSignal {
     raised: AtomicBool,
@@ -84,18 +88,30 @@ impl StopSignal {
         self.waker.wake();
     }
 
-    /// Takes a raised stop, lowering it, or registers `cx` to be woken by
-    /// the next one. The flag is checked again after the registration, so
-    /// a stop raised between the two is never lost.
-    pub(crate) fn poll_take(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if self.raised.swap(false, Ordering::SeqCst) {
+    /// Whether a stop is raised.
+    pub(crate) fn is_raised(&self) -> bool {
+        self.raised.load(Ordering::SeqCst)
+    }
+
+    /// Ready while a stop is raised, or registers `cx` to be woken by the
+    /// next one. The flag is checked again after the registration, so a
+    /// stop raised between the two is never lost.
+    pub(crate) fn poll_raised(&self, cx: &mut Context<'_>) -> Poll<()> {
+        if self.is_raised() {
             return Poll::Ready(());
         }
         self.waker.register(cx.waker());
-        if self.raised.swap(false, Ordering::SeqCst) {
+        if self.is_raised() {
             Poll::Ready(())
         } else {
             Poll::Pending
         }
+    }
+
+    /// Lowers the stop. A stop raised while the loop was dropping what an
+    /// earlier one reached is lowered with it, since nothing it could
+    /// reach is left in flight.
+    pub(crate) fn lower(&self) {
+        self.raised.store(false, Ordering::SeqCst);
     }
 }

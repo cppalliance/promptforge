@@ -4,8 +4,9 @@
 //! recorded failed run; a Vfs effect is answered inline as it is issued;
 //! and one run completes under a thread-parking executor with no runtime
 //! behind it. How a stop and a cancel reach the effects in flight sits in
-//! the `stop` child module, and every error `run` returns in the `errors`
-//! child module.
+//! the `stop` child module, how what a stop reaches depends on when the
+//! loop sees it in the `stop_timing` child module, and every error `run`
+//! returns in the `errors` child module.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -29,6 +30,8 @@ use crate::support::{HookedBackend, PendingTimer};
 mod errors;
 #[path = "harness-stop.rs"]
 mod stop;
+#[path = "harness-stop-timing.rs"]
+mod stop_timing;
 
 /// The request's name: every event's `execution` and the run
 /// metadata's `name`.
@@ -122,6 +125,11 @@ fn answers_where(records: &[Record], kind: &str, filter: impl Fn(&Value) -> bool
 /// The answer payloads of every effect of `kind`, in effect order.
 fn answers_to(records: &[Record], kind: &str) -> Vec<Value> {
     answers_where(records, kind, |_| true)
+}
+
+/// Whether a `ToolCall` effect body calls `tool`.
+fn calls(tool: &'static str) -> impl Fn(&Value) -> bool {
+    move |body| body["tool"] == tool
 }
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its

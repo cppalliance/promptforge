@@ -24,10 +24,15 @@
 //! stop aborts every effect in flight except the questions to the operator
 //! and answers each `Dropped`, leaving the cancel flag clear, so the run
 //! decides what a dropped call means: a `pcall` catches it, and an uncaught
-//! one ends the run cancelled. A Vfs effect is never in flight at a cancel
-//! or a stop: it is answered before the loop waits again. A drop is an
-//! answer, recorded like any other, so every effect record has exactly one
-//! answer record.
+//! one ends the run cancelled. The loop also looks for a stop before it
+//! starts a step's effects, and lowers each stop it sees once it has
+//! dropped what the stop reached, none included, so a stop never reaches
+//! an effect started after the loop saw it. A drop made there resumes the
+//! run as an inline answer does, so once the step's effects start the
+//! loop steps again instead of awaiting an answer. A Vfs effect is never in
+//! flight at a cancel or a stop: it is answered before the loop waits
+//! again. A drop is an answer, recorded like any other, so every effect
+//! record has exactly one answer record.
 //!
 //! A performer that panics is caught where its future is polled: its
 //! effect is answered `Dropped` and the panic is logged, so a lost
@@ -179,7 +184,10 @@ impl Driver {
                         self.drop_in_flight(Reach::All).await?;
                         continue;
                     }
-                    let mut answered_inline = false;
+                    let mut answered = false;
+                    if self.stop.is_raised() {
+                        answered = self.act_on_stop().await?;
+                    }
                     for (id, provenance, effect) in effects {
                         self.commit_effect(id, &provenance, &effect).await?;
                         // A Vfs effect comes back from `perform` and is
@@ -189,12 +197,13 @@ impl Driver {
                         if let Some((access, op)) = self.perform(id, &provenance, effect) {
                             let answer = answer_vfs(id, &provenance, access, op);
                             self.answer(id, &provenance, answer).await?;
-                            answered_inline = true;
+                            answered = true;
                         }
                     }
-                    if answered_inline {
+                    if answered {
                         // Stepping again, not awaiting: the answers just
-                        // resumed may have made chains ready, and a step
+                        // resumed, a stop's drops as well as the inline
+                        // ones, may have made chains ready, and a step
                         // whose every effect was a Vfs effect has nothing
                         // in flight to await.
                         continue;
@@ -217,12 +226,23 @@ impl Driver {
                 self.run.cancel();
                 self.drop_in_flight(Reach::All).await
             }
-            Woken::Stop => self.drop_in_flight(Reach::AllButQuestions).await,
+            Woken::Stop => self.act_on_stop().await.map(drop),
             Woken::Landed(id, provenance, answer) => {
                 self.answer(id, &provenance, answer).await?;
                 self.answer_landed().await
             }
         }
+    }
+
+    /// Acts on a raised stop: drops whatever is in flight but the
+    /// questions to the operator, which may be nothing, then lowers the
+    /// stop. Returns whether it answered any effect, since each answer
+    /// resumes a chain the run must step.
+    async fn act_on_stop(&mut self) -> Result<bool, RecorderError> {
+        let owed = self.flights.len();
+        self.drop_in_flight(Reach::AllButQuestions).await?;
+        self.stop.lower();
+        Ok(self.flights.len() < owed)
     }
 
     /// Waits for the cancel flag, a raised stop, or the next effect to
@@ -238,7 +258,7 @@ impl Driver {
             if Pin::new(&mut cancelled).poll(cx).is_ready() {
                 return Poll::Ready(Woken::Cancel);
             }
-            if stop.poll_take(cx).is_ready() {
+            if stop.poll_raised(cx).is_ready() {
                 return Poll::Ready(Woken::Stop);
             }
             flights

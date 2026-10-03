@@ -11796,10 +11796,13 @@ Catching a cancel does not keep the run going. Once the Host cancels, running Lu
 
 ### A stopped round
 
-A Host can also stop the round in flight without cancelling the run, as when the operator stops a reply that is heading the wrong way. A stop reaches the calls waiting on a model or a tool when it lands, and each one resumes with the same interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
+A Host can also stop the round in flight without cancelling the run, as when the operator stops a reply that is heading the wrong way. A stop reaches the calls waiting on a model, a tool, or a timeout when it lands, and each one resumes with the same interrupted error, kind `cancelled`, message `interrupted by Ctrl-C`:
 
 - `models.infer`, and each `models.loop` round
 - `tools.call`, and tool calls the model makes
+- `tasks.join` and `tasks.join_any` with a `timeout`; the tasks they wait on are not cancelled, and a later wait joins each one the interrupted wait had not yet delivered. A timed `tasks.join` loses the results of the members it delivered before the stop, so a later wait that names one of them raises `task_consumed`
+
+A stop reaches only the calls that are waiting when it lands. A stop that lands while no call is waiting changes nothing, so the next call runs as usual.
 
 A stop leaves the run's cancel flag clear, so running Lua goes on, and a caught stop keeps the run going. This block returns `stopped` when the Host stops its round, and the run completes:
 
@@ -11813,7 +11816,7 @@ return out
 
 Under a cancel, the same block's `return 'stopped'` changes nothing: the run still ends with the cancelled outcome, so a prompt need not tell a stop from a cancel. Left uncaught, the interrupted error from a stop ends the run with the cancelled outcome too.
 
-A question to the operator stays open through a stop. `input.ask()`, and the ask tool a model calls, keep waiting for the operator's answer, so a person in the middle of typing never loses the question. A `store` call is never cut short by a stop, because the Harness answers every `store` call before it next waits, and a stop takes effect only while it waits.
+A question to the operator stays open through a stop. `input.ask()`, and the ask tool a model calls, keep waiting for the operator's answer, so a person in the middle of typing never loses the question. A `store` call is never cut short by a stop, because the Harness answers every `store` call as the run makes it, so no `store` call is ever waiting when a stop lands.
 
 ---
 

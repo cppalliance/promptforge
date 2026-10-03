@@ -455,6 +455,9 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
     - The performer trait docs state that a performer must not block while polled.
     - The model-swap split is logged as debt, and Workshop's broker warns when the pick's context window is smaller than the launch binding's.
   - Found during that review: `StreamDelta` cannot leave the Engine in the Engine step, because the runner's `OnDelta` uses it until the streaming step and `harness-runner` cannot depend on `harness-gateway-client`. It leaves in the streaming step.
+  - Found while running step 8 (2026-10-03), and fixed in step 9:
+    - A round stop drops timers in flight, but the Engine's `drop_timer` moves the timer's slot to `Cancelled` without waking its owner, on the assumption that only a run cancel drops a live timer. After a stop the run continues, so a timed `tasks.join` or `tasks.join_any` silently loses its timeout. The operator chose "The Stop wakes the waiting call with the same interrupted error every other dropped call gets, so `pcall` catches it and the run continues".
+    - `RunControl::stop_round` latches a stop raised while nothing droppable is in flight onto the next call, so a Stop with only a question open drops the model round that follows the operator's answer. This contradicts "`stop_round` drops every effect in flight", so a stop the loop observes with nothing droppable in flight is cleared.
   - Code that exists only between steps:
     - From the per-run step to the streaming step, `InferenceBroker::chat` takes an `Option<OnDelta>` beside its `Round`. The Harness always passes `None`, and the Host's per-run broker supplies its own sender for `Chat` rounds.
     - From the per-run step to the deletion step, `RunMeta` keeps `session_id` and `agent`. The Harness writes `RunRequest.name` as `session_id` and leaves `agent` empty, and the Host's recorder tee (`harness-sessions`', then Workshop's) fills `agent` on `begin_run`.
@@ -552,14 +555,15 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
 
 ## Execution Instructions
 
-Six components, in dependency order:
+Seven components, in dependency order:
 
 1. Engine round vocabulary (step 1). It goes first because every later step names `Round`, and Workshop's transcript in step 3 stamps `reply` from the round ids this step puts on reply events. It changes only the Engine's public API and the code that builds its values, so it ships on its own.
 2. Per-run Harness (step 2). It comes next because Workshop's move in step 3 builds each conversation's run on `Harness::new`, `RunControl`, and `RunReport`. It lands under `harness-sessions`, rebuilt on it, so Workshop's unchanged suite tests the new effect loop before anything above the facade moves.
 3. Workshop conversations (steps 3 and 4). It comes after step 2 because `workshop-agents` builds a per-run Harness for each conversation. Its two pieces are sequential: Workshop moves with the facade swap first, and `harness-sessions` is deleted once nothing references it.
 4. Broker streaming and routing (steps 5 and 6). It comes after step 4, because `harness-sessions`' per-run broker uses the `Option<OnDelta>` that step 5 removes, and it builds on step 1's rounds and step 3's per-run broker. Its two pieces are sequential: streaming moves into the brokers first, then the brokers route model swaps and label completions, so the labels land once over both the whole-reply path and the streaming path.
 5. Runtime-agnostic Harness (step 7). It comes after step 5, keeping the plan's order, and after step 4, which removed the last tokio channels in the Harness tier. It needs nothing from step 6, so the two can be built side by side.
-6. Docs and exit criteria (step 8). It comes last because it describes the finished wiring and runs every exit criterion once.
+6. Docs and exit criteria (step 8). It describes the finished wiring.
+7. Round stop follow-ups (step 9). It comes last because its two defects were found while running step 8, and as the final step it runs every exit criterion once at full scope.
 
 Each step is one commit holding its code and its tests, and runs only its touched crates' checks. Each step that changes an Engine public item (steps 1 and 5) runs `cargo +nightly-2026-09-05 xtask api --bless`, then `--check`. Each step that changes a dependency edge runs `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`. The facade's doc pages change in steps 2, 3, 5, and 7, each time an item they name changes, because `cargo doc` denies broken intra-doc links and the tours run as doctests. Set `$env:RUSTDOCFLAGS='-D warnings'` in PowerShell before each `cargo doc` run. Every file in a `harness-*` or `workshop-*` crate stays at or under 500 lines, so split a file before an edit takes it past the limit, and new tests follow the sibling `<stem>-tests.rs` convention. Step 2 ends at the checkpoint in the Testing Plan, and step 3 starts only after it passes.
 
@@ -823,5 +827,29 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - Manual, in Workshop: a chat streams a reply; picking another model and sending gets the reply from the new model, with its label and the run log naming it; a prompt declaring `promptforge/web` searches and fetches; closing the panel and reopening it reattaches to the same conversation.
 
 </step-8>
+
+<step-9>
+
+### Step 9: A round stop interrupts a timed wait and never outlives the work in flight [completed]
+
+- Component: Round stop follow-ups
+- Depends on: step 2 (the round stop) and step 8 (the guide section this step completes).
+- Piece: one commit fixing two defects of step 2's round stop, which the Decision Record lists under "Found while running step 8". Both changes keep a run cancel exactly as it is today.
+- Timed waits, in `crates/promptforge-internal/engine/src/execute/scheduler/`:
+  - `apply.rs:205-218`: `drop_timer` moves the timer's slot to `Cancelled` without waking its owner, because it assumes only a run cancel drops a live timer. When the run's cancel flag is clear, a dropped timer must wake the chain waiting on it, and that chain's waiting call (a timed `tasks.join` or `tasks.join_any`) resumes with `Error::Interrupted`, kind `cancelled`, as a dropped `Chat` or `ToolCall` does (`dropped_answer`, `apply.rs:35-43`). Under a run cancel the drop keeps today's behavior. Rewrite the `drop_timer` doc to match.
+  - Change `timer.rs`, the task slots, or the join shim only as far as delivering that error needs. A timer that nothing waits on is still dropped silently.
+- Stop latching, in `crates/harness-internal/runner/src/`:
+  - `RunControl::stop_round` (`harness-control.rs`) sets a stop flag that the effect loop (`effect_loop.rs`) consumes. Today a stop raised while nothing droppable is in flight stays set and drops the next chat round, tool call, or timer. The loop must clear the flag whenever it observes a stop, after dropping whatever droppable effects are in flight at that moment, including none. A stop therefore never reaches an effect issued after the loop observed it.
+  - A question to the operator stays open across a stop, as today.
+- Guide: `guide/src/language/16-limits-and-errors.md`, the "A stopped round" subsection added in step 8, also says that a stop interrupts a timed `tasks.join` or `tasks.join_any` with the same interrupted error, and that a stop with nothing in flight changes nothing. Regenerate the export with `cargo run --locked -q -p build-user-guide`, then run `cargo xtask site --books-only`.
+- Tests:
+  - Engine, beside the drop tests in `crates/promptforge-internal/engine/src/execute/run/tests-drops.rs`: a timed `tasks.join_any` whose timer is dropped while the cancel flag is clear raises the cancelled error into a `pcall`, and the run continues; uncaught, the run ends `Cancelled`; with the cancel flag set, the drop ends the run as it does today.
+  - Runner, in `crates/harness-internal/runner/tests/it/harness-stop.rs`:
+    - `stop_round` during a timed `tasks.join_any` resumes the prompt's `pcall` instead of leaving it waiting on the joined task;
+    - `stop_round` while only a question to the operator is open leaves the question open, and once it is answered the next model round reaches the broker and completes;
+    - `stop_round` with nothing in flight changes nothing for the next effect.
+  - Run `cargo nextest run --locked -p promptforge-engine -p harness-runner --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on both with `--all-targets --all-features -- -D warnings`, `cargo nextest run --locked -p workshop-server`, `cargo nextest run --locked -p workshop-server --features headless`, `cargo run --locked -q -p build-user-guide` then `git diff --stat -- guide`, and `cargo xtask site --books-only`.
+
+</step-9>
 
 </execution-plan>

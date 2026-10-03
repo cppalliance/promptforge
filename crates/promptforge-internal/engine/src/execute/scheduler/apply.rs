@@ -31,8 +31,8 @@ use super::{
 
 /// The cancelled answer for a chain parked on `resume`'s kind of effect:
 /// the protocol variant the chain's shim expects, holding the run's
-/// cancellation error. A timer resumes no chain; its drop is applied to
-/// its slot instead, before this is reached.
+/// cancellation error. A timer's drop is applied to its slot and its
+/// waiter instead, before this is reached.
 fn dropped_answer(resume: &Continuation) -> Answer<Error> {
     match resume {
         Continuation::Infer(_) => Answer::Infer(Err(Error::Interrupted)),
@@ -203,17 +203,38 @@ impl Scheduler {
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
-    /// `Cancelled` without waking its owner. The Harness drops a live timer
-    /// only when it is cancelling the run, and that cancel tears the
-    /// waiter down with every other chain.
+    /// `Cancelled`. While the run's cancel flag is clear, the Harness gave
+    /// up the timeout and the run goes on, so the chain parked on the
+    /// timer leaves its wait with the cancelled error, as a dropped `Chat`
+    /// or `ToolCall` does: a timed `tasks.join` or `tasks.join_any` raises
+    /// it, and the model's `await_tasks` resumes its tool call with it. A
+    /// timer nothing waits on is dropped silently. Under a run cancel the
+    /// drop wakes no one, since the cancel tears the waiter down with
+    /// every other chain.
     fn drop_timer(&mut self, effect: EffectId) {
-        if let Some(slot) = self
+        let Some((task, owner)) = self
             .tasks
-            .values_mut()
-            .find(|slot| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
+            .iter_mut()
+            .find(|(_, slot)| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
+            .map(|(task, slot)| {
+                slot.state = TaskState::Cancelled;
+                slot.ok = Some(false);
+                (task.clone(), slot.owner)
+            })
+        else {
+            return;
+        };
+        if self.ctx.cancel().is_cancelled()
+            || !self.chains[owner.index()].waiting_on.contains(&task)
         {
-            slot.state = TaskState::Cancelled;
-            slot.ok = Some(false);
+            return;
         }
+        let chain = &mut self.chains[owner.index()];
+        chain.waiting_on.clear();
+        let answer = match chain.awaiting.take() {
+            Some(_) => Answer::ToolCallResult(Err(Error::Interrupted)),
+            None => Answer::JoinAny(Err(Error::Interrupted)),
+        };
+        self.wake_from_wait(owner, answer);
     }
 }
