@@ -113,7 +113,6 @@ impl crate::test_support::ChatClient for OverflowClient {
         _tools: Vec<crate::model::ToolSchema>,
         _options: crate::model::CompletionOptions,
         _limits: RunLimits,
-        _on_delta: Option<crate::test_support::DeltaHook>,
     ) -> crate::test_support::BoxFuture<
         std::result::Result<crate::model::Completion, crate::model::CompletionError>,
     > {

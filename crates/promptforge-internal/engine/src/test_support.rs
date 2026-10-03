@@ -15,7 +15,7 @@
 //! Harness for the Engine's own suites.
 //!
 //! [`RunHarness`] bundles a suite's resources for one run - an observer, a
-//! client, a fixture tool table, a delta hook - and [`run_with_harness`] is
+//! client, a fixture tool table - and [`run_with_harness`] is
 //! the implicit-prepare path over the tokio driver: prepare, refuse or
 //! run. The tool fixtures implement
 //! the stand-in trait [`TestTool`]; the production trait is the Harness's,
@@ -46,7 +46,7 @@ pub(crate) mod scripted_chat;
 pub(crate) mod tokio_driver;
 pub(crate) mod tools;
 
-pub use harness::{ChatClient, DeltaHook, RunHarness};
+pub use harness::{ChatClient, RunHarness};
 pub use recording::forward;
 pub use tokio_driver::{BoxFuture, Performer, Performers, drive_tokio};
 pub use tools::{TestTool, TestToolTable};
@@ -61,7 +61,6 @@ impl ChatClient for scripted_chat::ScriptedChat {
         tools: Vec<crate::model::ToolSchema>,
         options: crate::model::CompletionOptions,
         limits: crate::execute::RunLimits,
-        on_delta: Option<DeltaHook>,
     ) -> BoxFuture<Result<crate::model::Completion, crate::model::CompletionError>> {
         let chat = self.clone();
         Box::pin(async move {
@@ -71,11 +70,6 @@ impl ChatClient for scripted_chat::ScriptedChat {
                 &options,
                 limits.timeout(),
                 limits.response_bytes(),
-                |delta| {
-                    if let Some(hook) = &on_delta {
-                        hook(delta);
-                    }
-                },
             )
             .await
         })

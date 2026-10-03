@@ -1,10 +1,10 @@
 //! The streamed round end to end: what goes on the wire, and how the
 //! stream comes back as one completion.
 
-use promptforge::model::{CompletionResult, Message, StreamDelta};
+use promptforge::model::{CompletionResult, Message};
 
 use super::*;
-use crate::CompletionErrorKind;
+use crate::{CompletionErrorKind, StreamDelta};
 
 #[tokio::test]
 async fn complete_sends_completion_options_and_stream_flags_on_the_wire() {

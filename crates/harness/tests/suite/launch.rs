@@ -9,7 +9,7 @@ use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::{Origin, VfsError, VfsRef};
 use harness::{Harness, HostSnapshot, OutputError, RunRequest};
 
-use crate::support::{Offline, TokioTimer};
+use crate::support::{Clock, Offline};
 
 /// A prompt that reads its declared input and writes its declared output.
 const SHOUTS: &str = concat!(
@@ -25,7 +25,7 @@ fn harness() -> Harness {
     Harness::new(
         Arc::new(MemoryRecorder::new()),
         Arc::new(Offline),
-        Arc::new(TokioTimer),
+        Arc::new(Clock),
         CapabilityRegistry::new(),
         HostServices::new(),
     )

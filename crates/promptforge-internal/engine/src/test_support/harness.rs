@@ -5,9 +5,9 @@
 //! values; it holds no client, no tool implementation, and no sink. Those
 //! belong to whoever performs the effects. `RunHarness` is that bundle for
 //! the suites: the [`ChatClient`] a `Chat` effect is performed with, the
-//! [`TestToolTable`] a `ToolCall` effect's id resolves in, the delta hook
-//! a round of `Chat` origin forwards to, and the observer and capture the
-//! run's events are replayed onto. [`performers`](RunHarness::performers) and
+//! [`TestToolTable`] a `ToolCall` effect's id resolves in, and the
+//! observer and capture the run's events are replayed onto.
+//! [`performers`](RunHarness::performers) and
 //! [`sink`](RunHarness::sink) turn the bundle into what
 //! [`drive_tokio`](super::drive_tokio) takes. The Engine sees only its
 //! effects and answers; the Harness builds its own [`Performers`] and
@@ -16,8 +16,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_types::event::{Event, ReplyOrigin};
-use promptforge_types::wire::StreamDelta;
+use promptforge_types::event::Event;
 
 use super::recording::{self, DebugCapture, NullObserver, Observer};
 #[cfg(test)]
@@ -28,9 +27,6 @@ use crate::execute::RunLimits;
 use crate::execute::{Effect, EffectAnswer};
 use crate::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
 
-/// The live streaming-delta callback a chat round forwards its chunks to.
-pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
-
 /// What the test driver performs a `Chat` round on: a stand-in for the
 /// Harness's model client, which the Engine never holds and this crate
 /// never names. The suites' implementation answers each round from a
@@ -38,16 +34,13 @@ pub type DeltaHook = Arc<dyn Fn(StreamDelta) + Send + Sync>;
 pub trait ChatClient: Send + Sync {
     /// Performs one round: sends `messages` (with `tools` advertised when
     /// non-empty) under `options`, bounded by `limits`' request timeout
-    /// and response cap, forwarding each live delta to `on_delta` when
-    /// the round has the `Chat` origin, and returns the completion or its
-    /// failure.
+    /// and response cap, and returns the completion or its failure.
     fn complete(
         &self,
         messages: Vec<Message>,
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         limits: RunLimits,
-        on_delta: Option<DeltaHook>,
     ) -> BoxFuture<Result<Completion, CompletionError>>;
 }
 
@@ -64,14 +57,11 @@ pub struct RunHarness {
     pub(crate) client: Option<Arc<dyn ChatClient>>,
     /// The implementations `ToolCall` effects resolve their ids in.
     pub(crate) tools: TestToolTable,
-    /// The live streaming-delta callback a section's model rounds forward
-    /// their chunks to; `None` drops deltas at the leaf.
-    pub(crate) on_delta: Option<DeltaHook>,
 }
 
 impl RunHarness {
-    /// Builds the silent bundle: a null observer, no capture, no client, no
-    /// tools, no delta hook.
+    /// Builds the silent bundle: a null observer, no capture, no client,
+    /// and no tools.
     #[must_use]
     pub fn new() -> RunHarness {
         RunHarness {
@@ -79,7 +69,6 @@ impl RunHarness {
             debug: None,
             client: None,
             tools: TestToolTable::new(),
-            on_delta: None,
         }
     }
 
@@ -119,14 +108,6 @@ impl RunHarness {
         self
     }
 
-    /// Sets the live streaming-delta callback `models.loop` rounds forward
-    /// their chunks to. The default (`None`) drops deltas at the leaf.
-    #[must_use]
-    pub fn on_delta(mut self, hook: DeltaHook) -> RunHarness {
-        self.on_delta = Some(hook);
-        self
-    }
-
     /// The bundle's performers for the tokio test driver, starting from
     /// [`Performers::refusing`] and overriding the slots this bundle
     /// supplies: with a client, a `Chat` runs on it under `limits`'
@@ -136,30 +117,20 @@ impl RunHarness {
     pub fn performers(&self, limits: RunLimits) -> Performers {
         let mut performers = Performers::refusing();
         if let Some(client) = self.client.clone() {
-            let on_delta = self.on_delta.clone();
             performers.chat = Box::new(move |effect| {
                 let client = Arc::clone(&client);
-                let on_delta = on_delta.clone();
                 Box::pin(async move {
                     let Effect::Chat {
                         messages,
                         tools,
                         options,
-                        round,
                         ..
                     } = effect
                     else {
                         return EffectAnswer::Dropped;
                     };
-                    // The bundle's delta callback is the live consumer of a
-                    // round of `Chat` origin; without one, or for a nested
-                    // infer round, the chunks drop at the leaf and the
-                    // completed reply is the repair.
-                    let on_delta = (round.origin == ReplyOrigin::Chat)
-                        .then_some(on_delta)
-                        .flatten();
                     let result = client
-                        .complete(messages, tools, options, limits, on_delta)
+                        .complete(messages, tools, options, limits)
                         .await
                         .map(Box::new);
                     EffectAnswer::Chat(result)
@@ -214,7 +185,6 @@ impl fmt::Debug for RunHarness {
             .field("debug", &self.debug.is_some())
             .field("client", &self.client.is_some())
             .field("tools", &self.tools)
-            .field("on_delta", &self.on_delta.is_some())
             .finish()
     }
 }

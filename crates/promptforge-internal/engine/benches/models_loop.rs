@@ -21,9 +21,7 @@
 use std::num::NonZeroU32;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use promptforge_engine::test_support::{
-    BoxFuture, ChatClient, DeltaHook, RunHarness, run_with_harness,
-};
+use promptforge_engine::test_support::{BoxFuture, ChatClient, RunHarness, run_with_harness};
 use promptforge_engine::{Environment, RunContext, RunLimits, RunResult};
 use promptforge_model_client::client::{Completion, Message, ToolSchema};
 use promptforge_model_client::model::{CompletionError, CompletionOptions};
@@ -55,7 +53,6 @@ impl ChatClient for BenchClient {
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         limits: RunLimits,
-        on_delta: Option<DeltaHook>,
     ) -> BoxFuture<Result<Completion, CompletionError>> {
         let chat = self.0.clone();
         Box::pin(async move {
@@ -65,11 +62,6 @@ impl ChatClient for BenchClient {
                 &options,
                 limits.timeout(),
                 limits.response_bytes(),
-                |delta| {
-                    if let Some(hook) = &on_delta {
-                        hook(delta);
-                    }
-                },
             )
             .await
         })

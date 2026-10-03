@@ -9,8 +9,7 @@
 //! every Engine crate reports through and the [`EventSink`](emitter::EventSink)
 //! a run drains; and [`metrics`] is the model-call metrics vocabulary those
 //! events embed. [`models`] is the public model vocabulary (identity,
-//! catalog, descriptor) and [`wire`] the streaming delta the Harness's `on_delta`
-//! callback observes. [`tools`] is the runtime-agnostic tool vocabulary:
+//! catalog, descriptor). [`tools`] is the runtime-agnostic tool vocabulary:
 //! the implementation-free [`ToolDescriptor`](tools::ToolDescriptor), the
 //! caller-provided [`ToolCatalog`](tools::ToolCatalog), trusted output, and
 //! the model-safe tool error, and [`capabilities`] is the capability
@@ -48,4 +47,3 @@ pub mod replay;
 pub mod timestamp;
 pub mod tools;
 pub mod untrusted;
-pub mod wire;

@@ -11,13 +11,12 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, StreamDelta, ToolSchema,
-};
+use promptforge::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
 
 use crate::config::{GatewayConfigError, GatewayEndpoint, SecretString};
 use crate::failure::{elapsed, transport_failure, unavailable};
 use crate::wire::classify::classify_http_failure;
+use crate::wire::delta::StreamDelta;
 use crate::wire::read::{ChunkSource, read_body_capped, read_completion_stream};
 use crate::wire::request::build_request_body;
 use crate::wire::stream::escape_controls;

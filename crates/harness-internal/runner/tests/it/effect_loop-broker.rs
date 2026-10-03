@@ -1,14 +1,13 @@
 //! The effect loop answers every `Chat` effect through the inference
 //! broker: the broker receives each round's `Round`, with origin `Infer`
-//! for a nested `models.infer` and `Chat` for a section's own round, the
-//! loop hands it no delta callback, and the run resumes with the broker's
-//! completion as each round's answer.
+//! for a nested `models.infer` and `Chat` for a section's own round, and
+//! the run resumes with the broker's completion as each round's answer.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use harness_runner::effect_loop::drive_run;
-use harness_runner::performers::{BoxFuture, InferenceBroker, OnDelta, Performers};
+use harness_runner::performers::{BoxFuture, InferenceBroker, Performers};
 use harness_runner::recorder::{RecordKind, RunOutcome};
 use promptforge::cancel::CancelHandle;
 use promptforge::effect::Round;
@@ -58,9 +57,8 @@ fn infers_then_chats() -> Run {
     Run::new(prompt, "", ctx)
 }
 
-/// One round as the broker saw it: the last message's text, the round,
-/// and whether the round was handed a delta callback.
-type Seen = (String, Round, bool);
+/// One round as the broker saw it: the last message's text and the round.
+type Seen = (String, Round);
 
 /// Replies `re: <last message>` to every round and keeps each round it
 /// was handed.
@@ -81,16 +79,12 @@ impl InferenceBroker for RecordingBroker {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         round: Round,
-        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let asked = messages
             .last()
             .map(|message| message.content().to_owned())
             .unwrap_or_default();
-        self.rounds
-            .lock()
-            .unwrap()
-            .push((asked.clone(), round, on_delta.is_some()));
+        self.rounds.lock().unwrap().push((asked.clone(), round));
         Box::pin(async move {
             Completion::from_result(CompletionResult::Text(format!("re: {asked}")), "m")
                 .map(Box::new)
@@ -108,7 +102,7 @@ fn recording() -> (Performers, Arc<Mutex<Vec<Seen>>>) {
 }
 
 #[tokio::test]
-async fn the_broker_receives_each_rounds_round_and_no_delta_callback() {
+async fn the_broker_receives_each_rounds_round() {
     let (recorder, run_id) = begun_log().await;
     let (performers, rounds) = recording();
 
@@ -129,20 +123,17 @@ async fn the_broker_receives_each_rounds_round_and_no_delta_callback() {
                 Round {
                     id: RoundId::new(0),
                     origin: ReplyOrigin::Infer
-                },
-                false
+                }
             ),
             (
                 "chat round".to_owned(),
                 Round {
                     id: RoundId::new(1),
                     origin: ReplyOrigin::Chat
-                },
-                false
+                }
             ),
         ],
-        "the infer round is round 0 from `Infer`, the chat round is round 1 from `Chat`, \
-         and neither is handed a callback"
+        "the infer round is round 0 from `Infer`, and the chat round is round 1 from `Chat`"
     );
 }
 

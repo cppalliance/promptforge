@@ -396,10 +396,6 @@ Each kind has one fixed message, written for a model reader, and an HTTP failure
 
 The Engine never looks inside either value. It copies them into the [`Event::Request`](crate::event::Event::Request) and [`Event::Response`](crate::event::Event::Response) events, and only when the run has capture on. Treat both as private and untrusted, because nothing redacts them.
 
-## StreamDelta
-
-[`StreamDelta`] carries one live piece of a streaming reply to the delta callback. [`Text`](StreamDelta::Text) is a fragment of the answer text, and [`Reasoning`](StreamDelta::Reasoning) a fragment of reasoning, never part of the answer. Tool calls arrive only in the finished completion. Forward deltas only for a `Chat` effect whose [`Round`](crate::effect::Round) has the origin `Chat`: a section's chat round, not a nested `models.infer` round. It is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
-
 ## TemperatureError
 
 [`TemperatureError`] says why [`Temperature::new`] or [`CompletionOptions::with_temperature`] rejected a temperature. [`NotFinite`](TemperatureError::NotFinite) means NaN or an infinity, and [`OutOfRange`](TemperatureError::OutOfRange) means a finite value outside `[0.0, 2.0]`, held in its `value`. NaN reports `NotFinite`, because finiteness is checked first. The enum and `OutOfRange` are both `#[non_exhaustive]`, so match `OutOfRange { value, .. }`. Pass a finite value from `0.0` to `2.0`.

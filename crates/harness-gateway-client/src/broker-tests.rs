@@ -1,23 +1,24 @@
-//! The Gateway broker against the transport suite's mock gateways: a
-//! streamed round's deltas reach the callback in wire order, a round with
-//! no callback still answers with the whole reply, and `models` lists the
-//! catalog the gateway serves under the broker's key. Its `Debug` never
-//! prints the bearer key.
+//! The Gateway broker against the transport suite's mock gateways:
+//! `chat_streaming` hands each piece to its callback in wire order, the
+//! `InferenceBroker` round answers with the whole reply, and `models`
+//! lists the catalog the gateway serves under the broker's key. Its
+//! `Debug` never prints the bearer key.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
-use harness::{InferenceBroker, OnDelta};
+use harness::InferenceBroker;
 use promptforge::effect::Round;
 use promptforge::event::ReplyOrigin;
 use promptforge::ids::RoundId;
 use promptforge::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
-    StreamDelta, ThinkingMode,
+    ThinkingMode,
 };
 use serde_json::Value;
 
 use super::GatewayBroker;
+use crate::StreamDelta;
 use crate::config::{GatewayEndpoint, SecretString};
 use crate::transport::tests::{content_chunk, serve, sse_app, sse_body};
 
@@ -49,9 +50,13 @@ fn binding() -> ModelBinding {
     )
 }
 
-/// A three-fragment reply closed by a stop finish.
+/// A reply that reasons once and then answers in three fragments, closed
+/// by a stop finish.
 fn three_fragments() -> String {
     sse_body(&[
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": { "reasoning_content": "hmm" }, "finish_reason": null }]
+        }),
         content_chunk("one "),
         content_chunk("two "),
         content_chunk("three"),
@@ -61,13 +66,16 @@ fn three_fragments() -> String {
     ])
 }
 
-/// A delta callback that keeps every delta it is handed, beside what it
+/// The callback `chat_streaming` hands each piece to.
+type OnPiece = Arc<dyn Fn(StreamDelta) + Send + Sync>;
+
+/// A piece callback that keeps every piece it is handed, beside what it
 /// kept.
-fn recording() -> (OnDelta, Arc<Mutex<Vec<StreamDelta>>>) {
+fn recording() -> (OnPiece, Arc<Mutex<Vec<StreamDelta>>>) {
     let kept: Arc<Mutex<Vec<StreamDelta>>> = Arc::default();
     let sink = Arc::clone(&kept);
     (
-        Arc::new(move |delta| sink.lock().unwrap().push(delta)),
+        Arc::new(move |piece| sink.lock().unwrap().push(piece)),
         kept,
     )
 }
@@ -88,9 +96,36 @@ fn reply_of(result: &CompletionResult) -> &str {
 }
 
 #[tokio::test]
-async fn a_streamed_round_sends_its_deltas_to_the_callback_in_wire_order() {
+async fn chat_streaming_hands_each_piece_to_its_callback_in_wire_order() {
     let broker = broker_for(sse_app(three_fragments())).await;
-    let (on_delta, kept) = recording();
+    let (on_piece, kept) = recording();
+
+    let completion = broker
+        .chat_streaming(
+            binding(),
+            vec![Message::user("hi")],
+            Vec::new(),
+            CompletionOptions::new("m"),
+            on_piece,
+        )
+        .await
+        .expect("the mock round completes");
+    assert_eq!(reply_of(completion.result()), "one two three");
+    assert_eq!(
+        *kept.lock().unwrap(),
+        vec![
+            StreamDelta::Reasoning("hmm".to_owned()),
+            StreamDelta::Text("one ".to_owned()),
+            StreamDelta::Text("two ".to_owned()),
+            StreamDelta::Text("three".to_owned()),
+        ],
+        "each piece, reasoning and text alike, reaches the callback as it arrives, in the stream's order"
+    );
+}
+
+#[tokio::test]
+async fn the_inference_broker_round_answers_with_the_whole_reply() {
+    let broker = broker_for(sse_app(three_fragments())).await;
 
     let completion = broker
         .chat(
@@ -99,41 +134,13 @@ async fn a_streamed_round_sends_its_deltas_to_the_callback_in_wire_order() {
             Vec::new(),
             CompletionOptions::new("m"),
             round(ReplyOrigin::Chat),
-            Some(on_delta),
-        )
-        .await
-        .expect("the mock round completes");
-    assert_eq!(reply_of(completion.result()), "one two three");
-    assert_eq!(
-        *kept.lock().unwrap(),
-        vec![
-            StreamDelta::Text("one ".to_owned()),
-            StreamDelta::Text("two ".to_owned()),
-            StreamDelta::Text("three".to_owned()),
-        ],
-        "each fragment reaches the callback as it arrives, in the stream's order"
-    );
-}
-
-#[tokio::test]
-async fn a_round_without_a_callback_still_answers_with_the_whole_reply() {
-    let broker = broker_for(sse_app(three_fragments())).await;
-
-    let completion = broker
-        .chat(
-            binding(),
-            vec![Message::user("hi")],
-            Vec::new(),
-            CompletionOptions::new("m"),
-            round(ReplyOrigin::Infer),
-            None,
         )
         .await
         .expect("the mock round completes");
     assert_eq!(
         reply_of(completion.result()),
         "one two three",
-        "a nested infer's fragments have no consumer, and the completed reply still travels in the answer"
+        "a headless Host's round streams nowhere, and the completed reply travels in the answer"
     );
 }
 

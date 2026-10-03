@@ -28,9 +28,9 @@ is absent when nothing was measured. A broker may also attach a
 which the Engine copies into its debug capture events when a run turns
 capture on. A completion built without a transport has neither. The
 metrics vocabulary (`Usage`,
-`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) and
-`StreamDelta` are canonical in `promptforge-types`; this crate uses them
-from there and does not re-export them. A
+`LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) is
+canonical in `promptforge-types`; this crate uses it from there and does
+not re-export it. A
 malformed metadata section degrades to `None` with a diagnostic line that
 the broker attaches and the Engine reports as a `model_metadata_degraded`
 event; it never fails the call.

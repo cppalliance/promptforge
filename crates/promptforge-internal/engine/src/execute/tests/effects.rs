@@ -1,13 +1,12 @@
 //! Effects as values: every leaf request kind a section yields - `infer`
 //! and `chat`, `tool_call`, `store`, `timer` - issues
 //! exactly one `Effect` out of the run's `step`, and each effect's record
-//! round-trips through serde; only a round of `Chat` origin streams its
-//! deltas to the Harness. The run's answer rules (a drop, an orphan, a wrong
-//! kind) are pinned beside `Run` itself.
+//! round-trips through serde; a section's round carries the `Chat` origin
+//! and a nested infer round the `Infer` origin. The run's answer rules (a
+//! drop, an orphan, a wrong kind) are pinned beside `Run` itself.
 
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::RoundId;
-use promptforge_types::wire::StreamDelta;
 
 use super::models_loop::{echo_tools, loop_models, loop_prompt};
 use super::scheduler::scheduler_context_on;
@@ -61,18 +60,6 @@ fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
         section: section.to_owned(),
         caller,
     }
-}
-
-/// Records every streamed delta the run forwards to the Harness.
-fn delta_hook() -> (Arc<Mutex<Vec<StreamDelta>>>, RunHarness) {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&seen);
-    let harness = RunHarness::new().on_delta(Arc::new(move |delta| {
-        sink.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(delta);
-    }));
-    (seen, harness)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -268,9 +255,7 @@ async fn a_timed_wait_issues_exactly_one_timer_effect() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_chat_round_streams_its_deltas_to_the_harness() {
-    // The scripted gateway serves every reply as two content fragments,
-    // so a round of `Chat` origin forwards exactly two text deltas.
+async fn a_sections_round_is_the_runs_first_with_the_chat_origin() {
     let gateway = ScriptedChat::new(vec![resp_text("answer")]);
     let prompt = parse(&loop_prompt(
         "local msgs = messages.new()\n\
@@ -278,8 +263,7 @@ async fn a_chat_round_streams_its_deltas_to_the_harness() {
          models.loop(msgs)\n\
          return msgs[#msgs].content",
     ));
-    let (seen, delta_harness) = delta_hook();
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
     let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
@@ -292,24 +276,13 @@ async fn a_chat_round_streams_its_deltas_to_the_harness() {
         }],
         "the section's round is the run's first and has the chat origin"
     );
-    assert_eq!(
-        *seen.lock().expect("the delta log mutex is not poisoned"),
-        vec![
-            StreamDelta::Text("ans".to_owned()),
-            StreamDelta::Text("wer".to_owned()),
-        ],
-        "a chat round's fragments reach the Harness's hook live, in order"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_nested_infer_round_streams_no_deltas_to_the_harness() {
-    // A nested `models.infer` consumes only the completed reply; its
-    // fragments have no consumer and never reach the Harness's hook.
+async fn a_nested_infer_round_is_the_runs_first_with_the_infer_origin() {
     let gateway = ScriptedChat::new(vec![resp_text("answer")]);
     let prompt = parse(&loop_prompt("return models.infer('ask')"));
-    let (seen, delta_harness) = delta_hook();
-    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), delta_harness);
+    let (ctx, harness) = effect_context(&prompt, ToolSet::default(), RunHarness::new());
     let mut scheduler = TokioDriver::new(&ctx, harness, Some(gateway_client(&gateway)));
     let rounds = scheduler.record_rounds_for_test();
     let out = scheduler.drive().await.expect("the infer completes");
@@ -321,11 +294,5 @@ async fn a_nested_infer_round_streams_no_deltas_to_the_harness() {
             origin: ReplyOrigin::Infer,
         }],
         "the nested round is the run's first and has the infer origin"
-    );
-    assert!(
-        seen.lock()
-            .expect("the delta log mutex is not poisoned")
-            .is_empty(),
-        "an infer round forwards no deltas"
     );
 }

@@ -12,9 +12,10 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 
 use promptforge::metrics::ClientTiming;
-use promptforge::model::{Completion, CompletionError, StreamDelta};
+use promptforge::model::{Completion, CompletionError};
 use serde_json::Value;
 
+use super::delta::StreamDelta;
 use super::stream::{Applied, SseScanner, StreamAccumulator};
 use crate::failure::malformed;
 

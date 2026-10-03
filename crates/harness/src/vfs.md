@@ -29,14 +29,14 @@ use harness::vfs::{Origin, VfsRef};
 use harness::{Harness, HostSnapshot, RunRequest};
 use std::error::Error;
 use std::sync::Arc;
-# use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
+# use harness::{BoxFuture, InferenceBroker, Timer};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # struct Offline;
 # impl InferenceBroker for Offline {
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }
@@ -128,7 +128,7 @@ use std::sync::{Arc, Mutex};
 # use async_trait::async_trait;
 # use harness::capability::{CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, InputError, UserInput};
 # use harness::record::MemoryRecorder;
-# use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest, Timer};
+# use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest, Timer};
 # use promptforge::model::{Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema};
 # use std::error::Error;
 # struct Offline;
@@ -136,7 +136,7 @@ use std::sync::{Arc, Mutex};
 #     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>> {
 #         Box::pin(async { Ok(ModelCatalog::empty()) })
 #     }
-#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round, _: Option<OnDelta>) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+#     fn chat(&self, _: ModelBinding, _: Vec<Message>, _: Vec<ToolSchema>, _: CompletionOptions, _: promptforge::effect::Round) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
 #         let kind = CompletionErrorKind::Unavailable;
 #         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
 #     }

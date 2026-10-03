@@ -7,7 +7,7 @@ use std::sync::Arc;
 use harness::capability::{CapabilityRegistry, HostServices, INPUT_BROKER, InputBroker, UserInput};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest};
+use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
@@ -266,7 +266,6 @@ impl InferenceBroker for NoChat {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         _round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("the prompt makes no model round")
     }

@@ -14,9 +14,9 @@
 //! [`model::CompletionError`] as the failure a round reports.
 //!
 //! The metrics vocabulary in [`promptforge_types::metrics`] (`Usage`,
-//! `LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) and
-//! `StreamDelta` are canonical in `promptforge-types`, and this crate uses
-//! them from there: [`client::Completion`] holds a round's metrics. The
+//! `LlamaTimings`, `VllmMetrics`, `ClientTiming`, `CallMetrics`) is
+//! canonical in `promptforge-types`, and this crate uses it from there:
+//! [`client::Completion`] holds a round's metrics. The
 //! model identity/catalog vocabulary ([`model::ModelId`],
 //! [`model::ModelCatalog`], [`model::ModelDescriptor`],
 //! [`model::ThinkingMode`]) is canonical there too and re-exported through

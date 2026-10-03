@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use harness::capability::{CapabilityRegistry, HostServices};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest};
+use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use promptforge::effect::Round;
 use promptforge::event::ReplyOrigin;
 use promptforge::ids::RoundId;
@@ -17,7 +17,7 @@ use promptforge::model::{
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
 
-use crate::support::TokioTimer;
+use crate::support::Clock;
 
 /// The one model the scripted broker lists and the Host selects.
 const MODEL: &str = "scripted-model";
@@ -55,7 +55,6 @@ impl InferenceBroker for ScriptedBroker {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         self.rounds
             .lock()
@@ -88,7 +87,7 @@ async fn a_sections_round_reaches_the_broker_as_chat_and_a_nested_infer_round_as
     let harness = Harness::new(
         Arc::new(MemoryRecorder::new()),
         broker.clone(),
-        Arc::new(TokioTimer),
+        Arc::new(Clock),
         CapabilityRegistry::new(),
         HostServices::new(),
     );

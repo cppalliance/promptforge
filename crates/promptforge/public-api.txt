@@ -11,7 +11,6 @@
 #[non_exhaustive] pub enum promptforge::model::CompletionErrorKind
 #[non_exhaustive] pub enum promptforge::model::CompletionResult
 #[non_exhaustive] pub enum promptforge::model::ModelCatalogError
-#[non_exhaustive] pub enum promptforge::model::StreamDelta
 #[non_exhaustive] pub enum promptforge::model::TemperatureError
 #[non_exhaustive] pub enum promptforge::model::ThinkingMode
 #[non_exhaustive] pub enum promptforge::prompt::ArgType
@@ -143,7 +142,6 @@ auto promptforge::model::ModelId: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwi
 auto promptforge::model::ModelIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::ModelInvocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::RawExchange: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
-auto promptforge::model::StreamDelta: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::Temperature: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::TemperatureError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::model::ThinkingMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -266,7 +264,6 @@ derives promptforge::model::ModelId: Clone, Debug, Eq, Hash, Ord, PartialEq, Par
 derives promptforge::model::ModelIdError: Clone, Debug, Eq, PartialEq
 derives promptforge::model::ModelInvocation: Clone, Debug, PartialEq
 derives promptforge::model::RawExchange: Clone, Debug, Eq, PartialEq
-derives promptforge::model::StreamDelta: Clone, Debug, Eq, PartialEq
 derives promptforge::model::Temperature: Clone, Copy, Debug, PartialEq
 derives promptforge::model::TemperatureError: Clone, Debug, PartialEq
 derives promptforge::model::ThinkingMode: Clone, Copy, Debug, Deserialize, Eq, PartialEq
@@ -1208,10 +1205,6 @@ pub promptforge::model::ModelCatalogError::DuplicateId::server: alloc::string::S
 pub promptforge::model::ModelInvocation::max_tokens: core::option::Option<core::num::nonzero::NonZeroU32>
 pub promptforge::model::ModelInvocation::temperature: core::option::Option<promptforge::model::Temperature>
 pub promptforge::model::ModelInvocation::thinking: core::option::Option<bool>
-pub promptforge::model::StreamDelta::Reasoning(..)
-pub promptforge::model::StreamDelta::Reasoning::0: alloc::string::String
-pub promptforge::model::StreamDelta::Text(..)
-pub promptforge::model::StreamDelta::Text::0: alloc::string::String
 pub promptforge::model::TemperatureError::NotFinite
 pub promptforge::model::TemperatureError::OutOfRange::value: f64
 pub promptforge::model::ThinkingMode::Always

@@ -6,9 +6,8 @@
 //! no HTTP and no wire code, and records what every round carried so a
 //! suite asserts on the effect rather than on a request body. The answers
 //! follow the rules the gateway client's reader applies: an empty reply is
-//! the reader's `EmptyReply` failure, a streaming round's text arrives as
-//! live deltas, and a reply past the run's timeout is the client's
-//! `Timeout` failure.
+//! the reader's `EmptyReply` failure, and a reply past the run's timeout is
+//! the client's `Timeout` failure.
 //!
 //! This file names only external crates so the bench target can include
 //! it by `#[path]` beside the in-crate suites; it is not part of the
@@ -24,7 +23,6 @@ use promptforge_model_client::client::{
 };
 use promptforge_model_client::model::{CompletionError, CompletionErrorKind, CompletionOptions};
 use promptforge_types::metrics::CallMetrics;
-use promptforge_types::wire::StreamDelta;
 use serde_json::Value;
 
 /// The specific the reader adds to an empty reply whose reasoning it
@@ -79,9 +77,8 @@ impl ScriptedReply {
         }
     }
 
-    /// Answers a round with this reply, forwarding its live deltas to
-    /// `on_delta` first: the reasoning as one piece, then the text as two.
-    fn answer(&self, on_delta: &impl Fn(StreamDelta)) -> Result<Completion, CompletionError> {
+    /// Answers a round with this reply.
+    fn answer(&self) -> Result<Completion, CompletionError> {
         match self {
             ScriptedReply::Text {
                 model,
@@ -91,15 +88,6 @@ impl ScriptedReply {
                 metrics,
             } => {
                 let reasoning = reasoning.as_deref().filter(|text| !text.is_empty());
-                if let Some(reasoning) = reasoning {
-                    on_delta(StreamDelta::Reasoning(reasoning.to_owned()));
-                }
-                let (first, second) = split_for_stream(content);
-                for part in [first, second] {
-                    if !part.is_empty() {
-                        on_delta(StreamDelta::Text(part.to_owned()));
-                    }
-                }
                 if content.trim().is_empty() {
                     return Err(empty_reply(reasoning.is_some(), finish_reason.as_deref()));
                 }
@@ -138,7 +126,7 @@ impl ScriptedReply {
                 }
                 Err(error)
             }
-            ScriptedReply::Delayed(_, inner) => inner.answer(on_delta),
+            ScriptedReply::Delayed(_, inner) => inner.answer(),
         }
     }
 }
@@ -157,17 +145,6 @@ fn empty_reply(reasoning_present: bool, finish_reason: Option<&str>) -> Completi
         Some(reason) => error.with_finish_reason(reason),
         None => error,
     }
-}
-
-/// Splits `text` at its char midpoint, so a scripted string streams as two
-/// fragments.
-fn split_for_stream(text: &str) -> (&str, &str) {
-    let mid = text.chars().count() / 2;
-    let at = text
-        .char_indices()
-        .nth(mid)
-        .map_or(text.len(), |(index, _)| index);
-    text.split_at(at)
 }
 
 /// What one round's `Chat` effect carried.
@@ -246,9 +223,8 @@ impl ScriptedChat {
     }
 
     /// Answers one round: records what it carried, waits out a delayed
-    /// reply under `timeout`, forwards the reply's deltas to `on_delta`,
-    /// and returns the completion or the failure. `max_bytes` bounds
-    /// nothing, because no bytes are read.
+    /// reply under `timeout`, and returns the completion or the failure.
+    /// `max_bytes` bounds nothing, because no bytes are read.
     ///
     /// # Errors
     /// Returns the scripted failure, the `Timeout` failure for a delay
@@ -262,7 +238,6 @@ impl ScriptedChat {
         options: &CompletionOptions,
         timeout: Duration,
         _max_bytes: NonZeroU64,
-        on_delta: impl Fn(StreamDelta),
     ) -> Result<Completion, CompletionError> {
         let index = self.calls.fetch_add(1, Ordering::SeqCst);
         self.requests
@@ -283,6 +258,6 @@ impl ScriptedChat {
             let kind = CompletionErrorKind::Timeout;
             return Err(CompletionError::new(kind, kind.phrase()));
         }
-        reply.answer(&on_delta)
+        reply.answer()
     }
 }

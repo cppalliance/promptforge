@@ -12,7 +12,7 @@ use harness_capabilities::{
     Capability, CapabilityError, CapabilityId, CapabilityRegistry, Contribution, HostServices,
     INPUT_BROKER, InputBroker, InputError, RunServices, Tool,
 };
-use harness_runner::performers::{BoxFuture, InferenceBroker, OnDelta, Timer};
+use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, CompletionResult, Message,
@@ -45,12 +45,12 @@ pub(crate) enum Listing {
 }
 
 /// Lists the scripted model and plays every round through its script,
-/// keeping each round it was handed beside whether the round came with a
-/// delta callback, and counting the listings it was asked for.
+/// keeping each round it was handed and counting the listings it was
+/// asked for.
 pub(crate) struct ScriptedBroker {
     listing: Listing,
     script: Arc<ChatScript>,
-    rounds: Kept<(Round, bool)>,
+    rounds: Kept<Round>,
     listings: Arc<AtomicUsize>,
 }
 
@@ -88,7 +88,7 @@ impl ScriptedBroker {
 
     /// The rounds this broker keeps, readable after it moved into a
     /// Harness.
-    pub(crate) fn rounds(&self) -> Kept<(Round, bool)> {
+    pub(crate) fn rounds(&self) -> Kept<Round> {
         Arc::clone(&self.rounds)
     }
 
@@ -117,12 +117,8 @@ impl InferenceBroker for ScriptedBroker {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         round: Round,
-        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-        self.rounds
-            .lock()
-            .unwrap()
-            .push((round, on_delta.is_some()));
+        self.rounds.lock().unwrap().push(round);
         (self.script)(round, messages)
     }
 }

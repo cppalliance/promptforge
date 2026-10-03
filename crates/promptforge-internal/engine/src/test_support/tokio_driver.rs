@@ -165,8 +165,8 @@ pub(crate) struct TokioDriver<'a> {
 impl<'a> TokioDriver<'a> {
     /// Builds the driver for one run over `state`, performing its effects
     /// and replaying its events through the `harness` the suite assembled
-    /// itself. The bundle supplies the observer, chat client, tools, delta
-    /// hook, and debug capture; `client` is the run's scripted model when
+    /// itself. The bundle supplies the observer, chat client, tools, and
+    /// debug capture; `client` is the run's scripted model when
     /// the suite supplies one, overriding any in the bundle.
     #[cfg(test)]
     pub(crate) fn new(

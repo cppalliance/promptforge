@@ -10,7 +10,10 @@
 //! [`GatewayBroker`] is the [`harness::InferenceBroker`] a Gateway Host
 //! passes to `Harness::new`: it runs every model round on a
 //! [`GatewayChat`] under the Engine's default run limits and lists the
-//! Gateway's models through [`fetch_model_catalog`].
+//! Gateway's models through [`fetch_model_catalog`]. A Host that shows a
+//! reply as it forms runs the round through
+//! [`GatewayBroker::chat_streaming`], which hands each [`StreamDelta`] to
+//! the Host's callback as it arrives.
 //!
 //! [`GatewayChat`] speaks the always-streaming `/chat/completions` SSE
 //! shape to one Gateway URL with, usually, the Gateway's shared bearer
@@ -81,6 +84,7 @@ pub use search::GatewaySearchErrorKind;
 pub use transport::GatewayChat;
 pub use wire::classify::classify_http_failure;
 pub use wire::classify::classify_stream_error;
+pub use wire::delta::StreamDelta;
 pub use wire::read::ChunkSource;
 pub use wire::read::read_body_capped;
 pub use wire::read::read_completion_stream;

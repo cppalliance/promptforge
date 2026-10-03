@@ -77,7 +77,6 @@ pub mod model {
     pub use promptforge_types::models::ModelId;
     pub use promptforge_types::models::ModelIdError;
     pub use promptforge_types::models::ThinkingMode;
-    pub use promptforge_types::wire::StreamDelta;
 }
 
 pub mod tools {

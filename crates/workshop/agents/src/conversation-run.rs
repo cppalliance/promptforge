@@ -1,15 +1,14 @@
 //! What a conversation hands its run's Harness, and how it takes the
 //! run's report: the recorder tee, the per-run services with the
-//! conversation's input broker, the delta sender for each of the run's
-//! own rounds, and the drive that ends the conversation with its run.
+//! conversation's input broker, the live pieces of the run's own rounds,
+//! and the drive that ends the conversation with its run.
 
 use std::sync::Arc;
 
 use harness::capability::{HostServices, INPUT_BROKER, InputBroker};
 use harness::record::{RunOutcome, RunRecorder};
-use harness::{Harness, HarnessError, OnDelta, RunReport, RunRequest, display_chain};
+use harness::{Harness, HarnessError, RunReport, RunRequest, display_chain};
 use promptforge::ids::RoundId;
-use promptforge::model::StreamDelta;
 use tokio::sync::broadcast;
 
 use super::{Conversation, lock};
@@ -52,16 +51,6 @@ impl Conversation {
             );
         }
         services
-    }
-
-    /// The live-piece callback for the run's round `round`: each piece
-    /// goes out as a [`Delta`] stamped with the round's id, the id the
-    /// round's reply event carries. No client listening is not a failure:
-    /// the completed reply travels in the round's answer.
-    #[must_use]
-    pub fn delta_sender(&self, round: RoundId) -> OnDelta {
-        let conversation = self.clone();
-        Arc::new(move |piece| conversation.publish_delta(round, piece))
     }
 
     /// Drives the conversation's one run to its end: holds `harness`'s
@@ -108,15 +97,11 @@ impl Conversation {
         self.report(FailureKind::RunFailed, message);
     }
 
-    /// Stamps one live piece with its round and broadcasts it.
-    fn publish_delta(&self, round: RoundId, piece: StreamDelta) {
-        let (kind, content) = match piece {
-            StreamDelta::Text(text) => (DeltaKind::Text, text),
-            StreamDelta::Reasoning(text) => (DeltaKind::Reasoning, text),
-            // The enum is non-exhaustive across the crate seam; a future
-            // side channel has no delta kind yet and stays live-only.
-            _ => return,
-        };
+    /// Broadcasts one live piece of the run's round `round` as a
+    /// [`Delta`] of `kind`, stamped with the round's id, the id the
+    /// round's reply event carries. No client listening is not a failure:
+    /// the completed reply travels in the round's answer.
+    pub fn publish_delta(&self, round: RoundId, kind: DeltaKind, content: String) {
         if let Some(channels) = self.channels() {
             // No receiver means no client is attached; deltas are
             // ephemeral and the completed-reply event is the repair.

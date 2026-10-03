@@ -18,8 +18,8 @@ async-trait.workspace = true
 # The Harness's public API: the per-run Harness a conversation drives, its
 # control, the recorder tee's trait, and the input broker's trait.
 harness.workspace = true
-# The Engine's public API: the events a conversation observes, the round
-# ids its deltas and transcript stamp, and the live pieces a round sends.
+# The Engine's public API: the events a conversation observes, and the
+# round ids its deltas and transcript stamp.
 promptforge.workspace = true
 # Wait tokens and conversation ids are 128 bits from the OS CSPRNG:
 # unguessable by anything that has not seen the announcing frame.

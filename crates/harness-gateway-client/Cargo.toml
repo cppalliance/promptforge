@@ -14,14 +14,14 @@ documentation = "https://cppalliance.github.io/promptforge/harness-gateway-clien
 
 [dependencies]
 # The Harness public API: the `InferenceBroker` trait the Gateway broker
-# implements, with its boxed future and delta callback.
+# implements, with its boxed future.
 harness.workspace = true
 # The `promptforge/web` capability's `SearchProvider` trait and its query,
 # result, and error vocabulary, which `GatewaySearch` implements.
 harness-web.workspace = true
 # The Engine's public API: the chat vocabulary (Message, ToolSchema,
 # Completion, CompletionError) the wire code reads and builds through its
-# public constructors, the canonical metrics, model catalog, and delta
+# public constructors, the canonical metrics and model catalog
 # vocabulary, and the run limits the broker applies to every round.
 promptforge.workspace = true
 # `SearchProvider` is an `async_trait` trait.

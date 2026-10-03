@@ -735,7 +735,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 
 <step-5>
 
-### Step 5: Streaming lives only in the Host's broker
+### Step 5: Streaming lives only in the Host's broker [completed]
 
 - Component: Broker streaming and routing
 - Depends on: steps 1, 3, and 4.

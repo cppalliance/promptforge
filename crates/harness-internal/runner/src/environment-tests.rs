@@ -8,7 +8,7 @@ use promptforge::model::{
 };
 
 use super::*;
-use crate::performers::{BoxFuture, OnDelta};
+use crate::performers::BoxFuture;
 
 /// Lists no model; a round is never made.
 struct EmptyBroker;
@@ -25,7 +25,6 @@ impl InferenceBroker for EmptyBroker {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         _round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;
         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })

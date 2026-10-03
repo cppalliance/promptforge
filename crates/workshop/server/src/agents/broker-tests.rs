@@ -3,10 +3,12 @@
 //! with no URL or key in the message, after a replacement binding is
 //! published the next round and the next model list reach the
 //! replacement, a model list waits while the menu's catalog holds no
-//! chat-capable model, and a run's broker streams only its section's own
+//! chat-capable model, a streaming round hands its pieces to its callback
+//! and answers whole, and a run's broker streams only its section's own
 //! rounds into the conversation.
 
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::Router;
@@ -14,7 +16,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use harness::InferenceBroker;
-use harness_gateway_client::{CompletionError, CompletionErrorKind};
+use harness_gateway_client::{CompletionError, CompletionErrorKind, StreamDelta};
 use promptforge::effect::Round;
 use promptforge::event::ReplyOrigin;
 use promptforge::ids::RoundId;
@@ -124,13 +126,40 @@ async fn round(broker: &WorkshopBroker) -> Result<String, CompletionError> {
                 id: RoundId::new(0),
                 origin: ReplyOrigin::Infer,
             },
-            None,
         )
         .await?;
     match completion.result() {
         CompletionResult::Text(text) => Ok(text.clone()),
         other => panic!("the round replies with text: {other:?}"),
     }
+}
+
+/// Runs one streaming round on `broker` and returns its reply text beside
+/// every piece its callback was handed.
+async fn streamed_round(
+    broker: &WorkshopBroker,
+) -> (Result<String, CompletionError>, Vec<StreamDelta>) {
+    let kept: Arc<Mutex<Vec<StreamDelta>>> = Arc::default();
+    let sink = Arc::clone(&kept);
+    let completion = broker
+        .chat_streaming(
+            binding(),
+            vec![Message::user("hi")],
+            Vec::new(),
+            CompletionOptions::new("m"),
+            Arc::new(move |piece| {
+                sink.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(piece);
+            }),
+        )
+        .await;
+    let reply = completion.map(|completion| match completion.result() {
+        CompletionResult::Text(text) => text.clone(),
+        other => panic!("the round replies with text: {other:?}"),
+    });
+    let pieces = kept.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    (reply, pieces)
 }
 
 /// Lists the models on `broker` and returns their names.
@@ -160,10 +189,32 @@ async fn without_a_gateway_registration_rounds_and_model_lists_fail_as_unavailab
     let broker = WorkshopBroker::new(Registry::new());
     let error = round(&broker).await.expect_err("no gateway, no round");
     assert_unavailable(&error);
+    let (reply, pieces) = streamed_round(&broker).await;
+    assert_unavailable(&reply.expect_err("no gateway, no streaming round"));
+    assert!(pieces.is_empty(), "a refused round streams nothing");
     let error = listed(&broker)
         .await
         .expect_err("no gateway, no model list");
     assert_unavailable(&error);
+}
+
+#[tokio::test]
+async fn a_streaming_round_hands_its_pieces_to_the_callback_and_answers_whole() {
+    let gateway = spawn_gateway(keyed_gateway("first-model", "first-key")).await;
+    let (registry, _binding, _guard) = registry_with_gateway(&gateway, "first-key");
+    let broker = WorkshopBroker::new(registry);
+
+    let (reply, pieces) = streamed_round(&broker).await;
+    assert_eq!(
+        reply.expect("the gateway answers"),
+        "from first-model",
+        "the completed reply travels in the answer"
+    );
+    assert_eq!(
+        pieces,
+        [StreamDelta::Text("from first-model".to_owned())],
+        "the reply's one content chunk reaches the callback as it arrives"
+    );
 }
 
 #[tokio::test]
@@ -254,7 +305,6 @@ async fn run_round(broker: &RunBroker, id: u64, origin: ReplyOrigin) -> String {
                 id: RoundId::new(id),
                 origin,
             },
-            None,
         )
         .await
         .expect("the gateway answers");

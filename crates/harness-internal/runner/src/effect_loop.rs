@@ -292,8 +292,7 @@ impl Driver {
     /// Puts the performer future of a chat, tool-call, or timer effect in
     /// flight and returns `None`. The performer is called inside its
     /// future, so a performer that panics as it is called is caught like
-    /// one that panics as it runs. The Harness hands a round no delta
-    /// callback.
+    /// one that panics as it runs.
     ///
     /// A Vfs effect goes nowhere and is handed back as the access and
     /// operation it carries, for the caller to answer inline.
@@ -313,9 +312,7 @@ impl Driver {
             } => {
                 let broker = Arc::clone(&self.performers.broker);
                 let round = async move {
-                    let completion = broker
-                        .chat(binding, messages, tools, options, round, None)
-                        .await;
+                    let completion = broker.chat(binding, messages, tools, options, round).await;
                     EffectAnswer::Chat(completion)
                 };
                 (Box::pin(round), false)

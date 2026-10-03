@@ -14,7 +14,7 @@ use std::sync::Arc;
 use harness::capability::{CapabilityRegistry, HostServices, UserInput};
 use harness::record::MemoryRecorder;
 use harness::vfs::VfsRef;
-use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, OnDelta, RunRequest};
+use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding,
@@ -37,7 +37,6 @@ impl InferenceBroker for Offline {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         _round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;
         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })

@@ -30,8 +30,7 @@ use std::sync::Arc;
 
 use promptforge::effect::Round;
 use promptforge::model::{
-    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog,
-    StreamDelta, ToolSchema,
+    Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use promptforge::tools::{ToolError, ToolId, ToolOutput};
 use serde_json::Value;
@@ -45,9 +44,6 @@ pub use tools::ActivatedTools;
 /// returns and the loop polls.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// Receives each live piece of a streaming model round as it arrives.
-pub type OnDelta = Arc<dyn Fn(StreamDelta) + Send + Sync>;
-
 /// The Host's inference: lists the models it serves and performs a `Chat`
 /// effect as one model round over `messages` with `tools` advertised,
 /// under `binding`'s frozen `options`.
@@ -60,8 +56,8 @@ pub trait InferenceBroker: Send + Sync {
     fn models(&self) -> BoxFuture<Result<ModelCatalog, CompletionError>>;
 
     /// Runs the round. `round` is the round's run-wide id and the path
-    /// that dispatched it. `on_delta` receives the round's live pieces
-    /// when it is present; the Harness passes `None`.
+    /// that dispatched it. The Harness takes only the finished reply; a
+    /// broker that shows the reply as it forms streams it on its own.
     fn chat(
         &self,
         binding: ModelBinding,
@@ -69,7 +65,6 @@ pub trait InferenceBroker: Send + Sync {
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         round: Round,
-        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>>;
 }
 

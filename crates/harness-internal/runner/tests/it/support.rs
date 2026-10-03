@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 
-use harness_runner::performers::{
-    BoxFuture, InferenceBroker, OnDelta, Performers, Timer, ToolPerformer,
-};
+use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, ToolPerformer};
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
@@ -114,7 +112,6 @@ impl InferenceBroker for Unused {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         _round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         unreachable!("no test issues a Chat effect")
     }

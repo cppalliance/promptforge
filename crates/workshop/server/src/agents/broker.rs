@@ -13,14 +13,14 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use harness::{BoxFuture, InferenceBroker, OnDelta};
-use harness_gateway_client::{CompletionError, CompletionErrorKind, GatewayBroker};
+use harness::{BoxFuture, InferenceBroker};
+use harness_gateway_client::{CompletionError, CompletionErrorKind, GatewayBroker, StreamDelta};
 use promptforge::effect::Round;
 use promptforge::event::ReplyOrigin;
 use promptforge::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
-use workshop_agents::Conversation;
+use workshop_agents::{Conversation, DeltaKind};
 use workshop_menu::{CatalogBus, MenuHandles};
 use workshop_registry::Registry;
 
@@ -73,6 +73,22 @@ impl WorkshopBroker {
             chat_model_published(menu.catalog()).await;
         }
     }
+
+    /// Runs one round through the current generation's Gateway broker,
+    /// handing `on_piece` each live piece of the reply as it arrives.
+    pub(crate) fn chat_streaming(
+        &self,
+        binding: ModelBinding,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        on_piece: Arc<dyn Fn(StreamDelta) + Send + Sync>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        match self.current() {
+            Ok(broker) => broker.chat_streaming(binding, messages, tools, options, on_piece),
+            Err(error) => Box::pin(async move { Err(error) }),
+        }
+    }
 }
 
 impl InferenceBroker for WorkshopBroker {
@@ -91,10 +107,9 @@ impl InferenceBroker for WorkshopBroker {
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         round: Round,
-        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         match self.current() {
-            Ok(broker) => broker.chat(binding, messages, tools, options, round, on_delta),
+            Ok(broker) => broker.chat(binding, messages, tools, options, round),
             Err(error) => Box::pin(async move { Err(error) }),
         }
     }
@@ -130,14 +145,26 @@ impl InferenceBroker for RunBroker {
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         // Only a section's own round has a live reader; a nested
         // `models.infer` round is read whole from its answer.
-        let on_delta =
-            (round.origin == ReplyOrigin::Chat).then(|| self.conversation.delta_sender(round.id));
+        if round.origin != ReplyOrigin::Chat {
+            return self.inner.chat(binding, messages, tools, options, round);
+        }
+        let conversation = self.conversation.clone();
+        let on_piece = Arc::new(move |piece: StreamDelta| {
+            let (kind, content) = match piece {
+                StreamDelta::Text(text) => (DeltaKind::Text, text),
+                StreamDelta::Reasoning(text) => (DeltaKind::Reasoning, text),
+                // The enum is non-exhaustive across the crate seam; a
+                // future side channel has no delta kind yet and stays
+                // unshown.
+                _ => return,
+            };
+            conversation.publish_delta(round.id, kind, content);
+        });
         self.inner
-            .chat(binding, messages, tools, options, round, on_delta)
+            .chat_streaming(binding, messages, tools, options, on_piece)
     }
 }
 

@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use harness::{BoxFuture, InferenceBroker, OnDelta, Timer};
+use harness::{BoxFuture, InferenceBroker, Timer};
 use promptforge::effect::Round;
 use promptforge::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding,
@@ -25,7 +25,6 @@ impl InferenceBroker for Offline {
         _tools: Vec<ToolSchema>,
         _options: CompletionOptions,
         _round: Round,
-        _on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
         let kind = CompletionErrorKind::Unavailable;
         Box::pin(async move { Err(CompletionError::new(kind, kind.phrase())) })
@@ -33,9 +32,9 @@ impl InferenceBroker for Offline {
 }
 
 /// Sleeps on tokio's timer, as a Host on tokio does.
-pub(crate) struct TokioTimer;
+pub(crate) struct Clock;
 
-impl Timer for TokioTimer {
+impl Timer for Clock {
     fn sleep(&self, seconds: f64) -> BoxFuture<()> {
         let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO);
         Box::pin(tokio::time::sleep(duration))

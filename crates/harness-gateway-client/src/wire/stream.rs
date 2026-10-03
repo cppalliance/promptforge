@@ -22,10 +22,11 @@
 use std::collections::BTreeMap;
 
 use promptforge::metrics::{CallMetrics, ClientTiming};
-use promptforge::model::{Completion, CompletionError, RawExchange, StreamDelta};
+use promptforge::model::{Completion, CompletionError, RawExchange};
 use serde_json::{Map, Value};
 
 use super::classify::classify_stream_error;
+use super::delta::StreamDelta;
 use super::parse::{normalize, response_metadata};
 use crate::failure::malformed;
 

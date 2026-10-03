@@ -1,16 +1,16 @@
 //! The Gateway's inference broker: one model round per `Chat` effect on
-//! the Gateway client, with a section's live deltas handed to the round's
-//! callback as they arrive, and the Gateway's model list.
+//! the Gateway client, and the Gateway's model list.
 //!
-//! The run's `Event` sink receives what the Engine reports once it applies
-//! the round's answer (the turn, the reply, the tool calls); the deltas
-//! are the live view of the reply forming, and they travel through their
-//! own callback so a session can render them without a fragment ever
-//! reaching the Host's recorder.
+//! The Harness takes only a round's finished reply, so the broker's
+//! `InferenceBroker` round returns it whole. A Host that shows the reply
+//! as it forms runs the round through [`GatewayBroker::chat_streaming`]
+//! instead, which hands each live piece to the Host's callback as it
+//! arrives, so no fragment ever reaches the Host's recorder.
 
 use std::fmt;
+use std::sync::Arc;
 
-use harness::{BoxFuture, InferenceBroker, OnDelta};
+use harness::{BoxFuture, InferenceBroker};
 use promptforge::RunLimits;
 use promptforge::effect::Round;
 use promptforge::model::{
@@ -20,6 +20,7 @@ use promptforge::model::{
 use crate::catalog::fetch_model_catalog;
 use crate::config::{GatewayEndpoint, SecretString};
 use crate::transport::GatewayChat;
+use crate::wire::delta::StreamDelta;
 
 /// The [`InferenceBroker`] a Host hands the Harness to reach the Gateway:
 /// it performs the Engine's `Chat` effects on a [`GatewayChat`] and lists
@@ -80,6 +81,43 @@ impl GatewayBroker {
             key,
         }
     }
+
+    /// Runs one round as the [`InferenceBroker`] round does, handing
+    /// `on_piece` each live piece of the reply as it arrives, in the
+    /// stream's order. The returned completion holds the whole reply.
+    ///
+    /// `on_piece` is called inline as each piece is read, so it must not
+    /// block.
+    pub fn chat_streaming(
+        &self,
+        _binding: ModelBinding,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        on_piece: Arc<dyn Fn(StreamDelta) + Send + Sync>,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        self.round(messages, tools, options, move |piece| on_piece(piece))
+    }
+
+    /// One round on the client, handing each live piece to `on_piece`.
+    fn round(
+        &self,
+        messages: Vec<Message>,
+        tools: Vec<ToolSchema>,
+        options: CompletionOptions,
+        on_piece: impl Fn(StreamDelta) + Send + Sync + 'static,
+    ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
+        let client = self.client.clone();
+        Box::pin(async move {
+            // An empty advertisement sends no `tools` field at all, the
+            // plain chat-completions shape.
+            let tools = (!tools.is_empty()).then_some(tools.as_slice());
+            client
+                .complete(&messages, tools, &options, on_piece)
+                .await
+                .map(Box::new)
+        })
+    }
 }
 
 impl InferenceBroker for GatewayBroker {
@@ -96,24 +134,8 @@ impl InferenceBroker for GatewayBroker {
         tools: Vec<ToolSchema>,
         options: CompletionOptions,
         _round: Round,
-        on_delta: Option<OnDelta>,
     ) -> BoxFuture<Result<Box<Completion>, CompletionError>> {
-        let client = self.client.clone();
-        Box::pin(async move {
-            // An empty advertisement sends no `tools` field at all, the
-            // plain chat-completions shape.
-            let tools = (!tools.is_empty()).then_some(tools.as_slice());
-            client
-                .complete(&messages, tools, &options, |delta| {
-                    // Only a section's own round has a live consumer; a
-                    // nested infer's round arrives with no callback.
-                    if let Some(on_delta) = &on_delta {
-                        on_delta(delta);
-                    }
-                })
-                .await
-                .map(Box::new)
-        })
+        self.round(messages, tools, options, |_| {})
     }
 }
 
